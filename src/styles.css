@@ -216,12 +216,18 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   padding: 0 6px;
   color: var(--text-dim);
   font-size: 11px;
+  -webkit-user-select: none;
   user-select: none;
   background: var(--bg2);
   border-right: 1px solid var(--border);
   white-space: nowrap;
 }
-.udiff-mark { text-align: center; user-select: none; color: var(--text-dim); }
+.udiff-mark {
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+  color: var(--text-dim);
+}
 .udiff-text {
   margin: 0;
   padding: 0 10px;
@@ -380,6 +386,7 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   padding: 0 6px;
   color: var(--text-dim);
   font-size: 11px;
+  -webkit-user-select: none;
   user-select: none;
   background: var(--bg2);
   border-right: 1px solid var(--border);
