@@ -4,6 +4,7 @@ import { listNamespaces, Namespace } from "./api/nacos";
 import ConnectionManager from "./components/ConnectionManager";
 import ConfigBrowser from "./components/ConfigBrowser";
 import DiffView from "./components/DiffView";
+import Select from "./components/Select";
 
 type Mode = "browse" | "diff";
 
@@ -81,36 +82,29 @@ export default function App() {
 
           {mode === "browse" && (
             <>
-              <select
-                className="search-input"
+              <Select
                 value={activeConnId}
-                onChange={(e) => setActiveConnId(e.target.value)}
                 disabled={connections.length === 0}
-              >
-                {connections.length === 0 && <option value="">无连接</option>}
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                title="连接"
+                options={connections.map((c) => ({ value: c.id, label: c.name }))}
+                onChange={setActiveConnId}
+              />
 
-              <select
-                className="search-input"
+              <Select
                 value={tenant}
-                onChange={(e) => setTenant(e.target.value)}
                 disabled={!activeConn || nsLoading}
                 title="命名空间"
-              >
-                <option value="">{nsLoading ? "命名空间加载中…" : "public（默认）"}</option>
-                {namespaces
-                  .filter((n) => n.namespace)
-                  .map((n) => (
-                    <option key={n.namespace} value={n.namespace}>
-                      {n.namespaceShowName || n.namespace}（{n.configCount}）
-                    </option>
-                  ))}
-              </select>
+                options={[
+                  { value: "", label: nsLoading ? "命名空间加载中…" : "public（默认）" },
+                  ...namespaces
+                    .filter((n) => n.namespace)
+                    .map((n) => ({
+                      value: n.namespace,
+                      label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
+                    })),
+                ]}
+                onChange={setTenant}
+              />
             </>
           )}
 

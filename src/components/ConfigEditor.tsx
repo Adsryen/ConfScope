@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
+import Select from "./Select";
 
 interface Props {
   conn: Connection;
@@ -86,17 +87,12 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
             </label>
             <label className="field" style={{ flex: "0 0 130px" }}>
               <span>格式</span>
-              <select
-                className="search-input wide"
+              <Select
+                className="wide"
                 value={fmt}
-                onChange={(e) => setFmt(e.target.value as Format)}
-              >
-                {FORMATS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
+                options={FORMATS.map((f) => ({ value: f, label: f }))}
+                onChange={(v) => setFmt(v as Format)}
+              />
             </label>
           </div>
           <label className="field">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import {
   formatTime,
@@ -51,6 +51,9 @@ export default function HistoryView({
   const [picked, setPicked] = useState<string[]>([]);
   const [contents, setContents] = useState<Record<string, string>>({});
   const [viewing, setViewing] = useState<string | null>(null);
+  // 重内容渲染（diff/高亮）用延迟值：点击后左侧高亮先即时刷新，
+  // 右侧重渲染延后，切换时先显示「加载中」，不卡点击反馈。
+  const deferredViewing = useDeferredValue(viewing);
   // 单版本查看时：默认高亮「相对上一版的变更」，可切到原始内容
   const [rawView, setRawView] = useState(false);
   // 回滚：二次确认 + 进行中
@@ -225,16 +228,22 @@ export default function HistoryView({
           )
         ) : viewing ? (
           (() => {
-            const prev = prevOf(viewing);
+            const headPrev = prevOf(viewing); // 头部即时反映点击的版本
+            const dv = deferredViewing; // 重渲染用延迟值
+            const switching = viewing !== deferredViewing;
+            const prev = dv ? prevOf(dv) : undefined;
             const ready =
-              contents[viewing] !== undefined && (!prev || contents[prev.id] !== undefined);
+              !switching &&
+              dv != null &&
+              contents[dv] !== undefined &&
+              (!prev || contents[prev.id] !== undefined);
             return (
               <div className="content-box">
                 <div className="content-box-head">
                   <span>
                     nid {viewing} · {formatTime(itemOf(viewing)?.lastModifiedTime ?? "")}
-                    {prev ? (
-                      <span className="vs-prev"> · 相对上一版 nid {prev.id} 的变更</span>
+                    {headPrev ? (
+                      <span className="vs-prev"> · 相对上一版 nid {headPrev.id} 的变更</span>
                     ) : (
                       <span className="vs-prev"> · 首个版本（无上一版）</span>
                     )}
@@ -261,11 +270,11 @@ export default function HistoryView({
                 {!ready ? (
                   <div className="pad-msg">加载中…</div>
                 ) : rawView ? (
-                  <CodeView code={contents[viewing] ?? ""} format={format} />
+                  <CodeView code={contents[dv!] ?? ""} format={format} />
                 ) : (
                   <UnifiedDiff
                     oldText={prev ? contents[prev.id] ?? "" : ""}
-                    newText={contents[viewing] ?? ""}
+                    newText={contents[dv!] ?? ""}
                     format={format}
                   />
                 )}

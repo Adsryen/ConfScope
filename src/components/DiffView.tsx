@@ -3,6 +3,7 @@ import { Connection } from "../store/connections";
 import { getConfig, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import DiffPanel from "./DiffPanel";
+import Select from "./Select";
 
 interface Props {
   connections: Connection[];
@@ -101,34 +102,26 @@ function SourcePicker({
       <div className="source-title">{title}</div>
       <label className="field">
         <span>连接</span>
-        <select
-          className="search-input wide"
+        <Select
+          className="wide"
           value={source.connId}
-          onChange={(e) => onChange({ ...emptySource(e.target.value) })}
-        >
-          {connections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+          options={connections.map((c) => ({ value: c.id, label: c.name }))}
+          onChange={(v) => onChange({ ...emptySource(v) })}
+        />
       </label>
       <label className="field">
         <span>命名空间 {nsLoading ? "（加载中…）" : ""}</span>
-        <select
-          className="search-input wide"
+        <Select
+          className="wide"
           value={source.tenant}
-          onChange={(e) => onChange({ ...source, tenant: e.target.value })}
-        >
-          <option value="">public（默认）</option>
-          {namespaces
-            .filter((n) => n.namespace)
-            .map((n) => (
-              <option key={n.namespace} value={n.namespace}>
-                {n.namespaceShowName || n.namespace}
-              </option>
-            ))}
-        </select>
+          options={[
+            { value: "", label: "public（默认）" },
+            ...namespaces
+              .filter((n) => n.namespace)
+              .map((n) => ({ value: n.namespace, label: n.namespaceShowName || n.namespace })),
+          ]}
+          onChange={(v) => onChange({ ...source, tenant: v })}
+        />
       </label>
       <div className="field-row">
         <label className="field">

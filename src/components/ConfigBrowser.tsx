@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
-import { beautify, detectFormat, Format, FORMATS, nacosType } from "../lib/format";
+import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
 import HistoryView from "./HistoryView";
 import Pager from "./Pager";
+import Select from "./Select";
 
 interface Props {
   conn: Connection;
@@ -32,10 +33,8 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("content");
-  // 格式与美化：fmt 为当前选定格式；beautified 非空时展示美化后的内容
+  // fmt 为当前格式（驱动语法高亮 / 发布时的 type）
   const [fmt, setFmt] = useState<Format>("TEXT");
-  const [beautified, setBeautified] = useState<string | null>(null);
-  const [fmtError, setFmtError] = useState<string | null>(null);
   // 编辑 / 新建 / 删除
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -43,17 +42,6 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [delConfirm, setDelConfirm] = useState(false);
-
-  const doBeautify = (format: Format) => {
-    const r = beautify(content, format);
-    if (r.ok) {
-      setBeautified(r.text);
-      setFmtError(r.reformatted ? null : "该格式仅做轻量规整（保留注释/顺序）");
-    } else {
-      setBeautified(null);
-      setFmtError(`美化失败：${r.error ?? "内容不是合法的 " + format}`);
-    }
-  };
 
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
@@ -101,8 +89,6 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setTab("content");
     setContentLoading(true);
     setContentError(null);
-    setBeautified(null);
-    setFmtError(null);
     setContent("");
     try {
       const text = await getConfig(conn, tenant, item.dataId, item.group);
@@ -126,7 +112,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   }, [selected?.dataId, selected?.group]);
 
   const startEdit = () => {
-    setDraft(beautified ?? content);
+    setDraft(content);
     setEditing(true);
     setSaveError(null);
   };
@@ -281,17 +267,12 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                   <>
                     <div className="fmt-bar">
                       <span className="fmt-label">编辑 · 格式</span>
-                      <select
-                        className="search-input fmt-select"
+                      <Select
+                        className="fmt-select"
                         value={fmt}
-                        onChange={(e) => setFmt(e.target.value as Format)}
-                      >
-                        {FORMATS.map((f) => (
-                          <option key={f} value={f}>
-                            {f}
-                          </option>
-                        ))}
-                      </select>
+                        options={FORMATS.map((f) => ({ value: f, label: f }))}
+                        onChange={(v) => setFmt(v as Format)}
+                      />
                       {saveError && <span className="fmt-msg err">{saveError}</span>}
                       <span className="fmt-spacer" />
                       <button
@@ -321,42 +302,12 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                   <>
                     <div className="fmt-bar">
                       <span className="fmt-label">配置格式</span>
-                      <select
-                        className="search-input fmt-select"
+                      <Select
+                        className="fmt-select"
                         value={fmt}
-                        onChange={(e) => {
-                          const next = e.target.value as Format;
-                          setFmt(next);
-                          if (beautified !== null) doBeautify(next);
-                          else setFmtError(null);
-                        }}
-                      >
-                        {FORMATS.map((f) => (
-                          <option key={f} value={f}>
-                            {f}
-                          </option>
-                        ))}
-                      </select>
-                      {beautified === null ? (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => doBeautify(fmt)}
-                          disabled={!content}
-                        >
-                          ✨ 美化
-                        </button>
-                      ) : (
-                        <button
-                          className="btn btn-ghost btn-sm active"
-                          onClick={() => {
-                            setBeautified(null);
-                            setFmtError(null);
-                          }}
-                        >
-                          还原原始
-                        </button>
-                      )}
-                      {fmtError && <span className="fmt-msg">{fmtError}</span>}
+                        options={FORMATS.map((f) => ({ value: f, label: f }))}
+                        onChange={(v) => setFmt(v as Format)}
+                      />
                       <span className="fmt-spacer" />
                       <button
                         className="btn btn-ghost btn-sm"
@@ -366,9 +317,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       >
                         ⟳
                       </button>
-                      <CopyButton text={beautified ?? content} />
+                      <CopyButton text={content} />
                     </div>
-                    <CodeView code={beautified ?? content} format={fmt} />
+                    <CodeView code={content} format={fmt} />
                   </>
                 )}
               </div>
