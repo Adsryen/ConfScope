@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
+import { keysDoc } from "../lib/keys";
 import Combobox from "./Combobox";
 import DiffPanel from "./DiffPanel";
 import Select from "./Select";
+
+type DiffMode = "text" | "key";
 
 interface Props {
   connections: Connection[];
@@ -143,6 +146,7 @@ export default function DiffView({ connections }: Props) {
   const [rightLoaded, setRightLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<DiffMode>("text");
 
   if (connections.length === 0) {
     return <div className="pad-msg big">请先在「连接管理」中添加 Nacos 连接</div>;
@@ -183,6 +187,15 @@ export default function DiffView({ connections }: Props) {
   };
 
   const ready = leftLoaded && rightLoaded;
+  // 按对比模式决定喂给 diff 的文本:key 模式取去重排序后的键路径(忽略顺序/值)
+  const keyMode = mode === "key";
+  const leftText = ready ? (keyMode ? keysDoc(leftLoaded!.content, leftLoaded!.format) : leftLoaded!.content) : "";
+  const rightText = ready ? (keyMode ? keysDoc(rightLoaded!.content, rightLoaded!.format) : rightLoaded!.content) : "";
+  const diffFormat = keyMode
+    ? "TEXT"
+    : leftLoaded?.format !== "TEXT"
+    ? leftLoaded?.format
+    : rightLoaded?.format;
 
   return (
     <div className="diff-view">
@@ -191,6 +204,15 @@ export default function DiffView({ connections }: Props) {
         <SourcePicker title="来源 B（右）" connections={connections} source={right} onChange={setRight} />
       </div>
       <div className="diff-loadbar">
+        <span className="fmt-label">对比模式</span>
+        <Select
+          value={mode}
+          options={[
+            { value: "text", label: "文本(逐行)" },
+            { value: "key", label: "仅 Key(忽略顺序)" },
+          ]}
+          onChange={(v) => setMode(v as DiffMode)}
+        />
         <button className="btn btn-primary" onClick={loadBoth} disabled={loading}>
           {loading ? "加载中…" : "加载并对比"}
         </button>
@@ -201,9 +223,9 @@ export default function DiffView({ connections }: Props) {
           <DiffPanel
             leftLabel={leftLoaded!.label}
             rightLabel={rightLoaded!.label}
-            leftText={leftLoaded!.content}
-            rightText={rightLoaded!.content}
-            format={leftLoaded!.format !== "TEXT" ? leftLoaded!.format : rightLoaded!.format}
+            leftText={leftText}
+            rightText={rightText}
+            format={diffFormat}
           />
         ) : (
           <div className="pad-msg big">
