@@ -196,7 +196,45 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .fmt-label { font-size: 12px; color: var(--text-dim); }
 .fmt-select { max-width: 130px; padding: 4px 8px; }
 .fmt-msg { font-size: 11.5px; color: var(--yellow); }
-.content-box-head { padding: 8px 14px; font-size: 12px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.content-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.vs-prev { color: var(--blue); }
+
+/* ── 统一（单列）差异视图 ── */
+.udiff { flex: 1; overflow: auto; font-size: 12.5px; line-height: 1.5; }
+.udiff-row { display: grid; grid-template-columns: 48px 18px 1fr; min-height: 19px; }
+.udiff-gutter {
+  text-align: right;
+  padding: 0 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  user-select: none;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+.udiff-mark { text-align: center; user-select: none; color: var(--text-dim); }
+.udiff-text {
+  margin: 0;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+.udiff-row.add { background: var(--diff-add-bg); }
+.udiff-row.add .udiff-mark { color: var(--green); }
+.udiff-row.del { background: var(--diff-del-bg); }
+.udiff-row.del .udiff-mark { color: var(--red-h); }
+.udiff-row.del .udiff-text { color: #d99; }
 .code-area {
   flex: 1;
   overflow: auto;
