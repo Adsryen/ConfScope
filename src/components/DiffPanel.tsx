@@ -1,15 +1,33 @@
 import { useMemo, useState } from "react";
 import { diffLines } from "../lib/diff";
+import { Format } from "../lib/format";
+import { highlightLine } from "../lib/highlight";
 
 interface Props {
   leftLabel: string;
   rightLabel: string;
   leftText: string;
   rightText: string;
+  /** 提供时按该格式做语法高亮（TEXT 不高亮）。 */
+  format?: Format;
+}
+
+/** 渲染一个 diff 单元格：有可高亮格式时输出语法高亮 HTML，否则纯文本。 */
+function Cell({ text, side, format }: { text: string | null; side: string; format?: Format }) {
+  if (text == null) return <pre className={`diff-cell ${side}`} />;
+  if (format && format !== "TEXT") {
+    return (
+      <pre
+        className={`diff-cell ${side}`}
+        dangerouslySetInnerHTML={{ __html: highlightLine(text, format) }}
+      />
+    );
+  }
+  return <pre className={`diff-cell ${side}`}>{text}</pre>;
 }
 
 /** 并排展示两段文本的智能行级差异：增/删/改高亮 + 变更统计，可只看变更行。 */
-export default function DiffPanel({ leftLabel, rightLabel, leftText, rightText }: Props) {
+export default function DiffPanel({ leftLabel, rightLabel, leftText, rightText, format }: Props) {
   const [onlyChanges, setOnlyChanges] = useState(false);
   const result = useMemo(() => diffLines(leftText, rightText), [leftText, rightText]);
 
@@ -58,9 +76,9 @@ export default function DiffPanel({ leftLabel, rightLabel, leftText, rightText }
           rows.map((r, idx) => (
             <div className={`diff-row ${r.type}`} key={idx}>
               <span className="diff-gutter">{r.leftNo ?? ""}</span>
-              <pre className="diff-cell left">{r.left ?? ""}</pre>
+              <Cell text={r.left} side="left" format={format} />
               <span className="diff-gutter">{r.rightNo ?? ""}</span>
-              <pre className="diff-cell right">{r.right ?? ""}</pre>
+              <Cell text={r.right} side="right" format={format} />
             </div>
           ))
         )}

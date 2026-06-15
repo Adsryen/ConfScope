@@ -5,20 +5,24 @@ import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import HistoryView from "./HistoryView";
+import Pager from "./Pager";
 
 interface Props {
   conn: Connection;
   tenant: string;
 }
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 type Tab = "content" | "history";
 
-/** 配置浏览：左侧 dataId 列表（可搜索），右侧内容 / 历史 标签页。 */
+/** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
 export default function ConfigBrowser({ conn, tenant }: Props) {
   const [search, setSearch] = useState("");
+  const [appliedTerm, setAppliedTerm] = useState(""); // 已生效的搜索词（翻页时复用）
   const [items, setItems] = useState<ConfigItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [pageNo, setPageNo] = useState(1);
+  const [pages, setPages] = useState(1);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -46,22 +50,26 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
 
-  const fetchList = async (term: string) => {
+  const fetchList = async (term: string, page: number) => {
     const my = ++listReqId.current;
     setListLoading(true);
     setListError(null);
+    setAppliedTerm(term);
+    setPageNo(page);
     try {
       // blur 搜索：用 *term* 模糊匹配 dataId；term 为空则列全部
       const dataId = term.trim() ? `*${term.trim()}*` : "";
-      const page = await listConfigs(conn, tenant, dataId, "", 1, PAGE_SIZE);
+      const res = await listConfigs(conn, tenant, dataId, "", page, PAGE_SIZE);
       if (my !== listReqId.current) return;
-      setItems(page.pageItems);
-      setTotal(page.totalCount);
+      setItems(res.pageItems);
+      setTotal(res.totalCount);
+      setPages(Math.max(res.pagesAvailable || 1, 1));
     } catch (e) {
       if (my !== listReqId.current) return;
       setListError(String(e));
       setItems([]);
       setTotal(0);
+      setPages(1);
     } finally {
       if (my === listReqId.current) setListLoading(false);
     }
@@ -72,7 +80,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setSearch("");
     setSelected(null);
     setContent("");
-    fetchList("");
+    fetchList("", 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
 
@@ -114,23 +122,21 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             autoCorrect="off"
             spellCheck={false}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && fetchList(search)}
+            onKeyDown={(e) => e.key === "Enter" && fetchList(search, 1)}
           />
-          <button className="btn btn-ghost btn-sm" onClick={() => fetchList(search)}>
+          <button className="btn btn-ghost btn-sm" onClick={() => fetchList(search, 1)}>
             搜索
           </button>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => fetchList(search)}
+            onClick={() => fetchList(appliedTerm, pageNo)}
             title="刷新列表"
             disabled={listLoading}
           >
             ⟳
           </button>
         </div>
-        <div className="browser-count">
-          共 {total} 项{items.length < total ? `（显示前 ${items.length}）` : ""}
-        </div>
+        <div className="browser-count">共 {total} 项</div>
         <div className="browser-items">
           {listLoading && <div className="pad-msg">加载中…</div>}
           {listError && <div className="pad-msg err">{listError}</div>}
@@ -155,6 +161,12 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             );
           })}
         </div>
+        <Pager
+          page={pageNo}
+          pages={pages}
+          loading={listLoading}
+          onPage={(p) => fetchList(appliedTerm, p)}
+        />
       </div>
 
       <div className="browser-detail">

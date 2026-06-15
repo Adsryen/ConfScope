@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { formatTime, getHistoryDetail, HistoryItem, listHistory } from "../api/nacos";
 import { Format } from "../lib/format";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
+import Pager from "./Pager";
 import UnifiedDiff from "./UnifiedDiff";
 
 interface Props {
@@ -32,6 +33,9 @@ export default function HistoryView({
   format,
 }: Props) {
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageNo, setPageNo] = useState(1);
+  const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 勾选用于对比的版本 nid（最多两个），以及缓存的版本内容
@@ -41,25 +45,39 @@ export default function HistoryView({
   // 单版本查看时：默认高亮「相对上一版的变更」，可切到原始内容
   const [rawView, setRawView] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
+  const histReqId = useRef(0);
+
+  const loadHistory = (page: number) => {
+    const my = ++histReqId.current;
     setLoading(true);
     setError(null);
+    setPageNo(page);
+    listHistory(conn, tenant, dataId, group, page, PAGE_SIZE)
+      .then((res) => {
+        if (my !== histReqId.current) return;
+        setItems(res.pageItems);
+        setTotal(res.totalCount);
+        setPages(Math.max(res.pagesAvailable || 1, 1));
+      })
+      .catch((e) => {
+        if (my !== histReqId.current) return;
+        setError(String(e));
+        setItems([]);
+        setPages(1);
+      })
+      .finally(() => {
+        if (my === histReqId.current) setLoading(false);
+      });
+  };
+
+  useEffect(() => {
     setItems([]);
     setPicked([]);
     setContents({});
     setViewing(null);
     setRawView(false);
-    listHistory(conn, tenant, dataId, group, 1, PAGE_SIZE)
-      .then((page) => {
-        if (!alive) return;
-        setItems(page.pageItems);
-      })
-      .catch((e) => alive && setError(String(e)))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
+    loadHistory(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant, dataId, group]);
 
   // 拉取某个版本的内容（带缓存）
@@ -113,9 +131,10 @@ export default function HistoryView({
     <div className="history-view">
       <div className="history-list">
         <div className="history-list-head">
-          历史版本（{items.length}）
+          历史版本（{total}）
           <span className="history-hint">勾选 1 个与线上对比 · 勾选 2 个互相对比</span>
         </div>
+        <div className="history-items">
         {loading && <div className="pad-msg">加载中…</div>}
         {error && <div className="pad-msg err">{error}</div>}
         {!loading && !error && items.length === 0 && <div className="pad-msg">暂无历史记录</div>}
@@ -141,6 +160,8 @@ export default function HistoryView({
             </div>
           </div>
         ))}
+        </div>
+        <Pager page={pageNo} pages={pages} loading={loading} onPage={(p) => loadHistory(p)} />
       </div>
 
       <div className="history-detail">
@@ -162,6 +183,7 @@ export default function HistoryView({
               }
               leftText={leftNid ? contents[leftNid] ?? "" : ""}
               rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
+              format={format}
             />
           )
         ) : viewing ? (
@@ -198,6 +220,7 @@ export default function HistoryView({
                   <UnifiedDiff
                     oldText={prev ? contents[prev.id] ?? "" : ""}
                     newText={contents[viewing] ?? ""}
+                    format={format}
                   />
                 )}
               </div>

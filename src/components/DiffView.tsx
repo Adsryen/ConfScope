@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { getConfig, listNamespaces, Namespace } from "../api/nacos";
+import { detectFormat, Format } from "../lib/format";
 import DiffPanel from "./DiffPanel";
 
 interface Props {
@@ -17,6 +18,7 @@ interface Source {
 interface Loaded {
   label: string;
   content: string;
+  format: Format;
 }
 
 const emptySource = (connId: string): Source => ({
@@ -84,6 +86,7 @@ function SourcePicker({
       onLoaded({
         label: `${conn.name} · ${nsName} · ${source.dataId.trim()}`,
         content,
+        format: detectFormat(source.dataId.trim(), "", content),
       });
     } catch (e) {
       setError(String(e));
@@ -199,6 +202,7 @@ export default function DiffView({ connections }: Props) {
             rightLabel={rightLoaded!.label}
             leftText={leftLoaded!.content}
             rightText={rightLoaded!.content}
+            format={leftLoaded!.format !== "TEXT" ? leftLoaded!.format : rightLoaded!.format}
           />
         ) : (
           <div className="pad-msg big">
