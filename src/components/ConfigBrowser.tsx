@@ -242,20 +242,6 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 >
                   历史变更
                 </button>
-                {tab === "content" && !editing && (
-                  <>
-                    <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
-                      编辑
-                    </button>
-                    <button
-                      className={`btn btn-sm ${delConfirm ? "btn-danger" : "btn-ghost"}`}
-                      onClick={doDelete}
-                      onBlur={() => setDelConfirm(false)}
-                    >
-                      {delConfirm ? "确认删除?" : "删除"}
-                    </button>
-                  </>
-                )}
               </div>
             </div>
 
@@ -308,6 +294,20 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         options={FORMATS.map((f) => ({ value: f, label: f }))}
                         onChange={(v) => setFmt(v as Format)}
                       />
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={startEdit}
+                        disabled={contentLoading}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className={`btn btn-sm ${delConfirm ? "btn-danger" : "btn-ghost"}`}
+                        onClick={doDelete}
+                        onBlur={() => setDelConfirm(false)}
+                      >
+                        {delConfirm ? "确认删除?" : "删除"}
+                      </button>
                       <span className="fmt-spacer" />
                       <button
                         className="btn btn-ghost btn-sm"
