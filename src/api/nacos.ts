@@ -208,6 +208,46 @@ export function listHistory(
   );
 }
 
+export function publishConfig(
+  conn: Connection,
+  namespace: string,
+  dataId: string,
+  group: string,
+  content: string,
+  configType: string
+): Promise<void> {
+  return withAuth(conn, (accessToken, apiVersion) =>
+    invoke<void>("nacos_publish_config", {
+      baseUrl: conn.baseUrl,
+      accessToken,
+      apiVersion,
+      namespace,
+      dataId,
+      group,
+      content,
+      configType,
+    })
+  );
+}
+
+export function deleteConfig(
+  conn: Connection,
+  namespace: string,
+  dataId: string,
+  group: string
+): Promise<void> {
+  return withAuth(conn, (accessToken, apiVersion) =>
+    invoke<void>("nacos_delete_config", {
+      baseUrl: conn.baseUrl,
+      accessToken,
+      apiVersion,
+      namespace,
+      dataId,
+      group,
+    })
+  );
+}
+
 export function getHistoryDetail(
   conn: Connection,
   namespace: string,

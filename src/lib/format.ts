@@ -30,6 +30,11 @@ function normalizeType(t: string): Format | null {
   }
 }
 
+/** Format → Nacos 的 type 字段（小写）。 */
+export function nacosType(fmt: Format): string {
+  return fmt === "Properties" ? "properties" : fmt.toLowerCase();
+}
+
 /** 综合 Nacos type、dataId 后缀、内容特征推断格式。 */
 export function detectFormat(dataId: string, type: string, content: string): Format {
   const byType = normalizeType(type);

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
-import { ConfigItem, getConfig, listConfigs } from "../api/nacos";
-import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
+import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
+import { beautify, detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import CodeView from "./CodeView";
+import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
 import HistoryView from "./HistoryView";
 import Pager from "./Pager";
@@ -35,6 +36,13 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [fmt, setFmt] = useState<Format>("TEXT");
   const [beautified, setBeautified] = useState<string | null>(null);
   const [fmtError, setFmtError] = useState<string | null>(null);
+  // 编辑 / 新建 / 删除
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
+  const [delConfirm, setDelConfirm] = useState(false);
 
   const doBeautify = (format: Format) => {
     const r = beautify(content, format);
@@ -110,6 +118,52 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  // 切换配置时退出编辑/删除确认态
+  useEffect(() => {
+    setEditing(false);
+    setSaveError(null);
+    setDelConfirm(false);
+  }, [selected?.dataId, selected?.group]);
+
+  const startEdit = () => {
+    setDraft(beautified ?? content);
+    setEditing(true);
+    setSaveError(null);
+  };
+
+  const saveEdit = async () => {
+    if (!selected) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
+      setEditing(false);
+      await openConfig(selected); // 重新拉取最新内容
+    } catch (e) {
+      setSaveError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!selected) return;
+    if (!delConfirm) {
+      setDelConfirm(true);
+      return;
+    }
+    try {
+      await deleteConfig(conn, tenant, selected.dataId, selected.group);
+      setSelected(null);
+      setContent("");
+      setDelConfirm(false);
+      fetchList(appliedTerm, pageNo);
+    } catch (e) {
+      setContentError(String(e));
+      setDelConfirm(false);
+    }
+  };
+
   return (
     <div className="browser">
       <div className="browser-list">
@@ -134,6 +188,13 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             disabled={listLoading}
           >
             ⟳
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowNew(true)}
+            title="新建配置"
+          >
+            ＋
           </button>
         </div>
         <div className="browser-count">共 {total} 项</div>
@@ -195,6 +256,20 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 >
                   历史变更
                 </button>
+                {tab === "content" && !editing && (
+                  <>
+                    <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
+                      编辑
+                    </button>
+                    <button
+                      className={`btn btn-sm ${delConfirm ? "btn-danger" : "btn-ghost"}`}
+                      onClick={doDelete}
+                      onBlur={() => setDelConfirm(false)}
+                    >
+                      {delConfirm ? "确认删除?" : "删除"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -202,7 +277,47 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               <div className="content-box">
                 {contentLoading && <div className="pad-msg">加载中…</div>}
                 {contentError && <div className="pad-msg err">{contentError}</div>}
-                {!contentLoading && !contentError && (
+                {!contentLoading && !contentError && editing && (
+                  <>
+                    <div className="fmt-bar">
+                      <span className="fmt-label">编辑 · 格式</span>
+                      <select
+                        className="search-input fmt-select"
+                        value={fmt}
+                        onChange={(e) => setFmt(e.target.value as Format)}
+                      >
+                        {FORMATS.map((f) => (
+                          <option key={f} value={f}>
+                            {f}
+                          </option>
+                        ))}
+                      </select>
+                      {saveError && <span className="fmt-msg err">{saveError}</span>}
+                      <span className="fmt-spacer" />
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setEditing(false);
+                          setSaveError(null);
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>
+                        {saving ? "发布中…" : "保存发布"}
+                      </button>
+                    </div>
+                    <textarea
+                      className="editor-area mono grow"
+                      value={draft}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                  </>
+                )}
+                {!contentLoading && !contentError && !editing && (
                   <>
                     <div className="fmt-bar">
                       <span className="fmt-label">配置格式</span>
@@ -265,11 +380,25 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 group={selected.group}
                 currentContent={content}
                 format={fmt}
+                onRolledBack={() => selected && openConfig(selected)}
               />
             )}
           </>
         )}
       </div>
+
+      {showNew && (
+        <ConfigEditor
+          conn={conn}
+          namespace={tenant}
+          onClose={() => setShowNew(false)}
+          onSaved={(dataId, group) => {
+            setShowNew(false);
+            fetchList(appliedTerm, pageNo);
+            openConfig({ dataId, group, content: "", configType: "" });
+          }}
+        />
+      )}
     </div>
   );
 }

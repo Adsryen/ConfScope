@@ -11,6 +11,8 @@ pub fn run() {
             nacos::nacos_get_config,
             nacos::nacos_history_list,
             nacos::nacos_history_detail,
+            nacos::nacos_publish_config,
+            nacos::nacos_delete_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

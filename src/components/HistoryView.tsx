@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
-import { formatTime, getHistoryDetail, HistoryItem, listHistory } from "../api/nacos";
-import { Format } from "../lib/format";
+import {
+  formatTime,
+  getHistoryDetail,
+  HistoryItem,
+  listHistory,
+  publishConfig,
+} from "../api/nacos";
+import { Format, nacosType } from "../lib/format";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -15,8 +21,10 @@ interface Props {
   group: string;
   /** 当前线上内容，作为「与最新版对比」的右侧基准。 */
   currentContent: string;
-  /** 配置格式，用于原始内容的语法高亮。 */
+  /** 配置格式，用于原始内容的语法高亮与回滚发布时的 type。 */
   format: Format;
+  /** 回滚成功后通知父级刷新当前内容。 */
+  onRolledBack: () => void;
 }
 
 const PAGE_SIZE = 50;
@@ -31,6 +39,7 @@ export default function HistoryView({
   group,
   currentContent,
   format,
+  onRolledBack,
 }: Props) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -44,6 +53,9 @@ export default function HistoryView({
   const [viewing, setViewing] = useState<string | null>(null);
   // 单版本查看时：默认高亮「相对上一版的变更」，可切到原始内容
   const [rawView, setRawView] = useState(false);
+  // 回滚：二次确认 + 进行中
+  const [rbConfirm, setRbConfirm] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
 
   const histReqId = useRef(0);
 
@@ -110,8 +122,33 @@ export default function HistoryView({
       .filter((i) => Number(i.id) < Number(nid))
       .sort((a, b) => Number(b.id) - Number(a.id))[0];
 
+  // 回滚：把选中版本的内容重新发布为最新版（Nacos 无专用回滚接口）。
+  const rollback = async () => {
+    if (!viewing) return;
+    if (!rbConfirm) {
+      setRbConfirm(true);
+      return;
+    }
+    setRollingBack(true);
+    setError(null);
+    try {
+      const text = await ensureContent(viewing);
+      await publishConfig(conn, tenant, dataId, group, text, nacosType(format));
+      setRbConfirm(false);
+      setViewing(null);
+      onRolledBack();
+      loadHistory(1);
+    } catch (e) {
+      setError(String(e));
+      setRbConfirm(false);
+    } finally {
+      setRollingBack(false);
+    }
+  };
+
   const view = (nid: string) => {
     setError(null);
+    setRbConfirm(false);
     setViewing(nid); // 立即高亮，内容后台加载，避免连点时被慢请求覆盖
     const prev = prevOf(nid);
     Promise.all([
@@ -210,6 +247,15 @@ export default function HistoryView({
                       {rawView ? "高亮变更" : "原始内容"}
                     </button>
                     <CopyButton text={contents[viewing] ?? ""} label="复制本版" />
+                    <button
+                      className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
+                      onClick={rollback}
+                      onBlur={() => setRbConfirm(false)}
+                      disabled={rollingBack}
+                      title="将此版本内容重新发布为最新版"
+                    >
+                      {rollingBack ? "回滚中…" : rbConfirm ? "确认回滚?" : "回滚到此版本"}
+                    </button>
                   </span>
                 </div>
                 {!ready ? (

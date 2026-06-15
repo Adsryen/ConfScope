@@ -462,6 +462,32 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .modal-x:hover { background: var(--bg-hover); color: var(--text-hi); }
 .modal-body { padding: 16px 18px; overflow-y: auto; }
 
+.modal-lg { width: 860px; }
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+.editor-body { display: flex; flex-direction: column; gap: 12px; }
+.editor-area {
+  width: 100%;
+  min-height: 340px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  outline: none;
+  tab-size: 2;
+}
+.editor-area:focus { border-color: var(--accent); }
+.editor-area.grow { flex: 1; min-height: 0; margin: 0; border: none; border-radius: 0; }
+
 .conn-mgr { display: flex; gap: 18px; }
 .conn-list { width: 250px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
 .conn-list-title, .conn-form-title { font-size: 12px; color: var(--text-dim); margin-bottom: 2px; }

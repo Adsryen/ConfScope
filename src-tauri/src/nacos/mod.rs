@@ -474,6 +474,149 @@ pub async fn nacos_history_list(
 }
 
 #[tauri::command]
+pub async fn nacos_publish_config(
+    base_url: String,
+    access_token: String,
+    api_version: String,
+    namespace: String,
+    data_id: String,
+    group: String,
+    content: String,
+    config_type: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let version = parse_api(&api_version);
+        let c = client()?;
+        match version {
+            Api::V3 => {
+                // v3 console：表单提交，accessToken 走 header，返回 {code,message,data:bool}
+                let url = format!("{}/v3/console/cs/config", base(&base_url));
+                let form = [
+                    ("dataId", data_id.as_str()),
+                    ("groupName", group.as_str()),
+                    ("namespaceId", namespace.as_str()),
+                    ("content", content.as_str()),
+                    ("type", config_type.as_str()),
+                ];
+                let mut rb = c.post(&url).form(&form);
+                if !access_token.is_empty() {
+                    rb = rb.header("accessToken", &access_token);
+                }
+                let resp = rb.send().map_err(|e| format!("发布请求失败: {e}"))?;
+                let status = resp.status();
+                let text = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
+                if !status.is_success() {
+                    return Err(format!("Nacos 返回 {}: {}", status.as_u16(), truncate(&text)));
+                }
+                let v: Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("解析响应失败: {e} —— {}", truncate(&text)))?;
+                let ok = v.get("code").and_then(Value::as_i64) == Some(0)
+                    && v.get("data").and_then(Value::as_bool) == Some(true);
+                if !ok {
+                    return Err(format!("发布失败: {}", s(&v, "message")));
+                }
+                Ok(())
+            }
+            Api::V1 => {
+                // v1：表单提交，accessToken 走 query，成功返回纯文本 "true"
+                let url = format!("{}/v1/cs/configs", base(&base_url));
+                let form = [
+                    ("dataId", data_id.as_str()),
+                    ("group", group.as_str()),
+                    ("tenant", namespace.as_str()),
+                    ("content", content.as_str()),
+                    ("type", config_type.as_str()),
+                ];
+                let mut rb = c.post(&url);
+                if !access_token.is_empty() {
+                    rb = rb.query(&[("accessToken", access_token.as_str())]);
+                }
+                let resp = rb.form(&form).send().map_err(|e| format!("发布请求失败: {e}"))?;
+                let status = resp.status();
+                let text = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
+                if !status.is_success() {
+                    return Err(format!("Nacos 返回 {}: {}", status.as_u16(), truncate(&text)));
+                }
+                if text.trim() != "true" {
+                    return Err(format!("发布失败: {}", truncate(&text)));
+                }
+                Ok(())
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("任务调度失败: {e}"))?
+}
+
+#[tauri::command]
+pub async fn nacos_delete_config(
+    base_url: String,
+    access_token: String,
+    api_version: String,
+    namespace: String,
+    data_id: String,
+    group: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let version = parse_api(&api_version);
+        let c = client()?;
+        match version {
+            Api::V3 => {
+                let url = format!("{}/v3/console/cs/config", base(&base_url));
+                let query = [
+                    ("dataId", data_id.as_str()),
+                    ("groupName", group.as_str()),
+                    ("namespaceId", namespace.as_str()),
+                ];
+                let mut rb = c.delete(&url).query(&query);
+                if !access_token.is_empty() {
+                    rb = rb.header("accessToken", &access_token);
+                }
+                let resp = rb.send().map_err(|e| format!("删除请求失败: {e}"))?;
+                let status = resp.status();
+                let text = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
+                if !status.is_success() {
+                    return Err(format!("Nacos 返回 {}: {}", status.as_u16(), truncate(&text)));
+                }
+                let v: Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("解析响应失败: {e} —— {}", truncate(&text)))?;
+                if v.get("code").and_then(Value::as_i64) != Some(0) {
+                    return Err(format!("删除失败: {}", s(&v, "message")));
+                }
+                Ok(())
+            }
+            Api::V1 => {
+                let url = format!("{}/v1/cs/configs", base(&base_url));
+                let mut query = vec![
+                    ("dataId", data_id.as_str()),
+                    ("group", group.as_str()),
+                    ("tenant", namespace.as_str()),
+                ];
+                if !access_token.is_empty() {
+                    query.push(("accessToken", access_token.as_str()));
+                }
+                let resp = c
+                    .delete(&url)
+                    .query(&query)
+                    .send()
+                    .map_err(|e| format!("删除请求失败: {e}"))?;
+                let status = resp.status();
+                let text = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
+                if !status.is_success() {
+                    return Err(format!("Nacos 返回 {}: {}", status.as_u16(), truncate(&text)));
+                }
+                if text.trim() != "true" {
+                    return Err(format!("删除失败: {}", truncate(&text)));
+                }
+                Ok(())
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("任务调度失败: {e}"))?
+}
+
+#[tauri::command]
 pub async fn nacos_history_detail(
     base_url: String,
     access_token: String,
