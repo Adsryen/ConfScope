@@ -100,8 +100,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
   const openConfig = async (item: ConfigItem) => {
     const my = ++reqId.current;
-    setSelected(item); // 立即高亮，与异步内容加载解耦
-    setTab("content");
+    setSelected(item); // 立即高亮，与异步内容加载解耦；切换配置保持当前标签页
     setContentLoading(true);
     setContentError(null);
     setContent("");
@@ -344,6 +343,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           onClose={() => setShowNew(false)}
           onSaved={(dataId, group) => {
             setShowNew(false);
+            setTab("content");
             fetchList(appliedTerm, pageNo);
             openConfig({ dataId, group, content: "", configType: "" });
           }}
