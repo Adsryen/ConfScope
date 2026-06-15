@@ -659,6 +659,8 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .spacer { flex: 1; }
 
 .confirm-msg { font-size: 13px; color: var(--text); line-height: 1.6; }
+.alert-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.alert-list li { font-size: 13px; color: var(--red-h); line-height: 1.5; word-break: break-all; }
 
 /* ── Toast ── */
 .toaster {

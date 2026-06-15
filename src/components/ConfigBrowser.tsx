@@ -3,6 +3,8 @@ import { Connection } from "../store/connections";
 import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { toast } from "../lib/toast";
+import { validateConfig } from "../lib/validate";
+import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
 import CodeView from "./CodeView";
@@ -48,6 +50,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [showDelete, setShowDelete] = useState(false);
   // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
+  const [validateErrs, setValidateErrs] = useState<string[]>([]);
   const dirty = editing && draft !== content;
   const guardNav = (action: () => void) => {
     if (dirty) setPending(() => action);
@@ -142,6 +145,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
   const saveEdit = async () => {
     if (!selected) return;
+    const problems = validateConfig(draft, fmt);
+    if (problems.length) {
+      setValidateErrs(problems); // 弹框提示并禁止保存
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -394,6 +402,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             act();
           }}
           onCancel={() => setPending(null)}
+        />
+      )}
+
+      {validateErrs.length > 0 && (
+        <AlertModal
+          title="格式校验未通过"
+          messages={validateErrs}
+          onClose={() => setValidateErrs([])}
         />
       )}
     </div>

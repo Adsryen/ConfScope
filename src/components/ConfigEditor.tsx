@@ -3,6 +3,8 @@ import { Connection } from "../store/connections";
 import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { toast } from "../lib/toast";
+import { validateConfig } from "../lib/validate";
+import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import Select from "./Select";
 
@@ -21,6 +23,7 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validateErrs, setValidateErrs] = useState<string[]>([]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -31,6 +34,11 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
   const save = async () => {
     if (!dataId.trim()) {
       setError("dataId 不能为空");
+      return;
+    }
+    const problems = validateConfig(content, fmt);
+    if (problems.length) {
+      setValidateErrs(problems); // 弹框提示并禁止发布
       return;
     }
     setSaving(true);
@@ -120,6 +128,14 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
           </button>
         </div>
       </div>
+
+      {validateErrs.length > 0 && (
+        <AlertModal
+          title="格式校验未通过"
+          messages={validateErrs}
+          onClose={() => setValidateErrs([])}
+        />
+      )}
     </div>
   );
 }

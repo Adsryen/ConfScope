@@ -1,0 +1,40 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a9bed"/>
+      <stop offset="1" stop-color="#0a5fa6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="knob" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- 圆角方块背景 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="512" rx="232" fill="url(#sheen)"/>
+
+  <!-- 三条配置滑杆 -->
+  <g>
+    <!-- 轨道 -->
+    <rect x="232" y="344" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+    <rect x="232" y="492" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+    <rect x="232" y="640" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+
+    <!-- 已选段 -->
+    <rect x="232" y="344" width="420" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="232" y="492" width="170" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+    <rect x="232" y="640" width="330" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+
+    <!-- 滑块 -->
+    <circle cx="652" cy="364" r="50" fill="#ffffff" filter="url(#knob)"/>
+    <circle cx="402" cy="512" r="50" fill="#ffffff" filter="url(#knob)"/>
+    <circle cx="562" cy="660" r="50" fill="#ffffff" filter="url(#knob)"/>
+    <circle cx="652" cy="364" r="22" fill="#0a5fa6"/>
+    <circle cx="402" cy="512" r="22" fill="#0a5fa6"/>
+    <circle cx="562" cy="660" r="22" fill="#0a5fa6"/>
+  </g>
+</svg>
