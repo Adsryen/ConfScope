@@ -5,6 +5,7 @@ import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
+import DeleteConfirm from "./DeleteConfirm";
 import HistoryView from "./HistoryView";
 import Pager from "./Pager";
 import Select from "./Select";
@@ -41,7 +42,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
-  const [delConfirm, setDelConfirm] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
 
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
@@ -104,11 +105,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
-  // 切换配置时退出编辑/删除确认态
+  // 切换配置时退出编辑/删除态
   useEffect(() => {
     setEditing(false);
     setSaveError(null);
-    setDelConfirm(false);
+    setShowDelete(false);
   }, [selected?.dataId, selected?.group]);
 
   const startEdit = () => {
@@ -132,22 +133,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
   const doDelete = async () => {
     if (!selected) return;
-    if (!delConfirm) {
-      setDelConfirm(true);
-      return;
-    }
-    try {
-      await deleteConfig(conn, tenant, selected.dataId, selected.group);
-      setSelected(null);
-      setContent("");
-      setDelConfirm(false);
-      fetchList(appliedTerm, pageNo);
-    } catch (e) {
-      setContentError(String(e));
-      setDelConfirm(false);
-    }
+    await deleteConfig(conn, tenant, selected.dataId, selected.group);
+    setShowDelete(false);
+    setSelected(null);
+    setContent("");
+    fetchList(appliedTerm, pageNo);
   };
 
   return (
@@ -302,11 +295,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         编辑
                       </button>
                       <button
-                        className={`btn btn-sm ${delConfirm ? "btn-danger" : "btn-ghost"}`}
-                        onClick={doDelete}
-                        onBlur={() => setDelConfirm(false)}
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setShowDelete(true)}
+                        disabled={contentLoading}
                       >
-                        {delConfirm ? "确认删除?" : "删除"}
+                        删除
                       </button>
                       <span className="fmt-spacer" />
                       <button
@@ -348,6 +341,15 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             fetchList(appliedTerm, pageNo);
             openConfig({ dataId, group, content: "", configType: "" });
           }}
+        />
+      )}
+
+      {showDelete && selected && (
+        <DeleteConfirm
+          name={selected.dataId}
+          group={selected.group}
+          onCancel={() => setShowDelete(false)}
+          onConfirm={doDelete}
         />
       )}
     </div>

@@ -513,6 +513,21 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .modal-body { padding: 16px 18px; overflow-y: auto; }
 
 .modal-lg { width: 860px; }
+.modal-sm { width: 460px; }
+.del-body { display: flex; flex-direction: column; gap: 10px; }
+.del-warn { font-size: 13px; color: var(--red-h); }
+.del-target {
+  padding: 8px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-hi);
+  word-break: break-all;
+}
+.del-group { color: var(--text-dim); }
+.del-hint { font-size: 12.5px; color: var(--text-dim); }
+.del-hint b { color: var(--text-hi); }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
