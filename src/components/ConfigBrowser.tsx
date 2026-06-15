@@ -3,6 +3,7 @@ import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs } from "../api/nacos";
 import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
 import CodeView from "./CodeView";
+import CopyButton from "./CopyButton";
 import HistoryView from "./HistoryView";
 
 interface Props {
@@ -42,21 +43,27 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
+  const listReqId = useRef(0);
+
   const fetchList = async (term: string) => {
+    const my = ++listReqId.current;
     setListLoading(true);
     setListError(null);
     try {
       // blur 搜索：用 *term* 模糊匹配 dataId；term 为空则列全部
       const dataId = term.trim() ? `*${term.trim()}*` : "";
       const page = await listConfigs(conn, tenant, dataId, "", 1, PAGE_SIZE);
+      if (my !== listReqId.current) return;
       setItems(page.pageItems);
       setTotal(page.totalCount);
     } catch (e) {
+      if (my !== listReqId.current) return;
       setListError(String(e));
       setItems([]);
       setTotal(0);
     } finally {
-      setListLoading(false);
+      if (my === listReqId.current) setListLoading(false);
     }
   };
 
@@ -111,6 +118,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           />
           <button className="btn btn-ghost btn-sm" onClick={() => fetchList(search)}>
             搜索
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => fetchList(search)}
+            title="刷新列表"
+            disabled={listLoading}
+          >
+            ⟳
           </button>
         </div>
         <div className="browser-count">
@@ -215,6 +230,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         </button>
                       )}
                       {fmtError && <span className="fmt-msg">{fmtError}</span>}
+                      <span className="fmt-spacer" />
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => selected && openConfig(selected)}
+                        title="重新拉取内容"
+                        disabled={contentLoading}
+                      >
+                        ⟳
+                      </button>
+                      <CopyButton text={beautified ?? content} />
                     </div>
                     <CodeView code={beautified ?? content} format={fmt} />
                   </>

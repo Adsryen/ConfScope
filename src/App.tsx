@@ -16,6 +16,8 @@ export default function App() {
   const [tenant, setTenant] = useState<string>("");
   const [mode, setMode] = useState<Mode>("browse");
   const [showConnMgr, setShowConnMgr] = useState(connections.length === 0);
+  // 自增即重新拉取命名空间（用于「重试」）。
+  const [nsReload, setNsReload] = useState(0);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
 
@@ -51,7 +53,7 @@ export default function App() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConnId]);
+  }, [activeConnId, nsReload]);
 
   return (
     <div className="app-shell">
@@ -133,6 +135,14 @@ export default function App() {
             <div className="pad-msg big err">
               无法连接到 {activeConn.name}
               <div className="diff-hint">{nsError}</div>
+              <div className="err-actions">
+                <button className="btn btn-primary" onClick={() => setNsReload((x) => x + 1)}>
+                  重试
+                </button>
+                <button className="btn btn-ghost" onClick={() => setShowConnMgr(true)}>
+                  连接管理
+                </button>
+              </div>
             </div>
           ) : (
             <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} />

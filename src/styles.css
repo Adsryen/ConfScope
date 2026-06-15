@@ -196,6 +196,7 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .fmt-label { font-size: 12px; color: var(--text-dim); }
 .fmt-select { max-width: 130px; padding: 4px 8px; }
 .fmt-msg { font-size: 11.5px; color: var(--yellow); }
+.fmt-spacer { flex: 1; }
 .content-box-head {
   display: flex;
   align-items: center;
@@ -207,6 +208,8 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   border-bottom: 1px solid var(--border);
 }
 .vs-prev { color: var(--blue); }
+.head-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.err-actions { display: flex; gap: 10px; margin-top: 4px; }
 
 /* ── 统一（单列）差异视图 ── */
 .udiff { flex: 1; overflow: auto; font-size: 12.5px; line-height: 1.5; }
@@ -471,6 +474,13 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   border-radius: 4px; flex-shrink: 0;
 }
 .conn-item-del:hover { background: var(--red); color: #fff; }
+.conn-item-del.confirm {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--red);
+}
 
 .conn-form { flex: 1; display: flex; flex-direction: column; gap: 10px; }
 .conn-form .field > span { font-size: 12px; }

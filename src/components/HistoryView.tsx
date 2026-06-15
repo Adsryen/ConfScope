@@ -3,6 +3,7 @@ import { Connection } from "../store/connections";
 import { formatTime, getHistoryDetail, HistoryItem, listHistory } from "../api/nacos";
 import { Format } from "../lib/format";
 import CodeView from "./CodeView";
+import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
 import UnifiedDiff from "./UnifiedDiff";
 
@@ -179,12 +180,15 @@ export default function HistoryView({
                       <span className="vs-prev"> · 首个版本（无上一版）</span>
                     )}
                   </span>
-                  <button
-                    className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
-                    onClick={() => setRawView((v) => !v)}
-                  >
-                    {rawView ? "高亮变更" : "原始内容"}
-                  </button>
+                  <span className="head-actions">
+                    <button
+                      className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
+                      onClick={() => setRawView((v) => !v)}
+                    >
+                      {rawView ? "高亮变更" : "原始内容"}
+                    </button>
+                    <CopyButton text={contents[viewing] ?? ""} label="复制本版" />
+                  </span>
                 </div>
                 {!ready ? (
                   <div className="pad-msg">加载中…</div>

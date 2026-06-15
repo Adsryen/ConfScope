@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Connection,
   deleteConnection,
@@ -27,6 +27,17 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+
+  // Esc 关闭弹框
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -42,6 +53,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
   const edit = (c: Connection) => {
     setDraft({ ...c });
     setTestMsg(null);
+    setConfirmDel(null);
   };
 
   const save = () => {
@@ -55,11 +67,17 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     refresh();
   };
 
-  const remove = (id: string) => {
+  // 第一次点 × 进入确认态，再次点击才真正删除。
+  const askOrRemove = (id: string) => {
+    if (confirmDel !== id) {
+      setConfirmDel(id);
+      return;
+    }
     const target = list.find((c) => c.id === id);
     deleteConnection(id);
     clearToken(id, target?.baseUrl);
     if (draft.id === id) setDraft(emptyDraft());
+    setConfirmDel(null);
     refresh();
   };
 
@@ -108,21 +126,42 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                   <div className="conn-item-name">{c.name}</div>
                   <div className="conn-item-url">{c.baseUrl}</div>
                 </div>
-                <button
-                  className="conn-item-del"
-                  title="删除"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remove(c.id);
-                  }}
-                >
-                  ×
-                </button>
+                {confirmDel === c.id ? (
+                  <button
+                    className="conn-item-del confirm"
+                    title="再次点击确认删除"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askOrRemove(c.id);
+                    }}
+                  >
+                    删除?
+                  </button>
+                ) : (
+                  <button
+                    className="conn-item-del"
+                    title="删除"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      askOrRemove(c.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>
 
-          <div className="conn-form">
+          <div
+            className="conn-form"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                save();
+              }
+            }}
+          >
             <div className="conn-form-title">{draft.id ? "编辑连接" : "新建连接"}</div>
             <label className="field">
               <span>名称</span>
@@ -130,6 +169,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 className="search-input wide"
                 value={draft.name}
                 placeholder="例如 测试环境"
+                autoFocus
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
