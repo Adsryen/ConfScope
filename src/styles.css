@@ -536,22 +536,42 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   border-top: 1px solid var(--border);
 }
 .editor-body { display: flex; flex-direction: column; gap: 12px; }
-.editor-area {
-  width: 100%;
-  min-height: 340px;
-  resize: vertical;
-  background: var(--bg);
+
+/* ── 高亮可编辑代码框(透明 textarea 叠在高亮层上) ── */
+.editor-host { position: relative; }
+.editor-host.grow { flex: 1; min-height: 0; }
+.editor-host.fixed {
+  height: 360px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--text);
-  padding: 10px 12px;
+  overflow: hidden;
+}
+.code-editor { position: absolute; inset: 0; overflow: hidden; background: var(--bg); }
+.code-editor-pre,
+.code-editor-ta {
+  margin: 0;
+  position: absolute;
+  inset: 0;
+  padding: 12px 14px;
+  border: 0;
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.55;
-  outline: none;
   tab-size: 2;
+  white-space: pre;
+  overflow: auto;
 }
-.editor-area:focus { border-color: var(--accent); }
-.editor-area.grow { flex: 1; min-height: 0; margin: 0; border: none; border-radius: 0; }
+.code-editor-pre { pointer-events: none; color: var(--text); }
+.code-editor-ta {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-hi);
+  outline: none;
+}
+.code-editor-ta::placeholder { color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); }
 
 .conn-mgr { display: flex; gap: 18px; }
 .conn-list { width: 250px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }

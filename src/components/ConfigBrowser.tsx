@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
+import CodeEditor from "./CodeEditor";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
@@ -267,14 +268,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         {saving ? "发布中…" : "保存发布"}
                       </button>
                     </div>
-                    <textarea
-                      className="editor-area mono grow"
-                      value={draft}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      onChange={(e) => setDraft(e.target.value)}
-                    />
+                    <div className="editor-host grow">
+                      <CodeEditor value={draft} onChange={setDraft} format={fmt} />
+                    </div>
                   </>
                 )}
                 {!contentLoading && !contentError && !editing && (

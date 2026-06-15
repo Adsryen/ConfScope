@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
+import CodeEditor from "./CodeEditor";
 import Select from "./Select";
 
 interface Props {
@@ -97,15 +98,14 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
           </div>
           <label className="field">
             <span>内容</span>
-            <textarea
-              className="editor-area mono"
-              value={content}
-              placeholder="在此输入配置内容…"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              onChange={(e) => setContent(e.target.value)}
-            />
+            <div className="editor-host fixed">
+              <CodeEditor
+                value={content}
+                onChange={setContent}
+                format={fmt}
+                placeholder="在此输入配置内容…"
+              />
+            </div>
           </label>
           {error && <div className="test-msg err">{error}</div>}
         </div>
