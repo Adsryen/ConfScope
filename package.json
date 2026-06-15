@@ -1,0 +1,33 @@
+{
+  "name": "configuration-center-browser",
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "description": "配置中心管理工具：连接 Nacos，浏览配置、查看历史变更，并智能对比配置差异。",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite",
+    "build": "tauri build --bundles dmg",
+    "dist": "tauri build --bundles dmg",
+    "build:web": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4",
+    "esbuild": "^0.28.0",
+    "typescript": "^5",
+    "vite": "^5"
+  }
+}
