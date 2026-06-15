@@ -285,6 +285,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       />
                       <button
                         className="btn btn-ghost btn-sm"
+                        onClick={() => selected && openConfig(selected)}
+                        title="重新拉取内容"
+                        disabled={contentLoading}
+                      >
+                        ⟳
+                      </button>
+                      <CopyButton text={content} />
+                      <span className="fmt-spacer" />
+                      <button
+                        className="btn btn-ghost btn-sm"
                         onClick={startEdit}
                         disabled={contentLoading}
                       >
@@ -297,16 +307,6 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       >
                         删除
                       </button>
-                      <span className="fmt-spacer" />
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => selected && openConfig(selected)}
-                        title="重新拉取内容"
-                        disabled={contentLoading}
-                      >
-                        ⟳
-                      </button>
-                      <CopyButton text={content} />
                     </div>
                     <CodeView code={content} format={fmt} />
                   </>
