@@ -13,28 +13,28 @@
     </filter>
   </defs>
 
-  <!-- 圆角方块背景 -->
-  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
-  <rect x="0" y="0" width="1024" height="512" rx="232" fill="url(#sheen)"/>
+  <!-- 内容缩进到居中 824×824 区域(四周约 100px 透明边距,符合 macOS 图标规范) -->
+  <g transform="translate(100,100) scale(0.8046875)">
+    <!-- 圆角方块背景 -->
+    <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+    <rect x="0" y="0" width="1024" height="512" rx="232" fill="url(#sheen)"/>
 
-  <!-- 三条配置滑杆 -->
-  <g>
-    <!-- 轨道 -->
-    <rect x="232" y="344" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
-    <rect x="232" y="492" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
-    <rect x="232" y="640" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+    <!-- 三条配置滑杆 -->
+    <g>
+      <rect x="232" y="344" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+      <rect x="232" y="492" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
+      <rect x="232" y="640" width="560" height="40" rx="20" fill="#ffffff" fill-opacity="0.32"/>
 
-    <!-- 已选段 -->
-    <rect x="232" y="344" width="420" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
-    <rect x="232" y="492" width="170" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
-    <rect x="232" y="640" width="330" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+      <rect x="232" y="344" width="420" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+      <rect x="232" y="492" width="170" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
+      <rect x="232" y="640" width="330" height="40" rx="20" fill="#ffffff" fill-opacity="0.6"/>
 
-    <!-- 滑块 -->
-    <circle cx="652" cy="364" r="50" fill="#ffffff" filter="url(#knob)"/>
-    <circle cx="402" cy="512" r="50" fill="#ffffff" filter="url(#knob)"/>
-    <circle cx="562" cy="660" r="50" fill="#ffffff" filter="url(#knob)"/>
-    <circle cx="652" cy="364" r="22" fill="#0a5fa6"/>
-    <circle cx="402" cy="512" r="22" fill="#0a5fa6"/>
-    <circle cx="562" cy="660" r="22" fill="#0a5fa6"/>
+      <circle cx="652" cy="364" r="50" fill="#ffffff" filter="url(#knob)"/>
+      <circle cx="402" cy="512" r="50" fill="#ffffff" filter="url(#knob)"/>
+      <circle cx="562" cy="660" r="50" fill="#ffffff" filter="url(#knob)"/>
+      <circle cx="652" cy="364" r="22" fill="#0a5fa6"/>
+      <circle cx="402" cy="512" r="22" fill="#0a5fa6"/>
+      <circle cx="562" cy="660" r="22" fill="#0a5fa6"/>
+    </g>
   </g>
 </svg>
