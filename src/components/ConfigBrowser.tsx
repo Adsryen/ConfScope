@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
+import { toast } from "../lib/toast";
 import CodeEditor from "./CodeEditor";
+import ConfirmModal from "./ConfirmModal";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
@@ -44,6 +46,13 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
+  const [pending, setPending] = useState<(() => void) | null>(null);
+  const dirty = editing && draft !== content;
+  const guardNav = (action: () => void) => {
+    if (dirty) setPending(() => action);
+    else action();
+  };
 
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
@@ -138,6 +147,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     try {
       await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
       setEditing(false);
+      toast("配置已发布");
       await openConfig(selected); // 重新拉取最新内容
     } catch (e) {
       setSaveError(String(e));
@@ -146,6 +156,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  // 编辑态按 Esc 取消编辑(无弹框时)
+  useEffect(() => {
+    if (!editing || showNew || showDelete || pending) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditing(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing, showNew, showDelete, pending]);
+
   // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
   const doDelete = async () => {
     if (!selected) return;
@@ -153,6 +173,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setShowDelete(false);
     setSelected(null);
     setContent("");
+    toast("配置已删除");
     fetchList(appliedTerm, pageNo);
   };
 
@@ -199,7 +220,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               <div
                 key={`${it.group}/${it.dataId}`}
                 className={`browser-item${active ? " active" : ""}`}
-                onClick={() => openConfig(it)}
+                onClick={() => guardNav(() => openConfig(it))}
                 title={`${it.dataId}\nGROUP: ${it.group}`}
               >
                 <div className="browser-item-id">{it.dataId}</div>
@@ -356,6 +377,23 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           group={selected.group}
           onCancel={() => setShowDelete(false)}
           onConfirm={doDelete}
+        />
+      )}
+
+      {pending && (
+        <ConfirmModal
+          title="放弃未保存的修改？"
+          message="当前配置有未保存的编辑,切换将丢失这些改动。"
+          confirmLabel="放弃并切换"
+          cancelLabel="留在当前"
+          danger
+          onConfirm={() => {
+            const act = pending;
+            setPending(null);
+            setEditing(false);
+            act();
+          }}
+          onCancel={() => setPending(null)}
         />
       )}
     </div>

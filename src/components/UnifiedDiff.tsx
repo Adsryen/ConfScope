@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
@@ -18,12 +18,13 @@ type LineType = "ctx" | "add" | "del";
  *  新增绿、删除红、修改展开为红(旧)+绿(新)。用于「这一版改了哪些」。 */
 export default function UnifiedDiff({ oldText, newText, format }: Props) {
   const hl = format && format !== "TEXT";
+  const [onlyChanges, setOnlyChanges] = useState(false);
   const { rows, added, removed, modified } = useMemo(
     () => diffLines(oldText, newText),
     [oldText, newText]
   );
 
-  const lines = useMemo(() => {
+  const allLines = useMemo(() => {
     const out: { type: LineType; no: number | null; text: string }[] = [];
     for (const r of rows) {
       switch (r.type) {
@@ -45,6 +46,7 @@ export default function UnifiedDiff({ oldText, newText, format }: Props) {
     return out;
   }, [rows]);
 
+  const lines = onlyChanges ? allLines.filter((l) => l.type !== "ctx") : allLines;
   const identical = added === 0 && removed === 0 && modified === 0;
 
   return (
@@ -59,6 +61,14 @@ export default function UnifiedDiff({ oldText, newText, format }: Props) {
             <span className="stat stat-mod">~{modified} 修改</span>
           </>
         )}
+        <label className="diff-toggle">
+          <input
+            type="checkbox"
+            checked={onlyChanges}
+            onChange={(e) => setOnlyChanges(e.target.checked)}
+          />
+          仅显示变更
+        </label>
       </div>
       <div className="udiff mono">
         {lines.map((l, i) => (

@@ -5,6 +5,7 @@ import ConnectionManager from "./components/ConnectionManager";
 import ConfigBrowser from "./components/ConfigBrowser";
 import DiffView from "./components/DiffView";
 import Select from "./components/Select";
+import Toaster from "./components/Toaster";
 
 type Mode = "browse" | "diff";
 
@@ -153,6 +154,8 @@ export default function App() {
           onChange={(conns) => setConnections(conns)}
         />
       )}
+
+      <Toaster />
     </div>
   );
 }

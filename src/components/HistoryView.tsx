@@ -8,6 +8,7 @@ import {
   publishConfig,
 } from "../api/nacos";
 import { Format, nacosType } from "../lib/format";
+import { toast } from "../lib/toast";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -139,6 +140,7 @@ export default function HistoryView({
       await publishConfig(conn, tenant, dataId, group, text, nacosType(format));
       setRbConfirm(false);
       setViewing(null);
+      toast(`已回滚到 nid ${viewing}`);
       onRolledBack();
       loadHistory(1);
     } catch (e) {

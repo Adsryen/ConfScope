@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
+import { toast } from "../lib/toast";
 import CodeEditor from "./CodeEditor";
 import Select from "./Select";
 
@@ -43,6 +44,7 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
         content,
         nacosType(fmt)
       );
+      toast("配置已创建");
       onSaved(dataId.trim(), group.trim() || "DEFAULT_GROUP");
     } catch (e) {
       setError(String(e));
