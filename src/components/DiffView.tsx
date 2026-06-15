@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
-import { getConfig, listNamespaces, Namespace } from "../api/nacos";
+import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
+import Combobox from "./Combobox";
 import DiffPanel from "./DiffPanel";
 import Select from "./Select";
 
@@ -45,6 +46,8 @@ function SourcePicker({
 }) {
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
+  const [configs, setConfigs] = useState<ConfigItem[]>([]);
+  const [cfgLoading, setCfgLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +67,25 @@ function SourcePicker({
       alive = false;
     };
   }, [source.connId]);
+
+  // 连接 / 命名空间确定后,拉取该范围下的配置列表用于下拉模糊选择
+  useEffect(() => {
+    if (!conn) return;
+    let alive = true;
+    setCfgLoading(true);
+    setConfigs([]);
+    listConfigs(conn, source.tenant, "", "", 1, 500)
+      .then((page) => alive && setConfigs(page.pageItems))
+      .catch(() => alive && setConfigs([]))
+      .finally(() => alive && setCfgLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [source.connId, source.tenant]);
+
+  // dataId 候选（带 group 说明）；group 候选去重
+  const dataIdOptions = configs.map((c) => ({ value: c.dataId, sub: c.group }));
+  const groupOptions = Array.from(new Set(configs.map((c) => c.group))).map((g) => ({ value: g }));
 
   const load = async () => {
     if (!conn || !source.dataId.trim()) {
@@ -125,26 +147,22 @@ function SourcePicker({
       </label>
       <div className="field-row">
         <label className="field">
-          <span>dataId</span>
-          <input
-            className="search-input mono"
+          <span>dataId {cfgLoading ? "（加载中…）" : `（${configs.length}）`}</span>
+          <Combobox
             value={source.dataId}
-            placeholder="application.yaml"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            onChange={(e) => onChange({ ...source, dataId: e.target.value })}
+            placeholder="搜索或输入 dataId…"
+            options={dataIdOptions}
+            onChange={(v) => onChange({ ...source, dataId: v })}
+            onPick={(o) => onChange({ ...source, dataId: o.value, group: o.sub || source.group })}
           />
         </label>
         <label className="field">
           <span>group</span>
-          <input
-            className="search-input mono"
+          <Combobox
             value={source.group}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            onChange={(e) => onChange({ ...source, group: e.target.value })}
+            placeholder="DEFAULT_GROUP"
+            options={groupOptions}
+            onChange={(v) => onChange({ ...source, group: v })}
           />
         </label>
       </div>
