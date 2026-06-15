@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { formatTime, getHistoryDetail, HistoryItem, listHistory } from "../api/nacos";
+import { Format } from "../lib/format";
+import CodeView from "./CodeView";
 import DiffPanel from "./DiffPanel";
 import UnifiedDiff from "./UnifiedDiff";
 
@@ -11,6 +13,8 @@ interface Props {
   group: string;
   /** 当前线上内容，作为「与最新版对比」的右侧基准。 */
   currentContent: string;
+  /** 配置格式，用于原始内容的语法高亮。 */
+  format: Format;
 }
 
 const PAGE_SIZE = 50;
@@ -18,7 +22,14 @@ const opLabel = (t: string) =>
   ({ I: "新增", U: "更新", D: "删除" } as Record<string, string>)[t] ?? t ?? "—";
 
 /** 历史版本：左侧版本列表（可勾选两个对比），右侧展示选中版本内容或两版本 diff。 */
-export default function HistoryView({ conn, tenant, dataId, group, currentContent }: Props) {
+export default function HistoryView({
+  conn,
+  tenant,
+  dataId,
+  group,
+  currentContent,
+  format,
+}: Props) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +181,7 @@ export default function HistoryView({ conn, tenant, dataId, group, currentConten
                   </button>
                 </div>
                 {rawView ? (
-                  <pre className="code-area mono">{contents[viewing] ?? ""}</pre>
+                  <CodeView code={contents[viewing] ?? ""} format={format} />
                 ) : (
                   <UnifiedDiff
                     oldText={prev ? contents[prev.id] ?? "" : ""}

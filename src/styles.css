@@ -246,6 +246,32 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   white-space: pre;
   tab-size: 2;
 }
+.code-area code { font: inherit; background: none; padding: 0; }
+
+/* ── 语法高亮配色（对齐 VSCode Dark+） ── */
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable { color: #9cdcfe; }       /* 键 / 变量 */
+.hljs-string,
+.hljs-meta .hljs-string { color: #ce9178; }        /* 字符串值 */
+.hljs-number,
+.hljs-literal,
+.hljs-boolean { color: #b5cea8; }                  /* 数字 / true/false/null */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-type,
+.hljs-selector-tag { color: #569cd6; }
+.hljs-comment,
+.hljs-quote { color: #6a9955; font-style: italic; }
+.hljs-tag,
+.hljs-name { color: #569cd6; }                      /* XML 标签 */
+.hljs-section,
+.hljs-title { color: #4ec9b0; }                     /* TOML/INI [section] */
+.hljs-symbol,
+.hljs-bullet,
+.hljs-punctuation { color: var(--text-dim); }
+.hljs-meta { color: #808080; }
 
 /* ── History ── */
 .history-view { flex: 1; min-height: 0; display: flex; }

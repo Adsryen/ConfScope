@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs } from "../api/nacos";
 import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
+import CodeView from "./CodeView";
 import HistoryView from "./HistoryView";
 
 interface Props {
@@ -208,7 +209,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       )}
                       {fmtError && <span className="fmt-msg">{fmtError}</span>}
                     </div>
-                    <pre className="code-area mono">{beautified ?? content}</pre>
+                    <CodeView code={beautified ?? content} format={fmt} />
                   </>
                 )}
               </div>
@@ -219,6 +220,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 dataId={selected.dataId}
                 group={selected.group}
                 currentContent={content}
+                format={fmt}
               />
             )}
           </>
