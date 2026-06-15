@@ -7,7 +7,18 @@ import Combobox from "./Combobox";
 import DiffPanel from "./DiffPanel";
 import Select from "./Select";
 
-type DiffMode = "text" | "key";
+type DiffMode = "text" | "key" | "lines";
+
+/** 忽略顺序的整行对比:去空行、按行排序后再 diff(保留值,只忽略顺序)。 */
+function sortedLinesDoc(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))
+    .filter((l) => l.trim() !== "")
+    .sort()
+    .join("\n");
+}
 
 interface Props {
   connections: Connection[];
@@ -187,15 +198,13 @@ export default function DiffView({ connections }: Props) {
   };
 
   const ready = leftLoaded && rightLoaded;
-  // 按对比模式决定喂给 diff 的文本:key 模式取去重排序后的键路径(忽略顺序/值)
-  const keyMode = mode === "key";
-  const leftText = ready ? (keyMode ? keysDoc(leftLoaded!.content, leftLoaded!.format) : leftLoaded!.content) : "";
-  const rightText = ready ? (keyMode ? keysDoc(rightLoaded!.content, rightLoaded!.format) : rightLoaded!.content) : "";
-  const diffFormat = keyMode
-    ? "TEXT"
-    : leftLoaded?.format !== "TEXT"
-    ? leftLoaded?.format
-    : rightLoaded?.format;
+  // 按对比模式决定喂给 diff 的文本
+  const prep = (l: Loaded) =>
+    mode === "key" ? keysDoc(l.content, l.format) : mode === "lines" ? sortedLinesDoc(l.content) : l.content;
+  const leftText = ready ? prep(leftLoaded!) : "";
+  const rightText = ready ? prep(rightLoaded!) : "";
+  const diffFormat =
+    mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
 
   return (
     <div className="diff-view">
@@ -209,6 +218,7 @@ export default function DiffView({ connections }: Props) {
           value={mode}
           options={[
             { value: "text", label: "文本(逐行)" },
+            { value: "lines", label: "忽略顺序(整行)" },
             { value: "key", label: "仅 Key(忽略顺序)" },
           ]}
           onChange={(v) => setMode(v as DiffMode)}

@@ -29,6 +29,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
   const [testing, setTesting] = useState(false);
   // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [showPwd, setShowPwd] = useState(false);
 
   // Esc 关闭弹框
   useEffect(() => {
@@ -203,12 +204,25 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               </label>
               <label className="field">
                 <span>密码</span>
-                <input
-                  className="search-input mono"
-                  type="password"
-                  value={draft.password}
-                  onChange={(e) => set({ password: e.target.value })}
-                />
+                <div className="pwd-field">
+                  <input
+                    className="search-input wide mono"
+                    type={showPwd ? "text" : "password"}
+                    value={draft.password}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ password: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="pwd-toggle"
+                    title={showPwd ? "隐藏" : "显示"}
+                    onClick={() => setShowPwd((v) => !v)}
+                  >
+                    {showPwd ? "🙈" : "👁"}
+                  </button>
+                </div>
               </label>
             </div>
             <label className="field">

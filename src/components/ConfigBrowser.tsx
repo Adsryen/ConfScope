@@ -98,6 +98,22 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   };
   useEffect(() => () => window.clearTimeout(searchTimer.current), []);
 
+  // 键盘上下键在列表中移动选中(从搜索框或列表触发)
+  const moveSelection = (delta: number) => {
+    if (!items.length) return;
+    const idx = items.findIndex(
+      (it) => selected && it.dataId === selected.dataId && it.group === selected.group
+    );
+    const next = idx < 0 ? (delta > 0 ? 0 : items.length - 1) : idx + delta;
+    const it = items[Math.min(Math.max(next, 0), items.length - 1)];
+    if (it) guardNav(() => openConfig(it));
+  };
+  // 选中项滚入可视区
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selected?.dataId, selected?.group]);
+
   // 切换连接 / 命名空间时重置并重新拉列表
   useEffect(() => {
     setSearch("");
@@ -197,7 +213,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             autoCorrect="off"
             spellCheck={false}
             onChange={(e) => onSearchChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && searchNow()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") searchNow();
+              else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                moveSelection(1);
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                moveSelection(-1);
+              }
+            }}
           />
           <button
             className="btn btn-ghost btn-sm"
@@ -227,6 +252,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             return (
               <div
                 key={`${it.group}/${it.dataId}`}
+                ref={active ? activeRef : undefined}
                 className={`browser-item${active ? " active" : ""}`}
                 onClick={() => guardNav(() => openConfig(it))}
                 title={`${it.dataId}\nGROUP: ${it.group}`}

@@ -9,19 +9,36 @@ import Toaster from "./components/Toaster";
 
 type Mode = "browse" | "diff";
 
+const UI_KEY = "ccb.ui";
+function loadUI(): { connId?: string; mode?: Mode } {
+  try {
+    return JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
 export default function App() {
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
-  const [activeConnId, setActiveConnId] = useState<string>(connections[0]?.id ?? "");
+  const ui0 = loadUI();
+  const [activeConnId, setActiveConnId] = useState<string>(
+    connections.some((c) => c.id === ui0.connId) ? ui0.connId! : connections[0]?.id ?? ""
+  );
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
-  const [mode, setMode] = useState<Mode>("browse");
+  const [mode, setMode] = useState<Mode>(ui0.mode === "diff" ? "diff" : "browse");
   const [showConnMgr, setShowConnMgr] = useState(connections.length === 0);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
+
+  // 记住上次的连接与模式
+  useEffect(() => {
+    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode }));
+  }, [activeConnId, mode]);
 
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {
