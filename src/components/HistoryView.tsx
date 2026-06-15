@@ -91,15 +91,14 @@ export default function HistoryView({
       .filter((i) => Number(i.id) < Number(nid))
       .sort((a, b) => Number(b.id) - Number(a.id))[0];
 
-  const view = async (nid: string) => {
+  const view = (nid: string) => {
     setError(null);
-    try {
-      const prev = prevOf(nid);
-      await Promise.all([ensureContent(nid), prev ? ensureContent(prev.id) : Promise.resolve("")]);
-      setViewing(nid);
-    } catch (e) {
-      setError(String(e));
-    }
+    setViewing(nid); // 立即高亮，内容后台加载，避免连点时被慢请求覆盖
+    const prev = prevOf(nid);
+    Promise.all([
+      ensureContent(nid),
+      prev ? ensureContent(prev.id) : Promise.resolve(""),
+    ]).catch((e) => setError(String(e)));
   };
 
   // 对比：勾选 2 个 → 两版本对比；勾选 1 个 → 该版本 vs 当前线上
@@ -145,23 +144,30 @@ export default function HistoryView({
 
       <div className="history-detail">
         {comparing ? (
-          <DiffPanel
-            leftLabel={
-              leftNid
-                ? `nid ${leftNid} · ${formatTime(itemOf(leftNid)?.lastModifiedTime ?? "")}`
-                : "（无）"
-            }
-            rightLabel={
-              rightNid
-                ? `nid ${rightNid} · ${formatTime(itemOf(rightNid)?.lastModifiedTime ?? "")}`
-                : "当前线上内容"
-            }
-            leftText={leftNid ? contents[leftNid] ?? "" : ""}
-            rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
-          />
+          (leftNid && contents[leftNid] === undefined) ||
+          (rightNid && contents[rightNid] === undefined) ? (
+            <div className="pad-msg">加载中…</div>
+          ) : (
+            <DiffPanel
+              leftLabel={
+                leftNid
+                  ? `nid ${leftNid} · ${formatTime(itemOf(leftNid)?.lastModifiedTime ?? "")}`
+                  : "（无）"
+              }
+              rightLabel={
+                rightNid
+                  ? `nid ${rightNid} · ${formatTime(itemOf(rightNid)?.lastModifiedTime ?? "")}`
+                  : "当前线上内容"
+              }
+              leftText={leftNid ? contents[leftNid] ?? "" : ""}
+              rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
+            />
+          )
         ) : viewing ? (
           (() => {
             const prev = prevOf(viewing);
+            const ready =
+              contents[viewing] !== undefined && (!prev || contents[prev.id] !== undefined);
             return (
               <div className="content-box">
                 <div className="content-box-head">
@@ -180,7 +186,9 @@ export default function HistoryView({
                     {rawView ? "高亮变更" : "原始内容"}
                   </button>
                 </div>
-                {rawView ? (
+                {!ready ? (
+                  <div className="pad-msg">加载中…</div>
+                ) : rawView ? (
                   <CodeView code={contents[viewing] ?? ""} format={format} />
                 ) : (
                   <UnifiedDiff

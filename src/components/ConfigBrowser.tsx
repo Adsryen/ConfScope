@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs } from "../api/nacos";
 import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
@@ -69,22 +69,29 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
 
+  // 每次打开配置自增，异步结果只在仍是最新一次请求时才采用，避免连点串台。
+  const reqId = useRef(0);
+
   const openConfig = async (item: ConfigItem) => {
-    setSelected(item);
+    const my = ++reqId.current;
+    setSelected(item); // 立即高亮，与异步内容加载解耦
     setTab("content");
     setContentLoading(true);
     setContentError(null);
     setBeautified(null);
     setFmtError(null);
+    setContent("");
     try {
       const text = await getConfig(conn, tenant, item.dataId, item.group);
+      if (my !== reqId.current) return; // 已有更晚的点击，丢弃本次结果
       setContent(text);
       setFmt(detectFormat(item.dataId, item.configType, text));
     } catch (e) {
+      if (my !== reqId.current) return;
       setContentError(String(e));
       setContent("");
     } finally {
-      setContentLoading(false);
+      if (my === reqId.current) setContentLoading(false);
     }
   };
 
