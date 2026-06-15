@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs } from "../api/nacos";
+import { beautify, detectFormat, Format, FORMATS } from "../lib/format";
 import HistoryView from "./HistoryView";
 
 interface Props {
@@ -24,6 +25,21 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("content");
+  // 格式与美化：fmt 为当前选定格式；beautified 非空时展示美化后的内容
+  const [fmt, setFmt] = useState<Format>("TEXT");
+  const [beautified, setBeautified] = useState<string | null>(null);
+  const [fmtError, setFmtError] = useState<string | null>(null);
+
+  const doBeautify = (format: Format) => {
+    const r = beautify(content, format);
+    if (r.ok) {
+      setBeautified(r.text);
+      setFmtError(r.reformatted ? null : "该格式仅做轻量规整（保留注释/顺序）");
+    } else {
+      setBeautified(null);
+      setFmtError(`美化失败：${r.error ?? "内容不是合法的 " + format}`);
+    }
+  };
 
   const fetchList = async (term: string) => {
     setListLoading(true);
@@ -57,9 +73,12 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setTab("content");
     setContentLoading(true);
     setContentError(null);
+    setBeautified(null);
+    setFmtError(null);
     try {
       const text = await getConfig(conn, tenant, item.dataId, item.group);
       setContent(text);
+      setFmt(detectFormat(item.dataId, item.configType, text));
     } catch (e) {
       setContentError(String(e));
       setContent("");
@@ -149,7 +168,48 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 {contentLoading && <div className="pad-msg">加载中…</div>}
                 {contentError && <div className="pad-msg err">{contentError}</div>}
                 {!contentLoading && !contentError && (
-                  <pre className="code-area mono">{content}</pre>
+                  <>
+                    <div className="fmt-bar">
+                      <span className="fmt-label">配置格式</span>
+                      <select
+                        className="search-input fmt-select"
+                        value={fmt}
+                        onChange={(e) => {
+                          const next = e.target.value as Format;
+                          setFmt(next);
+                          if (beautified !== null) doBeautify(next);
+                          else setFmtError(null);
+                        }}
+                      >
+                        {FORMATS.map((f) => (
+                          <option key={f} value={f}>
+                            {f}
+                          </option>
+                        ))}
+                      </select>
+                      {beautified === null ? (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => doBeautify(fmt)}
+                          disabled={!content}
+                        >
+                          ✨ 美化
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-ghost btn-sm active"
+                          onClick={() => {
+                            setBeautified(null);
+                            setFmtError(null);
+                          }}
+                        >
+                          还原原始
+                        </button>
+                      )}
+                      {fmtError && <span className="fmt-msg">{fmtError}</span>}
+                    </div>
+                    <pre className="code-area mono">{beautified ?? content}</pre>
+                  </>
                 )}
               </div>
             ) : (

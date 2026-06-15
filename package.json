@@ -5,7 +5,9 @@
   "packageManager": "pnpm@10.33.2",
   "description": "配置中心管理工具：连接 Nacos，浏览配置、查看历史变更，并智能对比配置差异。",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
     "dev": "tauri dev",
@@ -19,7 +21,8 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
