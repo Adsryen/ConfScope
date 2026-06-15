@@ -62,7 +62,9 @@ export default function Select({
             <div
               key={o.value}
               className={`sel-option${o.value === value ? " active" : ""}`}
-              onClick={() => {
+              onMouseDown={(e) => {
+                e.preventDefault(); // 抢在 window mousedown(外部关闭)之前完成选中
+                e.stopPropagation();
                 onChange(o.value);
                 setOpen(false);
               }}
