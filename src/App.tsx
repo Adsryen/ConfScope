@@ -59,12 +59,11 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-name">配置中心</span>
-          <span className="brand-sub">Nacos 配置管理</span>
-        </div>
-
-        <div className="topbar-controls">
+        <div className="topbar-left">
+          <div className="brand">
+            <span className="brand-name">配置中心</span>
+            <span className="brand-sub">Nacos 配置管理</span>
+          </div>
           <div className="mode-switch">
             <button
               className={`mode-btn${mode === "browse" ? " active" : ""}`}
@@ -79,7 +78,9 @@ export default function App() {
               智能对比
             </button>
           </div>
+        </div>
 
+        <div className="topbar-controls">
           {mode === "browse" && (
             <>
               <Select

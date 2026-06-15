@@ -64,6 +64,7 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   flex-shrink: 0;
 }
 
+.topbar-left { display: flex; align-items: center; gap: 18px; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand-name { font-size: 16px; font-weight: 700; color: var(--text-hi); letter-spacing: 1px; }
 .brand-sub { font-size: 11px; color: var(--text-dim); }
