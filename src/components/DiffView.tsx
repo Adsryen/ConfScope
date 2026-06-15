@@ -30,26 +30,22 @@ const emptySource = (connId: string): Source => ({
   group: "DEFAULT_GROUP",
 });
 
-/** 单侧来源选择器：选连接 / 命名空间 / dataId / group，并加载内容。 */
+/** 单侧来源选择器：选连接 / 命名空间 / dataId / group（仅选择，加载由外层统一触发）。 */
 function SourcePicker({
   title,
   connections,
   source,
   onChange,
-  onLoaded,
 }: {
   title: string;
   connections: Connection[];
   source: Source;
   onChange: (s: Source) => void;
-  onLoaded: (l: Loaded | null) => void;
 }) {
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
   const [cfgLoading, setCfgLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const conn = connections.find((c) => c.id === source.connId);
 
@@ -86,38 +82,6 @@ function SourcePicker({
   // dataId 候选（带 group 说明）；group 候选去重
   const dataIdOptions = configs.map((c) => ({ value: c.dataId, sub: c.group }));
   const groupOptions = Array.from(new Set(configs.map((c) => c.group))).map((g) => ({ value: g }));
-
-  const load = async () => {
-    if (!conn || !source.dataId.trim()) {
-      setError("请填写 dataId");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    onLoaded(null);
-    try {
-      const content = await getConfig(
-        conn,
-        source.tenant,
-        source.dataId.trim(),
-        source.group.trim() || "DEFAULT_GROUP"
-      );
-      const nsName =
-        namespaces.find((n) => n.namespace === source.tenant)?.namespaceShowName ||
-        source.tenant ||
-        "public";
-      onLoaded({
-        label: `${conn.name} · ${nsName} · ${source.dataId.trim()}`,
-        content,
-        format: detectFormat(source.dataId.trim(), "", content),
-      });
-    } catch (e) {
-      setError(String(e));
-      onLoaded(null);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="source-picker">
@@ -166,10 +130,6 @@ function SourcePicker({
           />
         </label>
       </div>
-      {error && <div className="test-msg err">{error}</div>}
-      <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
-        {loading ? "加载中…" : "加载内容"}
-      </button>
     </div>
   );
 }
@@ -181,30 +141,60 @@ export default function DiffView({ connections }: Props) {
   const [right, setRight] = useState<Source>(emptySource(firstId));
   const [leftLoaded, setLeftLoaded] = useState<Loaded | null>(null);
   const [rightLoaded, setRightLoaded] = useState<Loaded | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (connections.length === 0) {
     return <div className="pad-msg big">请先在「连接管理」中添加 Nacos 连接</div>;
   }
+
+  // 拉取单个来源内容并组装成 Loaded
+  const loadOne = async (src: Source): Promise<Loaded> => {
+    const conn = connections.find((c) => c.id === src.connId);
+    if (!conn) throw "未选择连接";
+    if (!src.dataId.trim()) throw "未填写 dataId";
+    const group = src.group.trim() || "DEFAULT_GROUP";
+    const content = await getConfig(conn, src.tenant, src.dataId.trim(), group);
+    return {
+      label: `${conn.name} · ${src.tenant || "public"} · ${src.dataId.trim()}`,
+      content,
+      format: detectFormat(src.dataId.trim(), "", content),
+    };
+  };
+
+  // 一个按钮同时加载 A、B 并对比；任一失败只标记该侧
+  const loadBoth = async () => {
+    setLoading(true);
+    setError(null);
+    const [a, b] = await Promise.allSettled([loadOne(left), loadOne(right)]);
+    const errs: string[] = [];
+    if (a.status === "fulfilled") setLeftLoaded(a.value);
+    else {
+      setLeftLoaded(null);
+      errs.push(`来源 A：${a.reason}`);
+    }
+    if (b.status === "fulfilled") setRightLoaded(b.value);
+    else {
+      setRightLoaded(null);
+      errs.push(`来源 B：${b.reason}`);
+    }
+    setError(errs.join("    ") || null);
+    setLoading(false);
+  };
 
   const ready = leftLoaded && rightLoaded;
 
   return (
     <div className="diff-view">
       <div className="diff-sources">
-        <SourcePicker
-          title="来源 A（左）"
-          connections={connections}
-          source={left}
-          onChange={setLeft}
-          onLoaded={setLeftLoaded}
-        />
-        <SourcePicker
-          title="来源 B（右）"
-          connections={connections}
-          source={right}
-          onChange={setRight}
-          onLoaded={setRightLoaded}
-        />
+        <SourcePicker title="来源 A（左）" connections={connections} source={left} onChange={setLeft} />
+        <SourcePicker title="来源 B（右）" connections={connections} source={right} onChange={setRight} />
+      </div>
+      <div className="diff-loadbar">
+        <button className="btn btn-primary" onClick={loadBoth} disabled={loading}>
+          {loading ? "加载中…" : "加载并对比"}
+        </button>
+        {error && <span className="diff-loaderr">{error}</span>}
       </div>
       <div className="diff-result">
         {ready ? (
@@ -217,7 +207,7 @@ export default function DiffView({ connections }: Props) {
           />
         ) : (
           <div className="pad-msg big">
-            分别加载来源 A、B 的配置内容后自动对比
+            选择来源 A、B 后点「加载并对比」
             <div className="diff-hint">
               支持：同一 Nacos 两个配置 · 跨命名空间 · 跨服务器环境对比
             </div>
