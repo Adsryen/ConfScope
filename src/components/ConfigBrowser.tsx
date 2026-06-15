@@ -73,6 +73,19 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  // 输入即搜:防抖自动搜索(无需「搜索」按钮)
+  const searchTimer = useRef<number | undefined>(undefined);
+  const onSearchChange = (v: string) => {
+    setSearch(v);
+    window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => fetchList(v, 1), 400);
+  };
+  const searchNow = () => {
+    window.clearTimeout(searchTimer.current);
+    fetchList(search, 1);
+  };
+  useEffect(() => () => window.clearTimeout(searchTimer.current), []);
+
   // 切换连接 / 命名空间时重置并重新拉列表
   useEffect(() => {
     setSearch("");
@@ -155,12 +168,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && fetchList(search, 1)}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && searchNow()}
           />
-          <button className="btn btn-ghost btn-sm" onClick={() => fetchList(search, 1)}>
-            搜索
-          </button>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => fetchList(appliedTerm, pageNo)}
