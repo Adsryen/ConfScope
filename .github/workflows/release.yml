@@ -22,9 +22,6 @@ jobs:
             goarch: amd64
           - os: macos-latest
             platform: darwin
-            goarch: arm64
-          - os: macos-latest
-            platform: darwin
             goarch: amd64
 
     runs-on: ${{ matrix.os }}
