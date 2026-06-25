@@ -56,3 +56,4 @@ pnpm-debug.log*
 .claude/
 .agents/
 docs/superpowers/
+.trae/
