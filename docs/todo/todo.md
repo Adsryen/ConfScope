@@ -174,3 +174,10 @@ Abort trap: 6
 
 **维护者**: Adsryen  
 **项目**: https://github.com/Adsryen/ConfScope
+
+### 更新：macOS 支持状态
+**2026-06-25**: macOS 支持暂时完全移除
+- ❌ macOS ARM64 (darwin-arm64) - Wails CLI dyld 错误
+- ❌ macOS AMD64 (darwin-amd64) - 同样的 Wails CLI 错误（exit code 134）
+- **原因**: Wails CLI v2.12.0 在 macOS GitHub Actions 运行器上有兼容性问题
+- **临时方案**: 仅支持 Linux 和 Windows，macOS 待 Wails 修复后再添加

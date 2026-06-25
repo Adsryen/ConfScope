@@ -20,9 +20,6 @@ jobs:
           - os: windows-latest
             platform: windows
             goarch: amd64
-          - os: macos-latest
-            platform: darwin
-            goarch: amd64
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.platform }}-${{ matrix.goarch }})
@@ -192,7 +189,5 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/ConfScope-windows-amd64/ConfScope.exe
-            artifacts/ConfScope-darwin-arm64/ConfScope-darwin-arm64.dmg
-            artifacts/ConfScope-darwin-amd64/ConfScope-darwin-amd64.dmg
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm
