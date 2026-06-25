@@ -4,6 +4,7 @@ import { listNamespaces, Namespace } from "./api/nacos";
 import ConnectionManager from "./components/ConnectionManager";
 import ConfigBrowser from "./components/ConfigBrowser";
 import DiffView from "./components/DiffView";
+import About from "./components/About";
 import Select from "./components/Select";
 import Toaster from "./components/Toaster";
 
@@ -30,6 +31,7 @@ export default function App() {
   const [tenant, setTenant] = useState<string>("");
   const [mode, setMode] = useState<Mode>(ui0.mode === "diff" ? "diff" : "browse");
   const [showConnMgr, setShowConnMgr] = useState(connections.length === 0);
+  const [showAbout, setShowAbout] = useState(false);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
 
@@ -78,10 +80,6 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-left">
-          <div className="brand">
-            <span className="brand-name">ConfScope</span>
-            <span className="brand-sub">统一配置中心管理</span>
-          </div>
           <div className="mode-switch">
             <button
               className={`mode-btn${mode === "browse" ? " active" : ""}`}
@@ -130,6 +128,9 @@ export default function App() {
           <button className="btn btn-ghost btn-sm" onClick={() => setShowConnMgr(true)}>
             连接管理
           </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowAbout(true)}>
+            关于
+          </button>
         </div>
       </header>
 
@@ -170,6 +171,10 @@ export default function App() {
           onClose={() => setShowConnMgr(false)}
           onChange={(conns) => setConnections(conns)}
         />
+      )}
+
+      {showAbout && (
+        <About onClose={() => setShowAbout(false)} />
       )}
 
       <Toaster />

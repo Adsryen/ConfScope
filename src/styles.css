@@ -772,3 +772,163 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 ::-webkit-scrollbar-thumb { background: #424247; border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: #4f4f55; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* About 模态框 */
+.about-modal {
+  width: 500px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.about-header {
+  text-align: center;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.about-logo {
+  margin-bottom: 12px;
+}
+
+.about-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, #0078d4, #00bcf2);
+  color: white;
+  font-size: 24px;
+  font-weight: 700;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 120, 212, 0.3);
+}
+
+.about-header h2 {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.about-tagline {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.about-version {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.about-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.about-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.about-section ul {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+
+.about-section li {
+  position: relative;
+  padding-left: 0;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.about-section p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.about-section a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.about-section a:hover {
+  text-decoration: underline;
+}
+
+.about-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+
+.badge-success {
+  background: rgba(40, 167, 69, 0.2);
+  border-color: rgba(40, 167, 69, 0.4);
+  color: #28a745;
+}
+
+.badge-planned {
+  background: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.3);
+  color: #ffc107;
+}
+
+.about-links {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.about-links a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.about-footer {
+  text-align: center;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+}
+
+.about-footer p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.about-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.about-footer a:hover {
+  text-decoration: underline;
+}
