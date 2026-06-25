@@ -30,8 +30,7 @@ Thumbs.db
 go.work
 go.work.sum
 
-# Wails (auto-generated bindings)
-wailsjs/go/
+# Wails (auto-generated bindings - keep App.ts for CI builds)
 frontend/wailsjs/
 
 # Environment
