@@ -46,8 +46,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       # Linux 需要 WebKit/GTK 开发库
       - name: Install Linux dependencies
