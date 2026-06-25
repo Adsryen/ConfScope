@@ -48,3 +48,7 @@ pnpm-debug.log*
 # Temp files
 *.tmp
 *.temp
+
+# ai
+.claude/
+.agents/
