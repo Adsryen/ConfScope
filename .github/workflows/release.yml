@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux
             goarch: amd64
           - os: windows-latest
@@ -52,7 +52,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
@@ -115,7 +115,7 @@ jobs:
             "Section: devel" \
             "Priority: optional" \
             "Architecture: amd64" \
-            "Depends: libgtk-3-0, libwebkit2gtk-4.1-0" \
+            "Depends: libgtk-3-0, libwebkit2gtk-4.0-37" \
             "Maintainer: ConfScope <noreply@github.com>" \
             "Description: ConfScope - 配置中心管理工具" \
             " 浏览、对比、洞察多配置中心的配置差异。" \
