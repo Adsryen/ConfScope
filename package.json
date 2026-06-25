@@ -10,7 +10,7 @@
     "build": "wails build",
     "dist": "wails build",
     "build:win": "wails build -clean -nsis",
-    "build:web": "tsc && vite build",
+    "build:web": "vite build",
     "preview": "vite preview",
     "wails": "wails"
   },
