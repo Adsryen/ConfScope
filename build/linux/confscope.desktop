@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ConfScope
+Comment=配置中心管理工具 - 浏览、对比、洞察多配置中心的配置差异
+Exec=/usr/bin/confscope
+Icon=confscope
+Type=Application
+Categories=Development;Utility;
+Terminal=false
+StartupWMClass=confscope

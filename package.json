@@ -1,6 +1,6 @@
 {
   "name": "confscope",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
   "description": "ConfScope - 统一配置中心管理工具：浏览、对比、洞察多配置中心（Nacos/Apollo/Consul 等）的配置差异。",

@@ -1,6 +1,12 @@
-# ConfScope
+<p align="center">
+  <img src="appicon.png" width="200" alt="ConfScope Logo" />
+</p>
 
-> 🎯 **All configs in scope** — 统一配置中心管理工具
+<h1 align="center">ConfScope</h1>
+
+<p align="center">
+  <strong>多配置中心统一管理 · 智能对比 · 洞察差异</strong>
+</p>
 
 浏览、对比、洞察多配置中心（Nacos / Apollo / Consul 等）的配置差异。MVP 聚焦 **Nacos**：连接服务器、浏览配置、查看历史变更，并提供比原生更智能的**配置差异对比**。
 
@@ -140,5 +146,6 @@ MIT License
 ---
 
 <p align="center">
-  <strong>ConfScope</strong> — <em>Scope your configs</em>
+  <img src="Copilot_20260625_144337.png" width="64" alt="ConfScope" /><br/>
+  <strong>ConfScope</strong> — <em>多配置中心统一管理 · 智能对比 · 洞察差异</em>
 </p>

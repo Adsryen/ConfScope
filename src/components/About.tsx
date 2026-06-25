@@ -18,7 +18,19 @@ export default function About({ onClose }: AboutProps) {
       <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
         <div className="about-header">
           <div className="about-logo">
-            <div className="about-icon">CS</div>
+            <img
+              src="/appicon.png"
+              alt="ConfScope"
+              className="about-icon"
+              onError={(e) => {
+                // 如果图片加载失败，显示文字 fallback
+                (e.target as HTMLImageElement).style.display = "none";
+                const fallback = document.createElement("div");
+                fallback.className = "about-icon-fallback";
+                fallback.textContent = "CS";
+                (e.target as HTMLImageElement).parentNode?.appendChild(fallback);
+              }}
+            />
           </div>
           <h2>ConfScope</h2>
           <p className="about-tagline">统一配置中心管理工具</p>
