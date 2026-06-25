@@ -4,6 +4,19 @@
 
 浏览、对比、洞察多配置中心（Nacos / Apollo / Consul 等）的配置差异。MVP 聚焦 **Nacos**：连接服务器、浏览配置、查看历史变更，并提供比原生更智能的**配置差异对比**。
 
+## 🙏 致谢与说明
+
+本项目基于 [Configuration-Center-Browser](https://github.com/iGuos/Configuration-Center-Browser) 的优秀设计思路进行二次开发。原项目提供了 Nacos 配置管理的核心理念和前端交互设计，在此向原作者 [iGuos](https://github.com/iGuos) 表示衷心感谢！
+
+**本项目的主要改进：**
+
+- 🔧 **后端完全重构**：从原项目的纯前端方案重构为 **Go + Wails 2** 架构，后端直连 Nacos OpenAPI，提供更稳定的连接和更好的性能
+- 🎨 **前端深度优化**：在保留原项目核心功能的基础上，优化了 UI 交互、diff 对比算法、键盘导航等细节体验
+- 📦 **桌面应用升级**：从浏览器应用升级为原生桌面应用，支持 Windows/macOS/Linux 多平台
+- 🚀 **技术栈现代化**：采用 Wails 2 + Go + React 18 + TypeScript + Vite 5 的现代技术栈
+
+我们尊重原项目的开源精神，本项目将在原项目的基础上持续迭代，未来计划支持更多配置中心（Apollo、Consul 等），欢迎社区贡献。
+
 ## ✨ 核心特性
 
 | 模块 | 说明 |
