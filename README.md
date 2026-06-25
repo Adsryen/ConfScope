@@ -1,53 +1,131 @@
-# 配置中心 · Configuration Center Browser
+# ConfScope
 
-维护、管理配置中心的桌面工具。MVP 聚焦 **Nacos**：连接服务器、浏览配置、查看历史变更，并提供比 Nacos 原生更智能的 **配置差异对比**。
+> 🎯 **All configs in scope** — 统一配置中心管理工具
 
-## 技术栈
+浏览、对比、洞察多配置中心（Nacos / Apollo / Consul 等）的配置差异。MVP 聚焦 **Nacos**：连接服务器、浏览配置、查看历史变更，并提供比原生更智能的**配置差异对比**。
 
-对齐「百宝箱」项目：
-
-- **Tauri 2** + **React 18** + **TypeScript** + **Vite 5**
-- 后端 **Rust**（`reqwest`）直连 Nacos v1 OpenAPI（1.x / 2.x 兼容）
-- 深色 VSCode 风格 UI，纯前端 LCS 行级 diff，零额外重依赖
-
-## 功能（MVP）
+## ✨ 核心特性
 
 | 模块 | 说明 |
-| --- | --- |
-| 连接管理 | 多套 Nacos（名称 / 地址 / 账号密码 / 默认命名空间），本地持久化，支持连接测试 |
-| 认证 | 自动登录拿 `accessToken`、缓存与过期刷新，403 自动重登重试；未开启鉴权的 Nacos 留空账号即可 |
-| 配置浏览 | 命名空间切换、按 dataId 模糊搜索、查看配置内容 |
-| 历史变更 | 历史版本列表 + 单版本查看 |
-| 智能对比 | ① 同一配置两个历史版本对比 ② 历史版本与线上对比 ③ 任意两个配置对比（跨服务器 / 跨命名空间 / 跨 dataId）。并排行级高亮 + 变更统计 + 仅看变更 |
+|------|------|
+| 🔗 连接管理 | 多套配置中心连接（名称 / 地址 / 账号密码），本地持久化，支持连接测试 |
+| 🔐 智能认证 | 自动登录、Token 缓存与过期刷新、403 自动重登重试 |
+| 📖 配置浏览 | 命名空间切换、按 dataId 模糊搜索、查看配置内容 |
+| 📜 历史变更 | 历史版本列表 + 单版本查看 |
+| 🔍 智能对比 | ① 同一配置两个历史版本对比 ② 历史版本与线上对比 ③ 任意两个配置对比（跨服务器 / 跨命名空间 / 跨 dataId）。并排行级高亮 + 变更统计 + 仅看变更 |
 
-## 开发
+## 🛠️ 技术栈
+
+- **Wails 2** + **Go** + **React 18** + **TypeScript** + **Vite 5**
+- 后端 **Go** 直连配置中心 OpenAPI（Nacos v1/v3 兼容）
+- 深色 VSCode 风格 UI，纯前端 LCS 行级 diff，零额外重依赖
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Node.js >= 18
+- pnpm >= 8
+- Go >= 1.22
+- Wails CLI v2
+
+### 安装
 
 ```bash
+# 克隆项目
+git clone https://github.com/Adsryen/ConfScope.git
+cd ConfScope
+
+# 安装前端依赖
 pnpm install
-pnpm dev        # 启动 Tauri 桌面应用（开发）
-pnpm dev:web    # 仅启动前端（浏览器调试，Tauri 命令不可用）
-pnpm build      # 打包 dmg
+
+# 安装 Wails CLI
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+# 检查环境
+wails doctor
 ```
 
-## 目录结构
+### 开发
 
-```
-src/
-  api/nacos.ts          # invoke 封装 + 类型 + token 缓存/重试
-  store/connections.ts  # 连接的本地持久化
-  lib/diff.ts           # LCS 行级 diff
-  components/           # ConnectionManager / ConfigBrowser / HistoryView / DiffView / DiffPanel
-src-tauri/
-  src/nacos/mod.rs      # Nacos OpenAPI 客户端 + Tauri 命令
+```bash
+pnpm dev        # 启动 Wails 桌面应用（开发模式）
+pnpm dev:web    # 仅启动前端（浏览器调试，Wails Go 绑定不可用）
 ```
 
-## Nacos 接口
+### 构建
 
-| 命令 | Nacos API |
-| --- | --- |
-| `nacos_login` | `POST /v1/auth/login` |
-| `nacos_namespaces` | `GET /v1/console/namespaces` |
-| `nacos_list_configs` | `GET /v1/cs/configs?search=blur` |
-| `nacos_get_config` | `GET /v1/cs/configs` |
-| `nacos_history_list` | `GET /v1/cs/history?search=accurate` |
-| `nacos_history_detail` | `GET /v1/cs/history?nid=` |
+```bash
+pnpm build      # 打包当前系统桌面应用
+pnpm build:win  # Windows 下打包 NSIS exe 安装包
+```
+
+## 📁 项目结构
+
+```
+ConfScope/
+├── src/                          # React 前端
+│   ├── api/
+│   │   └── nacos.ts              # Wails Go 调用封装 + 类型 + token 缓存/重试
+│   ├── store/
+│   │   └── connections.ts        # 连接的本地持久化
+│   ├── lib/
+│   │   ├── diff.ts               # LCS 行级 diff
+│   │   └── clipboard.ts          # 剪贴板工具
+│   └── components/               # UI 组件
+│       ├── ConnectionManager.tsx  # 连接管理
+│       ├── ConfigBrowser.tsx      # 配置浏览
+│       ├── HistoryView.tsx        # 历史变更
+│       ├── DiffView.tsx           # 差异对比
+│       └── DiffPanel.tsx          # Diff 面板
+├── internal/
+│   └── nacos/
+│       └── client.go             # Nacos OpenAPI Go 客户端
+├── wailsjs/
+│   └── go/main/App.ts            # Wails Go 绑定（wails dev/build 自动生成）
+├── app.go                        # Wails 应用服务
+├── main.go                       # 程序入口
+└── wails.json                    # Wails 配置
+```
+
+## 🔌 Nacos 接口映射
+
+| 命令 | Nacos API | 说明 |
+|------|-----------|------|
+| `nacosDetectVersion` | `GET /v1/auth/login` | 探测 Nacos 版本（v1/v3） |
+| `nacosLogin` | `POST /v1/auth/login` | 登录获取 accessToken |
+| `nacosNamespaces` | `GET /v1/console/namespaces` | 获取命名空间列表 |
+| `nacosListConfigs` | `GET /v1/cs/configs?search=blur` | 模糊搜索配置列表 |
+| `nacosGetConfig` | `GET /v1/cs/configs` | 获取配置详情 |
+| `nacosHistoryList` | `GET /v1/cs/history?search=accurate` | 获取历史版本列表 |
+| `nacosHistoryDetail` | `GET /v1/cs/history?nid=` | 获取历史版本详情 |
+
+## 🎨 界面预览
+
+（后续添加截图）
+
+## 📋 路线图
+
+- [x] Nacos v1/v3 双版本支持
+- [x] 配置浏览与搜索
+- [x] 历史版本查看
+- [x] 智能配置对比（行级 diff）
+- [ ] Apollo 配置中心适配
+- [ ] Consul 配置中心适配
+- [ ] 配置导入导出
+- [ ] 配置模板管理
+- [ ] 批量操作
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+## 📄 许可证
+
+MIT License
+
+---
+
+<p align="center">
+  <strong>ConfScope</strong> — <em>Scope your configs</em>
+</p>

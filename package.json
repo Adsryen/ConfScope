@@ -1,32 +1,26 @@
 {
-  "name": "configuration-center-browser",
+  "name": "confscope",
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
-  "description": "配置中心管理工具：连接 Nacos，浏览配置、查看历史变更，并智能对比配置差异。",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
+  "description": "ConfScope - 统一配置中心管理工具：浏览、对比、洞察多配置中心（Nacos/Apollo/Consul 等）的配置差异。",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "wails dev",
     "dev:web": "vite",
-    "build": "tauri build --bundles dmg",
-    "dist": "tauri build --bundles dmg",
+    "build": "wails build",
+    "dist": "wails build",
+    "build:win": "wails build -clean -nsis",
     "build:web": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "wails": "wails"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
     "highlight.js": "^11.11.1",
     "react": "^18",
     "react-dom": "^18",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@vitejs/plugin-react": "^4",

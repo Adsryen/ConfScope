@@ -1,5 +1,5 @@
 // 复制文本到剪贴板。优先用异步 Clipboard API，失败再退回 textarea + execCommand，
-// 兼顾 Tauri WebView 在不同权限/上下文下的可用性。
+// 兼顾桌面 WebView 在不同权限/上下文下的可用性。
 
 export async function copyText(text: string): Promise<boolean> {
   try {

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "confscope",
+  "outputfilename": "ConfScope",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm build:web",
+  "frontend:dev:watcher": "pnpm dev:web",
+  "frontend:dev:serverUrl": "http://127.0.0.1:11865",
+  "author": {
+    "name": "",
+    "email": ""
+  }
+}

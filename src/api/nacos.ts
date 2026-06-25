@@ -1,7 +1,17 @@
-import { invoke } from "@tauri-apps/api/core";
+import {
+  NacosDeleteConfig,
+  NacosDetectVersion,
+  NacosGetConfig,
+  NacosHistoryDetail,
+  NacosHistoryList,
+  NacosListConfigs,
+  NacosLogin,
+  NacosNamespaces,
+  NacosPublishConfig,
+} from "../../wailsjs/go/main/App";
 import type { Connection } from "../store/connections";
 
-// ── 与 Rust 端对应的返回类型 ──
+// ── 与 Go 端对应的返回类型 ──
 export interface LoginResult {
   accessToken: string;
   tokenTtl: number;
@@ -63,9 +73,7 @@ const versionCache = new Map<string, ApiVersion>();
 export async function getVersion(conn: Connection): Promise<ApiVersion> {
   const hit = versionCache.get(conn.baseUrl);
   if (hit) return hit;
-  const v = (await invoke<string>("nacos_detect_version", {
-    baseUrl: conn.baseUrl,
-  })) as ApiVersion;
+  const v = (await NacosDetectVersion(conn.baseUrl)) as ApiVersion;
   const ver: ApiVersion = v === "v3" ? "v3" : "v1";
   versionCache.set(conn.baseUrl, ver);
   return ver;
@@ -86,12 +94,7 @@ export async function getToken(conn: Connection, force = false): Promise<string>
   if (!force && cached && Date.now() < cached.expireAt) return cached.token;
 
   const apiVersion = await getVersion(conn);
-  const res = await invoke<LoginResult>("nacos_login", {
-    baseUrl: conn.baseUrl,
-    username: conn.username,
-    password: conn.password,
-    apiVersion,
-  });
+  const res = await NacosLogin(conn.baseUrl, conn.username, conn.password, apiVersion);
   const ttl = res.tokenTtl > 0 ? res.tokenTtl : 18000;
   tokenCache.set(conn.id, {
     token: res.accessToken,
@@ -128,21 +131,12 @@ async function withAuth<T>(
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
   const apiVersion = await getVersion(conn);
-  return invoke<LoginResult>("nacos_login", {
-    baseUrl: conn.baseUrl,
-    username: conn.username,
-    password: conn.password,
-    apiVersion,
-  });
+  return NacosLogin(conn.baseUrl, conn.username, conn.password, apiVersion);
 }
 
 export function listNamespaces(conn: Connection): Promise<Namespace[]> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<Namespace[]>("nacos_namespaces", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-    })
+    NacosNamespaces(conn.baseUrl, accessToken, apiVersion)
   );
 }
 
@@ -155,16 +149,7 @@ export function listConfigs(
   pageSize: number
 ): Promise<ConfigPage> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<ConfigPage>("nacos_list_configs", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-      pageNo,
-      pageSize,
-    })
+    NacosListConfigs(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
   );
 }
 
@@ -175,14 +160,7 @@ export function getConfig(
   group: string
 ): Promise<string> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<string>("nacos_get_config", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-    })
+    NacosGetConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group)
   );
 }
 
@@ -195,16 +173,7 @@ export function listHistory(
   pageSize: number
 ): Promise<HistoryPage> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<HistoryPage>("nacos_history_list", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-      pageNo,
-      pageSize,
-    })
+    NacosHistoryList(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
   );
 }
 
@@ -217,16 +186,7 @@ export function publishConfig(
   configType: string
 ): Promise<void> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<void>("nacos_publish_config", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-      content,
-      configType,
-    })
+    NacosPublishConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
   );
 }
 
@@ -237,14 +197,7 @@ export function deleteConfig(
   group: string
 ): Promise<void> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<void>("nacos_delete_config", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-    })
+    NacosDeleteConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group)
   );
 }
 
@@ -256,15 +209,7 @@ export function getHistoryDetail(
   nid: string
 ): Promise<HistoryDetail> {
   return withAuth(conn, (accessToken, apiVersion) =>
-    invoke<HistoryDetail>("nacos_history_detail", {
-      baseUrl: conn.baseUrl,
-      accessToken,
-      apiVersion,
-      namespace,
-      dataId,
-      group,
-      nid,
-    })
+    NacosHistoryDetail(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, nid)
   );
 }
 

@@ -9,7 +9,7 @@ import Toaster from "./components/Toaster";
 
 type Mode = "browse" | "diff";
 
-const UI_KEY = "ccb.ui";
+const UI_KEY = "cs.ui";
 function loadUI(): { connId?: string; mode?: Mode } {
   try {
     return JSON.parse(localStorage.getItem(UI_KEY) || "{}");
@@ -79,8 +79,8 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-left">
           <div className="brand">
-            <span className="brand-name">配置中心</span>
-            <span className="brand-sub">Nacos 配置管理</span>
+            <span className="brand-name">ConfScope</span>
+            <span className="brand-sub">统一配置中心管理</span>
           </div>
           <div className="mode-switch">
             <button

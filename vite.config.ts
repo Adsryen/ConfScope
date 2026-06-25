@@ -5,10 +5,11 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
-    port: 1861,
+    host: '127.0.0.1', // 强制用 IPv4
+    port: 11865,
     strictPort: true,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/build/**"],
     },
   },
 });
