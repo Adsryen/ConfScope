@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"embed"
+	"image"
+	_ "image/png"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -13,9 +16,17 @@ import (
 //go:embed all:dist
 var assets embed.FS
 
+// icon 嵌入应用图标
+//
+//go:embed build/appicon.png
+var icon []byte
+
 // main 启动 Wails 桌面应用并绑定 Go 后端服务。
 func main() {
 	app := NewApp()
+
+	// 解码应用图标
+	iconImg, _, _ := image.Decode(bytes.NewReader(icon))
 
 	err := wails.Run(&options.App{
 		Title:     "ConfScope - 配置中心管理工具",
@@ -31,6 +42,7 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
+		Icon: iconImg,
 	})
 	if err != nil {
 		println("Error:", err.Error())
