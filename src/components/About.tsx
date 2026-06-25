@@ -47,29 +47,6 @@ export default function About({ onClose }: AboutProps) {
           </div>
 
           <div className="about-section">
-            <h3>🙏 致谢</h3>
-            <p>
-              本项目基于{" "}
-              <a
-                href="https://github.com/iGuos/Configuration-Center-Browser"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Configuration-Center-Browser
-              </a>{" "}
-              进行二次开发，感谢原作者{" "}
-              <a
-                href="https://github.com/iGuos"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                iGuos
-              </a>{" "}
-              的开源贡献！
-            </p>
-          </div>
-
-          <div className="about-section">
             <h3>📦 支持的配置中心</h3>
             <div className="about-badges">
               <span className="badge badge-success">Nacos ✅</span>
