@@ -6,7 +6,7 @@ export default defineConfig({
   clearScreen: false,
   server: {
     host: '127.0.0.1', // 强制用 IPv4
-    port: 11865,
+    port: 5173,
     strictPort: true,
     watch: {
       ignored: ["**/build/**"],
