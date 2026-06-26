@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "../i18n";
 
 interface Props {
   title: string;
@@ -14,12 +15,14 @@ interface Props {
 export default function ConfirmModal({
   title,
   message,
-  confirmLabel = "确定",
-  cancelLabel = "取消",
+  confirmLabel,
+  cancelLabel,
   danger,
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -34,7 +37,7 @@ export default function ConfirmModal({
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="modal-x" onClick={onCancel} title="关闭">
+          <button className="modal-x" onClick={onCancel} title={t('common.close')}>
             ×
           </button>
         </div>
@@ -43,10 +46,10 @@ export default function ConfirmModal({
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onCancel}>
-            {cancelLabel}
+            {cancelLabel || t('common.cancel')}
           </button>
           <button className={`btn ${danger ? "btn-danger" : "btn-primary"}`} onClick={onConfirm}>
-            {confirmLabel}
+            {confirmLabel || t('common.confirm')}
           </button>
         </div>
       </div>

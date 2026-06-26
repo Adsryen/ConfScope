@@ -732,6 +732,80 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .conn-form-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .spacer { flex: 1; }
 
+/* SSH 隧道配置样式 */
+.ssh-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.ssh-toggle {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  width: 100%;
+  text-align: left;
+}
+
+.ssh-toggle:hover {
+  color: var(--text-hi);
+}
+
+.ssh-badge {
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+.ssh-config {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--bg3);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ssh-key {
+  min-height: 80px;
+  resize: vertical;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ssh-config .field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ssh-config .field {
+  flex: 1;
+}
+
+.ssh-config .field > span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ssh-config .search-input {
+  max-width: none;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .confirm-msg { font-size: 13px; color: var(--text); line-height: 1.6; }
 .alert-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .alert-list li { font-size: 13px; color: var(--red-h); line-height: 1.5; word-break: break-all; }
@@ -938,4 +1012,30 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 
 .about-footer a:hover {
   text-decoration: underline;
+}
+
+/* ── Language Switch ── */
+.lang-switch {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  min-width: 70px;
+}
+
+.lang-switch:hover {
+  border-color: var(--accent);
+}
+
+.lang-switch:focus {
+  border-color: var(--accent);
+}
+
+.lang-switch option {
+  background: var(--bg2);
+  color: var(--text);
 }

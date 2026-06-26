@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "../i18n";
 
 interface Props {
   title: string;
@@ -8,6 +9,8 @@ interface Props {
 
 /** 仅提示用的弹框(列出若干问题 + 知道了)。 */
 export default function AlertModal({ title, messages, onClose }: Props) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" || e.key === "Enter") onClose();
@@ -21,7 +24,7 @@ export default function AlertModal({ title, messages, onClose }: Props) {
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="modal-x" onClick={onClose} title="关闭">
+          <button className="modal-x" onClick={onClose} title={t('common.close')}>
             ×
           </button>
         </div>
@@ -34,7 +37,7 @@ export default function AlertModal({ title, messages, onClose }: Props) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-primary" onClick={onClose}>
-            知道了
+            {t('common.confirm')}
           </button>
         </div>
       </div>

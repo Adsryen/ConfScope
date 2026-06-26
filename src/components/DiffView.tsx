@@ -3,6 +3,7 @@ import { Connection } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { keysDoc } from "../lib/keys";
+import { useTranslation } from "../i18n";
 import Combobox from "./Combobox";
 import DiffPanel from "./DiffPanel";
 import Select from "./Select";
@@ -56,6 +57,7 @@ function SourcePicker({
   source: Source;
   onChange: (s: Source) => void;
 }) {
+  const { t } = useTranslation();
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
@@ -101,7 +103,7 @@ function SourcePicker({
     <div className="source-picker">
       <div className="source-title">{title}</div>
       <label className="field">
-        <span>连接</span>
+        <span>{t('app.connection')}</span>
         <Select
           className="wide"
           value={source.connId}
@@ -110,12 +112,12 @@ function SourcePicker({
         />
       </label>
       <label className="field">
-        <span>命名空间 {nsLoading ? "（加载中…）" : ""}</span>
+        <span>{t('app.namespace')} {nsLoading ? `（${t('common.loading')}）` : ""}</span>
         <Select
           className="wide"
           value={source.tenant}
           options={[
-            { value: "", label: "public（默认）" },
+            { value: "", label: t('app.namespaceDefault') },
             ...namespaces
               .filter((n) => n.namespace)
               .map((n) => ({ value: n.namespace, label: n.namespaceShowName || n.namespace })),
@@ -125,10 +127,10 @@ function SourcePicker({
       </label>
       <div className="field-row">
         <label className="field">
-          <span>dataId {cfgLoading ? "（加载中…）" : `（${configs.length}）`}</span>
+          <span>dataId {cfgLoading ? `（${t('common.loading')}）` : `（${configs.length}）`}</span>
           <Combobox
             value={source.dataId}
-            placeholder="留空则匹配所有同名 dataId"
+            placeholder={t('diff.dataIdPlaceholder')}
             options={dataIdOptions}
             onChange={(v) => onChange({ ...source, dataId: v })}
             onPick={(o) => onChange({ ...source, dataId: o.value, group: o.sub || source.group })}
@@ -150,6 +152,7 @@ function SourcePicker({
 
 /** 智能对比工作台：任选两个来源（可跨连接 / 跨命名空间 / 跨 dataId）做差异对比。 */
 export default function DiffView({ connections }: Props) {
+  const { t } = useTranslation();
   const firstId = connections[0]?.id ?? "";
   const [left, setLeft] = useState<Source>(emptySource(firstId));
   const [right, setRight] = useState<Source>(emptySource(firstId));
@@ -170,7 +173,7 @@ export default function DiffView({ connections }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   if (connections.length === 0) {
-    return <div className="pad-msg big">请先在「连接管理」中添加 Nacos 连接</div>;
+    return <div className="pad-msg big">{t('diff.noConnection')}</div>;
   }
 
   // 拉取单个来源内容并组装成 Loaded
@@ -339,27 +342,27 @@ export default function DiffView({ connections }: Props) {
   return (
     <div className="diff-view">
       <div className="diff-sources">
-        <SourcePicker title="来源 A（左）" connections={connections} source={left} onChange={setLeft} />
-        <SourcePicker title="来源 B（右）" connections={connections} source={right} onChange={setRight} />
+        <SourcePicker title={t('diff.sourceA')} connections={connections} source={left} onChange={setLeft} />
+        <SourcePicker title={t('diff.sourceB')} connections={connections} source={right} onChange={setRight} />
       </div>
       <div className="diff-loadbar">
-        <span className="fmt-label">对比模式</span>
+        <span className="fmt-label">{t('diff.compareMode')}</span>
         <Select
           value={mode}
           options={[
-            { value: "text", label: "文本(逐行)" },
-            { value: "lines", label: "忽略顺序(整行)" },
-            { value: "key", label: "仅 Key(忽略顺序)" },
+            { value: "text", label: t('diff.modeText') },
+            { value: "lines", label: t('diff.modeLines') },
+            { value: "key", label: t('diff.modeKey') },
           ]}
           onChange={(v) => setMode(v as DiffMode)}
         />
         {matchResults ? (
           <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
-            {batchLoading ? "对比中…" : `对比选中（${selectedIds.size}）`}
+            {batchLoading ? t('diff.comparing') : t('diff.compareSelected', { count: selectedIds.size })}
           </button>
         ) : (
           <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
-            {loading || matchLoading ? "加载中…" : "加载并对比"}
+            {loading || matchLoading ? t('common.loading') : t('diff.loadAndCompare')}
           </button>
         )}
         {error && <span className="diff-loaderr">{error}</span>}
@@ -375,10 +378,10 @@ export default function DiffView({ connections }: Props) {
                   checked={selectedIds.size === matchResults.length}
                   onChange={toggleAll}
                 />
-                全选
+                {t('diff.selectAll')}
               </label>
               <span className="match-count">
-                找到 {matchResults.length} 个同名 dataId，已选 {selectedIds.size} 个
+                {t('diff.matchCount', { total: matchResults.length, selected: selectedIds.size })}
               </span>
             </div>
             <div className="match-items">
@@ -434,11 +437,9 @@ export default function DiffView({ connections }: Props) {
           />
         ) : !matchResults && !ready ? (
           <div className="pad-msg big">
-            选择来源 A、B 后点「加载并对比」
+            {t('diff.selectHint')}
             <div className="diff-hint">
-              支持：同一 Nacos 两个配置 · 跨命名空间 · 跨服务器环境对比
-              <br />
-              dataId 留空可自动匹配两侧同名配置进行批量对比
+              {t('diff.supportHint')}
             </div>
           </div>
         ) : null}

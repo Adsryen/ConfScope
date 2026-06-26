@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Connection, loadConnections } from "./store/connections";
 import { listNamespaces, Namespace } from "./api/nacos";
+import { useTranslation } from "./i18n";
 import ConnectionManager from "./components/ConnectionManager";
 import ConfigBrowser from "./components/ConfigBrowser";
 import DiffView from "./components/DiffView";
 import About from "./components/About";
 import Select from "./components/Select";
 import Toaster from "./components/Toaster";
+import LanguageSwitch from "./components/LanguageSwitch";
 
 type Mode = "browse" | "diff";
 
@@ -20,6 +22,7 @@ function loadUI(): { connId?: string; mode?: Mode } {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
   const ui0 = loadUI();
   const [activeConnId, setActiveConnId] = useState<string>(
@@ -85,13 +88,13 @@ export default function App() {
               className={`mode-btn${mode === "browse" ? " active" : ""}`}
               onClick={() => setMode("browse")}
             >
-              配置浏览
+              {t('app.title')}
             </button>
             <button
               className={`mode-btn${mode === "diff" ? " active" : ""}`}
               onClick={() => setMode("diff")}
             >
-              智能对比
+              {t('app.diff')}
             </button>
           </div>
         </div>
@@ -102,7 +105,7 @@ export default function App() {
               <Select
                 value={activeConnId}
                 disabled={connections.length === 0}
-                title="连接"
+                title={t('app.connection')}
                 options={connections.map((c) => ({ value: c.id, label: c.name }))}
                 onChange={setActiveConnId}
               />
@@ -110,9 +113,9 @@ export default function App() {
               <Select
                 value={tenant}
                 disabled={!activeConn || nsLoading}
-                title="命名空间"
+                title={t('app.namespace')}
                 options={[
-                  { value: "", label: nsLoading ? "命名空间加载中…" : "public（默认）" },
+                  { value: "", label: nsLoading ? t('app.namespaceLoading') : t('app.namespaceDefault') },
                   ...namespaces
                     .filter((n) => n.namespace)
                     .map((n) => ({
@@ -126,35 +129,36 @@ export default function App() {
           )}
 
           <button className="btn btn-ghost btn-sm" onClick={() => setShowConnMgr(true)}>
-            连接管理
+            {t('app.connectionManage')}
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowAbout(true)}>
-            关于
+            {t('app.about')}
           </button>
+          <LanguageSwitch />
         </div>
       </header>
 
       <main className="workspace">
         {connections.length === 0 ? (
           <div className="pad-msg big">
-            还没有任何 Nacos 连接
+            {t('app.noConnection')}
             <button className="btn btn-primary" onClick={() => setShowConnMgr(true)}>
-              添加连接
+              {t('app.addConnection')}
             </button>
           </div>
         ) : mode === "browse" ? (
           !activeConn ? (
-            <div className="pad-msg big">请选择一个连接</div>
+            <div className="pad-msg big">{t('app.selectConnection')}</div>
           ) : nsError ? (
             <div className="pad-msg big err">
-              无法连接到 {activeConn.name}
+              {t('app.cannotConnect', { name: activeConn.name })}
               <div className="diff-hint">{nsError}</div>
               <div className="err-actions">
                 <button className="btn btn-primary" onClick={() => setNsReload((x) => x + 1)}>
-                  重试
+                  {t('common.retry')}
                 </button>
                 <button className="btn btn-ghost" onClick={() => setShowConnMgr(true)}>
-                  连接管理
+                  {t('app.connectionManage')}
                 </button>
               </div>
             </div>

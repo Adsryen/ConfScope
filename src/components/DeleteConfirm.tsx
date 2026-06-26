@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "../i18n";
 
 interface Props {
   /** 需要输入以确认的名称（dataId）。 */
@@ -10,6 +11,7 @@ interface Props {
 
 /** 删除确认弹框：必须输入 dataId 完全一致才能删除,防误删。 */
 export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Props) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,19 +41,19 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
     <div className="modal-overlay" onClick={() => !busy && onCancel()}>
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>删除配置</h3>
-          <button className="modal-x" onClick={onCancel} disabled={busy} title="关闭">
+          <h3>{t('config.deleteTitle')}</h3>
+          <button className="modal-x" onClick={onCancel} disabled={busy} title={t('common.close')}>
             ×
           </button>
         </div>
         <div className="modal-body del-body">
-          <p className="del-warn">⚠️ 此操作不可恢复，将永久删除以下配置：</p>
+          <p className="del-warn">⚠️ {t('config.deleteWarning')}</p>
           <div className="del-target mono">
             {name}
             <span className="del-group"> · {group}</span>
           </div>
           <p className="del-hint">
-            请输入 dataId <b className="mono">{name}</b> 以确认：
+            {t('config.deleteHint')} <b className="mono">{name}</b>
           </p>
           <input
             className="search-input wide mono"
@@ -68,10 +70,10 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>
-            取消
+            {t('common.cancel')}
           </button>
           <button className="btn btn-danger" onClick={confirm} disabled={!match || busy}>
-            {busy ? "删除中…" : "删除"}
+            {busy ? t('config.deleting') : t('common.delete')}
           </button>
         </div>
       </div>

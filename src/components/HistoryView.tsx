@@ -9,6 +9,7 @@ import {
 } from "../api/nacos";
 import { Format, nacosType } from "../lib/format";
 import { toast } from "../lib/toast";
+import { useTranslation } from "../i18n";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -42,6 +43,7 @@ export default function HistoryView({
   format,
   onRolledBack,
 }: Props) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [pageNo, setPageNo] = useState(1);
@@ -140,7 +142,7 @@ export default function HistoryView({
       await publishConfig(conn, tenant, dataId, group, text, nacosType(format));
       setRbConfirm(false);
       setViewing(null);
-      toast(`已回滚到 nid ${viewing}`);
+      toast(t('history.rollbackSuccess', { nid: viewing }));
       onRolledBack();
       loadHistory(1);
     } catch (e) {
@@ -173,13 +175,13 @@ export default function HistoryView({
     <div className="history-view">
       <div className="history-list">
         <div className="history-list-head">
-          历史版本（{total}）
-          <span className="history-hint">勾选 1 个与线上对比 · 勾选 2 个互相对比</span>
+          {t('history.title')}（{total}）
+          <span className="history-hint">{t('history.pickHint')}</span>
         </div>
         <div className="history-items">
-        {loading && <div className="pad-msg">加载中…</div>}
+        {loading && <div className="pad-msg">{t('common.loading')}</div>}
         {error && <div className="pad-msg err">{error}</div>}
-        {!loading && !error && items.length === 0 && <div className="pad-msg">暂无历史记录</div>}
+        {!loading && !error && items.length === 0 && <div className="pad-msg">{t('history.empty')}</div>}
         {items.map((h) => (
           <div
             key={h.id}
@@ -191,7 +193,7 @@ export default function HistoryView({
               type="checkbox"
               checked={picked.includes(h.id)}
               onChange={() => togglePick(h.id)}
-              title="勾选用于对比"
+              title={t('history.pickForCompare')}
             />
             <div className="history-item-main" onClick={() => view(h.id)}>
               <div className="history-item-time">{formatTime(h.lastModifiedTime)}</div>
@@ -210,18 +212,18 @@ export default function HistoryView({
         {comparing ? (
           (leftNid && contents[leftNid] === undefined) ||
           (rightNid && contents[rightNid] === undefined) ? (
-            <div className="pad-msg">加载中…</div>
+            <div className="pad-msg">{t('common.loading')}</div>
           ) : (
             <DiffPanel
               leftLabel={
                 leftNid
                   ? `nid ${leftNid} · ${formatTime(itemOf(leftNid)?.lastModifiedTime ?? "")}`
-                  : "（无）"
+                  : t('history.noContent')
               }
               rightLabel={
                 rightNid
                   ? `nid ${rightNid} · ${formatTime(itemOf(rightNid)?.lastModifiedTime ?? "")}`
-                  : "当前线上内容"
+                  : t('history.currentOnline')
               }
               leftText={leftNid ? contents[leftNid] ?? "" : ""}
               rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
@@ -245,9 +247,9 @@ export default function HistoryView({
                   <span>
                     nid {viewing} · {formatTime(itemOf(viewing)?.lastModifiedTime ?? "")}
                     {headPrev ? (
-                      <span className="vs-prev"> · 相对上一版 nid {headPrev.id} 的变更</span>
+                      <span className="vs-prev"> · {t('history.vsPrev', { nid: headPrev.id })}</span>
                     ) : (
-                      <span className="vs-prev"> · 首个版本（无上一版）</span>
+                      <span className="vs-prev"> · {t('history.firstVersion')}</span>
                     )}
                   </span>
                   <span className="head-actions">
@@ -255,22 +257,22 @@ export default function HistoryView({
                       className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
                       onClick={() => setRawView((v) => !v)}
                     >
-                      {rawView ? "高亮变更" : "原始内容"}
+                      {rawView ? t('history.highlightChanges') : t('history.rawContent')}
                     </button>
-                    <CopyButton text={contents[viewing] ?? ""} label="复制本版" />
+                    <CopyButton text={contents[viewing] ?? ""} label={t('history.copyVersion')} />
                     <button
                       className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
                       onClick={rollback}
                       onBlur={() => setRbConfirm(false)}
                       disabled={rollingBack}
-                      title="将此版本内容重新发布为最新版"
+                      title={t('history.rollbackHint')}
                     >
-                      {rollingBack ? "回滚中…" : rbConfirm ? "确认回滚?" : "回滚到此版本"}
+                      {rollingBack ? t('history.rollingBack') : rbConfirm ? t('history.confirmRollback') : t('history.rollback')}
                     </button>
                   </span>
                 </div>
                 {!ready ? (
-                  <div className="pad-msg">加载中…</div>
+                  <div className="pad-msg">{t('common.loading')}</div>
                 ) : rawView ? (
                   <CodeView code={contents[dv!] ?? ""} format={format} />
                 ) : (
@@ -284,7 +286,7 @@ export default function HistoryView({
             );
           })()
         ) : (
-          <div className="pad-msg">点击左侧版本查看内容，或勾选版本进行对比</div>
+          <div className="pad-msg">{t('history.selectHint')}</div>
         )}
       </div>
     </div>

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   Connection,
+  SSHConfig,
   deleteConnection,
   loadConnections,
   upsertConnection,
 } from "../store/connections";
 import { clearToken, testConnection } from "../api/nacos";
+import { useTranslation } from "../i18n";
 
 interface Props {
   onClose: () => void;
@@ -20,9 +22,11 @@ const emptyDraft = (): Draft => ({
   username: "nacos",
   password: "",
   defaultNamespace: "",
+  sshConfig: undefined,
 });
 
 export default function ConnectionManager({ onClose, onChange }: Props) {
+  const { t } = useTranslation();
   const [list, setList] = useState<Connection[]>(loadConnections());
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -30,6 +34,9 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
   // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [showPwd, setShowPwd] = useState(false);
+  const [showSSHConfig, setShowSSHConfig] = useState(false);
+  const [showSSHPwd, setShowSSHPwd] = useState(false);
+  const [showSSHPassphrase, setShowSSHPassphrase] = useState(false);
 
   // Esc 关闭弹框
   useEffect(() => {
@@ -45,6 +52,17 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setTestMsg(null);
   };
 
+  const setSSH = (patch: Partial<SSHConfig>) => {
+    setDraft((d) => ({
+      ...d,
+      sshConfig: {
+        ...d.sshConfig,
+        ...patch,
+      } as SSHConfig,
+    }));
+    setTestMsg(null);
+  };
+
   const refresh = () => {
     const next = loadConnections();
     setList(next);
@@ -55,6 +73,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setDraft({ ...c });
     setTestMsg(null);
     setConfirmDel(null);
+    setShowSSHConfig(!!c.sshConfig);
   };
 
   const save = () => {
@@ -107,16 +126,16 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>连接管理</h3>
-          <button className="modal-x" onClick={onClose} title="关闭">
+          <h3>{t('connection.title')}</h3>
+          <button className="modal-x" onClick={onClose} title={t('common.close')}>
             ×
           </button>
         </div>
 
         <div className="modal-body conn-mgr">
           <div className="conn-list">
-            <div className="conn-list-title">已保存连接</div>
-            {list.length === 0 && <div className="conn-empty">暂无连接，右侧新建一个</div>}
+            <div className="conn-list-title">{t('connection.savedConnections')}</div>
+            {list.length === 0 && <div className="conn-empty">{t('connection.noConnections')}</div>}
             {list.map((c) => (
               <div
                 key={c.id}
@@ -130,18 +149,18 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 {confirmDel === c.id ? (
                   <button
                     className="conn-item-del confirm"
-                    title="再次点击确认删除"
+                    title={t('connection.confirmDelete')}
                     onClick={(e) => {
                       e.stopPropagation();
                       askOrRemove(c.id);
                     }}
                   >
-                    删除?
+                    {t('connection.deleteConfirm')}
                   </button>
                 ) : (
                   <button
                     className="conn-item-del"
-                    title="删除"
+                    title={t('common.delete')}
                     onClick={(e) => {
                       e.stopPropagation();
                       askOrRemove(c.id);
@@ -163,13 +182,13 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               }
             }}
           >
-            <div className="conn-form-title">{draft.id ? "编辑连接" : "新建连接"}</div>
+            <div className="conn-form-title">{draft.id ? t('connection.edit') : t('connection.new')}</div>
             <label className="field">
-              <span>名称</span>
+              <span>{t('connection.name')}</span>
               <input
                 className="search-input wide"
                 value={draft.name}
-                placeholder="例如 测试环境"
+                placeholder={t('connection.namePlaceholder')}
                 autoFocus
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -178,7 +197,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               />
             </label>
             <label className="field">
-              <span>服务器地址</span>
+              <span>{t('connection.address')}</span>
               <input
                 className="search-input wide mono"
                 value={draft.baseUrl}
@@ -191,11 +210,11 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
             </label>
             <div className="field-row">
               <label className="field">
-                <span>账号</span>
+                <span>{t('connection.username')}</span>
                 <input
                   className="search-input mono"
                   value={draft.username}
-                  placeholder="nacos（留空=免鉴权）"
+                  placeholder={t('connection.usernamePlaceholder')}
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
@@ -203,7 +222,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 />
               </label>
               <label className="field">
-                <span>密码</span>
+                <span>{t('connection.password')}</span>
                 <div className="pwd-field">
                   <input
                     className="search-input wide mono"
@@ -217,7 +236,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                   <button
                     type="button"
                     className="pwd-toggle"
-                    title={showPwd ? "隐藏" : "显示"}
+                    title={showPwd ? t('connection.hide') : t('connection.show')}
                     onClick={() => setShowPwd((v) => !v)}
                   >
                     {showPwd ? "🙈" : "👁"}
@@ -226,11 +245,11 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               </label>
             </div>
             <label className="field">
-              <span>默认命名空间 ID（留空=public）</span>
+              <span>{t('connection.defaultNamespace')}</span>
               <input
                 className="search-input wide mono"
                 value={draft.defaultNamespace}
-                placeholder="留空表示 public"
+                placeholder={t('connection.defaultNamespacePlaceholder')}
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
@@ -238,22 +257,192 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               />
             </label>
 
+            {/* SSH 隧道配置 */}
+            <div className="ssh-section">
+              <button
+                type="button"
+                className="ssh-toggle"
+                onClick={() => {
+                  if (!showSSHConfig && !draft.sshConfig) {
+                    // 首次展开时初始化默认 SSH 配置
+                    setSSH({
+                      host: "",
+                      port: 22,
+                      username: "root",
+                      authType: "password",
+                      remoteHost: "localhost",
+                      remotePort: 8848,
+                    });
+                  }
+                  setShowSSHConfig(!showSSHConfig);
+                }}
+              >
+                {showSSHConfig ? "▼" : "▶"} {t('connection.sshConfig')}
+                {draft.sshConfig && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
+              </button>
+
+              {showSSHConfig && (
+                <div className="ssh-config">
+                  <label className="field">
+                    <span>{t('connection.sshHost')}</span>
+                    <input
+                      className="search-input wide"
+                      value={draft.sshConfig?.host || ""}
+                      placeholder={t('connection.sshHostPlaceholder')}
+                      onChange={(e) => setSSH({ host: e.target.value })}
+                    />
+                  </label>
+
+                  <div className="field-row">
+                    <label className="field">
+                      <span>{t('connection.sshPort')}</span>
+                      <input
+                        className="search-input mono"
+                        type="number"
+                        value={draft.sshConfig?.port || 22}
+                        onChange={(e) => setSSH({ port: parseInt(e.target.value) || 22 })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t('connection.sshUsername')}</span>
+                      <input
+                        className="search-input mono"
+                        value={draft.sshConfig?.username || ""}
+                        placeholder="root"
+                        onChange={(e) => setSSH({ username: e.target.value })}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>{t('connection.authType')}</span>
+                    <select
+                      className="search-input wide"
+                      value={draft.sshConfig?.authType || "password"}
+                      onChange={(e) => setSSH({ authType: e.target.value as "password" | "key" })}
+                    >
+                      <option value="password">{t('connection.passwordAuth')}</option>
+                      <option value="key">{t('connection.keyAuth')}</option>
+                    </select>
+                  </label>
+
+                  {draft.sshConfig?.authType === "password" && (
+                    <label className="field">
+                      <span>{t('connection.sshPassword')}</span>
+                      <div className="pwd-field">
+                        <input
+                          className="search-input wide mono"
+                          type={showSSHPwd ? "text" : "password"}
+                          value={draft.sshConfig?.password || ""}
+                          onChange={(e) => setSSH({ password: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          className="pwd-toggle"
+                          title={showSSHPwd ? t('connection.hide') : t('connection.show')}
+                          onClick={() => setShowSSHPwd((v) => !v)}
+                        >
+                          {showSSHPwd ? "🙈" : "👁"}
+                        </button>
+                      </div>
+                    </label>
+                  )}
+
+                  {draft.sshConfig?.authType === "key" && (
+                    <>
+                      <label className="field">
+                        <span>{t('connection.privateKey')}</span>
+                        <textarea
+                          className="search-input wide mono ssh-key"
+                          value={draft.sshConfig?.privateKey || ""}
+                          placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                          onChange={(e) => setSSH({ privateKey: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t('connection.privateKeyPassword')}</span>
+                        <div className="pwd-field">
+                          <input
+                            className="search-input wide mono"
+                            type={showSSHPassphrase ? "text" : "password"}
+                            value={draft.sshConfig?.passphrase || ""}
+                            onChange={(e) => setSSH({ passphrase: e.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="pwd-toggle"
+                            title={showSSHPassphrase ? t('connection.hide') : t('connection.show')}
+                            onClick={() => setShowSSHPassphrase((v) => !v)}
+                          >
+                            {showSSHPassphrase ? "🙈" : "👁"}
+                          </button>
+                        </div>
+                      </label>
+                    </>
+                  )}
+
+                  <div className="field-row">
+                    <label className="field">
+                      <span>{t('connection.remoteHost')}</span>
+                      <input
+                        className="search-input mono"
+                        value={draft.sshConfig?.remoteHost || "localhost"}
+                        placeholder="localhost"
+                        onChange={(e) => setSSH({ remoteHost: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t('connection.remotePort')}</span>
+                      <input
+                        className="search-input mono"
+                        type="number"
+                        value={draft.sshConfig?.remotePort || 8848}
+                        onChange={(e) => setSSH({ remotePort: parseInt(e.target.value) || 8848 })}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field">
+                    <span>{t('connection.localPort')}</span>
+                    <input
+                      className="search-input mono"
+                      type="number"
+                      value={draft.sshConfig?.localPort || ""}
+                      placeholder={t('connection.localPortPlaceholder')}
+                      onChange={(e) => setSSH({ localPort: parseInt(e.target.value) || undefined })}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setDraft((d) => ({ ...d, sshConfig: undefined }));
+                      setShowSSHConfig(false);
+                    }}
+                  >
+                    {t('connection.removeSSH')}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {testMsg && (
               <div className={`test-msg ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
             )}
 
             <div className="conn-form-actions">
               <button className="btn btn-ghost" onClick={doTest} disabled={testing}>
-                {testing ? "测试中…" : "测试连接"}
+                {testing ? t('connection.testing') : t('connection.test')}
               </button>
               <div className="spacer" />
               {draft.id && (
                 <button className="btn btn-ghost" onClick={() => setDraft(emptyDraft())}>
-                  新建
+                  {t('connection.new')}
                 </button>
               )}
               <button className="btn btn-primary" onClick={save}>
-                保存
+                {t('common.save')}
               </button>
             </div>
           </div>

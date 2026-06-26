@@ -4,6 +4,7 @@ import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from 
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
+import { useTranslation } from "../i18n";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -25,6 +26,7 @@ type Tab = "content" | "history";
 
 /** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
 export default function ConfigBrowser({ conn, tenant }: Props) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [appliedTerm, setAppliedTerm] = useState(""); // 已生效的搜索词（翻页时复用）
   const [items, setItems] = useState<ConfigItem[]>([]);
@@ -171,7 +173,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     try {
       await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
       setEditing(false);
-      toast("配置已发布");
+      toast(t('config.published'));
       await openConfig(selected); // 重新拉取最新内容
     } catch (e) {
       setSaveError(String(e));
@@ -197,7 +199,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setShowDelete(false);
     setSelected(null);
     setContent("");
-    toast("配置已删除");
+    toast(t('config.deleted'));
     fetchList(appliedTerm, pageNo);
   };
 
@@ -207,7 +209,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         <div className="browser-search">
           <input
             className="search-input wide"
-            placeholder="搜索 dataId…"
+            placeholder={t('config.searchPlaceholder')}
             value={search}
             autoCapitalize="off"
             autoCorrect="off"
@@ -227,7 +229,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => fetchList(appliedTerm, pageNo)}
-            title="刷新列表"
+            title={t('config.refresh')}
             disabled={listLoading}
           >
             ⟳
@@ -235,17 +237,17 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           <button
             className="btn btn-primary btn-sm"
             onClick={() => setShowNew(true)}
-            title="新建配置"
+            title={t('config.newConfig')}
           >
             ＋
           </button>
         </div>
-        <div className="browser-count">共 {total} 项</div>
+        <div className="browser-count">{t('config.total', { count: total })}</div>
         <div className="browser-items">
-          {listLoading && <div className="pad-msg">加载中…</div>}
+          {listLoading && <div className="pad-msg">{t('config.loading')}</div>}
           {listError && <div className="pad-msg err">{listError}</div>}
           {!listLoading && !listError && items.length === 0 && (
-            <div className="pad-msg">没有配置</div>
+            <div className="pad-msg">{t('config.empty')}</div>
           )}
           {items.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
@@ -276,14 +278,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
       <div className="browser-detail">
         {!selected ? (
-          <div className="pad-msg big">从左侧选择一个配置查看</div>
+          <div className="pad-msg big">{t('config.selectHint')}</div>
         ) : (
           <>
             <div className="detail-header">
               <div className="detail-title">
                 <span className="detail-dataid mono">{selected.dataId}</span>
                 <span className="detail-group">
-                  GROUP: {selected.group}
+                  {t('config.group')}: {selected.group}
                   {selected.configType ? ` · ${selected.configType}` : ""}
                 </span>
               </div>
@@ -292,25 +294,25 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                   className={`tab-btn${tab === "content" ? " active" : ""}`}
                   onClick={() => setTab("content")}
                 >
-                  内容
+                  {t('config.content')}
                 </button>
                 <button
                   className={`tab-btn${tab === "history" ? " active" : ""}`}
                   onClick={() => setTab("history")}
                 >
-                  历史变更
+                  {t('config.history')}
                 </button>
               </div>
             </div>
 
             {tab === "content" ? (
               <div className="content-box">
-                {contentLoading && <div className="pad-msg">加载中…</div>}
+                {contentLoading && <div className="pad-msg">{t('config.loading')}</div>}
                 {contentError && <div className="pad-msg err">{contentError}</div>}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
-                      <span className="fmt-label">编辑 · 格式</span>
+                      <span className="fmt-label">{t('config.editFormat')}</span>
                       <Select
                         className="fmt-select"
                         value={fmt}
@@ -326,10 +328,10 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                           setSaveError(null);
                         }}
                       >
-                        取消
+                        {t('common.cancel')}
                       </button>
                       <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>
-                        {saving ? "发布中…" : "保存发布"}
+                        {saving ? t('config.publishing') : t('config.savePublish')}
                       </button>
                     </div>
                     <div className="editor-host grow">
@@ -340,7 +342,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 {!contentLoading && !contentError && !editing && (
                   <>
                     <div className="fmt-bar">
-                      <span className="fmt-label">配置格式</span>
+                      <span className="fmt-label">{t('config.format')}</span>
                       <Select
                         className="fmt-select"
                         value={fmt}
@@ -350,7 +352,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => selected && openConfig(selected)}
-                        title="重新拉取内容"
+                        title={t('config.refreshContent')}
                         disabled={contentLoading}
                       >
                         ⟳
@@ -362,14 +364,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         onClick={startEdit}
                         disabled={contentLoading}
                       >
-                        编辑
+                        {t('common.edit')}
                       </button>
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => setShowDelete(true)}
                         disabled={contentLoading}
                       >
-                        删除
+                        {t('common.delete')}
                       </button>
                     </div>
                     <CodeView code={content} format={fmt} />
@@ -416,10 +418,10 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
       {pending && (
         <ConfirmModal
-          title="放弃未保存的修改？"
-          message="当前配置有未保存的编辑,切换将丢失这些改动。"
-          confirmLabel="放弃并切换"
-          cancelLabel="留在当前"
+          title={t('config.discardConfirm')}
+          message={t('config.discardMessage')}
+          confirmLabel={t('config.discardAndSwitch')}
+          cancelLabel={t('config.stayCurrent')}
           danger
           onConfirm={() => {
             const act = pending;
@@ -433,7 +435,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
       {validateErrs.length > 0 && (
         <AlertModal
-          title="格式校验未通过"
+          title={t('config.validateFailed')}
           messages={validateErrs}
           onClose={() => setValidateErrs([])}
         />
