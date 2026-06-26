@@ -1,5 +1,28 @@
 // Nacos 连接的本地持久化。桌面端单机工具，连接信息（含密码）存 localStorage。
 
+export interface SSHConfig {
+  /** SSH 服务器地址 */
+  host: string;
+  /** SSH 端口，默认 22 */
+  port: number;
+  /** SSH 用户名 */
+  username: string;
+  /** 认证方式：password 或 key */
+  authType: 'password' | 'key';
+  /** SSH 密码（password 认证时使用） */
+  password?: string;
+  /** SSH 私钥内容（key 认证时使用） */
+  privateKey?: string;
+  /** 私钥密码（如果有） */
+  passphrase?: string;
+  /** 本地端口（可选，默认自动分配） */
+  localPort?: number;
+  /** 远程端口（Nacos 服务器端口） */
+  remotePort: number;
+  /** 远程主机（通常是 localhost 或 127.0.0.1） */
+  remoteHost: string;
+}
+
 export interface Connection {
   id: string;
   name: string;
@@ -9,6 +32,8 @@ export interface Connection {
   password: string;
   /** 默认命名空间 id（tenant），空表示 public。 */
   defaultNamespace: string;
+  /** SSH 隧道配置（可选） */
+  sshConfig?: SSHConfig;
 }
 
 const KEY = "cs.connections";

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"confscope/internal/nacos"
+	"confscope/internal/ssh"
 )
 
 // App 是 Wails 暴露给前端的应用服务。
@@ -11,18 +12,27 @@ import (
 // 这一层只做桌面端方法绑定和参数转发，具体 Nacos HTTP 协议适配由
 // internal/nacos.Client 负责，避免前端绑定层混入业务解析逻辑。
 type App struct {
-	ctx   context.Context
-	nacos *nacos.Client
+	ctx    context.Context
+	nacos  *nacos.Client
+	sshMgr *ssh.Manager
 }
 
 // NewApp 创建应用服务实例。
 func NewApp() *App {
-	return &App{nacos: nacos.NewClient()}
+	return &App{
+		nacos:  nacos.NewClient(),
+		sshMgr: ssh.NewManager(),
+	}
 }
 
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// shutdown 停止所有 SSH 隧道。
+func (a *App) shutdown(ctx context.Context) {
+	a.sshMgr.StopAll()
 }
 
 // NacosDetectVersion 探测目标 Nacos 服务应使用 v1 还是 v3 OpenAPI。
@@ -117,4 +127,26 @@ func (a *App) NacosDeleteConfig(
 	group string,
 ) error {
 	return a.nacos.DeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
+}
+
+// CreateSSHTunnel 创建并启动 SSH 隧道。
+// connectionId 是连接的唯一标识，config 是 SSH 隧道配置。
+// 返回本地监听端口。
+func (a *App) CreateSSHTunnel(connectionId string, config ssh.Config) (int, error) {
+	return a.sshMgr.CreateTunnel(connectionId, config)
+}
+
+// StopSSHTunnel 停止指定连接的 SSH 隧道。
+func (a *App) StopSSHTunnel(connectionId string) {
+	a.sshMgr.StopTunnel(connectionId)
+}
+
+// StopAllSSHTunnels 停止所有 SSH 隧道。
+func (a *App) StopAllSSHTunnels() {
+	a.sshMgr.StopAll()
+}
+
+// GetSSHTunnelLocalPort 获取指定连接的 SSH 隧道本地端口。
+func (a *App) GetSSHTunnelLocalPort(connectionId string) (int, error) {
+	return a.sshMgr.GetLocalPort(connectionId)
 }

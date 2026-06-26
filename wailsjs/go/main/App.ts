@@ -57,6 +57,10 @@ type GoApp = {
     dataId: string,
     group: string
   ): Promise<void>;
+  CreateSSHTunnel(connectionId: string, config: any): Promise<number>;
+  StopSSHTunnel(connectionId: string): Promise<void>;
+  StopAllSSHTunnels(): Promise<void>;
+  GetSSHTunnelLocalPort(connectionId: string): Promise<number>;
 };
 
 declare global {
@@ -139,5 +143,17 @@ export const NacosDeleteConfig = (
   dataId: string,
   group: string
 ) => app().NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group);
+
+export const CreateSSHTunnel = (connectionId: string, config: any) =>
+  app().CreateSSHTunnel(connectionId, config);
+
+export const StopSSHTunnel = (connectionId: string) =>
+  app().StopSSHTunnel(connectionId);
+
+export const StopAllSSHTunnels = () =>
+  app().StopAllSSHTunnels();
+
+export const GetSSHTunnelLocalPort = (connectionId: string) =>
+  app().GetSSHTunnelLocalPort(connectionId);
 
 export {};

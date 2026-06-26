@@ -8,8 +8,50 @@ import {
   NacosLogin,
   NacosNamespaces,
   NacosPublishConfig,
+  CreateSSHTunnel,
+  StopSSHTunnel,
 } from "../../wailsjs/go/main/App";
 import type { Connection } from "../store/connections";
+
+// ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
+const tunnelUrlCache = new Map<string, string>();
+
+/** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
+export async function resolveBaseUrl(conn: Connection): Promise<string> {
+  if (!conn.sshConfig) return conn.baseUrl;
+
+  const cached = tunnelUrlCache.get(conn.id);
+  if (cached) return cached;
+
+  // 解析原始 baseUrl，提取 context-path 和协议
+  const url = new URL(conn.baseUrl);
+  const contextPath = url.pathname;
+
+  // 创建 SSH 隧道
+  const localPort = await CreateSSHTunnel(conn.id, {
+    host: conn.sshConfig.host,
+    port: conn.sshConfig.port,
+    username: conn.sshConfig.username,
+    authType: conn.sshConfig.authType,
+    password: conn.sshConfig.password || "",
+    privateKey: conn.sshConfig.privateKey || "",
+    passphrase: conn.sshConfig.passphrase || "",
+    localPort: conn.sshConfig.localPort || 0,
+    remotePort: conn.sshConfig.remotePort,
+    remoteHost: conn.sshConfig.remoteHost,
+  });
+
+  // 用本地隧道端口替换原始 URL 的端口
+  const tunnelUrl = `${url.protocol}//localhost:${localPort}${contextPath}`;
+  tunnelUrlCache.set(conn.id, tunnelUrl);
+  return tunnelUrl;
+}
+
+/** 清除某连接的 SSH 隧道。 */
+export function closeTunnel(connId: string) {
+  tunnelUrlCache.delete(connId);
+  StopSSHTunnel(connId);
+}
 
 // ── 与 Go 端对应的返回类型 ──
 export interface LoginResult {
@@ -73,7 +115,8 @@ const versionCache = new Map<string, ApiVersion>();
 export async function getVersion(conn: Connection): Promise<ApiVersion> {
   const hit = versionCache.get(conn.baseUrl);
   if (hit) return hit;
-  const v = (await NacosDetectVersion(conn.baseUrl)) as ApiVersion;
+  const baseUrl = await resolveBaseUrl(conn);
+  const v = (await NacosDetectVersion(baseUrl)) as ApiVersion;
   const ver: ApiVersion = v === "v3" ? "v3" : "v1";
   versionCache.set(conn.baseUrl, ver);
   return ver;
@@ -94,7 +137,8 @@ export async function getToken(conn: Connection, force = false): Promise<string>
   if (!force && cached && Date.now() < cached.expireAt) return cached.token;
 
   const apiVersion = await getVersion(conn);
-  const res = await NacosLogin(conn.baseUrl, conn.username, conn.password, apiVersion);
+  const baseUrl = await resolveBaseUrl(conn);
+  const res = await NacosLogin(baseUrl, conn.username, conn.password, apiVersion);
   const ttl = res.tokenTtl > 0 ? res.tokenTtl : 18000;
   tokenCache.set(conn.id, {
     token: res.accessToken,
@@ -103,10 +147,11 @@ export async function getToken(conn: Connection, force = false): Promise<string>
   return res.accessToken;
 }
 
-/** 清掉某连接的 token 与版本缓存（凭据/地址改动或删除时调用）。 */
+/** 清掉某连接的 token、版本与隧道缓存（凭据/地址改动或删除时调用）。 */
 export function clearToken(connId: string, baseUrl?: string) {
   tokenCache.delete(connId);
   if (baseUrl) versionCache.delete(baseUrl);
+  closeTunnel(connId);
 }
 
 /** 包一层「403 自动重登重试」+ 自动注入 apiVersion。 */
@@ -131,16 +176,18 @@ async function withAuth<T>(
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
   const apiVersion = await getVersion(conn);
-  return NacosLogin(conn.baseUrl, conn.username, conn.password, apiVersion);
+  const baseUrl = await resolveBaseUrl(conn);
+  return NacosLogin(baseUrl, conn.username, conn.password, apiVersion);
 }
 
-export function listNamespaces(conn: Connection): Promise<Namespace[]> {
+export async function listNamespaces(conn: Connection): Promise<Namespace[]> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosNamespaces(conn.baseUrl, accessToken, apiVersion)
+    NacosNamespaces(baseUrl, accessToken, apiVersion)
   );
 }
 
-export function listConfigs(
+export async function listConfigs(
   conn: Connection,
   namespace: string,
   dataId: string,
@@ -148,23 +195,25 @@ export function listConfigs(
   pageNo: number,
   pageSize: number
 ): Promise<ConfigPage> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosListConfigs(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
+    NacosListConfigs(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
   );
 }
 
-export function getConfig(
+export async function getConfig(
   conn: Connection,
   namespace: string,
   dataId: string,
   group: string
 ): Promise<string> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosGetConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group)
+    NacosGetConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
   );
 }
 
-export function listHistory(
+export async function listHistory(
   conn: Connection,
   namespace: string,
   dataId: string,
@@ -172,12 +221,13 @@ export function listHistory(
   pageNo: number,
   pageSize: number
 ): Promise<HistoryPage> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosHistoryList(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
+    NacosHistoryList(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
   );
 }
 
-export function publishConfig(
+export async function publishConfig(
   conn: Connection,
   namespace: string,
   dataId: string,
@@ -185,31 +235,34 @@ export function publishConfig(
   content: string,
   configType: string
 ): Promise<void> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosPublishConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
+    NacosPublishConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
   );
 }
 
-export function deleteConfig(
+export async function deleteConfig(
   conn: Connection,
   namespace: string,
   dataId: string,
   group: string
 ): Promise<void> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosDeleteConfig(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group)
+    NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
   );
 }
 
-export function getHistoryDetail(
+export async function getHistoryDetail(
   conn: Connection,
   namespace: string,
   dataId: string,
   group: string,
   nid: string
 ): Promise<HistoryDetail> {
+  const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosHistoryDetail(conn.baseUrl, accessToken, apiVersion, namespace, dataId, group, nid)
+    NacosHistoryDetail(baseUrl, accessToken, apiVersion, namespace, dataId, group, nid)
   );
 }
 
