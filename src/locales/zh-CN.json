@@ -50,6 +50,7 @@
     "testing": "测试中…",
     "saveSuccess": "保存成功",
     "saveFailed": "保存失败:{error}",
+    "nameAndAddressRequired": "连接名称和目标地址不能为空",
     "deleteFailed": "删除失败",
     "deleteConfirm": "确定要删除连接「{name}」吗？",
     "deleteNote": "本地连接信息将被移除，但不会影响 Nacos 服务端。",

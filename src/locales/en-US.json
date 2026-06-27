@@ -50,6 +50,7 @@
     "testing": "Testing…",
     "saveSuccess": "Saved successfully",
     "saveFailed": "Save failed: {error}",
+    "nameAndAddressRequired": "Connection name and target address are required",
     "deleteFailed": "Delete failed",
     "deleteConfirm": "Delete connection \"{name}\"?",
     "deleteNote": "Local connection info will be removed, but won't affect the Nacos server.",
