@@ -695,7 +695,15 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
 .conn-item:hover { border-color: var(--accent); }
 .conn-item.active { border-color: var(--accent); background: rgba(0, 122, 204, 0.12); }
 .conn-item-main { flex: 1; min-width: 0; }
-.conn-item-name { font-size: 13px; color: var(--text-hi); }
+.conn-item-name { font-size: 13px; color: var(--text-hi); display: flex; align-items: center; gap: 6px; }
+.conn-ssh-badge {
+  font-size: 10px;
+  color: var(--green);
+  background: rgba(78, 201, 176, 0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
 .conn-item-url { font-size: 11px; color: var(--text-dim); word-break: break-all; }
 .conn-item-del {
   width: 22px; height: 22px;

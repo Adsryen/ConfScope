@@ -56,9 +56,15 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setDraft((d) => ({
       ...d,
       sshConfig: {
+        host: "",
+        port: 22,
+        username: "root",
+        authType: "password" as const,
+        remoteHost: "localhost",
+        remotePort: 8848,
         ...d.sshConfig,
         ...patch,
-      } as SSHConfig,
+      },
     }));
     setTestMsg(null);
   };
@@ -73,17 +79,23 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setDraft({ ...c });
     setTestMsg(null);
     setConfirmDel(null);
-    setShowSSHConfig(!!c.sshConfig);
+    setShowSSHConfig(!!c.sshConfig?.host);
   };
 
   const save = () => {
     if (!draft.name.trim() || !draft.baseUrl.trim()) {
-      setTestMsg({ ok: false, text: "名称与地址不能为空" });
+      setTestMsg({ ok: false, text: t('connection.nameAndAddressRequired') });
       return;
     }
-    const saved = upsertConnection({ ...draft, name: draft.name.trim(), baseUrl: draft.baseUrl.trim() });
+    // SSH 配置：host 为空则不保存
+    const toSave = { ...draft };
+    if (toSave.sshConfig && !toSave.sshConfig.host?.trim()) {
+      toSave.sshConfig = undefined;
+    }
+    const saved = upsertConnection({ ...toSave, name: toSave.name.trim(), baseUrl: toSave.baseUrl.trim() });
     clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
     setDraft(emptyDraft());
+    setShowSSHConfig(false);
     refresh();
   };
 
@@ -143,7 +155,10 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 onClick={() => edit(c)}
               >
                 <div className="conn-item-main">
-                  <div className="conn-item-name">{c.name}</div>
+                  <div className="conn-item-name">
+                    {c.name}
+                    {c.sshConfig && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
+                  </div>
                   <div className="conn-item-url">{c.baseUrl}</div>
                 </div>
                 {confirmDel === c.id ? (
@@ -262,23 +277,10 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               <button
                 type="button"
                 className="ssh-toggle"
-                onClick={() => {
-                  if (!showSSHConfig && !draft.sshConfig) {
-                    // 首次展开时初始化默认 SSH 配置
-                    setSSH({
-                      host: "",
-                      port: 22,
-                      username: "root",
-                      authType: "password",
-                      remoteHost: "localhost",
-                      remotePort: 8848,
-                    });
-                  }
-                  setShowSSHConfig(!showSSHConfig);
-                }}
+                onClick={() => setShowSSHConfig(!showSSHConfig)}
               >
                 {showSSHConfig ? "▼" : "▶"} {t('connection.sshConfig')}
-                {draft.sshConfig && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
+                {draft.sshConfig?.host && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
               </button>
 
               {showSSHConfig && (
@@ -326,7 +328,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                     </select>
                   </label>
 
-                  {draft.sshConfig?.authType === "password" && (
+                  {(draft.sshConfig?.authType ?? "password") === "password" && (
                     <label className="field">
                       <span>{t('connection.sshPassword')}</span>
                       <div className="pwd-field">
