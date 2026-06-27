@@ -35,7 +35,7 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
 
   const save = async () => {
     if (!dataId.trim()) {
-      setError("dataId 不能为空");
+      setError(t('config.dataIdRequired'));
       return;
     }
     const problems = validateConfig(content, fmt);

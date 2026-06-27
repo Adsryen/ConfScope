@@ -142,7 +142,7 @@ export default function HistoryView({
       await publishConfig(conn, tenant, dataId, group, text, nacosType(format));
       setRbConfirm(false);
       setViewing(null);
-      toast(t('history.rollbackSuccess', { nid: viewing }));
+      toast(t('history.rollbackSuccess', { n: viewing }));
       onRolledBack();
       loadHistory(1);
     } catch (e) {
