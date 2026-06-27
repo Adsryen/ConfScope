@@ -1000,6 +1000,24 @@ select, button, .mode-btn, .tab-btn { cursor: pointer; }
   text-decoration: none;
 }
 
+.update-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.update-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.update-proxy-row {
+  align-items: flex-start;
+}
+
 .about-footer {
   text-align: center;
   padding-top: 20px;

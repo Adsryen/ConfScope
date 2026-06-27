@@ -204,6 +204,16 @@
     "tech2": "Backend: Go + Wails 2",
     "tech3": "UI: Dark VSCode theme",
     "supportedCenters": "📦 Supported Config Centers",
+    "updateTitle": "App Updates",
+    "checkUpdate": "Check for Updates",
+    "checkingUpdate": "Checking…",
+    "openDownload": "Open Download Page",
+    "updateAvailable": "New version v{version} available",
+    "updateSourceHit": "Source: {source}",
+    "noUpdate": "You are on the latest version",
+    "httpProxy": "HTTP Proxy",
+    "httpsProxy": "HTTPS Proxy",
+    "noProxy": "No Proxy",
     "feedback": "🐛 Report Issue",
     "close": "Close"
   }

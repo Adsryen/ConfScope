@@ -9,8 +9,8 @@
 ## 近期执行顺序
 
 - [x] **补齐现有核心自动化测试第一批**：已覆盖 Go 后端 Nacos/SSH 基线，以及前端核心纯函数、状态模块和主要配置操作组件。
-- [ ] **下一项立即做：应用检查更新**：当前测试补齐任务收尾后，优先实现 ConfScope 自身版本检查、更新提示和下载入口。
-- [ ] **随后再做代码结构拆分**：在检查更新完成并有测试保护后，再推进后端 provider 抽象、前端 API 边界和大组件拆分。
+- [x] **应用检查更新第一版**：已实现 ConfScope 自身版本检查、更新提示、国内加速线路回退、下载入口和检查更新代理配置。
+- [ ] **下一项立即做：代码结构拆分**：在检查更新完成并有测试保护后，推进后端 provider 抽象、前端 API 边界和大组件拆分。
 - [ ] **再进入多环境治理主线**：审计矩阵 UI、环境间应用、操作历史与回退、Apollo 支持按后续章节逐步推进。
 
 ---
@@ -251,35 +251,36 @@
 
 ### 3.1 应用检查更新
 
-这是当前测试补齐任务之后的下一项优先工作。它不属于配置中心能力，但直接影响桌面工具的可维护性和用户升级体验，应优先于 Apollo、Consul、审计矩阵 UI 之外的大功能。
+第一版已完成手动检查、更新提示、下载入口、国内加速线路回退和检查更新代理配置。剩余工作集中在自动后台检查、忽略版本、版本注入和后续内置下载校验。
 
-- [ ] **统一当前版本来源**
+- [x] **统一当前版本来源**
   - `package.json` 已有 `version`，但 Go/Wails 运行时还没有统一暴露应用版本。
   - 增加 Go 侧 `AppVersion` 或 `GetAppInfo` 绑定，前端 About/设置页统一读取。
-  - 后续打包时考虑用 `-ldflags` 注入版本，避免手工改多处。
-- [ ] **定义更新源**
+  - [ ] 后续打包时考虑用 `-ldflags` 注入版本，避免手工改多处。
+- [x] **定义更新源**
   - 第一版优先支持一个 release manifest JSON，字段包括 `version`、`notes`、`downloadUrl`、`publishedAt`、`sha256`、`mandatory`。
   - 如果后续托管在 GitHub Releases，可用 GitHub API 或把 manifest 放在 release asset 中。
   - 更新源 URL 先做常量或配置项，不把业务逻辑绑死到某个平台。
-- [ ] **Go 后端实现检查更新**
+- [x] **Go 后端实现检查更新**
   - `CheckForUpdates(currentVersion)`：请求更新源、超时控制、解析 manifest、比较 semver。
   - 返回统一结果：`currentVersion`、`latestVersion`、`hasUpdate`、`downloadUrl`、`releaseNotes`、`mandatory`、`error`。
   - 网络失败不影响应用启动，只返回可展示错误。
   - 不在第一版做自动下载、自动安装和静默替换。
-- [ ] **前端 UI/交互**
+- [x] **前端 UI/交互**
   - About 或 Settings 中增加“检查更新”入口。
   - 展示当前版本、最新版本、检查中、已是最新、检查失败、有新版本。
   - 有新版本时展示 release notes 摘要和“打开下载页”按钮。
-  - 支持启动后低频后台检查，但默认不弹强打断弹框；只在有更新时给顶部提示或 About 红点。
+  - [ ] 支持启动后低频后台检查，但默认不弹强打断弹框；只在有更新时给顶部提示或 About 红点。
 - [ ] **本地状态**
-  - 记录 `lastUpdateCheckAt`、`lastSeenVersion`、`skipVersion`。
+  - [x] 记录检查更新使用的全局代理配置。
+  - [ ] 记录 `lastUpdateCheckAt`、`lastSeenVersion`、`skipVersion`。
   - 用户可选择“忽略此版本”，避免每次启动重复提示。
   - 强制更新 `mandatory=true` 时不允许忽略，但仍不自动安装。
-- [ ] **安全与校验**
+- [x] **安全与校验**
   - 下载链接必须使用 HTTPS。
   - manifest 支持 sha256 字段；第一版只展示校验值，后续若做内置下载再强制校验。
   - release notes 只按纯文本/Markdown 安全渲染，不执行 HTML。
-- [ ] **自动化测试**
+- [x] **自动化测试**
   - Go 使用 `httptest.Server` 覆盖：有更新、无更新、manifest 不合法、网络失败、版本比较。
   - TypeScript 覆盖更新状态派生和 UI 展示。
   - 如果新增 About/Settings UI，补 React Testing Library 组件测试。
@@ -301,7 +302,9 @@
   - HTTP proxy。
   - HTTPS proxy。
   - no_proxy。
-- [ ] Go HTTP client 支持读取代理配置。
+- [x] 检查更新入口已支持录入并持久化全局代理配置。
+- [x] 检查更新 Go HTTP client 支持读取全局代理配置。
+- [ ] Nacos / Apollo / WebDAV 等配置中心 HTTP client 支持读取代理配置。
 - [ ] 每个连接允许覆盖全局代理。
 - [ ] UI 标识当前连接是否走代理。
 - [ ] 代理配置放入 SettingsView 的“网络”分组。
@@ -665,7 +668,7 @@
 
 ## 10. 测试与工程质量
 
-当前自动化测试已经补上第一层基线：Go 后端覆盖 Nacos client 与 SSH manager/tunnel，前端已引入 Vitest + React Testing Library，并覆盖 diff、format、keys、validate、normalize、audit、highlight、toast、connection store，以及配置浏览、编辑、历史、删除确认、连接管理等核心组件路径。下一阶段先补检查更新的 Go/React 测试，再推进 Playwright Web E2E；否则 AuditView、BackupView、连接管理升级后仍会依赖大量人工回归。
+当前自动化测试已经补上第一层基线：Go 后端覆盖 Nacos client、SSH manager/tunnel 与检查更新，前端已引入 Vitest + React Testing Library，并覆盖 diff、format、keys、validate、normalize、audit、highlight、toast、connection store、检查更新，以及配置浏览、编辑、历史、删除确认、连接管理等核心组件路径。下一阶段推进 Playwright Web E2E；否则 AuditView、BackupView、连接管理升级后仍会依赖大量人工回归。
 
 ### 10.1 Go 测试
 
@@ -673,13 +676,18 @@
 - [x] Nacos client 基础行为测试。
 - [x] SSH manager 测试。
 - [x] SSH tunnel 基础测试。
+- [x] 检查更新测试。
+  - 有更新、无更新、manifest 不合法、网络失败、版本比较。
+  - 国内加速线路回退。
+  - 全局代理与 no_proxy。
 - [ ] provider 抽象加单元测试。
 - [ ] Nacos v1/v3 响应兼容测试。
 - [ ] App Wails 绑定层加薄测试。
-  - 参数透传。
-  - 错误返回。
+  - [x] 应用信息与检查更新默认版本。
+  - [ ] 参数透传。
+  - [ ] 错误返回。
   - provider 分发。
-- [ ] 代理配置测试。
+- [ ] Nacos / Apollo / WebDAV 代理配置测试。
 - [ ] WebDAV 客户端测试。
 - [ ] Apollo client 使用 `httptest.Server` 模拟 Portal/OpenAPI。
 - [ ] 批量任务调度测试。
@@ -702,6 +710,7 @@
 - [x] 测试语法高亮兜底与逐行缓存。
 - [x] 测试 toast 发布订阅与自动移除。
 - [x] 测试连接本地存储的读取、新增、更新、删除、SSH 配置保存。
+- [x] 测试检查更新 API 包装和代理配置存储。
 - [ ] 测试导出数据生成。
   - CSV 转义。
   - JSON 字段完整性。
@@ -769,10 +778,10 @@
   - 连接测试成功/失败。
   - SSH 配置保存。
 - [ ] 检查更新组件测试。
-  - 当前版本展示。
-  - 检查中/已最新/有更新/检查失败状态。
-  - 忽略此版本。
-  - 打开下载页。
+  - [x] 当前版本展示。
+  - [x] 检查中/已最新/有更新/检查失败状态。
+  - [ ] 忽略此版本。
+  - [x] 打开下载页。
 - [ ] `AuditView` 测试。
   - 过滤状态。
   - 行选择。

@@ -5,7 +5,16 @@ import (
 
 	"confscope/internal/nacos"
 	"confscope/internal/ssh"
+	"confscope/internal/updatecheck"
 )
+
+var appVersion = "1.0.0"
+
+type AppInfo struct {
+	Name          string               `json:"name"`
+	Version       string               `json:"version"`
+	UpdateSources []updatecheck.Source `json:"updateSources"`
+}
 
 // App 是 Wails 暴露给前端的应用服务。
 //
@@ -23,6 +32,23 @@ func NewApp() *App {
 		nacos:  nacos.NewClient(),
 		sshMgr: ssh.NewManager(),
 	}
+}
+
+// GetAppInfo 返回应用基础信息和内置更新源。
+func (a *App) GetAppInfo() AppInfo {
+	return AppInfo{
+		Name:          "ConfScope",
+		Version:       appVersion,
+		UpdateSources: updatecheck.DefaultSources,
+	}
+}
+
+// CheckForUpdates 检查 ConfScope 是否有可用新版本。
+func (a *App) CheckForUpdates(req updatecheck.Request) updatecheck.Result {
+	if req.CurrentVersion == "" {
+		req.CurrentVersion = appVersion
+	}
+	return updatecheck.Check(context.Background(), req)
 }
 
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。
