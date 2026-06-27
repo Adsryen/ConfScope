@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "wails dev",
     "dev:web": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "wails build",
     "dist": "wails build",
     "build:win": "wails build -clean -nsis",
@@ -26,6 +28,7 @@
     "@vitejs/plugin-react": "^4",
     "esbuild": "^0.28.0",
     "typescript": "^5",
-    "vite": "^5"
+    "vite": "^5",
+    "vitest": "^2.1.9"
   }
 }
