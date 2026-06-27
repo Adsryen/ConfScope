@@ -204,6 +204,16 @@
     "tech2": "后端：Go + Wails 2",
     "tech3": "UI：深色 VSCode 风格",
     "supportedCenters": "📦 支持的配置中心",
+    "updateTitle": "应用更新",
+    "checkUpdate": "检查更新",
+    "checkingUpdate": "检查中…",
+    "openDownload": "打开下载页",
+    "updateAvailable": "发现新版本 v{version}",
+    "updateSourceHit": "命中线路：{source}",
+    "noUpdate": "当前已是最新版本",
+    "httpProxy": "HTTP 代理",
+    "httpsProxy": "HTTPS 代理",
+    "noProxy": "不走代理",
     "feedback": "🐛 反馈问题",
     "close": "关闭"
   }

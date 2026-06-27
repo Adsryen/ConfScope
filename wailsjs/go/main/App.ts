@@ -1,4 +1,6 @@
 type GoApp = {
+  GetAppInfo(): Promise<any>;
+  CheckForUpdates(request: any): Promise<any>;
   NacosDetectVersion(baseUrl: string): Promise<string>;
   NacosLogin(baseUrl: string, username: string, password: string, apiVersion: string): Promise<any>;
   NacosNamespaces(baseUrl: string, accessToken: string, apiVersion: string): Promise<any>;
@@ -74,6 +76,10 @@ declare global {
 }
 
 const app = () => window.go.main.App;
+
+export const GetAppInfo = () => app().GetAppInfo();
+
+export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
 
 export const NacosDetectVersion = (baseUrl: string) => app().NacosDetectVersion(baseUrl);
 
