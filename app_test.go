@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"confscope/internal/provider"
 	"confscope/internal/updatecheck"
 )
 
@@ -58,5 +59,20 @@ func TestCheckForUpdatesUsesAppVersionWhenCurrentVersionIsEmpty(t *testing.T) {
 	}
 	if !result.HasUpdate || result.LatestVersion != "9.9.9" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestNewAppRegistersNacosProvider(t *testing.T) {
+	app := NewApp()
+
+	p, err := app.providerFor(provider.ProviderNacos)
+	if err != nil {
+		t.Fatalf("providerFor returned error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("providerFor returned nil provider")
+	}
+	if _, ok := p.(*provider.NacosProvider); !ok {
+		t.Fatalf("provider type = %T, want *provider.NacosProvider", p)
 	}
 }
