@@ -1,6 +1,6 @@
 # ConfScope 开发待办规划
 
-**最后更新**: 2026-06-28
+**最后更新**: 2026-06-29
 **规划参考**: `/mnt/c/Users/adsry/Desktop/fsdownload/ConfigCenterComparer`
 **当前定位**: Go + Wails 桌面端配置中心管理、对比、审计工具。MVP 已支持 Nacos，后续应从“单配置浏览与 diff”升级为“多环境配置治理”。
 
@@ -68,7 +68,7 @@
 
 **当前基线**: `v1.0.0`
 **当前开发线**: `v1.1.0`
-**下一项立即做**: `v1.1.0 / P0` 的代码结构拆分与 provider 底座。
+**下一项立即做**: `v1.1.0 / P0` 的 MSE Nacos 连接第一阶段与 provider 兼容迁移。
 
 - [x] `v1.0.0` 已具备 Nacos 浏览、编辑、历史、diff、多连接、SSH 基础能力。
 - [x] 已完成核心自动化测试第一批。
@@ -152,12 +152,20 @@
   - 保留 `src/api/nacos.ts` 兼容过渡。
   - 新增通用 `src/api/configCenter.ts`。
   - [ ] 页面逐步从 Nacos 专属 API 迁移到通用 API。
+- [ ] 阿里云 MSE Nacos 连接第一阶段。
+  - 作为 Nacos provider 的连接形态增强，不单独提升到大版本。
+  - 连接模型增加 Nacos 发行版/来源：`opensource | aliyun-mse`。
+  - 认证模型增加 `none | nacos-password | aliyun-aksk`，保留旧连接的 username/password 兼容迁移。
+  - 后端 Nacos client 封装 MSE 鉴权请求构造，前端不直接拼签名、不暴露 secret 到日志。
+  - 第一阶段覆盖测试连接、命名空间、配置列表、配置详情、历史查询。
+  - 写操作先沿用现有危险操作确认；若 MSE 权限不足，要给出明确错误提示。
 - [ ] 自动化测试。
   - [x] provider 抽象单元测试第一批。
   - [x] Nacos 适配器测试第一批。
   - [x] App provider 注册薄测试。
   - [x] App Wails 绑定 provider 分发测试第一批。
   - [x] 前端通用 configCenter API 包装测试第一批。
+  - [ ] MSE Nacos 鉴权请求构造与连接模型迁移测试。
   - [ ] 页面迁移后的组件回归测试。
 
 #### P1
@@ -560,11 +568,10 @@
   - datacenter 选择。
   - key prefix 过滤。
   - 与 Nacos/Apollo/local 的 diff 和 AuditView。
-- [ ] 阿里云 MSE / Nacos 企业场景。
-  - AccessKey 模式。
-  - 认证类型：username/password、accessKey/secretKey、token。
-  - Go 后端封装签名逻辑，前端不直接处理 secret。
-  - 连接测试区分认证失败、网络失败、权限不足。
+- [ ] 阿里云 MSE / Nacos 企业治理增强。
+  - RAM 角色、STS 临时凭证、KMS/系统钥匙串托管凭据评估。
+  - 企业权限视图与批量治理策略。
+  - 更细的错误分类、审计脱敏和凭据轮换提醒。
 - [ ] 配置治理报告。
   - 摘要。
   - 异常趋势。
