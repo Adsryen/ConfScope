@@ -1,6 +1,14 @@
 type GoApp = {
   GetAppInfo(): Promise<any>;
   CheckForUpdates(request: any): Promise<any>;
+  ConfigCenterListNamespaces(profile: any): Promise<any>;
+  ConfigCenterListConfigs(profile: any, request: any): Promise<any>;
+  ConfigCenterGetConfig(profile: any, ref: any): Promise<any>;
+  ConfigCenterPublishConfig(profile: any, request: any): Promise<void>;
+  ConfigCenterDeleteConfig(profile: any, ref: any): Promise<void>;
+  ConfigCenterListHistory(profile: any, ref: any, page: any): Promise<any>;
+  ConfigCenterGetHistoryDetail(profile: any, ref: any, id: string): Promise<any>;
+  ConfigCenterTestConnection(profile: any): Promise<void>;
   NacosDetectVersion(baseUrl: string): Promise<string>;
   NacosLogin(baseUrl: string, username: string, password: string, apiVersion: string): Promise<any>;
   NacosNamespaces(baseUrl: string, accessToken: string, apiVersion: string): Promise<any>;
@@ -80,6 +88,30 @@ const app = () => window.go.main.App;
 export const GetAppInfo = () => app().GetAppInfo();
 
 export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
+
+export const ConfigCenterListNamespaces = (profile: any) =>
+  app().ConfigCenterListNamespaces(profile);
+
+export const ConfigCenterListConfigs = (profile: any, request: any) =>
+  app().ConfigCenterListConfigs(profile, request);
+
+export const ConfigCenterGetConfig = (profile: any, ref: any) =>
+  app().ConfigCenterGetConfig(profile, ref);
+
+export const ConfigCenterPublishConfig = (profile: any, request: any) =>
+  app().ConfigCenterPublishConfig(profile, request);
+
+export const ConfigCenterDeleteConfig = (profile: any, ref: any) =>
+  app().ConfigCenterDeleteConfig(profile, ref);
+
+export const ConfigCenterListHistory = (profile: any, ref: any, page: any) =>
+  app().ConfigCenterListHistory(profile, ref, page);
+
+export const ConfigCenterGetHistoryDetail = (profile: any, ref: any, id: string) =>
+  app().ConfigCenterGetHistoryDetail(profile, ref, id);
+
+export const ConfigCenterTestConnection = (profile: any) =>
+  app().ConfigCenterTestConnection(profile);
 
 export const NacosDetectVersion = (baseUrl: string) => app().NacosDetectVersion(baseUrl);
 

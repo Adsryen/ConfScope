@@ -148,15 +148,17 @@
   - 保留现有 Nacos 行为，不重写业务。
   - 先把 `internal/nacos.Client` 包进 provider 适配器。
   - Wails `App` 只保留薄绑定和参数转发。
-- [ ] 前端 API 边界。
+- [x] 前端 API 边界第一批。
   - 保留 `src/api/nacos.ts` 兼容过渡。
   - 新增通用 `src/api/configCenter.ts`。
-  - 页面逐步从 Nacos 专属 API 迁移到通用 API。
+  - [ ] 页面逐步从 Nacos 专属 API 迁移到通用 API。
 - [ ] 自动化测试。
   - [x] provider 抽象单元测试第一批。
   - [x] Nacos 适配器测试第一批。
   - [x] App provider 注册薄测试。
-  - [ ] App Wails 绑定 provider 分发测试：参数透传、错误返回、provider 分发。
+  - [x] App Wails 绑定 provider 分发测试第一批。
+  - [x] 前端通用 configCenter API 包装测试第一批。
+  - [ ] 页面迁移后的组件回归测试。
 
 #### P1
 
