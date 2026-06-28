@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"confscope/internal/nacos"
@@ -11,6 +12,8 @@ import (
 )
 
 var appVersion = "1.0.0"
+
+var errUnsupportedProvider = errors.New("unsupported config center provider")
 
 type AppInfo struct {
 	Name          string               `json:"name"`
@@ -44,9 +47,73 @@ func NewApp() *App {
 func (a *App) providerFor(providerType provider.ProviderType) (provider.ConfigProvider, error) {
 	p, ok := a.providers[providerType]
 	if !ok || p == nil {
-		return nil, fmt.Errorf("不支持的配置中心类型: %s", providerType)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedProvider, providerType)
 	}
 	return p, nil
+}
+
+func (a *App) ConfigCenterListNamespaces(profile provider.ConnectionProfile) ([]provider.Namespace, error) {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return nil, err
+	}
+	return p.ListNamespaces(profile)
+}
+
+func (a *App) ConfigCenterListConfigs(profile provider.ConnectionProfile, req provider.ListConfigsRequest) (provider.ConfigPage, error) {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return provider.ConfigPage{}, err
+	}
+	return p.ListConfigs(profile, req)
+}
+
+func (a *App) ConfigCenterGetConfig(profile provider.ConnectionProfile, ref provider.ConfigRef) (provider.ConfigDocument, error) {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return provider.ConfigDocument{}, err
+	}
+	return p.GetConfig(profile, ref)
+}
+
+func (a *App) ConfigCenterPublishConfig(profile provider.ConnectionProfile, req provider.PublishConfigRequest) error {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return err
+	}
+	return p.PublishConfig(profile, req)
+}
+
+func (a *App) ConfigCenterDeleteConfig(profile provider.ConnectionProfile, ref provider.ConfigRef) error {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return err
+	}
+	return p.DeleteConfig(profile, ref)
+}
+
+func (a *App) ConfigCenterListHistory(profile provider.ConnectionProfile, ref provider.ConfigRef, page provider.PageRequest) (provider.HistoryPage, error) {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return provider.HistoryPage{}, err
+	}
+	return p.ListHistory(profile, ref, page)
+}
+
+func (a *App) ConfigCenterGetHistoryDetail(profile provider.ConnectionProfile, ref provider.ConfigRef, id string) (provider.HistoryDetail, error) {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return provider.HistoryDetail{}, err
+	}
+	return p.GetHistoryDetail(profile, ref, id)
+}
+
+func (a *App) ConfigCenterTestConnection(profile provider.ConnectionProfile) error {
+	p, err := a.providerFor(profile.Provider)
+	if err != nil {
+		return err
+	}
+	return p.TestConnection(profile)
 }
 
 // GetAppInfo 返回应用基础信息和内置更新源。
