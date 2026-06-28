@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"confscope/internal/nacos"
+	"confscope/internal/provider"
 	"confscope/internal/ssh"
 	"confscope/internal/updatecheck"
 )
@@ -21,17 +23,30 @@ type AppInfo struct {
 // 这一层只做桌面端方法绑定和参数转发，具体 Nacos HTTP 协议适配由
 // internal/nacos.Client 负责，避免前端绑定层混入业务解析逻辑。
 type App struct {
-	ctx    context.Context
-	nacos  *nacos.Client
-	sshMgr *ssh.Manager
+	ctx       context.Context
+	nacos     *nacos.Client
+	sshMgr    *ssh.Manager
+	providers map[provider.ProviderType]provider.ConfigProvider
 }
 
 // NewApp 创建应用服务实例。
 func NewApp() *App {
+	nacosClient := nacos.NewClient()
 	return &App{
-		nacos:  nacos.NewClient(),
+		nacos:  nacosClient,
 		sshMgr: ssh.NewManager(),
+		providers: map[provider.ProviderType]provider.ConfigProvider{
+			provider.ProviderNacos: provider.NewNacosProvider(nacosClient),
+		},
 	}
+}
+
+func (a *App) providerFor(providerType provider.ProviderType) (provider.ConfigProvider, error) {
+	p, ok := a.providers[providerType]
+	if !ok || p == nil {
+		return nil, fmt.Errorf("不支持的配置中心类型: %s", providerType)
+	}
+	return p, nil
 }
 
 // GetAppInfo 返回应用基础信息和内置更新源。

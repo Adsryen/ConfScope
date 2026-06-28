@@ -129,13 +129,13 @@
 
 #### P0
 
-- [ ] 后端 Provider 抽象。
+- [x] 后端 Provider 抽象第一批。
   - 定义 `ProviderType`: `nacos | apollo | consul | local`。
   - 定义 `ConnectionProfile`: 连接、认证、代理、SSH、环境标签、安全等级。
   - 定义 `ConfigRef`: provider、connectionId、namespace、group、dataId、key。
   - 定义 `ConfigDocument`: 原始内容、格式、更新时间、版本、来源。
-  - 定义 `ConfigEntry`: 拆解后的 key/value/path/type。
-- [ ] 后端通用接口。
+  - [ ] 后续补 `ConfigEntry` 后端模型；当前 key/value 拆解仍保留在前端算法层。
+- [x] 后端通用接口第一批。
   - `ListNamespaces`
   - `ListConfigs`
   - `GetConfig`
@@ -144,7 +144,7 @@
   - `ListHistory`
   - `GetHistoryDetail`
   - `TestConnection`
-- [ ] Nacos 适配层。
+- [x] Nacos 适配层第一批。
   - 保留现有 Nacos 行为，不重写业务。
   - 先把 `internal/nacos.Client` 包进 provider 适配器。
   - Wails `App` 只保留薄绑定和参数转发。
@@ -153,9 +153,10 @@
   - 新增通用 `src/api/configCenter.ts`。
   - 页面逐步从 Nacos 专属 API 迁移到通用 API。
 - [ ] 自动化测试。
-  - provider 抽象单元测试。
-  - Nacos 适配器测试。
-  - App Wails 绑定薄测试：参数透传、错误返回、provider 分发。
+  - [x] provider 抽象单元测试第一批。
+  - [x] Nacos 适配器测试第一批。
+  - [x] App provider 注册薄测试。
+  - [ ] App Wails 绑定 provider 分发测试：参数透传、错误返回、provider 分发。
 
 #### P1
 
