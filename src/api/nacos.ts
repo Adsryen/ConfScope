@@ -1,16 +1,24 @@
 import {
   NacosDeleteConfig,
   NacosDetectVersion,
-  NacosGetConfig,
-  NacosHistoryDetail,
-  NacosHistoryList,
-  NacosListConfigs,
   NacosLogin,
-  NacosNamespaces,
   NacosPublishConfig,
   CreateSSHTunnel,
   StopSSHTunnel,
 } from "../../wailsjs/go/main/App";
+import {
+  getConfig as configCenterGetConfig,
+  getHistoryDetail as configCenterGetHistoryDetail,
+  listConfigs as configCenterListConfigs,
+  listHistory as configCenterListHistory,
+  listNamespaces as configCenterListNamespaces,
+  type ConfigPage as ConfigCenterConfigPage,
+  type ConfigRef,
+  type ConnectionProfile,
+  type HistoryDetail as ConfigCenterHistoryDetail,
+  type HistoryPage as ConfigCenterHistoryPage,
+  type Namespace as ConfigCenterNamespace,
+} from "./configCenter";
 import type { Connection } from "../store/connections";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
@@ -173,6 +181,105 @@ async function withAuth<T>(
   }
 }
 
+async function withProfile<T>(
+  conn: Connection,
+  call: (profile: ConnectionProfile) => Promise<T>
+): Promise<T> {
+  const apiVersion = await getVersion(conn);
+  const accessToken = await getToken(conn);
+  const baseUrl = await resolveBaseUrl(conn);
+  try {
+    return await call(toConnectionProfile(conn, baseUrl, accessToken, apiVersion));
+  } catch (e) {
+    const msg = String(e);
+    if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
+      const fresh = await getToken(conn, true);
+      return await call(toConnectionProfile(conn, baseUrl, fresh, apiVersion));
+    }
+    throw e;
+  }
+}
+
+function toConnectionProfile(
+  conn: Connection,
+  baseUrl: string,
+  accessToken: string,
+  apiVersion: ApiVersion
+): ConnectionProfile {
+  const optional = conn as Connection & { environment?: string; safetyLevel?: string };
+  return {
+    id: conn.id,
+    name: conn.name,
+    provider: "nacos",
+    baseUrl,
+    accessToken,
+    apiVersion,
+    environment: optional.environment ?? "",
+    safetyLevel: optional.safetyLevel ?? "",
+  };
+}
+
+function toConfigRef(conn: Connection, namespace: string, dataId: string, group: string): ConfigRef {
+  return {
+    provider: "nacos",
+    connectionId: conn.id,
+    namespace,
+    group,
+    dataId,
+    key: "",
+  };
+}
+
+function fromConfigCenterNamespace(item: ConfigCenterNamespace): Namespace {
+  return {
+    namespace: item.id,
+    namespaceShowName: item.name,
+    configCount: item.configCount,
+    kind: item.kind,
+  };
+}
+
+function fromConfigCenterConfigPage(page: ConfigCenterConfigPage): ConfigPage {
+  return {
+    totalCount: page.totalCount,
+    pageNumber: page.pageNumber,
+    pagesAvailable: page.pagesAvailable,
+    pageItems: page.pageItems.map((item) => ({
+      dataId: item.ref.dataId,
+      group: item.ref.group,
+      content: item.content,
+      configType: item.format,
+    })),
+  };
+}
+
+function fromConfigCenterHistoryPage(page: ConfigCenterHistoryPage): HistoryPage {
+  return {
+    totalCount: page.totalCount,
+    pageNumber: page.pageNumber,
+    pagesAvailable: page.pagesAvailable,
+    pageItems: page.pageItems.map((item) => ({
+      id: item.id,
+      dataId: item.ref.dataId,
+      group: item.ref.group,
+      opType: item.opType,
+      lastModifiedTime: item.lastModifiedTime,
+    })),
+  };
+}
+
+function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): HistoryDetail {
+  return {
+    id: detail.id,
+    dataId: detail.ref.dataId,
+    group: detail.ref.group,
+    content: detail.content,
+    opType: detail.opType,
+    createdTime: detail.createdTime,
+    lastModifiedTime: detail.lastModifiedTime,
+  };
+}
+
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
   const apiVersion = await getVersion(conn);
@@ -181,10 +288,10 @@ export async function testConnection(conn: Connection): Promise<LoginResult> {
 }
 
 export async function listNamespaces(conn: Connection): Promise<Namespace[]> {
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosNamespaces(baseUrl, accessToken, apiVersion)
-  );
+  return withProfile(conn, async (profile) => {
+    const items = await configCenterListNamespaces(profile);
+    return items.map(fromConfigCenterNamespace);
+  });
 }
 
 export async function listConfigs(
@@ -195,10 +302,10 @@ export async function listConfigs(
   pageNo: number,
   pageSize: number
 ): Promise<ConfigPage> {
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosListConfigs(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
-  );
+  return withProfile(conn, async (profile) => {
+    const page = await configCenterListConfigs(profile, { namespace, dataId, group, pageNo, pageSize });
+    return fromConfigCenterConfigPage(page);
+  });
 }
 
 export async function getConfig(
@@ -207,10 +314,10 @@ export async function getConfig(
   dataId: string,
   group: string
 ): Promise<string> {
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosGetConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
-  );
+  return withProfile(conn, async (profile) => {
+    const document = await configCenterGetConfig(profile, toConfigRef(conn, namespace, dataId, group));
+    return document.content;
+  });
 }
 
 export async function listHistory(
@@ -221,10 +328,14 @@ export async function listHistory(
   pageNo: number,
   pageSize: number
 ): Promise<HistoryPage> {
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosHistoryList(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
-  );
+  return withProfile(conn, async (profile) => {
+    const page = await configCenterListHistory(
+      profile,
+      toConfigRef(conn, namespace, dataId, group),
+      { pageNo, pageSize }
+    );
+    return fromConfigCenterHistoryPage(page);
+  });
 }
 
 export async function publishConfig(
@@ -260,10 +371,10 @@ export async function getHistoryDetail(
   group: string,
   nid: string
 ): Promise<HistoryDetail> {
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosHistoryDetail(baseUrl, accessToken, apiVersion, namespace, dataId, group, nid)
-  );
+  return withProfile(conn, async (profile) => {
+    const detail = await configCenterGetHistoryDetail(profile, toConfigRef(conn, namespace, dataId, group), nid);
+    return fromConfigCenterHistoryDetail(detail);
+  });
 }
 
 /** 统一格式化 Nacos 时间：v3 是 epoch 毫秒，v1 是字符串，纯数字按时间戳格式化。 */
