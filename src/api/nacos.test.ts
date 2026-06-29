@@ -8,6 +8,7 @@ import {
   listConfigs,
   listHistory,
   listNamespaces,
+  testConnection,
 } from "./nacos";
 import type { Connection } from "../store/connections";
 
@@ -37,6 +38,9 @@ function makeConnection(id: string): Connection {
   return {
     id,
     name: "dev",
+    provider: "nacos",
+    distribution: "opensource",
+    authType: "nacos-password",
     baseUrl: `http://127.0.0.1:8848/${id}/nacos`,
     username: "nacos",
     password: "secret",
@@ -44,14 +48,19 @@ function makeConnection(id: string): Connection {
   };
 }
 
-function expectedProfile(conn: Connection, accessToken = "token-1") {
+function expectedProfile(conn: Connection, accessToken = "token-1", apiVersion = "v3") {
   return {
     id: conn.id,
     name: conn.name,
     provider: "nacos",
+    distribution: conn.distribution,
+    authType: conn.authType,
     baseUrl: conn.baseUrl,
     accessToken,
-    apiVersion: "v3",
+    apiVersion,
+    accessKeyId: "",
+    accessKeySecret: "",
+    securityToken: "",
     environment: "",
     safetyLevel: "",
   };
@@ -194,5 +203,32 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.NacosLogin).toHaveBeenCalledTimes(2);
     expect(goApp.ConfigCenterGetConfig).toHaveBeenNthCalledWith(1, expectedProfile(conn, "expired-token"), ref);
     expect(goApp.ConfigCenterGetConfig).toHaveBeenNthCalledWith(2, expectedProfile(conn, "fresh-token"), ref);
+  });
+
+  it("tests Aliyun MSE Nacos connections through configCenter without Nacos password login", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-mse-test"),
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      username: "",
+      password: "",
+      accessKeyId: "ak-test",
+      accessKeySecret: "sk-test",
+      securityToken: "sts-token",
+    };
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith({
+      ...expectedProfile(conn, "", "v1"),
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      accessKeyId: "ak-test",
+      accessKeySecret: "sk-test",
+      securityToken: "sts-token",
+    });
+    expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,9 @@ type Draft = Omit<Connection, "id"> & { id?: string };
 
 const emptyDraft = (): Draft => ({
   name: "",
+  provider: "nacos",
+  distribution: "opensource",
+  authType: "nacos-password",
   baseUrl: "http://localhost:8848/nacos",
   username: "nacos",
   password: "",
@@ -49,6 +52,17 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
+    setTestMsg(null);
+  };
+
+  const setDistribution = (distribution: Draft["distribution"]) => {
+    setDraft((d) => ({
+      ...d,
+      distribution,
+      authType: distribution === "aliyun-mse" ? "aliyun-aksk" : "nacos-password",
+      username: distribution === "aliyun-mse" ? "" : d.username || "nacos",
+      password: distribution === "aliyun-mse" ? "" : d.password,
+    }));
     setTestMsg(null);
   };
 
@@ -117,7 +131,7 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setTesting(true);
     setTestMsg(null);
     try {
-      if (draft.username) {
+      if (draft.authType === "aliyun-aksk" || draft.username) {
         const r = await testConnection({ ...(draft as Connection), id: draft.id ?? "test" });
         setTestMsg({
           ok: true,
@@ -211,6 +225,31 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 onChange={(e) => set({ name: e.target.value })}
               />
             </label>
+            <div className="field-row">
+              <label className="field">
+                <span>{t('connection.distribution')}</span>
+                <select
+                  className="search-input wide"
+                  value={draft.distribution ?? "opensource"}
+                  onChange={(e) => setDistribution(e.target.value as Draft["distribution"])}
+                >
+                  <option value="opensource">{t('connection.opensourceNacos')}</option>
+                  <option value="aliyun-mse">{t('connection.aliyunMseNacos')}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{t('connection.authType')}</span>
+                <select
+                  className="search-input wide"
+                  value={draft.authType ?? "nacos-password"}
+                  onChange={(e) => set({ authType: e.target.value as Draft["authType"] })}
+                >
+                  <option value="none">{t('connection.noAuth')}</option>
+                  <option value="nacos-password">{t('connection.nacosPasswordAuth')}</option>
+                  <option value="aliyun-aksk">{t('connection.aliyunAKSKAuth')}</option>
+                </select>
+              </label>
+            </div>
             <label className="field">
               <span>{t('connection.address')}</span>
               <input
@@ -223,42 +262,96 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 onChange={(e) => set({ baseUrl: e.target.value })}
               />
             </label>
-            <div className="field-row">
-              <label className="field">
-                <span>{t('connection.username')}</span>
-                <input
-                  className="search-input mono"
-                  value={draft.username}
-                  placeholder={t('connection.usernamePlaceholder')}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  onChange={(e) => set({ username: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span>{t('connection.password')}</span>
-                <div className="pwd-field">
+            {draft.authType !== "aliyun-aksk" && (
+              <div className="field-row">
+                <label className="field">
+                  <span>{t('connection.username')}</span>
                   <input
-                    className="search-input wide mono"
-                    type={showPwd ? "text" : "password"}
-                    value={draft.password}
+                    className="search-input mono"
+                    value={draft.username}
+                    placeholder={t('connection.usernamePlaceholder')}
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
-                    onChange={(e) => set({ password: e.target.value })}
+                    onChange={(e) => set({ username: e.target.value })}
                   />
-                  <button
-                    type="button"
-                    className="pwd-toggle"
-                    title={showPwd ? t('connection.hide') : t('connection.show')}
-                    onClick={() => setShowPwd((v) => !v)}
-                  >
-                    {showPwd ? "🙈" : "👁"}
-                  </button>
+                </label>
+                <label className="field">
+                  <span>{t('connection.password')}</span>
+                  <div className="pwd-field">
+                    <input
+                      className="search-input wide mono"
+                      type={showPwd ? "text" : "password"}
+                      value={draft.password}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(e) => set({ password: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="pwd-toggle"
+                      title={showPwd ? t('connection.hide') : t('connection.show')}
+                      onClick={() => setShowPwd((v) => !v)}
+                    >
+                      {showPwd ? "🙈" : "👁"}
+                    </button>
+                  </div>
+                </label>
+              </div>
+            )}
+            {draft.authType === "aliyun-aksk" && (
+              <>
+                <div className="field-row">
+                  <label className="field">
+                    <span>{t('connection.accessKeyId')}</span>
+                    <input
+                      className="search-input mono"
+                      value={draft.accessKeyId ?? ""}
+                      placeholder={t('connection.accessKeyIdPlaceholder')}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(e) => set({ accessKeyId: e.target.value })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t('connection.accessKeySecret')}</span>
+                    <div className="pwd-field">
+                      <input
+                        className="search-input wide mono"
+                        type={showPwd ? "text" : "password"}
+                        value={draft.accessKeySecret ?? ""}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        onChange={(e) => set({ accessKeySecret: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="pwd-toggle"
+                        title={showPwd ? t('connection.hide') : t('connection.show')}
+                        onClick={() => setShowPwd((v) => !v)}
+                      >
+                        {showPwd ? "🙈" : "👁"}
+                      </button>
+                    </div>
+                  </label>
                 </div>
-              </label>
-            </div>
+                <label className="field">
+                  <span>{t('connection.securityToken')}</span>
+                  <input
+                    className="search-input wide mono"
+                    value={draft.securityToken ?? ""}
+                    placeholder={t('connection.securityTokenPlaceholder')}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ securityToken: e.target.value })}
+                  />
+                </label>
+              </>
+            )}
             <label className="field">
               <span>{t('connection.defaultNamespace')}</span>
               <input

@@ -151,4 +151,30 @@ describe("ConnectionManager", () => {
     });
     expect(screen.getByTitle("SSH 隧道")).toBeInTheDocument();
   });
+
+  it("saves Aliyun MSE Nacos AccessKey settings", async () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("连接名称（标签）"), { target: { value: "mse-dev" } });
+    fireEvent.change(screen.getByLabelText("Nacos 类型"), { target: { value: "aliyun-mse" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "https://mse.example.com/nacos" } });
+    fireEvent.change(fieldByLabel("AccessKey ID"), { target: { value: "ak-test" } });
+    fireEvent.change(fieldByLabel("AccessKey Secret"), { target: { value: "sk-test" } });
+    fireEvent.change(fieldByLabel("Security Token（可选）"), { target: { value: "sts-token" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: "mse-dev",
+        distribution: "aliyun-mse",
+        authType: "aliyun-aksk",
+        baseUrl: "https://mse.example.com/nacos",
+        accessKeyId: "ak-test",
+        accessKeySecret: "sk-test",
+        securityToken: "sts-token",
+      }),
+    ]);
+  });
 });

@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +12,12 @@ import (
 
 	"confscope/internal/nacos"
 )
+
+func expectedProviderMSESignature(secret, namespace, group, timestamp string) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write([]byte(namespace + "+" + group + "+" + timestamp))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
 
 func newProviderIPv4Server(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
@@ -115,6 +124,47 @@ func TestNacosProviderTestsConnectionWithNamespaces(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("TestConnection returned error: %v", err)
+	}
+}
+
+func TestNacosProviderPassesMSEAuthToClient(t *testing.T) {
+	server := newProviderIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/cs/configs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Spas-AccessKey") != "ak-test" {
+			t.Fatalf("missing Spas-AccessKey header")
+		}
+		if r.Header.Get("Timestamp") == "" {
+			t.Fatalf("missing Timestamp header")
+		}
+		wantSignature := expectedProviderMSESignature("sk-test", "public", "DEFAULT_GROUP", r.Header.Get("Timestamp"))
+		if r.Header.Get("Spas-Signature") != wantSignature {
+			t.Fatalf("Spas-Signature = %q, want %q", r.Header.Get("Spas-Signature"), wantSignature)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount":0,"pageNumber":1,"pagesAvailable":0,"pageItems":[]}`))
+	}))
+
+	p := NewNacosProvider(nacos.NewClient())
+	_, err := p.ListConfigs(ConnectionProfile{
+		ID:              "conn-mse",
+		Provider:        ProviderNacos,
+		BaseURL:         server.URL,
+		APIVersion:      "v1",
+		Distribution:    DistributionAliyunMSE,
+		AuthType:        AuthAliyunAKSK,
+		AccessKeyID:     "ak-test",
+		AccessKeySecret: "sk-test",
+	}, ListConfigsRequest{
+		Namespace: "public",
+		Group:     "DEFAULT_GROUP",
+		DataID:    "app",
+		PageNo:    1,
+		PageSize:  20,
+	})
+	if err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
 	}
 }
 

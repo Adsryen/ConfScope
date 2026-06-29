@@ -10,14 +10,21 @@ import {
 } from "../../wailsjs/go/main/App";
 
 export type ProviderType = "nacos" | "apollo" | "consul" | "local";
+export type Distribution = "opensource" | "aliyun-mse";
+export type AuthType = "none" | "nacos-password" | "aliyun-aksk";
 
 export interface ConnectionProfile {
   id: string;
   name: string;
   provider: ProviderType;
+  distribution: Distribution;
+  authType: AuthType;
   baseUrl: string;
   accessToken: string;
   apiVersion: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+  securityToken: string;
   environment: string;
   safetyLevel: string;
 }

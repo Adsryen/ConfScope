@@ -18,7 +18,9 @@ const timeout = 15 * time.Second
 // Client 不保存登录态；accessToken 的缓存和刷新由前端 API 层负责，这里只根据传入
 // 的 token 和 API 版本发起请求并归一化响应。
 type Client struct {
-	http *http.Client
+	http    *http.Client
+	mseAuth MSEAuth
+	clock   func() time.Time
 }
 
 // NewClient 创建 Nacos HTTP 客户端。
@@ -32,5 +34,19 @@ func NewClient() *Client {
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Keep compatibility with existing self-signed Nacos deployments.
 			},
 		},
+		clock: time.Now,
 	}
+}
+
+func (c *Client) SetMSEAuth(auth MSEAuth) {
+	c.mseAuth = auth
+}
+
+func (c *Client) WithMSEAuth(auth MSEAuth) *Client {
+	next := *c
+	next.mseAuth = auth
+	if next.clock == nil {
+		next.clock = time.Now
+	}
+	return &next
 }
