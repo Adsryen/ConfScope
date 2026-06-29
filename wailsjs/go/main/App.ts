@@ -70,6 +70,7 @@ type GoApp = {
     group: string
   ): Promise<void>;
   CreateSSHTunnel(connectionId: string, config: any): Promise<number>;
+  TestSSHConnection(config: any): Promise<any>;
   StopSSHTunnel(connectionId: string): Promise<void>;
   StopAllSSHTunnels(): Promise<void>;
   GetSSHTunnelLocalPort(connectionId: string): Promise<number>;
@@ -191,6 +192,9 @@ export const NacosDeleteConfig = (
 
 export const CreateSSHTunnel = (connectionId: string, config: any) =>
   app().CreateSSHTunnel(connectionId, config);
+
+export const TestSSHConnection = (config: any) =>
+  app().TestSSHConnection(config);
 
 export const StopSSHTunnel = (connectionId: string) =>
   app().StopSSHTunnel(connectionId);

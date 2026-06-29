@@ -137,6 +137,20 @@ describe("connection store", () => {
     expect(loadConnections()[0]).toEqual(created);
   });
 
+  it("preserves reusable SSH profile references when persisting", () => {
+    const created = upsertConnection({
+      name: "ssh-profile",
+      baseUrl: "http://nacos.internal:8848/nacos",
+      username: "",
+      password: "",
+      defaultNamespace: "",
+      sshProfileId: "ssh-prod",
+    });
+
+    expect(loadConnections()[0]).toEqual(created);
+    expect(loadConnections()[0]).toEqual(expect.objectContaining({ sshProfileId: "ssh-prod" }));
+  });
+
   it("preserves local snapshot force and validation metadata", () => {
     const created = upsertConnection({
       name: "local-snapshot",

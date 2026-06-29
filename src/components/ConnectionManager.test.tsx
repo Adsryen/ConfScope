@@ -342,6 +342,45 @@ describe("ConnectionManager", () => {
     expect(screen.getByTitle("SSH 隧道")).toBeInTheDocument();
   });
 
+  it("saves inline SSH settings as a reusable profile and references it from the connection", async () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "ssh-dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 用户名"), { target: { value: "ops" } });
+    fireEvent.change(fieldByLabel("SSH 密码"), { target: { value: "ssh-secret" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存为 SSH 配置档案" }));
+
+    expect(screen.getByText("SSH 配置档案已保存")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "SSH 配置档案" })).toHaveDisplayValue(
+      "ssh-dev (ops@jump.example.com:22)"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const saved = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0][0];
+    expect(saved).toEqual(expect.objectContaining({
+      name: "ssh-dev",
+      sourceName: "云上内网",
+      sshProfileId: expect.stringMatching(/^ssh_/),
+    }));
+    expect(saved.sshConfig).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]")).toEqual([
+      expect.objectContaining({
+        name: "ssh-dev",
+        config: expect.objectContaining({
+          host: "jump.example.com",
+          username: "ops",
+          password: "ssh-secret",
+        }),
+      }),
+    ]);
+  });
+
   it("saves Aliyun MSE Nacos AccessKey settings", async () => {
     const onChange = vi.fn();
     renderManager(onChange);

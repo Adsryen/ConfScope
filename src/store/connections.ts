@@ -65,6 +65,8 @@ export interface Connection {
   defaultNamespace: string;
   /** SSH 隧道配置（可选） */
   sshConfig?: SSHConfig;
+  /** 全局 SSH 隧道配置档案引用；优先于 sshConfig。 */
+  sshProfileId?: string;
 }
 
 const KEY = "cs.connections";
@@ -187,5 +189,6 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     securityToken: raw.securityToken,
     defaultNamespace: raw.defaultNamespace ?? "",
     sshConfig: raw.sshConfig,
+    sshProfileId: raw.sshProfileId ?? "",
   };
 }

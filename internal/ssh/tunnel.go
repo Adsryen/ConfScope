@@ -1,6 +1,3 @@
-// Package ssh 实现 SSH 隧道连接功能。
-//
-// 支持通过 SSH 隧道访问内网的 Nacos 服务器，支持密码和密钥认证。
 package ssh
 
 import (
@@ -9,35 +6,31 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-// Config 是 SSH 隧道配置。
+// Config describes an SSH tunnel and authentication settings.
 type Config struct {
-	// SSH 服务器地址
-	Host string `json:"host"`
-	// SSH 端口，默认 22
-	Port int `json:"port"`
-	// SSH 用户名
-	Username string `json:"username"`
-	// 认证方式：password 或 key
-	AuthType string `json:"authType"`
-	// SSH 密码（password 认证时使用）
-	Password string `json:"password,omitempty"`
-	// SSH 私钥内容（key 认证时使用）
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Username   string `json:"username"`
+	AuthType   string `json:"authType"`
+	Password   string `json:"password,omitempty"`
 	PrivateKey string `json:"privateKey,omitempty"`
-	// 私钥密码（如果有）
 	Passphrase string `json:"passphrase,omitempty"`
-	// 本地端口（可选，默认自动分配）
-	LocalPort int `json:"localPort,omitempty"`
-	// 远程端口（Nacos 服务器端口）
-	RemotePort int `json:"remotePort"`
-	// 远程主机（通常是 localhost 或 127.0.0.1）
+	LocalPort  int    `json:"localPort,omitempty"`
+	RemotePort int    `json:"remotePort"`
 	RemoteHost string `json:"remoteHost"`
 }
 
-// Tunnel 是 SSH 隧道实例。
+// TestResult contains SSH login probe metadata.
+type TestResult struct {
+	LatencyMs int64 `json:"latencyMs"`
+}
+
+// Tunnel is a running SSH tunnel instance.
 type Tunnel struct {
 	config    Config
 	sshClient *ssh.Client
@@ -47,15 +40,12 @@ type Tunnel struct {
 	closed    bool
 }
 
-// NewTunnel 创建新的 SSH 隧道实例。
 func NewTunnel(config Config) *Tunnel {
 	return &Tunnel{
 		config: config,
 	}
 }
 
-// Start 启动 SSH 隧道。
-// 返回本地监听端口，如果配置中指定了本地端口则使用指定端口，否则自动分配。
 func (t *Tunnel) Start() (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -64,13 +54,11 @@ func (t *Tunnel) Start() (int, error) {
 		return 0, fmt.Errorf("tunnel is closed")
 	}
 
-	// 创建 SSH 客户端配置
 	sshConfig, err := t.createSSHConfig()
 	if err != nil {
 		return 0, fmt.Errorf("failed to create SSH config: %w", err)
 	}
 
-	// 连接 SSH 服务器
 	addr := net.JoinHostPort(t.config.Host, strconv.Itoa(t.config.Port))
 	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
@@ -78,7 +66,6 @@ func (t *Tunnel) Start() (int, error) {
 	}
 	t.sshClient = sshClient
 
-	// 创建本地监听器
 	localAddr := net.JoinHostPort("localhost", strconv.Itoa(t.config.LocalPort))
 	listener, err := net.Listen("tcp", localAddr)
 	if err != nil {
@@ -86,17 +73,13 @@ func (t *Tunnel) Start() (int, error) {
 		return 0, fmt.Errorf("failed to listen on local port: %w", err)
 	}
 	t.listener = listener
-
-	// 获取实际监听端口
 	t.localPort = listener.Addr().(*net.TCPAddr).Port
 
-	// 启动转发协程
 	go t.forward()
 
 	return t.localPort, nil
 }
 
-// Stop 停止 SSH 隧道。
 func (t *Tunnel) Stop() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -110,47 +93,53 @@ func (t *Tunnel) Stop() {
 	}
 }
 
-// GetLocalPort 获取本地监听端口。
 func (t *Tunnel) GetLocalPort() int {
 	return t.localPort
 }
 
-// createSSHConfig 创建 SSH 客户端配置。
 func (t *Tunnel) createSSHConfig() (*ssh.ClientConfig, error) {
-	config := &ssh.ClientConfig{
-		User:            t.config.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: 生产环境应该验证主机密钥
+	return createSSHConfig(t.config)
+}
+
+func createSSHConfig(config Config) (*ssh.ClientConfig, error) {
+	sshConfig := &ssh.ClientConfig{
+		User:            config.Username,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: verify host keys before production use.
+		Timeout:         10 * time.Second,
 	}
 
-	switch t.config.AuthType {
+	switch config.AuthType {
 	case "password":
-		config.Auth = []ssh.AuthMethod{
-			ssh.Password(t.config.Password),
+		sshConfig.Auth = []ssh.AuthMethod{
+			ssh.Password(config.Password),
 		}
 	case "key":
-		signer, err := t.parsePrivateKey()
+		signer, err := parsePrivateKey(config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse private key: %w", err)
 		}
-		config.Auth = []ssh.AuthMethod{
+		sshConfig.Auth = []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		}
 	default:
-		return nil, fmt.Errorf("unsupported auth type: %s", t.config.AuthType)
+		return nil, fmt.Errorf("unsupported auth type: %s", config.AuthType)
 	}
 
-	return config, nil
+	return sshConfig, nil
 }
 
-// parsePrivateKey 解析私钥。
 func (t *Tunnel) parsePrivateKey() (ssh.Signer, error) {
+	return parsePrivateKey(t.config)
+}
+
+func parsePrivateKey(config Config) (ssh.Signer, error) {
 	var signer ssh.Signer
 	var err error
 
-	if t.config.Passphrase != "" {
-		signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(t.config.PrivateKey), []byte(t.config.Passphrase))
+	if config.Passphrase != "" {
+		signer, err = ssh.ParsePrivateKeyWithPassphrase([]byte(config.PrivateKey), []byte(config.Passphrase))
 	} else {
-		signer, err = ssh.ParsePrivateKey([]byte(t.config.PrivateKey))
+		signer, err = ssh.ParsePrivateKey([]byte(config.PrivateKey))
 	}
 
 	if err != nil {
@@ -160,7 +149,28 @@ func (t *Tunnel) parsePrivateKey() (ssh.Signer, error) {
 	return signer, nil
 }
 
-// forward 执行端口转发。
+// TestConnection verifies that the SSH server can be reached and authenticated.
+func TestConnection(config Config) (TestResult, error) {
+	startedAt := time.Now()
+	if config.Port <= 0 {
+		config.Port = 22
+	}
+
+	sshConfig, err := createSSHConfig(config)
+	if err != nil {
+		return TestResult{LatencyMs: time.Since(startedAt).Milliseconds()}, fmt.Errorf("failed to create SSH config: %w", err)
+	}
+
+	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
+	client, err := ssh.Dial("tcp", addr, sshConfig)
+	if err != nil {
+		return TestResult{LatencyMs: time.Since(startedAt).Milliseconds()}, fmt.Errorf("failed to connect to SSH server: %w", err)
+	}
+	defer client.Close()
+
+	return TestResult{LatencyMs: time.Since(startedAt).Milliseconds()}, nil
+}
+
 func (t *Tunnel) forward() {
 	for {
 		conn, err := t.listener.Accept()
@@ -178,11 +188,9 @@ func (t *Tunnel) forward() {
 	}
 }
 
-// handleConnection 处理单个连接。
 func (t *Tunnel) handleConnection(localConn net.Conn) {
 	defer localConn.Close()
 
-	// 连接远程服务
 	remoteAddr := net.JoinHostPort(t.config.RemoteHost, strconv.Itoa(t.config.RemotePort))
 	remoteConn, err := t.sshClient.Dial("tcp", remoteAddr)
 	if err != nil {
@@ -190,7 +198,6 @@ func (t *Tunnel) handleConnection(localConn net.Conn) {
 	}
 	defer remoteConn.Close()
 
-	// 双向复制数据
 	done := make(chan struct{}, 2)
 
 	go func() {

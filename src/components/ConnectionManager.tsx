@@ -12,6 +12,13 @@ import {
   renameProject,
   upsertConnection,
 } from "../store/connections";
+import {
+  loadSSHProfiles,
+  normalizeSSHConfig,
+  sshProfileLabel,
+  upsertSSHProfile,
+  type SSHProfile,
+} from "../store/sshProfiles";
 import { clearToken, testConnection } from "../api/nacos";
 import {
   selectLocalSnapshotDirectory,
@@ -45,6 +52,7 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   password: "",
   defaultNamespace: "",
   sshConfig: undefined,
+  sshProfileId: "",
 });
 
 type HelpPopover = { text: string; top: number; left: number };
@@ -122,6 +130,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const { t } = useTranslation();
   const defaultNewEnvironment = t('connection.environmentDev');
   const [list, setList] = useState<Connection[]>(loadConnections());
+  const [sshProfiles, setSSHProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
   const [draft, setDraft] = useState<Draft>(emptyDraft(defaultNewEnvironment));
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
@@ -172,6 +181,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const setSSH = (patch: Partial<SSHConfig>) => {
     setDraft((d) => ({
       ...d,
+      sshProfileId: "",
       sshConfig: {
         host: "",
         port: 22,
@@ -184,9 +194,59 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setTestMsg(null);
   };
 
+  const selectedSSHProfile = sshProfiles.find((profile) => profile.id === draft.sshProfileId);
+
+  const setSSHProfile = (profileId: string) => {
+    if (!profileId) {
+      setDraft((d) => ({
+        ...d,
+        sshProfileId: "",
+        sshConfig: d.sshConfig ?? {
+          host: "",
+          port: 22,
+          username: "root",
+          authType: "password",
+        },
+      }));
+      setShowSSHConfig(true);
+      setTestMsg(null);
+      return;
+    }
+    setDraft((d) => ({ ...d, sshProfileId: profileId, sshConfig: undefined }));
+    setShowSSHConfig(true);
+    setTestMsg(null);
+  };
+
+  const copySSHProfileToInline = () => {
+    if (!selectedSSHProfile) return;
+    setDraft((d) => ({
+      ...d,
+      sshProfileId: "",
+      sshConfig: { ...selectedSSHProfile.config },
+    }));
+    setShowSSHConfig(true);
+    setTestMsg(null);
+  };
+
+  const saveInlineSSHAsProfile = () => {
+    const config = normalizeSSHConfig(draft.sshConfig);
+    if (!config.host.trim() || !config.username.trim()) {
+      setTestMsg({ ok: false, text: t('connection.sshProfileRequired') });
+      return;
+    }
+    const profile = upsertSSHProfile({
+      name: draft.name?.trim() || draft.sourceName?.trim() || `${config.username}@${config.host}`,
+      config,
+    });
+    setSSHProfiles(loadSSHProfiles());
+    setDraft((d) => ({ ...d, sshProfileId: profile.id, sshConfig: undefined }));
+    setShowSSHConfig(true);
+    setTestMsg({ ok: true, text: t('connection.sshProfileSaved') });
+  };
+
   const setAccessMode = (mode: "direct" | "ssh") => {
     if (mode === "direct") {
-      setDraft((d) => ({ ...d, sourceType: "nacos", sshConfig: undefined }));
+      setDraft((d) => ({ ...d, sourceType: "nacos", sshConfig: undefined, sshProfileId: "" }));
       setShowSSHConfig(false);
       setTestMsg(null);
       return;
@@ -195,7 +255,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setDraft((d) => ({
       ...d,
       sourceType: "nacos",
-      sshConfig: d.sshConfig ?? {
+      sshConfig: d.sshProfileId ? undefined : d.sshConfig ?? {
         host: "",
         port: 22,
         username: "root",
@@ -239,7 +299,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       ? [currentEnvironment, ...environmentPresets]
       : environmentPresets)
   );
-  const accessMode = showSSHConfig || draft.sshConfig ? "ssh" : "direct";
+  const accessMode = showSSHConfig || draft.sshConfig || draft.sshProfileId ? "ssh" : "direct";
   const nacosSourceNamePresets = [
     { label: t('connection.sourcePresetPublic'), mode: "direct" as const },
     { label: t('connection.sourcePresetCloudIntranet'), mode: "direct" as const },
@@ -317,7 +377,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       checkedAt: c.localValidation.checkedAt,
     } : null);
     setConfirmDel(null);
-    setShowSSHConfig(!!c.sshConfig?.host);
+    setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
   };
 
   const selectContext = (projectName: string, environmentName?: string) => {
@@ -369,6 +429,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     }
     // SSH 配置：host 为空则不保存
     const toSave = { ...draft };
+    if (toSave.sshProfileId) {
+      toSave.sshConfig = undefined;
+    }
     if (toSave.sshConfig && !toSave.sshConfig.host?.trim()) {
       toSave.sshConfig = undefined;
     } else if (toSave.sshConfig) {
@@ -595,7 +658,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           <div className="conn-item-name">
                             {connectionSourceName(c)}
                             {c.isDefaultSource && <span className="conn-ssh-badge">{t('connection.defaultSource')}</span>}
-                            {c.sshConfig && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
+                            {(c.sshConfig || c.sshProfileId) && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
                           </div>
                           <div className="conn-item-url">
                             <span>{c.sourceType === "local-snapshot" ? t('connection.sourceTypeSnapshot') : t('connection.sourceTypeNacos')}</span>
@@ -998,11 +1061,42 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 onClick={() => setShowSSHConfig(!showSSHConfig)}
               >
                 {showSSHConfig ? "▼" : "▶"} {t('connection.sshConfig')}
-                {draft.sshConfig?.host && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
+                {(draft.sshConfig?.host || selectedSSHProfile) && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
               </button>
 
               {showSSHConfig && (
                 <div className="ssh-config">
+                  <label className="field">
+                    <FieldLabel {...fieldLabelProps} tip={t('connection.sshProfileHelp')}>{t('connection.sshProfile')}</FieldLabel>
+                    <select
+                      className="search-input wide"
+                      value={draft.sshProfileId ?? ""}
+                      onChange={(e) => setSSHProfile(e.target.value)}
+                    >
+                      <option value="">{t('connection.sshProfileInline')}</option>
+                      {sshProfiles.map((profile) => (
+                        <option value={profile.id} key={profile.id}>
+                          {sshProfileLabel(profile)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {selectedSSHProfile && (
+                    <div className="ssh-profile-summary">
+                      <div className="ssh-profile-title">{sshProfileLabel(selectedSSHProfile)}</div>
+                      <div className="ssh-profile-meta">
+                        {selectedSSHProfile.config.authType === "key" ? t('connection.keyAuth') : t('connection.passwordAuth')}
+                        {selectedSSHProfile.config.localPort ? ` / localhost:${selectedSSHProfile.config.localPort}` : ""}
+                      </div>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={copySSHProfileToInline}>
+                        {t('connection.sshProfileCopyInline')}
+                      </button>
+                    </div>
+                  )}
+
+                  {!selectedSSHProfile && (
+                    <>
                   <label className="field">
                     <FieldLabel {...fieldLabelProps} required tip={t('connection.sshHostHelp')}>{t('connection.sshHost')}</FieldLabel>
                     <input
@@ -1115,13 +1209,23 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
+                    onClick={saveInlineSSHAsProfile}
+                  >
+                    {t('connection.sshProfileSave')}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
                     onClick={() => {
-                      setDraft((d) => ({ ...d, sshConfig: undefined }));
+                      setDraft((d) => ({ ...d, sshConfig: undefined, sshProfileId: "" }));
                       setShowSSHConfig(false);
                     }}
                   >
                     {t('connection.removeSSH')}
                   </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>}
