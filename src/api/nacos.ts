@@ -35,6 +35,7 @@ export async function resolveBaseUrl(conn: Connection): Promise<string> {
   // 解析原始 baseUrl，提取 context-path 和协议
   const url = new URL(conn.baseUrl);
   const contextPath = url.pathname;
+  const remotePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
 
   // 创建 SSH 隧道
   const localPort = await CreateSSHTunnel(conn.id, {
@@ -46,8 +47,8 @@ export async function resolveBaseUrl(conn: Connection): Promise<string> {
     privateKey: conn.sshConfig.privateKey || "",
     passphrase: conn.sshConfig.passphrase || "",
     localPort: conn.sshConfig.localPort || 0,
-    remotePort: conn.sshConfig.remotePort,
-    remoteHost: conn.sshConfig.remoteHost,
+    remotePort,
+    remoteHost: url.hostname,
   });
 
   // 用本地隧道端口替换原始 URL 的端口

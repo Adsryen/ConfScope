@@ -100,8 +100,6 @@ describe("connection store", () => {
         username: "ops",
         authType: "password",
         password: "secret",
-        remoteHost: "127.0.0.1",
-        remotePort: 8848,
       },
     };
 

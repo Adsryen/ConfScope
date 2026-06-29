@@ -17,10 +17,10 @@ export interface SSHConfig {
   passphrase?: string;
   /** 本地端口（可选，默认自动分配） */
   localPort?: number;
-  /** 远程端口（Nacos 服务器端口） */
-  remotePort: number;
-  /** 远程主机（通常是 localhost 或 127.0.0.1） */
-  remoteHost: string;
+  /** @deprecated 从连接 baseUrl 自动推导，仅保留用于兼容旧本地数据。 */
+  remotePort?: number;
+  /** @deprecated 从连接 baseUrl 自动推导，仅保留用于兼容旧本地数据。 */
+  remoteHost?: string;
 }
 
 export type ProviderType = "nacos" | "apollo" | "consul" | "local";

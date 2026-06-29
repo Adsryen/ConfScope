@@ -87,8 +87,6 @@
     "passwordAuth": "Password Auth",
     "keyAuth": "Key Auth",
     "sshPassword": "SSH Password",
-    "remoteHost": "Remote Host",
-    "remotePort": "Remote Port",
     "localPort": "Local Port (optional, auto-assign if empty)",
     "localPortPlaceholder": "Leave empty for auto-assign",
     "removeSSH": "Remove SSH Config",

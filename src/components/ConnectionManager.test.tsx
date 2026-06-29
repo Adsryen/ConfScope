@@ -130,8 +130,6 @@ describe("ConnectionManager", () => {
     fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
     fireEvent.change(fieldByLabel("SSH 用户名"), { target: { value: "ops" } });
     fireEvent.change(fieldByLabel("SSH 密码"), { target: { value: "ssh-secret" } });
-    fireEvent.change(fieldByLabel("远程主机"), { target: { value: "127.0.0.1" } });
-    fireEvent.change(fieldByLabel("远程端口"), { target: { value: "8849" } });
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
@@ -143,8 +141,6 @@ describe("ConnectionManager", () => {
             host: "jump.example.com",
             username: "ops",
             password: "ssh-secret",
-            remoteHost: "127.0.0.1",
-            remotePort: 8849,
           }),
         }),
       ]);
