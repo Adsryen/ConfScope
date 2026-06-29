@@ -27,6 +27,7 @@ const tunnelUrlCache = new Map<string, string>();
 
 /** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
 export async function resolveBaseUrl(conn: Connection): Promise<string> {
+  if (conn.sourceType === "local-snapshot") return conn.localPath || conn.baseUrl;
   if (!conn.sshConfig) return conn.baseUrl;
 
   const cached = tunnelUrlCache.get(conn.id);
@@ -123,6 +124,7 @@ const versionCache = new Map<string, ApiVersion>();
 
 /** 探测并缓存连接的 Nacos API 版本（v1=1.x/2.x，v3=3.x）。 */
 export async function getVersion(conn: Connection): Promise<ApiVersion> {
+  if (conn.sourceType === "local-snapshot") return "v1";
   if (conn.authType === "aliyun-aksk") return "v1";
   const hit = versionCache.get(conn.baseUrl);
   if (hit) return hit;
@@ -143,6 +145,7 @@ const tokenCache = new Map<string, CachedToken>();
 /** 拿到一个可用的 accessToken：缓存命中且未过期直接返回，否则登录刷新。
  *  未填账号（未开启鉴权）的连接返回空串。 */
 export async function getToken(conn: Connection, force = false): Promise<string> {
+  if (conn.sourceType === "local-snapshot") return "";
   if (!conn.username) return "";
   const cached = tokenCache.get(conn.id);
   if (!force && cached && Date.now() < cached.expireAt) return cached.token;
@@ -188,6 +191,10 @@ async function withProfile<T>(
   conn: Connection,
   call: (profile: ConnectionProfile) => Promise<T>
 ): Promise<T> {
+  if (conn.sourceType === "local-snapshot") {
+    const baseUrl = await resolveBaseUrl(conn);
+    return call(toConnectionProfile(conn, baseUrl, "", "v1"));
+  }
   const apiVersion = await getVersion(conn);
   const accessToken = await getToken(conn);
   const baseUrl = await resolveBaseUrl(conn);
@@ -213,9 +220,9 @@ function toConnectionProfile(
   return {
     id: conn.id,
     name: conn.name,
-    provider: "nacos",
+    provider: conn.sourceType === "local-snapshot" ? "local" : "nacos",
     distribution: conn.distribution ?? "opensource",
-    authType: conn.authType ?? (conn.username ? "nacos-password" : "none"),
+    authType: conn.sourceType === "local-snapshot" ? "none" : conn.authType ?? (conn.username ? "nacos-password" : "none"),
     baseUrl,
     accessToken,
     apiVersion,
@@ -229,7 +236,7 @@ function toConnectionProfile(
 
 function toConfigRef(conn: Connection, namespace: string, dataId: string, group: string): ConfigRef {
   return {
-    provider: "nacos",
+    provider: conn.sourceType === "local-snapshot" ? "local" : "nacos",
     connectionId: conn.id,
     namespace,
     group,
@@ -290,6 +297,11 @@ function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): Histo
 
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
+  if (conn.sourceType === "local-snapshot") {
+    const baseUrl = await resolveBaseUrl(conn);
+    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, "", "v1"));
+    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+  }
   if (conn.authType === "aliyun-aksk") {
     const apiVersion = await getVersion(conn);
     const baseUrl = await resolveBaseUrl(conn);
@@ -360,6 +372,9 @@ export async function publishConfig(
   content: string,
   configType: string
 ): Promise<void> {
+  if (conn.sourceType === "local-snapshot") {
+    throw new Error("本地快照来源只读，不能发布配置");
+  }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
     NacosPublishConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
@@ -372,6 +387,9 @@ export async function deleteConfig(
   dataId: string,
   group: string
 ): Promise<void> {
+  if (conn.sourceType === "local-snapshot") {
+    throw new Error("本地快照来源只读，不能删除配置");
+  }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
     NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)

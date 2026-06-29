@@ -4,11 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"confscope/internal/nacos"
 	"confscope/internal/provider"
 	"confscope/internal/ssh"
 	"confscope/internal/updatecheck"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 var appVersion = "1.0.0"
@@ -19,6 +25,16 @@ type AppInfo struct {
 	Name          string               `json:"name"`
 	Version       string               `json:"version"`
 	UpdateSources []updatecheck.Source `json:"updateSources"`
+}
+
+type LocalSnapshotValidation struct {
+	Valid          bool     `json:"valid"`
+	Path           string   `json:"path"`
+	Message        string   `json:"message"`
+	ConfigCount    int      `json:"configCount"`
+	HasManifest    bool     `json:"hasManifest"`
+	MatchedMarkers []string `json:"matchedMarkers"`
+	CheckedAt      string   `json:"checkedAt"`
 }
 
 // App 是 Wails 暴露给前端的应用服务。
@@ -40,6 +56,7 @@ func NewApp() *App {
 		sshMgr: ssh.NewManager(),
 		providers: map[provider.ProviderType]provider.ConfigProvider{
 			provider.ProviderNacos: provider.NewNacosProvider(nacosClient),
+			provider.ProviderLocal: provider.NewLocalProvider(),
 		},
 	}
 }
@@ -131,6 +148,19 @@ func (a *App) CheckForUpdates(req updatecheck.Request) updatecheck.Result {
 		req.CurrentVersion = appVersion
 	}
 	return updatecheck.Check(context.Background(), req)
+}
+
+func (a *App) SelectLocalSnapshotDirectory() (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("wails runtime is not ready")
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择本地快照目录",
+	})
+}
+
+func (a *App) ValidateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
+	return validateLocalSnapshotDirectory(path)
 }
 
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。
@@ -257,4 +287,99 @@ func (a *App) StopAllSSHTunnels() {
 // GetSSHTunnelLocalPort 获取指定连接的 SSH 隧道本地端口。
 func (a *App) GetSSHTunnelLocalPort(connectionId string) (int, error) {
 	return a.sshMgr.GetLocalPort(connectionId)
+}
+
+func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
+	result := LocalSnapshotValidation{
+		Path:      strings.TrimSpace(path),
+		CheckedAt: time.Now().Format(time.RFC3339),
+	}
+	if result.Path == "" {
+		result.Message = "本地快照目录不能为空"
+		return result
+	}
+
+	info, err := os.Stat(result.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			result.Message = "目录不存在"
+		} else {
+			result.Message = err.Error()
+		}
+		return result
+	}
+	if !info.IsDir() {
+		result.Message = "路径不是文件夹"
+		return result
+	}
+
+	manifestNames := map[string]struct{}{
+		"confscope.snapshot.json": {},
+		"manifest.json":           {},
+		"metadata.json":           {},
+		".metadata.yml":           {},
+		".metadata.yaml":          {},
+	}
+	structureDirs := map[string]struct{}{
+		"configs":    {},
+		"namespaces": {},
+	}
+	configExts := map[string]struct{}{
+		".json":       {},
+		".yaml":       {},
+		".yml":        {},
+		".properties": {},
+		".xml":        {},
+		".toml":       {},
+		".ini":        {},
+		".txt":        {},
+	}
+
+	entries, err := os.ReadDir(result.Path)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	for _, entry := range entries {
+		name := strings.ToLower(entry.Name())
+		if entry.IsDir() {
+			if _, ok := structureDirs[name]; ok {
+				result.MatchedMarkers = append(result.MatchedMarkers, entry.Name()+"/")
+			}
+			continue
+		}
+		if _, ok := manifestNames[name]; ok {
+			result.HasManifest = true
+			result.MatchedMarkers = append(result.MatchedMarkers, entry.Name())
+		}
+	}
+
+	configCount := 0
+	_ = filepath.WalkDir(result.Path, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(d.Name())
+		if _, ok := manifestNames[name]; ok {
+			return nil
+		}
+		if _, ok := configExts[strings.ToLower(filepath.Ext(path))]; ok {
+			configCount++
+		}
+		return nil
+	})
+	result.ConfigCount = configCount
+
+	if !result.HasManifest && len(result.MatchedMarkers) == 0 {
+		result.Message = "未找到快照清单或标准目录结构"
+		return result
+	}
+	if result.ConfigCount == 0 {
+		result.Message = "未找到可对比的配置文件"
+		return result
+	}
+
+	result.Valid = true
+	result.Message = "本地快照目录结构有效"
+	return result
 }
