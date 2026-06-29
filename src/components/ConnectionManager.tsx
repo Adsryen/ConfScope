@@ -15,6 +15,7 @@ import { useTranslation } from "../i18n";
 interface Props {
   onClose: () => void;
   onChange: (conns: Connection[]) => void;
+  embedded?: boolean;
 }
 
 type Draft = Omit<Connection, "id"> & { id?: string };
@@ -38,7 +39,7 @@ const emptyDraft = (): Draft => ({
   sshConfig: undefined,
 });
 
-export default function ConnectionManager({ onClose, onChange }: Props) {
+export default function ConnectionManager({ onClose, onChange, embedded = false }: Props) {
   const { t } = useTranslation();
   const [list, setList] = useState<Connection[]>(loadConnections());
   const [draft, setDraft] = useState<Draft>(emptyDraft());
@@ -53,12 +54,13 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
 
   // Esc 关闭弹框
   useEffect(() => {
+    if (embedded) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [embedded, onClose]);
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -187,17 +189,21 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     }
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+  const content = (
+    <>
+      <div className={embedded ? "page-header" : "modal-header"}>
+        <div>
           <h3>{t('connection.title')}</h3>
+          {embedded && <div className="page-subtitle">{t('connection.pageSubtitle')}</div>}
+        </div>
+        {!embedded && (
           <button className="modal-x" onClick={onClose} title={t('common.close')}>
             ×
           </button>
-        </div>
+        )}
+      </div>
 
-        <div className="modal-body conn-mgr">
+      <div className={embedded ? "conn-mgr conn-mgr-page" : "modal-body conn-mgr"}>
           <div className="conn-list">
             <div className="conn-list-title">{t('connection.savedConnections')}</div>
             {list.length === 0 && <div className="conn-empty">{t('connection.noConnections')}</div>}
@@ -618,8 +624,19 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
               </button>
             </div>
           </div>
-        </div>
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="page-surface connection-page">{content}</div>;
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        {content}
+    </div>
     </div>
   );
 }

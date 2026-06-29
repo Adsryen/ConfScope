@@ -10,10 +10,73 @@ import Select from "./components/Select";
 import Toaster from "./components/Toaster";
 import LanguageSwitch from "./components/LanguageSwitch";
 
-type Mode = "browse" | "diff";
+type Mode = "browse" | "diff" | "connections" | "audit" | "backup" | "tasks" | "settings" | "about";
+
+const navIconPath: Record<Mode, string[]> = {
+  browse: [
+    "M4 5h16",
+    "M4 10h16",
+    "M4 15h10",
+    "M4 20h8",
+  ],
+  diff: [
+    "M6 4v5c0 2 1 3 3 3h6",
+    "M6 20v-5c0-2 1-3 3-3h6",
+    "M15 8l4 4-4 4",
+  ],
+  connections: [
+    "M5 5h9v6H5z",
+    "M10 11v4",
+    "M10 18h4",
+    "M17 15h2a2 2 0 012 2v1a2 2 0 01-2 2h-2a2 2 0 01-2-2v-1a2 2 0 012-2z",
+    "M7 8h5",
+  ],
+  audit: [
+    "M4 5h16v14H4z",
+    "M4 10h16",
+    "M9 5v14",
+    "M15 5v14",
+  ],
+  backup: [
+    "M5 7c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z",
+    "M5 7v8c0 1.7 3.1 3 7 3s7-1.3 7-3V7",
+    "M5 11c0 1.7 3.1 3 7 3s7-1.3 7-3",
+    "M16 17l3 3",
+    "M19 17l-3 3",
+  ],
+  tasks: [
+    "M5 7l2 2 4-4",
+    "M13 8h6",
+    "M5 16l2 2 4-4",
+    "M13 17h6",
+  ],
+  settings: [
+    "M5 7h14",
+    "M5 12h14",
+    "M5 17h14",
+    "M9 5v4",
+    "M15 10v4",
+    "M11 15v4",
+  ],
+  about: [
+    "M12 11v6",
+    "M12 7h.01",
+    "M12 22a10 10 0 100-20 10 10 0 000 20z",
+  ],
+};
+
+function NavIcon({ mode }: { mode: Mode }) {
+  return (
+    <svg className="side-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {navIconPath[mode].map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
 
 const UI_KEY = "cs.ui";
-function loadUI(): { connId?: string; mode?: Mode } {
+function loadUI(): { connId?: string; mode?: Mode; sidebarCollapsed?: boolean } {
   try {
     return JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   } catch {
@@ -32,9 +95,11 @@ export default function App() {
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
-  const [mode, setMode] = useState<Mode>(ui0.mode === "diff" ? "diff" : "browse");
-  const [showConnMgr, setShowConnMgr] = useState(connections.length === 0);
-  const [showAbout, setShowAbout] = useState(false);
+  const knownMode = ["browse", "diff", "connections", "audit", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
+    ? ui0.mode!
+    : "browse";
+  const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
 
@@ -42,8 +107,8 @@ export default function App() {
 
   // 记住上次的连接与模式
   useEffect(() => {
-    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode }));
-  }, [activeConnId, mode]);
+    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode, sidebarCollapsed }));
+  }, [activeConnId, mode, sidebarCollapsed]);
 
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {
@@ -79,107 +144,157 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConnId, nsReload]);
 
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar-left">
-          <div className="mode-switch">
-            <button
-              className={`mode-btn${mode === "browse" ? " active" : ""}`}
-              onClick={() => setMode("browse")}
-            >
-              {t('app.title')}
+  const navItems: { mode: Mode; label: string; unavailable?: boolean }[] = [
+    { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
+    { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
+    { mode: "connections", label: t('app.connectionManage') },
+    { mode: "audit", label: t('app.audit'), unavailable: true },
+    { mode: "backup", label: t('app.backup'), unavailable: true },
+    { mode: "tasks", label: t('app.tasks'), unavailable: true },
+    { mode: "settings", label: t('app.settings'), unavailable: true },
+    { mode: "about", label: t('app.about') },
+  ];
+
+  const plannedPage = (title: string, description: string) => (
+    <div className="planned-page">
+      <div className="planned-badge">{t('app.planned')}</div>
+      <h2>{title}</h2>
+      <p>{description}</p>
+    </div>
+  );
+
+  const settingsPage = (
+    <div className="page-surface settings-page">
+      <div className="page-header">
+        <div>
+          <h3>{t('app.settings')}</h3>
+          <div className="page-subtitle">{t('app.settingsSubtitle')}</div>
+        </div>
+      </div>
+      <div className="settings-body">
+        <section className="settings-section">
+          <h4>{t('app.language')}</h4>
+          <LanguageSwitch />
+        </section>
+        <section className="settings-section muted">
+          <span className="planned-badge">{t('app.planned')}</span>
+          <p>{t('app.settingsPlanned')}</p>
+        </section>
+      </div>
+    </div>
+  );
+
+  const browsePage = (
+    <div className="page-surface browse-page">
+      <div className="page-header browse-header">
+        <div>
+          <h3>{t('app.title')}</h3>
+          <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t('app.selectConnection')}</div>
+        </div>
+        <div className="page-actions">
+          <Select
+            value={activeConnId}
+            disabled={connections.length === 0}
+            title={t('app.connection')}
+            options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
+            onChange={setActiveConnId}
+          />
+          <Select
+            value={tenant}
+            disabled={!activeConn || nsLoading}
+            title={t('app.namespace')}
+            options={[
+              { value: "", label: nsLoading ? t('app.namespaceLoading') : t('app.namespaceDefault') },
+              ...namespaces
+                .filter((n) => n.namespace)
+                .map((n) => ({
+                  value: n.namespace,
+                  label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
+                })),
+            ]}
+            onChange={setTenant}
+          />
+        </div>
+      </div>
+      {!activeConn ? (
+        <div className="pad-msg big">{t('app.selectConnection')}</div>
+      ) : nsError ? (
+        <div className="pad-msg big err">
+          {t('app.cannotConnect', { name: activeConn.name })}
+          <div className="diff-hint">{nsError}</div>
+          <div className="err-actions">
+            <button className="btn btn-primary" onClick={() => setNsReload((x) => x + 1)}>
+              {t('common.retry')}
             </button>
-            <button
-              className={`mode-btn${mode === "diff" ? " active" : ""}`}
-              onClick={() => setMode("diff")}
-            >
-              {t('app.diff')}
+            <button className="btn btn-ghost" onClick={() => setMode("connections")}>
+              {t('app.connectionManage')}
             </button>
           </div>
         </div>
+      ) : (
+        <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} />
+      )}
+    </div>
+  );
 
-        <div className="topbar-controls">
-          {mode === "browse" && (
-            <>
-              <Select
-                value={activeConnId}
-                disabled={connections.length === 0}
-                title={t('app.connection')}
-                options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
-                onChange={setActiveConnId}
-              />
-
-              <Select
-                value={tenant}
-                disabled={!activeConn || nsLoading}
-                title={t('app.namespace')}
-                options={[
-                  { value: "", label: nsLoading ? t('app.namespaceLoading') : t('app.namespaceDefault') },
-                  ...namespaces
-                    .filter((n) => n.namespace)
-                    .map((n) => ({
-                      value: n.namespace,
-                      label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
-                    })),
-                ]}
-                onChange={setTenant}
-              />
-            </>
-          )}
-
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowConnMgr(true)}>
-            {t('app.connectionManage')}
+  return (
+    <div className="app-shell">
+      <div className="app-main">
+        <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
+          <button
+            className="sidebar-toggle"
+            title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+          >
+            {sidebarCollapsed ? ">" : "<"}
           </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowAbout(true)}>
-            {t('app.about')}
-          </button>
-          <LanguageSwitch />
-        </div>
-      </header>
+          <nav className="side-nav">
+            {navItems.map((item) => (
+              <button
+                key={item.mode}
+                className={`side-nav-item${mode === item.mode ? " active" : ""}`}
+                title={sidebarCollapsed ? item.label : undefined}
+                onClick={() => setMode(item.mode)}
+              >
+                <NavIcon mode={item.mode} />
+                <span className="side-label">{item.label}</span>
+                {item.unavailable && <span className="nav-planned">{t('app.planned')}</span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      <main className="workspace">
-        {connections.length === 0 ? (
+        <main className="workspace">
+        {mode === "connections" ? (
+          <ConnectionManager
+            embedded
+            onClose={() => setMode(connections.length ? "browse" : "connections")}
+            onChange={(conns) => setConnections(conns)}
+          />
+        ) : mode === "audit" ? (
+          plannedPage(t('app.audit'), t('app.auditPlanned'))
+        ) : mode === "backup" ? (
+          plannedPage(t('app.backup'), t('app.backupPlanned'))
+        ) : mode === "tasks" ? (
+          plannedPage(t('app.tasks'), t('app.tasksPlanned'))
+        ) : mode === "settings" ? (
+          settingsPage
+        ) : connections.length === 0 ? (
           <div className="pad-msg big">
             {t('app.noConnection')}
-            <button className="btn btn-primary" onClick={() => setShowConnMgr(true)}>
+            <button className="btn btn-primary" onClick={() => setMode("connections")}>
               {t('app.addConnection')}
             </button>
           </div>
         ) : mode === "browse" ? (
-          !activeConn ? (
-            <div className="pad-msg big">{t('app.selectConnection')}</div>
-          ) : nsError ? (
-            <div className="pad-msg big err">
-              {t('app.cannotConnect', { name: activeConn.name })}
-              <div className="diff-hint">{nsError}</div>
-              <div className="err-actions">
-                <button className="btn btn-primary" onClick={() => setNsReload((x) => x + 1)}>
-                  {t('common.retry')}
-                </button>
-                <button className="btn btn-ghost" onClick={() => setShowConnMgr(true)}>
-                  {t('app.connectionManage')}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} />
-          )
-        ) : (
+          browsePage
+        ) : mode === "diff" ? (
           <DiffView connections={connections} />
-        )}
-      </main>
-
-      {showConnMgr && (
-        <ConnectionManager
-          onClose={() => setShowConnMgr(false)}
-          onChange={(conns) => setConnections(conns)}
-        />
-      )}
-
-      {showAbout && (
-        <About onClose={() => setShowAbout(false)} />
-      )}
+        ) : mode === "about" ? (
+          <About embedded />
+        ) : null}
+        </main>
+      </div>
 
       <Toaster />
     </div>

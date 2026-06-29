@@ -4,10 +4,11 @@ import { useTranslation } from "../i18n";
 import { loadSettings, updateProxySettings, type ProxySettings } from "../store/settings";
 
 interface AboutProps {
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }
 
-export default function About({ onClose }: AboutProps) {
+export default function About({ onClose = () => {}, embedded = false }: AboutProps) {
   const { t } = useTranslation();
   const [appInfo, setAppInfo] = useState<AppInfo>({
     name: "ConfScope",
@@ -19,12 +20,13 @@ export default function About({ onClose }: AboutProps) {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
 
   useEffect(() => {
+    if (embedded) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
-  }, [onClose]);
+  }, [embedded, onClose]);
 
   useEffect(() => {
     let alive = true;
@@ -86,9 +88,8 @@ export default function About({ onClose }: AboutProps) {
     window.open(updateResult.downloadUrl, "_blank", "noopener,noreferrer");
   };
 
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
+  const content = (
+    <>
         <div className="about-header">
           <div className="about-logo">
             <img
@@ -233,10 +234,23 @@ export default function About({ onClose }: AboutProps) {
               Adsryen
             </a>
           </p>
-          <button className="btn btn-primary" onClick={onClose}>
-            {t('about.close')}
-          </button>
+          {!embedded && (
+            <button className="btn btn-primary" onClick={onClose}>
+              {t('about.close')}
+            </button>
+          )}
         </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="page-surface about-page">{content}</div>;
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
+        {content}
       </div>
     </div>
   );
