@@ -26,10 +26,23 @@ export interface SSHConfig {
 export type ProviderType = "nacos" | "apollo" | "consul" | "local";
 export type NacosDistribution = "opensource" | "aliyun-mse";
 export type ConnectionAuthType = "none" | "nacos-password" | "aliyun-aksk";
+export type ConfigSourceType = "nacos" | "local-snapshot";
+
+export const DEFAULT_PROJECT_NAME = "默认项目";
+export const DEFAULT_ENVIRONMENT_NAME = "未分组";
 
 export interface Connection {
   id: string;
   name: string;
+  projectId?: string;
+  projectName?: string;
+  environmentId?: string;
+  environmentName?: string;
+  sourceName?: string;
+  sourceType?: ConfigSourceType;
+  readonly?: boolean;
+  isDefaultSource?: boolean;
+  tags?: string[];
   provider?: ProviderType;
   distribution?: NacosDistribution;
   authType?: ConnectionAuthType;
@@ -88,6 +101,22 @@ export function deleteConnection(id: string) {
   saveAll(loadConnections().filter((c) => c.id !== id));
 }
 
+export function connectionProjectName(conn: Pick<Connection, "projectName">): string {
+  return conn.projectName?.trim() || DEFAULT_PROJECT_NAME;
+}
+
+export function connectionEnvironmentName(conn: Pick<Connection, "environmentName">): string {
+  return conn.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME;
+}
+
+export function connectionSourceName(conn: Pick<Connection, "sourceName" | "name">): string {
+  return conn.sourceName?.trim() || conn.name?.trim() || "默认来源";
+}
+
+export function connectionDisplayLabel(conn: Connection): string {
+  return `${connectionProjectName(conn)} / ${connectionEnvironmentName(conn)} / ${connectionSourceName(conn)}`;
+}
+
 function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connection {
   const provider = raw.provider ?? "nacos";
   const distribution = raw.distribution ?? "opensource";
@@ -98,6 +127,15 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
   return {
     id: raw.id ?? genId(),
     name: raw.name ?? "",
+    projectId: raw.projectId ?? "",
+    projectName: raw.projectName?.trim() || DEFAULT_PROJECT_NAME,
+    environmentId: raw.environmentId ?? "",
+    environmentName: raw.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME,
+    sourceName: raw.sourceName?.trim() || raw.name || "",
+    sourceType: raw.sourceType ?? "nacos",
+    readonly: raw.readonly ?? false,
+    isDefaultSource: raw.isDefaultSource ?? false,
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
     provider,
     distribution,
     authType,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Connection } from "../store/connections";
+import { Connection, connectionDisplayLabel } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { keysDoc } from "../lib/keys";
@@ -107,7 +107,7 @@ function SourcePicker({
         <Select
           className="wide"
           value={source.connId}
-          options={connections.map((c) => ({ value: c.id, label: c.name }))}
+          options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
           onChange={(v) => onChange({ ...emptySource(v) })}
         />
       </label>
@@ -185,7 +185,7 @@ export default function DiffView({ connections }: Props) {
     const group = src.group.trim() || "DEFAULT_GROUP";
     const content = await getConfig(conn, src.tenant, id, group);
     return {
-      label: `${conn.name} · ${src.tenant || "public"} · ${id}`,
+      label: `${connectionDisplayLabel(conn)} / ${src.tenant || "public"} / ${id}`,
       content,
       format: detectFormat(id, "", content),
     };
