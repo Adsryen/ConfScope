@@ -87,8 +87,6 @@
     "passwordAuth": "密码认证",
     "keyAuth": "密钥认证",
     "sshPassword": "SSH 密码",
-    "remoteHost": "远程主机",
-    "remotePort": "远程端口",
     "localPort": "本地端口（可选，默认自动分配）",
     "localPortPlaceholder": "留空自动分配",
     "removeSSH": "移除 SSH 配置",

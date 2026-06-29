@@ -231,4 +231,37 @@ describe("nacos api compatibility bridge", () => {
     });
     expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
   });
+
+  it("derives SSH tunnel target from the Nacos base URL", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-derived"),
+      baseUrl: "http://nacos.internal:8845/nacos",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 37380,
+        username: "root",
+        authType: "password",
+        password: "ssh-secret",
+        remoteHost: "legacy.example.com",
+        remotePort: 9999,
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValue(12875);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledWith(
+      conn.id,
+      expect.objectContaining({
+        host: "jump.example.com",
+        port: 37380,
+        remoteHost: "nacos.internal",
+        remotePort: 8845,
+      })
+    );
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://localhost:12875/nacos" })
+    );
+  });
 });

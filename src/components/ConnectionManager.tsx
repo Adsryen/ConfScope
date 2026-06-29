@@ -74,8 +74,6 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
         port: 22,
         username: "root",
         authType: "password" as const,
-        remoteHost: "localhost",
-        remotePort: 8848,
         ...d.sshConfig,
         ...patch,
       },
@@ -105,6 +103,9 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     const toSave = { ...draft };
     if (toSave.sshConfig && !toSave.sshConfig.host?.trim()) {
       toSave.sshConfig = undefined;
+    } else if (toSave.sshConfig) {
+      const { remoteHost: _remoteHost, remotePort: _remotePort, ...sshConfig } = toSave.sshConfig;
+      toSave.sshConfig = sshConfig;
     }
     const saved = upsertConnection({ ...toSave, name: toSave.name.trim(), baseUrl: toSave.baseUrl.trim() });
     clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
@@ -475,27 +476,6 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                       </label>
                     </>
                   )}
-
-                  <div className="field-row">
-                    <label className="field">
-                      <span>{t('connection.remoteHost')}</span>
-                      <input
-                        className="search-input mono"
-                        value={draft.sshConfig?.remoteHost || "localhost"}
-                        placeholder="localhost"
-                        onChange={(e) => setSSH({ remoteHost: e.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>{t('connection.remotePort')}</span>
-                      <input
-                        className="search-input mono"
-                        type="number"
-                        value={draft.sshConfig?.remotePort || 8848}
-                        onChange={(e) => setSSH({ remotePort: parseInt(e.target.value) || 8848 })}
-                      />
-                    </label>
-                  </div>
 
                   <label className="field">
                     <span>{t('connection.localPort')}</span>
