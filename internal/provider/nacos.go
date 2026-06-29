@@ -14,7 +14,8 @@ func NewNacosProvider(client *nacos.Client) *NacosProvider {
 }
 
 func (p *NacosProvider) ListNamespaces(profile ConnectionProfile) ([]Namespace, error) {
-	items, err := p.client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
+	client := p.clientFor(profile)
+	items, err := client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +32,8 @@ func (p *NacosProvider) ListNamespaces(profile ConnectionProfile) ([]Namespace, 
 }
 
 func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRequest) (ConfigPage, error) {
-	page, err := p.client.ListConfigs(
+	client := p.clientFor(profile)
+	page, err := client.ListConfigs(
 		profile.BaseURL,
 		profile.AccessToken,
 		profile.APIVersion,
@@ -68,7 +70,8 @@ func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRe
 }
 
 func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (ConfigDocument, error) {
-	content, err := p.client.GetConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
+	client := p.clientFor(profile)
+	content, err := client.GetConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
 	if err != nil {
 		return ConfigDocument{}, err
 	}
@@ -81,17 +84,20 @@ func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (Con
 
 func (p *NacosProvider) PublishConfig(profile ConnectionProfile, req PublishConfigRequest) error {
 	ref := normalizeRef(profile, req.Ref)
-	return p.client.PublishConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, req.Content, req.Format)
+	client := p.clientFor(profile)
+	return client.PublishConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, req.Content, req.Format)
 }
 
 func (p *NacosProvider) DeleteConfig(profile ConnectionProfile, ref ConfigRef) error {
 	ref = normalizeRef(profile, ref)
-	return p.client.DeleteConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
+	client := p.clientFor(profile)
+	return client.DeleteConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
 }
 
 func (p *NacosProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, page PageRequest) (HistoryPage, error) {
 	ref = normalizeRef(profile, ref)
-	history, err := p.client.HistoryList(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, page.PageNo, page.PageSize)
+	client := p.clientFor(profile)
+	history, err := client.HistoryList(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, page.PageNo, page.PageSize)
 	if err != nil {
 		return HistoryPage{}, err
 	}
@@ -117,7 +123,8 @@ func (p *NacosProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, pa
 
 func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRef, id string) (HistoryDetail, error) {
 	ref = normalizeRef(profile, ref)
-	detail, err := p.client.HistoryDetail(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, id)
+	client := p.clientFor(profile)
+	detail, err := client.HistoryDetail(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, id)
 	if err != nil {
 		return HistoryDetail{}, err
 	}
@@ -135,8 +142,20 @@ func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRe
 }
 
 func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
-	_, err := p.client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
+	client := p.clientFor(profile)
+	_, err := client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
 	return err
+}
+
+func (p *NacosProvider) clientFor(profile ConnectionProfile) *nacos.Client {
+	if profile.Distribution != DistributionAliyunMSE || profile.AuthType != AuthAliyunAKSK {
+		return p.client
+	}
+	return p.client.WithMSEAuth(nacos.MSEAuth{
+		AccessKeyID:     profile.AccessKeyID,
+		AccessKeySecret: profile.AccessKeySecret,
+		SecurityToken:   profile.SecurityToken,
+	})
 }
 
 func normalizeRef(profile ConnectionProfile, ref ConfigRef) ConfigRef {

@@ -33,6 +33,7 @@ func (c *Client) getText(baseURL, path string, query url.Values, accessToken str
 	if version == apiV3 && accessToken != "" {
 		req.Header.Set("accessToken", accessToken)
 	}
+	c.applyMSEAuth(req, requestNamespace(query, nil), requestGroup(query, nil))
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("请求失败: %w", err)
@@ -102,6 +103,7 @@ func (c *Client) sendForm(method, baseURL, path string, query url.Values, form u
 	if version == apiV3 && accessToken != "" {
 		req.Header.Set("accessToken", accessToken)
 	}
+	c.applyMSEAuth(req, requestNamespace(query, form), requestGroup(query, form))
 	resp, err := c.http.Do(req)
 	if err != nil {
 		switch method {
@@ -131,4 +133,28 @@ func readBody(resp *http.Response) (string, error) {
 		return "", err
 	}
 	return string(body), nil
+}
+
+func requestNamespace(query url.Values, form url.Values) string {
+	return firstValue(query, form, "tenant", "namespaceId")
+}
+
+func requestGroup(query url.Values, form url.Values) string {
+	return firstValue(query, form, "group", "groupName")
+}
+
+func firstValue(query url.Values, form url.Values, keys ...string) string {
+	for _, key := range keys {
+		if query != nil {
+			if value := query.Get(key); value != "" {
+				return value
+			}
+		}
+		if form != nil {
+			if value := form.Get(key); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }

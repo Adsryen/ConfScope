@@ -1,6 +1,8 @@
 package provider
 
 type ProviderType string
+type Distribution string
+type AuthType string
 
 const (
 	ProviderNacos  ProviderType = "nacos"
@@ -9,15 +11,31 @@ const (
 	ProviderLocal  ProviderType = "local"
 )
 
+const (
+	DistributionOpenSource Distribution = "opensource"
+	DistributionAliyunMSE  Distribution = "aliyun-mse"
+)
+
+const (
+	AuthNone          AuthType = "none"
+	AuthNacosPassword AuthType = "nacos-password"
+	AuthAliyunAKSK    AuthType = "aliyun-aksk"
+)
+
 type ConnectionProfile struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Provider    ProviderType `json:"provider"`
-	BaseURL     string       `json:"baseUrl"`
-	AccessToken string       `json:"accessToken"`
-	APIVersion  string       `json:"apiVersion"`
-	Environment string       `json:"environment"`
-	SafetyLevel string       `json:"safetyLevel"`
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Provider        ProviderType `json:"provider"`
+	Distribution    Distribution `json:"distribution"`
+	AuthType        AuthType     `json:"authType"`
+	BaseURL         string       `json:"baseUrl"`
+	AccessToken     string       `json:"accessToken"`
+	APIVersion      string       `json:"apiVersion"`
+	AccessKeyID     string       `json:"accessKeyId"`
+	AccessKeySecret string       `json:"accessKeySecret"`
+	SecurityToken   string       `json:"securityToken"`
+	Environment     string       `json:"environment"`
+	SafetyLevel     string       `json:"safetyLevel"`
 }
 
 type ConfigRef struct {

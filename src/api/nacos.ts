@@ -12,6 +12,7 @@ import {
   listConfigs as configCenterListConfigs,
   listHistory as configCenterListHistory,
   listNamespaces as configCenterListNamespaces,
+  testConnection as configCenterTestConnection,
   type ConfigPage as ConfigCenterConfigPage,
   type ConfigRef,
   type ConnectionProfile,
@@ -121,6 +122,7 @@ const versionCache = new Map<string, ApiVersion>();
 
 /** 探测并缓存连接的 Nacos API 版本（v1=1.x/2.x，v3=3.x）。 */
 export async function getVersion(conn: Connection): Promise<ApiVersion> {
+  if (conn.authType === "aliyun-aksk") return "v1";
   const hit = versionCache.get(conn.baseUrl);
   if (hit) return hit;
   const baseUrl = await resolveBaseUrl(conn);
@@ -211,9 +213,14 @@ function toConnectionProfile(
     id: conn.id,
     name: conn.name,
     provider: "nacos",
+    distribution: conn.distribution ?? "opensource",
+    authType: conn.authType ?? (conn.username ? "nacos-password" : "none"),
     baseUrl,
     accessToken,
     apiVersion,
+    accessKeyId: conn.accessKeyId ?? "",
+    accessKeySecret: conn.accessKeySecret ?? "",
+    securityToken: conn.securityToken ?? "",
     environment: optional.environment ?? "",
     safetyLevel: optional.safetyLevel ?? "",
   };
@@ -282,6 +289,12 @@ function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): Histo
 
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
+  if (conn.authType === "aliyun-aksk") {
+    const apiVersion = await getVersion(conn);
+    const baseUrl = await resolveBaseUrl(conn);
+    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, "", apiVersion));
+    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+  }
   const apiVersion = await getVersion(conn);
   const baseUrl = await resolveBaseUrl(conn);
   return NacosLogin(baseUrl, conn.username, conn.password, apiVersion);

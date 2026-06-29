@@ -23,13 +23,23 @@ export interface SSHConfig {
   remoteHost: string;
 }
 
+export type ProviderType = "nacos" | "apollo" | "consul" | "local";
+export type NacosDistribution = "opensource" | "aliyun-mse";
+export type ConnectionAuthType = "none" | "nacos-password" | "aliyun-aksk";
+
 export interface Connection {
   id: string;
   name: string;
+  provider?: ProviderType;
+  distribution?: NacosDistribution;
+  authType?: ConnectionAuthType;
   /** 形如 http://localhost:8848/nacos（含 context-path）。 */
   baseUrl: string;
   username: string;
   password: string;
+  accessKeyId?: string;
+  accessKeySecret?: string;
+  securityToken?: string;
   /** 默认命名空间 id（tenant），空表示 public。 */
   defaultNamespace: string;
   /** SSH 隧道配置（可选） */
@@ -47,7 +57,7 @@ export function loadConnections(): Connection[] {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr.map(normalizeConnection) : [];
   } catch {
     return [];
   }
@@ -62,13 +72,13 @@ export function upsertConnection(conn: Omit<Connection, "id"> & { id?: string })
   if (conn.id) {
     const idx = list.findIndex((c) => c.id === conn.id);
     if (idx >= 0) {
-      const updated = { ...list[idx], ...conn, id: conn.id } as Connection;
+      const updated = normalizeConnection({ ...list[idx], ...conn, id: conn.id });
       list[idx] = updated;
       saveAll(list);
       return updated;
     }
   }
-  const created: Connection = { ...conn, id: genId() } as Connection;
+  const created = normalizeConnection({ ...conn, id: genId() });
   list.push(created);
   saveAll(list);
   return created;
@@ -76,4 +86,28 @@ export function upsertConnection(conn: Omit<Connection, "id"> & { id?: string })
 
 export function deleteConnection(id: string) {
   saveAll(loadConnections().filter((c) => c.id !== id));
+}
+
+function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connection {
+  const provider = raw.provider ?? "nacos";
+  const distribution = raw.distribution ?? "opensource";
+  let authType = raw.authType;
+  if (!authType) {
+    authType = raw.username ? "nacos-password" : "none";
+  }
+  return {
+    id: raw.id ?? genId(),
+    name: raw.name ?? "",
+    provider,
+    distribution,
+    authType,
+    baseUrl: raw.baseUrl ?? "",
+    username: raw.username ?? "",
+    password: raw.password ?? "",
+    accessKeyId: raw.accessKeyId,
+    accessKeySecret: raw.accessKeySecret,
+    securityToken: raw.securityToken,
+    defaultNamespace: raw.defaultNamespace ?? "",
+    sshConfig: raw.sshConfig,
+  };
 }
