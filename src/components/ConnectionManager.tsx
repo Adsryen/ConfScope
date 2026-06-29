@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import {
   Connection,
   SSHConfig,
+  connectionEnvironmentName,
+  connectionProjectName,
+  connectionSourceName,
   deleteConnection,
   loadConnections,
   upsertConnection,
@@ -18,6 +21,13 @@ type Draft = Omit<Connection, "id"> & { id?: string };
 
 const emptyDraft = (): Draft => ({
   name: "",
+  projectName: "默认项目",
+  environmentName: "未分组",
+  sourceName: "",
+  sourceType: "nacos",
+  readonly: false,
+  isDefaultSource: false,
+  tags: [],
   provider: "nacos",
   distribution: "opensource",
   authType: "nacos-password",
@@ -81,6 +91,25 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
     setTestMsg(null);
   };
 
+  const groupedConnections = list.reduce<
+    { project: string; environments: { environment: string; connections: Connection[] }[] }[]
+  >((projects, conn) => {
+    const project = connectionProjectName(conn);
+    const environment = connectionEnvironmentName(conn);
+    let projectGroup = projects.find((item) => item.project === project);
+    if (!projectGroup) {
+      projectGroup = { project, environments: [] };
+      projects.push(projectGroup);
+    }
+    let envGroup = projectGroup.environments.find((item) => item.environment === environment);
+    if (!envGroup) {
+      envGroup = { environment, connections: [] };
+      projectGroup.environments.push(envGroup);
+    }
+    envGroup.connections.push(conn);
+    return projects;
+  }, []);
+
   const refresh = () => {
     const next = loadConnections();
     setList(next);
@@ -107,7 +136,16 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
       const { remoteHost: _remoteHost, remotePort: _remotePort, ...sshConfig } = toSave.sshConfig;
       toSave.sshConfig = sshConfig;
     }
-    const saved = upsertConnection({ ...toSave, name: toSave.name.trim(), baseUrl: toSave.baseUrl.trim() });
+    const sourceName = toSave.sourceName?.trim() || toSave.name.trim();
+    const saved = upsertConnection({
+      ...toSave,
+      name: toSave.name.trim(),
+      projectName: toSave.projectName?.trim() || "默认项目",
+      environmentName: toSave.environmentName?.trim() || "未分组",
+      sourceName,
+      sourceType: toSave.sourceType ?? "nacos",
+      baseUrl: toSave.baseUrl.trim(),
+    });
     clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
     setDraft(emptyDraft());
     setShowSSHConfig(false);
@@ -163,42 +201,53 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
           <div className="conn-list">
             <div className="conn-list-title">{t('connection.savedConnections')}</div>
             {list.length === 0 && <div className="conn-empty">{t('connection.noConnections')}</div>}
-            {list.map((c) => (
-              <div
-                key={c.id}
-                className={`conn-item${draft.id === c.id ? " active" : ""}`}
-                onClick={() => edit(c)}
-              >
-                <div className="conn-item-main">
-                  <div className="conn-item-name">
-                    {c.name}
-                    {c.sshConfig && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
+            {groupedConnections.map((project) => (
+              <div className="conn-group" key={project.project}>
+                <div className="conn-group-title">{project.project}</div>
+                {project.environments.map((env) => (
+                  <div className="conn-env-group" key={`${project.project}/${env.environment}`}>
+                    <div className="conn-env-title">{env.environment}</div>
+                    {env.connections.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`conn-item${draft.id === c.id ? " active" : ""}`}
+                        onClick={() => edit(c)}
+                      >
+                        <div className="conn-item-main">
+                          <div className="conn-item-name">
+                            {connectionSourceName(c)}
+                            {c.isDefaultSource && <span className="conn-ssh-badge">{t('connection.defaultSource')}</span>}
+                            {c.sshConfig && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
+                          </div>
+                          <div className="conn-item-url">{c.baseUrl}</div>
+                        </div>
+                        {confirmDel === c.id ? (
+                          <button
+                            className="conn-item-del confirm"
+                            title={t('connection.confirmDelete')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              askOrRemove(c.id);
+                            }}
+                          >
+                            {t('connection.deleteConfirm')}
+                          </button>
+                        ) : (
+                          <button
+                            className="conn-item-del"
+                            title={t('common.delete')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              askOrRemove(c.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  <div className="conn-item-url">{c.baseUrl}</div>
-                </div>
-                {confirmDel === c.id ? (
-                  <button
-                    className="conn-item-del confirm"
-                    title={t('connection.confirmDelete')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      askOrRemove(c.id);
-                    }}
-                  >
-                    {t('connection.deleteConfirm')}
-                  </button>
-                ) : (
-                  <button
-                    className="conn-item-del"
-                    title={t('common.delete')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      askOrRemove(c.id);
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
+                ))}
               </div>
             ))}
           </div>
@@ -226,6 +275,54 @@ export default function ConnectionManager({ onClose, onChange }: Props) {
                 onChange={(e) => set({ name: e.target.value })}
               />
             </label>
+            <div className="field-row">
+              <label className="field">
+                <span>{t('connection.project')}</span>
+                <input
+                  className="search-input wide"
+                  value={draft.projectName ?? ""}
+                  placeholder={t('connection.projectPlaceholder')}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ projectName: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>{t('connection.environment')}</span>
+                <input
+                  className="search-input wide"
+                  value={draft.environmentName ?? ""}
+                  placeholder={t('connection.environmentPlaceholder')}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ environmentName: e.target.value })}
+                />
+              </label>
+            </div>
+            <div className="field-row">
+              <label className="field">
+                <span>{t('connection.sourceName')}</span>
+                <input
+                  className="search-input wide"
+                  value={draft.sourceName ?? ""}
+                  placeholder={t('connection.sourceNamePlaceholder')}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ sourceName: e.target.value })}
+                />
+              </label>
+              <label className="field check-field">
+                <span>{t('connection.defaultSource')}</span>
+                <input
+                  type="checkbox"
+                  checked={!!draft.isDefaultSource}
+                  onChange={(e) => set({ isDefaultSource: e.target.checked })}
+                />
+              </label>
+            </div>
             <div className="field-row">
               <label className="field">
                 <span>{t('connection.distribution')}</span>

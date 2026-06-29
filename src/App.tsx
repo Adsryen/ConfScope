@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Connection, loadConnections } from "./store/connections";
+import { Connection, connectionDisplayLabel, loadConnections } from "./store/connections";
 import { listNamespaces, Namespace } from "./api/nacos";
 import { useTranslation } from "./i18n";
 import ConnectionManager from "./components/ConnectionManager";
@@ -106,7 +106,7 @@ export default function App() {
                 value={activeConnId}
                 disabled={connections.length === 0}
                 title={t('app.connection')}
-                options={connections.map((c) => ({ value: c.id, label: c.name }))}
+                options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
                 onChange={setActiveConnId}
               />
 

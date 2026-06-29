@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteConnection, loadConnections, upsertConnection, type Connection } from "./connections";
+import {
+  connectionDisplayLabel,
+  deleteConnection,
+  loadConnections,
+  upsertConnection,
+  type Connection,
+} from "./connections";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -47,7 +53,28 @@ describe("connection store", () => {
     });
 
     expect(created.id).toMatch(/^c_/);
+    expect(created.projectName).toBe("默认项目");
+    expect(created.environmentName).toBe("未分组");
+    expect(created.sourceName).toBe("dev");
+    expect(created.sourceType).toBe("nacos");
     expect(loadConnections()).toEqual([created]);
+  });
+
+  it("persists project environment and source metadata", () => {
+    const created = upsertConnection({
+      name: "prod-public",
+      projectName: "订单系统",
+      environmentName: "生产",
+      sourceName: "云上公网",
+      isDefaultSource: true,
+      baseUrl: "https://prod.example.com/nacos",
+      username: "nacos",
+      password: "nacos",
+      defaultNamespace: "",
+    });
+
+    expect(loadConnections()[0]).toEqual(created);
+    expect(connectionDisplayLabel(created)).toBe("订单系统 / 生产 / 云上公网");
   });
 
   it("updates an existing connection in place", () => {
