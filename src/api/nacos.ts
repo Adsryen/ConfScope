@@ -21,6 +21,7 @@ import {
   type Namespace as ConfigCenterNamespace,
 } from "./configCenter";
 import type { Connection } from "../store/connections";
+import { connectionSSHConfig } from "../store/sshProfiles";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
@@ -28,7 +29,8 @@ const tunnelUrlCache = new Map<string, string>();
 /** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
 export async function resolveBaseUrl(conn: Connection): Promise<string> {
   if (conn.sourceType === "local-snapshot") return conn.localPath || conn.baseUrl;
-  if (!conn.sshConfig) return conn.baseUrl;
+  const sshConfig = connectionSSHConfig(conn);
+  if (!sshConfig) return conn.baseUrl;
 
   const cached = tunnelUrlCache.get(conn.id);
   if (cached) return cached;
@@ -40,14 +42,14 @@ export async function resolveBaseUrl(conn: Connection): Promise<string> {
 
   // 创建 SSH 隧道
   const localPort = await CreateSSHTunnel(conn.id, {
-    host: conn.sshConfig.host,
-    port: conn.sshConfig.port,
-    username: conn.sshConfig.username,
-    authType: conn.sshConfig.authType,
-    password: conn.sshConfig.password || "",
-    privateKey: conn.sshConfig.privateKey || "",
-    passphrase: conn.sshConfig.passphrase || "",
-    localPort: conn.sshConfig.localPort || 0,
+    host: sshConfig.host,
+    port: sshConfig.port,
+    username: sshConfig.username,
+    authType: sshConfig.authType,
+    password: sshConfig.password || "",
+    privateKey: sshConfig.privateKey || "",
+    passphrase: sshConfig.passphrase || "",
+    localPort: sshConfig.localPort || 0,
     remotePort,
     remoteHost: url.hostname,
   });

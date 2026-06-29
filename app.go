@@ -274,6 +274,10 @@ func (a *App) CreateSSHTunnel(connectionId string, config ssh.Config) (int, erro
 	return a.sshMgr.CreateTunnel(connectionId, config)
 }
 
+func (a *App) TestSSHConnection(config ssh.Config) (ssh.TestResult, error) {
+	return ssh.TestConnection(config)
+}
+
 // StopSSHTunnel 停止指定连接的 SSH 隧道。
 func (a *App) StopSSHTunnel(connectionId string) {
 	a.sshMgr.StopTunnel(connectionId)

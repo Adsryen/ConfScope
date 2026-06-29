@@ -34,6 +34,26 @@ const goApp = {
   StopSSHTunnel: vi.fn(),
 };
 
+class MemoryStorage {
+  private values = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key);
+  }
+
+  clear() {
+    this.values.clear();
+  }
+}
+
 function makeConnection(id: string): Connection {
   return {
     id,
@@ -80,6 +100,7 @@ function expectedRef(conn: Connection, namespace = "public", dataId = "app.yaml"
 describe("nacos api compatibility bridge", () => {
   beforeEach(() => {
     for (const fn of Object.values(goApp)) fn.mockReset();
+    vi.stubGlobal("localStorage", new MemoryStorage());
     goApp.NacosDetectVersion.mockResolvedValue("v3");
     goApp.NacosLogin.mockResolvedValue({
       accessToken: "token-1",
@@ -327,6 +348,52 @@ describe("nacos api compatibility bridge", () => {
     );
     expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(
       expect.objectContaining({ baseUrl: "http://localhost:12875/nacos" })
+    );
+  });
+
+  it("uses reusable SSH profiles when resolving tunnels", async () => {
+    localStorage.setItem("cs.sshProfiles", JSON.stringify([
+      {
+        id: "ssh-prod",
+        name: "生产跳板机",
+        config: {
+          host: "prod-jump.example.com",
+          port: 2222,
+          username: "deploy",
+          authType: "password",
+          password: "profile-secret",
+        },
+        createdAt: "2026-06-29T00:00:00Z",
+        updatedAt: "2026-06-29T00:00:00Z",
+      },
+    ]));
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-profile"),
+      baseUrl: "http://nacos.internal:8848/nacos",
+      sshProfileId: "ssh-prod",
+      sshConfig: {
+        host: "inline.example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        password: "inline-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValue(13001);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledWith(
+      conn.id,
+      expect.objectContaining({
+        host: "prod-jump.example.com",
+        port: 2222,
+        username: "deploy",
+        password: "profile-secret",
+        remoteHost: "nacos.internal",
+        remotePort: 8848,
+      })
     );
   });
 });

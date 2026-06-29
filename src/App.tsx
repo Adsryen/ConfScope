@@ -8,9 +8,10 @@ import DiffView from "./components/DiffView";
 import About from "./components/About";
 import Select from "./components/Select";
 import Toaster from "./components/Toaster";
-import LanguageSwitch from "./components/LanguageSwitch";
+import SettingsView from "./components/SettingsView";
+import SSHManagerView from "./components/SSHManagerView";
 
-type Mode = "browse" | "diff" | "connections" | "audit" | "backup" | "tasks" | "settings" | "about";
+type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
 
 const navIconPath: Record<Mode, string[]> = {
   browse: [
@@ -30,6 +31,13 @@ const navIconPath: Record<Mode, string[]> = {
     "M10 18h4",
     "M17 15h2a2 2 0 012 2v1a2 2 0 01-2 2h-2a2 2 0 01-2-2v-1a2 2 0 012-2z",
     "M7 8h5",
+  ],
+  ssh: [
+    "M5 12h5",
+    "M14 12h5",
+    "M10 8l4 4-4 4",
+    "M6 7a3 3 0 100 6 3 3 0 000-6z",
+    "M18 11a3 3 0 100 6 3 3 0 000-6z",
   ],
   audit: [
     "M4 5h16v14H4z",
@@ -95,7 +103,7 @@ export default function App() {
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
-  const knownMode = ["browse", "diff", "connections", "audit", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
+  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
     ? ui0.mode!
     : "browse";
   const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
@@ -148,10 +156,11 @@ export default function App() {
     { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
     { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
     { mode: "connections", label: t('app.connectionManage') },
+    { mode: "ssh", label: t('app.sshTunnels') },
     { mode: "audit", label: t('app.audit'), unavailable: true },
     { mode: "backup", label: t('app.backup'), unavailable: true },
     { mode: "tasks", label: t('app.tasks'), unavailable: true },
-    { mode: "settings", label: t('app.settings'), unavailable: true },
+    { mode: "settings", label: t('app.settings') },
     { mode: "about", label: t('app.about') },
   ];
 
@@ -160,27 +169,6 @@ export default function App() {
       <div className="planned-badge">{t('app.planned')}</div>
       <h2>{title}</h2>
       <p>{description}</p>
-    </div>
-  );
-
-  const settingsPage = (
-    <div className="page-surface settings-page">
-      <div className="page-header">
-        <div>
-          <h3>{t('app.settings')}</h3>
-          <div className="page-subtitle">{t('app.settingsSubtitle')}</div>
-        </div>
-      </div>
-      <div className="settings-body">
-        <section className="settings-section">
-          <h4>{t('app.language')}</h4>
-          <LanguageSwitch />
-        </section>
-        <section className="settings-section muted">
-          <span className="planned-badge">{t('app.planned')}</span>
-          <p>{t('app.settingsPlanned')}</p>
-        </section>
-      </div>
     </div>
   );
 
@@ -277,8 +265,10 @@ export default function App() {
           plannedPage(t('app.backup'), t('app.backupPlanned'))
         ) : mode === "tasks" ? (
           plannedPage(t('app.tasks'), t('app.tasksPlanned'))
+        ) : mode === "ssh" ? (
+          <SSHManagerView />
         ) : mode === "settings" ? (
-          settingsPage
+          <SettingsView />
         ) : connections.length === 0 ? (
           <div className="pad-msg big">
             {t('app.noConnection')}
