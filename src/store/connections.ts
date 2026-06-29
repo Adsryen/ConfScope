@@ -40,6 +40,14 @@ export interface Connection {
   environmentName?: string;
   sourceName?: string;
   sourceType?: ConfigSourceType;
+  localPath?: string;
+  forceLocalSnapshot?: boolean;
+  localValidation?: {
+    valid: boolean;
+    message: string;
+    configCount: number;
+    checkedAt: string;
+  };
   readonly?: boolean;
   isDefaultSource?: boolean;
   tags?: string[];
@@ -101,6 +109,35 @@ export function deleteConnection(id: string) {
   saveAll(loadConnections().filter((c) => c.id !== id));
 }
 
+export function renameProject(oldName: string, newName: string): Connection[] {
+  const from = oldName.trim() || DEFAULT_PROJECT_NAME;
+  const to = newName.trim();
+  const list = loadConnections();
+  if (!to || from === to) return list;
+
+  const next = list.map((conn) =>
+    connectionProjectName(conn) === from ? normalizeConnection({ ...conn, projectName: to }) : conn
+  );
+  saveAll(next);
+  return next;
+}
+
+export function renameEnvironment(projectName: string, oldName: string, newName: string): Connection[] {
+  const project = projectName.trim() || DEFAULT_PROJECT_NAME;
+  const from = oldName.trim() || DEFAULT_ENVIRONMENT_NAME;
+  const to = newName.trim();
+  const list = loadConnections();
+  if (!to || from === to) return list;
+
+  const next = list.map((conn) =>
+    connectionProjectName(conn) === project && connectionEnvironmentName(conn) === from
+      ? normalizeConnection({ ...conn, environmentName: to })
+      : conn
+  );
+  saveAll(next);
+  return next;
+}
+
 export function connectionProjectName(conn: Pick<Connection, "projectName">): string {
   return conn.projectName?.trim() || DEFAULT_PROJECT_NAME;
 }
@@ -133,6 +170,9 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     environmentName: raw.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME,
     sourceName: raw.sourceName?.trim() || raw.name || "",
     sourceType: raw.sourceType ?? "nacos",
+    localPath: raw.localPath?.trim() || "",
+    forceLocalSnapshot: raw.forceLocalSnapshot ?? false,
+    localValidation: raw.localValidation,
     readonly: raw.readonly ?? false,
     isDefaultSource: raw.isDefaultSource ?? false,
     tags: Array.isArray(raw.tags) ? raw.tags : [],

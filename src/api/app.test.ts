@@ -2,17 +2,26 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { checkForUpdates, getAppInfo } from "./app";
+import {
+  checkForUpdates,
+  getAppInfo,
+  selectLocalSnapshotDirectory,
+  validateLocalSnapshotDirectory,
+} from "./app";
 
 const goApp = {
   GetAppInfo: vi.fn(),
   CheckForUpdates: vi.fn(),
+  SelectLocalSnapshotDirectory: vi.fn(),
+  ValidateLocalSnapshotDirectory: vi.fn(),
 };
 
 describe("app api", () => {
   beforeEach(() => {
     goApp.GetAppInfo.mockReset();
     goApp.CheckForUpdates.mockReset();
+    goApp.SelectLocalSnapshotDirectory.mockReset();
+    goApp.ValidateLocalSnapshotDirectory.mockReset();
     vi.stubGlobal("go", {
       main: {
         App: goApp,
@@ -63,5 +72,23 @@ describe("app api", () => {
         noProxy: "localhost",
       },
     });
+  });
+
+  it("uses Wails bindings for local snapshot folder selection and validation", async () => {
+    goApp.SelectLocalSnapshotDirectory.mockResolvedValue("C:\\backup\\prod");
+    goApp.ValidateLocalSnapshotDirectory.mockResolvedValue({
+      valid: true,
+      path: "C:\\backup\\prod",
+      configCount: 3,
+    });
+
+    await expect(selectLocalSnapshotDirectory()).resolves.toBe("C:\\backup\\prod");
+    await expect(validateLocalSnapshotDirectory("C:\\backup\\prod")).resolves.toMatchObject({
+      valid: true,
+      configCount: 3,
+    });
+
+    expect(goApp.SelectLocalSnapshotDirectory).toHaveBeenCalledTimes(1);
+    expect(goApp.ValidateLocalSnapshotDirectory).toHaveBeenCalledWith("C:\\backup\\prod");
   });
 });

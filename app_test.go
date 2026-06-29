@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"confscope/internal/provider"
@@ -187,5 +189,74 @@ func TestConfigCenterMethodsRejectUnsupportedProvider(t *testing.T) {
 	}
 	if !errors.Is(err, errUnsupportedProvider) {
 		t.Fatalf("error = %v, want errUnsupportedProvider", err)
+	}
+}
+
+func TestValidateLocalSnapshotDirectoryAcceptsManifestAndConfigFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "confscope.snapshot.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(dir, "configs")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "app.yaml"), []byte("a: 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewApp().ValidateLocalSnapshotDirectory(dir)
+
+	if !result.Valid {
+		t.Fatalf("Valid = false, message = %q", result.Message)
+	}
+	if result.ConfigCount != 1 {
+		t.Fatalf("ConfigCount = %d, want 1", result.ConfigCount)
+	}
+	if !result.HasManifest {
+		t.Fatal("HasManifest = false")
+	}
+}
+
+func TestValidateLocalSnapshotDirectoryAcceptsDotMetadataYaml(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".metadata.yml"), []byte("version: 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte("a: 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := NewApp().ValidateLocalSnapshotDirectory(dir)
+
+	if !result.Valid {
+		t.Fatalf("Valid = false, message = %q", result.Message)
+	}
+	if !result.HasManifest {
+		t.Fatal("HasManifest = false")
+	}
+	if result.ConfigCount != 1 {
+		t.Fatalf("ConfigCount = %d, want 1", result.ConfigCount)
+	}
+}
+
+func TestValidateLocalSnapshotDirectoryRejectsInvalidPaths(t *testing.T) {
+	app := NewApp()
+
+	if result := app.ValidateLocalSnapshotDirectory(""); result.Valid || result.Message == "" {
+		t.Fatalf("empty path result = %+v", result)
+	}
+
+	file := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(file, []byte("a: 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if result := app.ValidateLocalSnapshotDirectory(file); result.Valid || result.Message != "路径不是文件夹" {
+		t.Fatalf("file path result = %+v", result)
+	}
+
+	emptyDir := t.TempDir()
+	if result := app.ValidateLocalSnapshotDirectory(emptyDir); result.Valid || result.Message != "未找到快照清单或标准目录结构" {
+		t.Fatalf("empty dir result = %+v", result)
 	}
 }

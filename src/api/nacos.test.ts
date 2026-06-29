@@ -232,6 +232,71 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
   });
 
+  it("routes local snapshot sources through the local provider without Nacos auth", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-local"),
+      name: "local-prod",
+      sourceType: "local-snapshot",
+      localPath: "C:\\backup\\prod",
+      baseUrl: "C:\\backup\\prod",
+      username: "",
+      password: "",
+    };
+    const localProfile = {
+      ...expectedProfile(conn, "", "v1"),
+      provider: "local",
+      authType: "none",
+      baseUrl: "C:\\backup\\prod",
+    };
+    const ref = {
+      ...expectedRef(conn, "", "app.yaml", "DEFAULT_GROUP"),
+      provider: "local",
+    };
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([
+      { id: "", name: "public", configCount: 1, kind: 0 },
+    ]);
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "a: 1", format: "yaml" }],
+    });
+    goApp.ConfigCenterGetConfig.mockResolvedValue({
+      ref,
+      content: "a: 1",
+      format: "yaml",
+      version: "",
+      source: "C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml",
+    });
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([
+      { namespace: "", namespaceShowName: "public", configCount: 1, kind: 0 },
+    ]);
+    await expect(listConfigs(conn, "", "", "DEFAULT_GROUP", 1, 20)).resolves.toEqual({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "a: 1", configType: "yaml" }],
+    });
+    await expect(getConfig(conn, "", "app.yaml", "DEFAULT_GROUP")).resolves.toBe("a: 1");
+    await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+
+    expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
+    expect(goApp.CreateSSHTunnel).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(localProfile);
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(localProfile, {
+      namespace: "",
+      dataId: "",
+      group: "DEFAULT_GROUP",
+      pageNo: 1,
+      pageSize: 20,
+    });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(localProfile, ref);
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(localProfile);
+  });
+
   it("derives SSH tunnel target from the Nacos base URL", async () => {
     const conn: Connection = {
       ...makeConnection("conn-ssh-derived"),

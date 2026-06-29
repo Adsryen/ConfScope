@@ -627,6 +627,55 @@ select, button, .tab-btn { cursor: pointer; }
 
 .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .field > span { font-size: 11px; color: var(--text-dim); }
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-dim);
+}
+.required-mark {
+  color: var(--red);
+  margin-left: 3px;
+  font-weight: 700;
+}
+.help-tip {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-dim);
+  background: var(--bg3);
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+}
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--text-hi);
+  border-color: var(--accent);
+  outline: none;
+}
+.help-popover {
+  position: fixed;
+  z-index: 9999;
+  width: min(320px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  background: #1f1f23;
+  color: #f2f2f2;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  pointer-events: none;
+}
 .field-row { display: flex; gap: 8px; }
 .check-field {
   flex: 0 0 120px;
@@ -862,6 +911,7 @@ select, button, .tab-btn { cursor: pointer; }
 .conn-mgr { display: flex; gap: 18px; }
 .conn-list { width: 250px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
 .conn-list-title, .conn-form-title { font-size: 12px; color: var(--text-dim); margin-bottom: 2px; }
+.conn-create-btn { width: 100%; justify-content: center; margin-bottom: 4px; }
 .conn-empty { font-size: 12px; color: var(--text-dim); padding: 10px 0; }
 .conn-group {
   display: flex;
@@ -869,20 +919,77 @@ select, button, .tab-btn { cursor: pointer; }
   gap: 5px;
 }
 .conn-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 5px;
+  padding: 5px 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-hi);
+  border-radius: 5px;
+  cursor: pointer;
 }
+.conn-group-title:hover,
+.conn-env-title:hover { background: var(--bg-hover); }
+.conn-group-title.active,
+.conn-env-title.active { background: var(--bg-active); }
+.conn-group-name,
+.conn-env-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conn-env-group {
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 .conn-env-title {
-  padding-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  padding: 4px 6px;
   font-size: 11px;
   color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.conn-tree-actions {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.conn-group-title:hover .conn-tree-actions,
+.conn-env-title:hover .conn-tree-actions,
+.conn-group-title:focus-within .conn-tree-actions,
+.conn-env-title:focus-within .conn-tree-actions { display: flex; }
+.conn-tree-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.conn-tree-btn:hover {
+  color: var(--text-hi);
+  background: var(--bg3);
+  border-color: var(--border);
+}
+.conn-inline-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 2px 6px;
+  background: var(--bg1);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-hi);
+  font: inherit;
+  outline: none;
 }
 .conn-item {
   display: flex;
@@ -892,6 +999,7 @@ select, button, .tab-btn { cursor: pointer; }
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: 6px;
+  margin-left: 18px;
 }
 .conn-item:hover { border-color: var(--accent); }
 .conn-item.active { border-color: var(--accent); background: rgba(0, 122, 204, 0.12); }
@@ -905,7 +1013,14 @@ select, button, .tab-btn { cursor: pointer; }
   border-radius: 3px;
   white-space: nowrap;
 }
-.conn-item-url { font-size: 11px; color: var(--text-dim); word-break: break-all; }
+.conn-item-url {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
 .conn-item-del {
   width: 22px; height: 22px;
   background: none; border: none;
@@ -922,6 +1037,38 @@ select, button, .tab-btn { cursor: pointer; }
 }
 
 .pwd-field { display: flex; gap: 6px; }
+.path-field { display: flex; gap: 6px; align-items: center; }
+.path-field .search-input { min-width: 0; }
+.local-validation {
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.local-validation.ok { color: var(--green); background: var(--diff-add-bg); }
+.local-validation.err { color: var(--red-h); background: var(--diff-del-bg); }
+.local-validation-path {
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.force-local-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.field-warning {
+  font-size: 11px;
+  color: var(--yellow);
+  background: rgba(220, 220, 170, 0.12);
+  border: 1px solid rgba(220, 220, 170, 0.25);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
 .pwd-toggle {
   flex-shrink: 0;
   width: 34px;
@@ -933,8 +1080,22 @@ select, button, .tab-btn { cursor: pointer; }
 }
 .pwd-toggle:hover { background: var(--bg-hover); }
 
-.conn-form { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.conn-form { flex: 1; display: flex; flex-direction: column; gap: 12px; }
 .conn-form .field > span { font-size: 12px; }
+.conn-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.conn-form-section:first-of-type { border-top: none; padding-top: 0; }
+.conn-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-hi);
+  letter-spacing: 0;
+}
 .test-msg { font-size: 12px; padding: 6px 10px; border-radius: 4px; }
 .test-msg.ok { color: var(--green); background: var(--diff-add-bg); }
 .test-msg.err { background: var(--diff-del-bg); }
@@ -966,7 +1127,7 @@ select, button, .tab-btn { cursor: pointer; }
 
 /* SSH 隧道配置样式 */
 .ssh-section {
-  margin-top: 10px;
+  margin-top: 0;
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }

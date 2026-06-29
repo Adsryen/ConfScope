@@ -1,6 +1,8 @@
 type GoApp = {
   GetAppInfo(): Promise<any>;
   CheckForUpdates(request: any): Promise<any>;
+  SelectLocalSnapshotDirectory(): Promise<string>;
+  ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   ConfigCenterListNamespaces(profile: any): Promise<any>;
   ConfigCenterListConfigs(profile: any, request: any): Promise<any>;
   ConfigCenterGetConfig(profile: any, ref: any): Promise<any>;
@@ -88,6 +90,11 @@ const app = () => window.go.main.App;
 export const GetAppInfo = () => app().GetAppInfo();
 
 export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
+
+export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
+
+export const ValidateLocalSnapshotDirectory = (path: string) =>
+  app().ValidateLocalSnapshotDirectory(path);
 
 export const ConfigCenterListNamespaces = (profile: any) =>
   app().ConfigCenterListNamespaces(profile);
