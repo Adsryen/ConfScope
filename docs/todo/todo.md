@@ -68,7 +68,7 @@
 
 **当前基线**: `v1.0.0`
 **当前开发线**: `v1.1.0`
-**下一项立即做**: `v1.1.0 / P0` 的 MSE Nacos 连接第一阶段与 provider 兼容迁移。
+**下一项立即做**: `v1.1.0 / P0` 的页面迁移后组件回归测试与连接管理收口。
 
 - [x] `v1.0.0` 已具备 Nacos 浏览、编辑、历史、diff、多连接、SSH 基础能力。
 - [x] 已完成核心自动化测试第一批。
@@ -152,20 +152,20 @@
   - 保留 `src/api/nacos.ts` 兼容过渡。
   - 新增通用 `src/api/configCenter.ts`。
   - [ ] 页面逐步从 Nacos 专属 API 迁移到通用 API。
-- [ ] 阿里云 MSE Nacos 连接第一阶段。
+- [x] 阿里云 MSE Nacos 连接第一阶段。
   - 作为 Nacos provider 的连接形态增强，不单独提升到大版本。
-  - 连接模型增加 Nacos 发行版/来源：`opensource | aliyun-mse`。
-  - 认证模型增加 `none | nacos-password | aliyun-aksk`，保留旧连接的 username/password 兼容迁移。
-  - 后端 Nacos client 封装 MSE 鉴权请求构造，前端不直接拼签名、不暴露 secret 到日志。
-  - 第一阶段覆盖测试连接、命名空间、配置列表、配置详情、历史查询。
-  - 写操作先沿用现有危险操作确认；若 MSE 权限不足，要给出明确错误提示。
+  - [x] 连接模型增加 Nacos 发行版/来源：`opensource | aliyun-mse`。
+  - [x] 认证模型增加 `none | nacos-password | aliyun-aksk`，保留旧连接的 username/password 兼容迁移。
+  - [x] 后端 Nacos client 封装 MSE 鉴权请求构造，前端不直接拼签名、不暴露 secret 到日志。
+  - [x] 第一阶段覆盖测试连接、命名空间、配置列表、配置详情、历史查询。
+  - [ ] 写操作在真实 MSE 环境下验证权限不足、发布、删除错误提示。
 - [ ] 自动化测试。
   - [x] provider 抽象单元测试第一批。
   - [x] Nacos 适配器测试第一批。
   - [x] App provider 注册薄测试。
   - [x] App Wails 绑定 provider 分发测试第一批。
   - [x] 前端通用 configCenter API 包装测试第一批。
-  - [ ] MSE Nacos 鉴权请求构造与连接模型迁移测试。
+  - [x] MSE Nacos 鉴权请求构造与连接模型迁移测试。
   - [ ] 页面迁移后的组件回归测试。
 
 #### P1
