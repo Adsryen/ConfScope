@@ -339,6 +339,39 @@ describe("ConnectionManager", () => {
     expect(screen.queryByText("dev")).not.toBeInTheDocument();
   });
 
+  it("duplicates a saved connection as a new editable draft", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    saveConnection({
+      name: "dev-inner",
+      project: "订单系统",
+      environment: "开发",
+      source: "云上内网",
+      baseUrl: "http://dev.example.com/nacos",
+    });
+
+    const item = within(connectionList()).getByText("云上内网").closest(".conn-item") as HTMLElement;
+    fireEvent.click(within(item).getByTitle("复制连接"));
+
+    expect(screen.getByText("新建连接")).toBeInTheDocument();
+    expect(fieldByLabel("来源名称")).toHaveValue("云上内网 副本");
+    expect(fieldByLabel("备注（可选）")).toHaveValue("dev-inner 副本");
+    expect(controlByLabel("项目")).toHaveValue("订单系统");
+    expect(controlByLabel("环境")).toHaveValue("开发");
+    expect(fieldByLabel("目标地址")).toHaveValue("http://dev.example.com/nacos");
+    expect(screen.getByText("已复制为新连接草稿，修改后保存即可生成新连接")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const savedList = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(savedList).toHaveLength(2);
+    expect(savedList).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceName: "云上内网", name: "dev-inner" }),
+      expect.objectContaining({ sourceName: "云上内网 副本", name: "dev-inner 副本" }),
+    ]));
+  });
+
   it("shows connection test success and failure as a link trace", async () => {
     apiMocks.testConnection.mockResolvedValueOnce({
       accessToken: "token",
