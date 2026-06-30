@@ -3,7 +3,7 @@ import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from ".
 import { detectFormat, Format } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
-import { Connection, connectionDisplayLabel } from "../store/connections";
+import { Connection, connectionDisplayLabel, updateConnection } from "../store/connections";
 import { loadSettings } from "../store/settings";
 import { useTranslation } from "../i18n";
 import Combobox from "./Combobox";
@@ -14,6 +14,7 @@ type DiffMode = "text" | "key" | "lines";
 
 interface Props {
   connections: Connection[];
+  onConnectionsChange?: (connections: Connection[]) => void;
 }
 
 interface Source {
@@ -87,6 +88,7 @@ function SourcePicker({
   connections,
   source,
   onChange,
+  onSetDefaultNamespace,
   sortConnections,
   sortNamespaces,
 }: {
@@ -94,6 +96,7 @@ function SourcePicker({
   connections: Connection[];
   source: Source;
   onChange: (source: Source) => void;
+  onSetDefaultNamespace?: (connId: string, namespace: string) => void;
   sortConnections: boolean;
   sortNamespaces: boolean;
 }) {
@@ -185,6 +188,7 @@ function SourcePicker({
     { value: "", label: t("app.namespaceDefault") },
     ...namespaceItems.map((item) => ({ value: item.namespace, label: item.namespaceShowName || item.namespace })),
   ];
+  const canSetDefaultNamespace = !!conn && conn.sourceType !== "local-snapshot" && source.tenant !== (conn.defaultNamespace ?? "");
   const dataIdOptions = configs.map((item) => ({ value: item.dataId, sub: item.group }));
   const groupOptions = Array.from(new Set(configs.map((item) => item.group))).map((value) => ({ value }));
 
@@ -218,12 +222,24 @@ function SourcePicker({
         <span>
           {t("app.namespace")} {nsLoading ? `(${t("common.loading")})` : ""}
         </span>
-        <Select
-          className="wide"
-          value={source.tenant}
-          options={namespaceOptions}
-          onChange={(value) => onChange({ ...source, tenant: value, usesDefaultNamespace: false })}
-        />
+        <div className="namespace-pick-row">
+          <Select
+            className="wide"
+            value={source.tenant}
+            options={namespaceOptions}
+            onChange={(value) => onChange({ ...source, tenant: value, usesDefaultNamespace: false })}
+          />
+          {onSetDefaultNamespace && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={!canSetDefaultNamespace}
+              onClick={() => onSetDefaultNamespace(source.connId, source.tenant)}
+            >
+              {t("diff.setDefaultNamespace")}
+            </button>
+          )}
+        </div>
         {nsError && (
           <span className="field-error">
             {t("diff.namespaceLoadFailed")}: {nsError}
@@ -264,7 +280,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ connections }: Props) {
+export default function DiffView({ connections, onConnectionsChange }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const firstId = connections[0]?.id ?? "";
@@ -282,6 +298,7 @@ export default function DiffView({ connections }: Props) {
   const [batchLoading, setBatchLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
 
   const resetComparisonState = () => {
     setMatchResults(null);
@@ -291,6 +308,7 @@ export default function DiffView({ connections }: Props) {
     setBatchOnlyChanges(new Set());
     setLeftLoaded(null);
     setRightLoaded(null);
+    setNotice(null);
   };
 
   useEffect(() => {
@@ -311,6 +329,13 @@ export default function DiffView({ connections }: Props) {
   const updateRight = (source: Source) => {
     setRight(source);
     resetComparisonState();
+  };
+
+  const setConnectionDefaultNamespace = (connId: string, namespace: string) => {
+    const next = updateConnection(connId, { defaultNamespace: namespace });
+    onConnectionsChange?.(next);
+    setNotice(t("diff.defaultNamespaceSaved"));
+    setError(null);
   };
 
   if (connections.length === 0) {
@@ -343,6 +368,7 @@ export default function DiffView({ connections }: Props) {
   const doMatch = async () => {
     setMatchLoading(true);
     setError(null);
+    setNotice(null);
     setMatchResults(null);
     setBatchResults([]);
 
@@ -401,6 +427,7 @@ export default function DiffView({ connections }: Props) {
 
     setLoading(true);
     setError(null);
+    setNotice(null);
     const [leftResult, rightResult] = await Promise.allSettled([loadOne(left), loadOne(right)]);
     const errors: string[] = [];
 
@@ -440,6 +467,7 @@ export default function DiffView({ connections }: Props) {
     setBatchLoading(true);
     setBatchResults([]);
     setError(null);
+    setNotice(null);
     setBatchOnlyChanges(new Set());
 
     const results: BatchResult[] = [];
@@ -535,6 +563,7 @@ export default function DiffView({ connections }: Props) {
           connections={connections}
           source={left}
           onChange={updateLeft}
+          onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
           sortConnections={settings.compare.sortConnections}
           sortNamespaces={settings.compare.sortNamespaces}
         />
@@ -543,6 +572,7 @@ export default function DiffView({ connections }: Props) {
           connections={connections}
           source={right}
           onChange={updateRight}
+          onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
           sortConnections={settings.compare.sortConnections}
           sortNamespaces={settings.compare.sortNamespaces}
         />
@@ -568,6 +598,7 @@ export default function DiffView({ connections }: Props) {
             {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
           </button>
         )}
+        {notice && <span className="diff-loadok">{notice}</span>}
         {error && <span className="diff-loaderr">{error}</span>}
       </div>
 

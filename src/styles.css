@@ -1272,10 +1272,21 @@ select, button, .tab-btn { cursor: pointer; }
   background: var(--bg2);
   flex-shrink: 0;
 }
-.diff-loaderr { font-size: 12px; color: var(--red-h); }
+.diff-loaderr,
+.diff-loadok { font-size: 12px; }
+.diff-loaderr { color: var(--red-h); }
+.diff-loadok { color: var(--green); }
 
 .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .field > span { font-size: 11px; color: var(--text-dim); }
+.namespace-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.namespace-pick-row .sel { min-width: 0; }
+.namespace-pick-row .btn { flex: 0 0 auto; }
 .field-error {
   color: var(--red-h);
   font-size: 11px;
@@ -1761,8 +1772,16 @@ select, button, .tab-btn { cursor: pointer; }
 }
 
 .pwd-field { display: flex; gap: 6px; }
-.path-field { display: flex; gap: 6px; align-items: center; }
-.path-field .search-input { min-width: 0; }
+.path-field,
+.namespace-field { display: flex; gap: 6px; align-items: center; }
+.path-field .search-input,
+.namespace-field .search-input { min-width: 0; }
+.namespace-field .btn { flex: 0 0 auto; }
+.namespace-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .local-validation {
   font-size: 11px;
   padding: 6px 8px;

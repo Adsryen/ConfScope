@@ -308,7 +308,7 @@ export default function App() {
         ) : mode === "browse" ? (
           browsePage
         ) : mode === "diff" ? (
-          <DiffView connections={connections} />
+          <DiffView connections={connections} onConnectionsChange={setConnections} />
         ) : mode === "about" ? (
           <About embedded />
         ) : null}

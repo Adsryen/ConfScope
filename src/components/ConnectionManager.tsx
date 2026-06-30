@@ -19,7 +19,7 @@ import {
   upsertSSHProfile,
   type SSHProfile,
 } from "../store/sshProfiles";
-import { clearToken, testConnection } from "../api/nacos";
+import { clearToken, listNamespaces, testConnection, type Namespace } from "../api/nacos";
 import {
   selectLocalSnapshotDirectory,
   validateLocalSnapshotDirectory,
@@ -205,6 +205,22 @@ function connectionTestKey(draft: Draft): string {
   });
 }
 
+function namespaceLoadKey(draft: Draft): string {
+  const sshConfig = normalizeSSHConfig(draft.sshConfig);
+  return JSON.stringify({
+    id: draft.id ?? "",
+    sourceType: draft.sourceType ?? "nacos",
+    baseUrl: draft.baseUrl ?? "",
+    distribution: draft.distribution ?? "opensource",
+    authType: draft.authType ?? "none",
+    username: draft.username ?? "",
+    accessKeyId: draft.accessKeyId ?? "",
+    securityToken: draft.securityToken ?? "",
+    sshProfileId: draft.sshProfileId ?? "",
+    sshConfig: sshConfig.host ? sshConfig : undefined,
+  });
+}
+
 function sourceAddress(conn: Pick<Connection, "sourceType" | "localPath" | "baseUrl">): string {
   return conn.sourceType === "local-snapshot" ? conn.localPath || conn.baseUrl : conn.baseUrl;
 }
@@ -284,6 +300,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [localValidation, setLocalValidation] = useState<LocalSnapshotValidation | null>(null);
   const [validatingLocal, setValidatingLocal] = useState(false);
   const [selectingLocalDir, setSelectingLocalDir] = useState(false);
+  const [namespaceLoadingKey, setNamespaceLoadingKey] = useState<string | null>(null);
+  const [namespaceResultKey, setNamespaceResultKey] = useState<string | null>(null);
+  const [namespaceOptions, setNamespaceOptions] = useState<Namespace[]>([]);
+  const [namespaceError, setNamespaceError] = useState<string | null>(null);
   const [activeProject, setActiveProject] = useState(emptyDraft(defaultNewEnvironment).projectName ?? DEFAULT_PROJECT_NAME);
   const [activeEnvironment, setActiveEnvironment] = useState(
     emptyDraft(defaultNewEnvironment).environmentName ?? defaultNewEnvironment
@@ -297,14 +317,23 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [showSSHPwd, setShowSSHPwd] = useState(false);
   const [showSSHPassphrase, setShowSSHPassphrase] = useState(false);
   const currentTestKey = connectionTestKey(draft);
+  const currentNamespaceKey = namespaceLoadKey(draft);
   const currentTestKeyRef = useRef(currentTestKey);
+  const currentNamespaceKeyRef = useRef(currentNamespaceKey);
   const testingCurrent = testingKey === currentTestKey;
+  const loadingNamespaces = namespaceLoadingKey === currentNamespaceKey;
+  const visibleNamespaces = namespaceResultKey === currentNamespaceKey ? namespaceOptions : [];
+  const visibleNamespaceError = namespaceResultKey === currentNamespaceKey ? namespaceError : null;
   const visibleTestTrace = testResultKey === currentTestKey ? testTrace : null;
   const visibleTestMsg = testResultKey === null || testResultKey === currentTestKey ? testMsg : null;
 
   useEffect(() => {
     currentTestKeyRef.current = currentTestKey;
   }, [currentTestKey]);
+
+  useEffect(() => {
+    currentNamespaceKeyRef.current = currentNamespaceKey;
+  }, [currentNamespaceKey]);
 
   // Esc 关闭弹框
   useEffect(() => {
@@ -503,6 +532,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setDraft(next);
     setCreatingProject(!projectOptions.includes((next.projectName ?? "").trim()));
     setTestMsg(null);
+    setNamespaceResultKey(null);
+    setNamespaceOptions([]);
+    setNamespaceError(null);
     setConfirmDel(null);
     setShowSSHConfig(false);
   };
@@ -513,6 +545,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setDraft({ ...c });
     setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
     setTestMsg(null);
+    setNamespaceResultKey(null);
+    setNamespaceOptions([]);
+    setNamespaceError(null);
     setLocalValidation(c.localValidation ? {
       valid: c.localValidation.valid,
       path: c.localPath ?? "",
@@ -668,6 +703,41 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       setTestTrace(buildConnectionTrace(snapshot, startedAt, false, message));
     } finally {
       setTestingKey((current) => (current === snapshotKey ? null : current));
+    }
+  };
+
+  const loadDefaultNamespaceOptions = async () => {
+    if (draft.sourceType === "local-snapshot") return;
+    if (!draft.baseUrl.trim()) {
+      setNamespaceResultKey(currentNamespaceKey);
+      setNamespaceOptions([]);
+      setNamespaceError(t('connection.addressRequired'));
+      return;
+    }
+
+    const snapshot: Draft = {
+      ...draft,
+      tags: [...(draft.tags ?? [])],
+      sshConfig: draft.sshConfig ? { ...draft.sshConfig } : undefined,
+    };
+    const snapshotKey = namespaceLoadKey(snapshot);
+    currentNamespaceKeyRef.current = snapshotKey;
+    setNamespaceLoadingKey(snapshotKey);
+    setNamespaceResultKey(snapshotKey);
+    setNamespaceOptions([]);
+    setNamespaceError(null);
+
+    try {
+      const items = await listNamespaces({ ...(snapshot as Connection), id: snapshot.id ?? "namespace-preview" });
+      if (currentNamespaceKeyRef.current !== snapshotKey) return;
+      setNamespaceOptions(items);
+      setNamespaceError(null);
+    } catch (e) {
+      if (currentNamespaceKeyRef.current !== snapshotKey) return;
+      setNamespaceOptions([]);
+      setNamespaceError(String(e));
+    } finally {
+      setNamespaceLoadingKey((current) => (current === snapshotKey ? null : current));
     }
   };
 
@@ -1214,15 +1284,50 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               )}
               <label className="field">
                 <FieldLabel {...fieldLabelProps} tip={t('connection.defaultNamespaceHelp')}>{t('connection.defaultNamespace')}</FieldLabel>
-                <input
-                  className="search-input wide mono"
-                  value={draft.defaultNamespace}
-                  placeholder={t('connection.defaultNamespacePlaceholder')}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  onChange={(e) => set({ defaultNamespace: e.target.value })}
-                />
+                <div className="namespace-field">
+                  <input
+                    className="search-input wide mono"
+                    value={draft.defaultNamespace}
+                    placeholder={t('connection.defaultNamespacePlaceholder')}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ defaultNamespace: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={loadDefaultNamespaceOptions}
+                    disabled={loadingNamespaces}
+                  >
+                    {loadingNamespaces ? t('connection.loadingNamespaces') : t('connection.loadNamespaces')}
+                  </button>
+                </div>
+                {(visibleNamespaces.length > 0 || visibleNamespaceError) && (
+                  <div className="namespace-select-wrap">
+                    {visibleNamespaces.length > 0 && (
+                      <select
+                        className="search-input wide"
+                        value={draft.defaultNamespace}
+                        onChange={(e) => set({ defaultNamespace: e.target.value })}
+                      >
+                        <option value="">{t('app.namespaceDefault')}</option>
+                        {visibleNamespaces
+                          .filter((item) => item.namespace)
+                          .map((item) => (
+                            <option value={item.namespace} key={item.namespace}>
+                              {item.namespaceShowName || item.namespace} / {item.namespace} ({item.configCount})
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                    {visibleNamespaceError && (
+                      <div className="field-error">
+                        {t('connection.loadNamespacesFailed')}: {visibleNamespaceError}
+                      </div>
+                    )}
+                  </div>
+                )}
               </label>
             </section>}
 
