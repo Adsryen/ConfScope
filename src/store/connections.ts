@@ -70,9 +70,11 @@ export interface Connection {
 }
 
 const KEY = "cs.connections";
+let idSeq = 0;
 
 function genId(): string {
-  return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  idSeq = (idSeq + 1) % 1000000;
+  return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}_${idSeq.toString(36)}`;
 }
 
 export function loadConnections(): Connection[] {

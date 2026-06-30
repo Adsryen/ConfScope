@@ -1968,12 +1968,25 @@ select, button, .tab-btn { cursor: pointer; }
   color: var(--text-dim);
   word-break: break-all;
 }
+.conn-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.conn-item-action,
 .conn-item-del {
   width: 22px; height: 22px;
   background: none; border: none;
-  color: var(--text-dim); font-size: 16px;
+  color: var(--text-dim);
+  font-size: 14px;
   border-radius: 4px; flex-shrink: 0;
 }
+.conn-item-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-hi);
+}
+.conn-item-del { font-size: 16px; }
 .conn-item-del:hover { background: var(--red); color: #fff; }
 .conn-item-del.confirm {
   width: auto;

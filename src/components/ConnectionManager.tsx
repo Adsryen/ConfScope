@@ -231,6 +231,11 @@ function connectionLabelMeta(conn: Pick<Connection, "name" | "sourceName">): str
   return label && label !== sourceName ? label : "";
 }
 
+function copyLabel(value: string | undefined, fallback: string, suffix: string): string {
+  const base = value?.trim() || fallback;
+  return base.includes(suffix) ? base : `${base}${suffix}`;
+}
+
 function getHelpPopover(text: string, target: HTMLElement): HelpPopover {
   const rect = target.getBoundingClientRect();
   const width = Math.min(320, Math.max(220, window.innerWidth - 24));
@@ -545,6 +550,39 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setDraft({ ...c });
     setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
     setTestMsg(null);
+    setNamespaceResultKey(null);
+    setNamespaceOptions([]);
+    setNamespaceError(null);
+    setLocalValidation(c.localValidation ? {
+      valid: c.localValidation.valid,
+      path: c.localPath ?? "",
+      message: c.localValidation.message,
+      configCount: c.localValidation.configCount,
+      hasManifest: false,
+      matchedMarkers: [],
+      checkedAt: c.localValidation.checkedAt,
+    } : null);
+    setConfirmDel(null);
+    setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
+  };
+
+  const duplicateConnection = (c: Connection) => {
+    const sourceName = copyLabel(connectionSourceName(c), t('connection.sourceName'), t('connection.copySuffix'));
+    const label = copyLabel(c.name, sourceName, t('connection.copySuffix'));
+    setActiveProject(connectionProjectName(c));
+    setActiveEnvironment(connectionEnvironmentName(c));
+    setDraft({
+      ...c,
+      id: undefined,
+      name: label,
+      sourceName,
+      isDefaultSource: false,
+    });
+    setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
+    setTestMsg({ ok: true, text: t('connection.copyReady') });
+    setTestTrace(null);
+    setTestResultKey(null);
+    setTestingKey(null);
     setNamespaceResultKey(null);
     setNamespaceOptions([]);
     setNamespaceError(null);
@@ -909,29 +947,43 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             {connectionLabelMeta(c) && <span>{t('connection.connectionLabelShort')}: {connectionLabelMeta(c)}</span>}
                           </div>
                         </div>
-                        {confirmDel === c.id ? (
+                        <div className="conn-item-actions">
                           <button
-                            className="conn-item-del confirm"
-                            title={t('connection.confirmDelete')}
+                            className="conn-item-action"
+                            title={t('connection.copy')}
+                            aria-label={t('connection.copy')}
                             onClick={(e) => {
                               e.stopPropagation();
-                              askOrRemove(c.id);
+                              duplicateConnection(c);
                             }}
                           >
-                            {t('connection.deleteConfirm')}
+                            ⧉
                           </button>
-                        ) : (
-                          <button
-                            className="conn-item-del"
-                            title={t('common.delete')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              askOrRemove(c.id);
-                            }}
-                          >
-                            ×
-                          </button>
-                        )}
+                          {confirmDel === c.id ? (
+                            <button
+                              className="conn-item-del confirm"
+                              title={t('connection.confirmDelete')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                askOrRemove(c.id);
+                              }}
+                            >
+                              {t('connection.deleteConfirm')}
+                            </button>
+                          ) : (
+                            <button
+                              className="conn-item-del"
+                              title={t('common.delete')}
+                              aria-label={t('common.delete')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                askOrRemove(c.id);
+                              }}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
