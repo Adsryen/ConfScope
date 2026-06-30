@@ -8,6 +8,7 @@ import ConnectionManager from "./ConnectionManager";
 
 const apiMocks = vi.hoisted(() => ({
   clearToken: vi.fn(),
+  listNamespaces: vi.fn(),
   testConnection: vi.fn(),
 }));
 
@@ -88,7 +89,11 @@ describe("ConnectionManager", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.123456);
     vi.setSystemTime(new Date("2026-06-27T00:00:00Z"));
     apiMocks.clearToken.mockReset();
+    apiMocks.listNamespaces.mockReset();
     apiMocks.testConnection.mockReset();
+    apiMocks.listNamespaces.mockResolvedValue([
+      { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 3, kind: 0 },
+    ]);
     clipboardMocks.copyText.mockReset();
     appApiMocks.selectLocalSnapshotDirectory.mockReset();
     appApiMocks.validateLocalSnapshotDirectory.mockReset();
@@ -156,6 +161,39 @@ describe("ConnectionManager", () => {
         projectName: "订单系统",
         environmentName: "生产",
         sourceName: "云上公网",
+      }),
+    ]);
+  });
+
+  it("loads namespaces in the connection form and saves the selected default namespace", async () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(fieldByLabel("目标地址"), {
+      target: { value: "http://dev.example.com/nacos" },
+    });
+    fireEvent.change(fieldByLabel("用户名"), { target: { value: "nacos" } });
+    fireEvent.change(fieldByLabel("密码"), { target: { value: "secret" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "加载命名空间" }));
+
+    await screen.findByRole("option", { name: "开发命名空间 / dev-tenant (3)" });
+    const namespaceSelect = screen
+      .getByRole("option", { name: "开发命名空间 / dev-tenant (3)" })
+      .closest("select") as HTMLSelectElement;
+    fireEvent.change(namespaceSelect, { target: { value: "dev-tenant" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(apiMocks.listNamespaces).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: "http://dev.example.com/nacos",
+      username: "nacos",
+      password: "secret",
+    }));
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        defaultNamespace: "dev-tenant",
       }),
     ]);
   });

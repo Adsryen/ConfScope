@@ -107,6 +107,15 @@ export function upsertConnection(conn: Omit<Connection, "id"> & { id?: string })
   return created;
 }
 
+export function updateConnection(id: string, patch: Partial<Omit<Connection, "id">>): Connection[] {
+  const list = loadConnections();
+  const idx = list.findIndex((c) => c.id === id);
+  if (idx < 0) return list;
+  list[idx] = normalizeConnection({ ...list[idx], ...patch, id });
+  saveAll(list);
+  return list;
+}
+
 export function deleteConnection(id: string) {
   saveAll(loadConnections().filter((c) => c.id !== id));
 }

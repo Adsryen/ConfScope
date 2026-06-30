@@ -52,11 +52,11 @@ const snapshotConn: Connection = {
   defaultNamespace: "",
 };
 
-function renderDiff(connections: Connection[]) {
+function renderDiff(connections: Connection[], onConnectionsChange?: (connections: Connection[]) => void) {
   localStorage.setItem("locale", "zh-CN");
   return render(
     <I18nProvider>
-      <DiffView connections={connections} />
+      <DiffView connections={connections} onConnectionsChange={onConnectionsChange} />
     </I18nProvider>
   );
 }
@@ -131,6 +131,36 @@ describe("DiffView", () => {
     await waitFor(() => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "prod-tenant", "", "", 1, 500);
     });
+  });
+
+  it("sets the selected namespace as the connection default from smart compare", async () => {
+    apiMocks.listNamespaces.mockResolvedValue([
+      { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 },
+      { namespace: "prod-tenant", namespaceShowName: "生产命名空间", configCount: 1, kind: 0 },
+    ]);
+    localStorage.setItem("cs.connections", JSON.stringify([nacosConn]));
+    const onConnectionsChange = vi.fn();
+
+    renderDiff([nacosConn], onConnectionsChange);
+
+    await screen.findAllByText("开发命名空间");
+    const namespaceButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发命名空间"));
+    fireEvent.click(namespaceButtons[0]);
+    fireEvent.mouseDown(await screen.findByText("生产命名空间"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "设为默认" })[0]);
+
+    expect(await screen.findByText("已设为默认命名空间")).toBeInTheDocument();
+    expect(onConnectionsChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "dev-nacos",
+        defaultNamespace: "prod-tenant",
+      }),
+    ]);
   });
 
   it("shows namespace load failures instead of silently clearing the selector", async () => {
