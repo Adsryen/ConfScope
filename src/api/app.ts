@@ -1,6 +1,10 @@
 import {
   CheckForUpdates,
+  DownloadUpdate,
   GetAppInfo,
+  GetCurrentPlatform,
+  GetDownloadProgress,
+  InstallAndRestart,
   SelectLocalSnapshotDirectory,
   ValidateLocalSnapshotDirectory,
 } from "../../wailsjs/go/main/App";
@@ -38,6 +42,14 @@ export interface UpdateCheckResult {
   error: string;
 }
 
+export interface DownloadProgress {
+  downloaded: number;
+  total: number;
+  percent: number;
+  done: boolean;
+  error: string;
+}
+
 export interface LocalSnapshotValidation {
   valid: boolean;
   path: string;
@@ -54,6 +66,22 @@ export function getAppInfo(): Promise<AppInfo> {
 
 export function checkForUpdates(request: CheckUpdatesRequest): Promise<UpdateCheckResult> {
   return CheckForUpdates(request);
+}
+
+export function downloadUpdate(downloadURL: string, sha256: string): Promise<string> {
+  return DownloadUpdate(downloadURL, sha256);
+}
+
+export function getDownloadProgress(): Promise<DownloadProgress> {
+  return GetDownloadProgress();
+}
+
+export function installAndRestart(downloadedFile: string): Promise<void> {
+  return InstallAndRestart(downloadedFile);
+}
+
+export function getCurrentPlatform(): Promise<string> {
+  return GetCurrentPlatform();
 }
 
 export function selectLocalSnapshotDirectory(): Promise<string> {

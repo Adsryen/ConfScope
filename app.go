@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"confscope/internal/nacos"
@@ -46,6 +47,11 @@ type App struct {
 	nacos     *nacos.Client
 	sshMgr    *ssh.Manager
 	providers map[provider.ProviderType]provider.ConfigProvider
+
+	downloadMu       sync.Mutex
+	downloadProgress updatecheck.DownloadProgress
+	downloadErr      string
+	downloadedFile   string
 }
 
 // NewApp 创建应用服务实例。
@@ -148,6 +154,66 @@ func (a *App) CheckForUpdates(req updatecheck.Request) updatecheck.Result {
 		req.CurrentVersion = appVersion
 	}
 	return updatecheck.Check(context.Background(), req)
+}
+
+// GetCurrentPlatform 返回当前平台标识，如 "windows-amd64"。
+func (a *App) GetCurrentPlatform() string {
+	return updatecheck.CurrentPlatform()
+}
+
+// DownloadUpdate 下载更新文件，通过 Wails 事件报告进度。
+// 返回下载后的临时文件路径。
+func (a *App) DownloadUpdate(downloadURL string, sha256 string) (string, error) {
+	a.downloadMu.Lock()
+	a.downloadProgress = updatecheck.DownloadProgress{}
+	a.downloadErr = ""
+	a.downloadedFile = ""
+	a.downloadMu.Unlock()
+
+	ctx := context.Background()
+	if a.ctx != nil {
+		ctx = a.ctx
+	}
+
+	filePath, err := updatecheck.Download(ctx, downloadURL, sha256, func(p updatecheck.DownloadProgress) {
+		a.downloadMu.Lock()
+		a.downloadProgress = p
+		a.downloadMu.Unlock()
+
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "update:download-progress", p)
+		}
+	})
+
+	a.downloadMu.Lock()
+	if err != nil {
+		a.downloadErr = err.Error()
+		a.downloadProgress.Error = err.Error()
+		a.downloadMu.Unlock()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "update:download-progress", updatecheck.DownloadProgress{Error: err.Error()})
+		}
+		return "", err
+	}
+	a.downloadedFile = filePath
+	a.downloadMu.Unlock()
+	return filePath, nil
+}
+
+// GetDownloadProgress 返回当前下载进度（供前端轮询）。
+func (a *App) GetDownloadProgress() updatecheck.DownloadProgress {
+	a.downloadMu.Lock()
+	defer a.downloadMu.Unlock()
+	return a.downloadProgress
+}
+
+// InstallAndRestart 安装更新并重启应用。
+func (a *App) InstallAndRestart(downloadedFile string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("get executable path: %w", err)
+	}
+	return updatecheck.InstallAndRestart(downloadedFile, exePath)
 }
 
 func (a *App) SelectLocalSnapshotDirectory() (string, error) {

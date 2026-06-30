@@ -1,6 +1,10 @@
 type GoApp = {
   GetAppInfo(): Promise<any>;
   CheckForUpdates(request: any): Promise<any>;
+  DownloadUpdate(downloadURL: string, sha256: string): Promise<string>;
+  GetDownloadProgress(): Promise<any>;
+  InstallAndRestart(downloadedFile: string): Promise<void>;
+  GetCurrentPlatform(): Promise<string>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   ConfigCenterListNamespaces(profile: any): Promise<any>;
@@ -91,6 +95,16 @@ const app = () => window.go.main.App;
 export const GetAppInfo = () => app().GetAppInfo();
 
 export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
+
+export const DownloadUpdate = (downloadURL: string, sha256: string) =>
+  app().DownloadUpdate(downloadURL, sha256);
+
+export const GetDownloadProgress = () => app().GetDownloadProgress();
+
+export const InstallAndRestart = (downloadedFile: string) =>
+  app().InstallAndRestart(downloadedFile);
+
+export const GetCurrentPlatform = () => app().GetCurrentPlatform();
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 

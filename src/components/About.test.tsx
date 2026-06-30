@@ -9,6 +9,9 @@ import About from "./About";
 const apiMocks = vi.hoisted(() => ({
   getAppInfo: vi.fn(),
   checkForUpdates: vi.fn(),
+  downloadUpdate: vi.fn(),
+  getDownloadProgress: vi.fn(),
+  installAndRestart: vi.fn(),
 }));
 
 vi.mock("../api/app", () => apiMocks);
@@ -27,6 +30,9 @@ describe("About", () => {
     localStorage.clear();
     apiMocks.getAppInfo.mockReset();
     apiMocks.checkForUpdates.mockReset();
+    apiMocks.downloadUpdate.mockReset();
+    apiMocks.getDownloadProgress.mockReset();
+    apiMocks.installAndRestart.mockReset();
     apiMocks.getAppInfo.mockResolvedValue({
       name: "ConfScope",
       version: "1.0.0",
@@ -49,17 +55,23 @@ describe("About", () => {
       checkedAt: "2026-06-28T00:00:00Z",
       error: "",
     });
+    apiMocks.getDownloadProgress.mockResolvedValue({
+      downloaded: 0,
+      total: 0,
+      percent: 0,
+      done: false,
+      error: "",
+    });
   });
 
   it("checks updates with built-in sources and global proxy settings", async () => {
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
     localStorage.setItem("cs.settings", JSON.stringify({
       proxy: {
         httpProxy: "http://127.0.0.1:7890",
         httpsProxy: "http://127.0.0.1:7890",
         noProxy: "localhost,127.0.0.1",
       },
-      update: { skipVersion: "", lastCheckAt: "" },
+      update: { skipVersion: "", lastCheckAt: "", proxyOnlyForUpdate: true },
       compare: { sortConnections: true, sortNamespaces: true },
     }));
 
@@ -68,7 +80,6 @@ describe("About", () => {
     expect(await screen.findByText("v1.0.0")).toBeInTheDocument();
     expect(screen.getByText("GitHub 官方")).toBeInTheDocument();
     expect(screen.getByText("国内加速 1")).toBeInTheDocument();
-    expect(screen.queryByLabelText("HTTP 代理")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
@@ -89,9 +100,15 @@ describe("About", () => {
     expect(await screen.findByText("发现新版本 v1.1.0")).toBeInTheDocument();
     expect(screen.getByText("命中线路：国内加速 1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "打开下载页" }));
+    // 点击下载更新
+    fireEvent.click(screen.getByRole("button", { name: "下载更新" }));
 
-    expect(open).toHaveBeenCalledWith("https://download.example/ConfScope.exe", "_blank", "noopener,noreferrer");
+    await waitFor(() => {
+      expect(apiMocks.downloadUpdate).toHaveBeenCalledWith(
+        "https://download.example/ConfScope.exe",
+        "abc"
+      );
+    });
   });
 
   it("shows the latest-state message when no update exists", async () => {

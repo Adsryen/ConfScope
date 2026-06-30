@@ -9,7 +9,8 @@
     "retry": "Retry",
     "edit": "Edit",
     "error": "Error",
-    "success": "Success"
+    "success": "Success",
+    "copy": "Copy"
   },
   "app": {
     "title": "Config Browser",
@@ -62,6 +63,7 @@
     "httpProxy": "HTTP Proxy",
     "httpsProxy": "HTTPS Proxy",
     "noProxy": "No Proxy",
+    "proxyOnlyForUpdate": "Use proxy only for update checks (Nacos connections bypass proxy)",
     "settingsSaved": "Settings saved"
   },
   "ssh": {
@@ -388,10 +390,17 @@
     "updateTitle": "App Updates",
     "checkUpdate": "Check for Updates",
     "checkingUpdate": "Checking…",
+    "downloadUpdate": "Download Update",
+    "downloadingUpdate": "Downloading…",
+    "installingUpdate": "Installing Update",
+    "restartToInstall": "Restart to Install",
     "openDownload": "Open Download Page",
     "updateAvailable": "New version v{version} available",
     "updateSourceHit": "Source: {source}",
     "noUpdate": "You are on the latest version",
+    "downloadComplete": "Download complete, verification passed",
+    "downloadFailed": "Download failed: {error}",
+    "sha256VerifyFailed": "SHA256 verification failed",
     "httpProxy": "HTTP Proxy",
     "httpsProxy": "HTTPS Proxy",
     "noProxy": "No Proxy",
