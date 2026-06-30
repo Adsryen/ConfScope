@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Connection } from "../store/connections";
+import { Connection, connectionDisplayLabel } from "../store/connections";
 import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
+import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
@@ -57,7 +58,16 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
       toast(t('config.configCreated'));
       onSaved(dataId.trim(), group.trim() || "DEFAULT_GROUP");
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      setError(message);
+      reportError({
+        title: "新建配置失败",
+        source: `${connectionDisplayLabel(conn)} / ${namespace || "public"} / ${group.trim() || "DEFAULT_GROUP"} / ${dataId.trim()}`,
+        message,
+        detail: message,
+        actionLabel: "重试发布",
+        onAction: () => save(),
+      });
     } finally {
       setSaving(false);
     }

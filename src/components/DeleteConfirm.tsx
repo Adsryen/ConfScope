@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { reportError } from "../lib/errorCenter";
 import { useTranslation } from "../i18n";
 
 interface Props {
@@ -32,7 +33,16 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
     try {
       await onConfirm();
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      setError(message);
+      reportError({
+        title: "删除配置失败",
+        source: `${group} / ${name}`,
+        message,
+        detail: message,
+        actionLabel: "重试删除",
+        onAction: () => confirm(),
+      });
       setBusy(false);
     }
   };

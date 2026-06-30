@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
+import { reportError } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import { Connection, connectionDisplayLabel } from "../store/connections";
 import { loadSettings } from "../store/settings";
@@ -110,8 +111,16 @@ function SourcePicker({
       })
       .catch((e) => {
         if (!alive) return;
+        const message = errorText(e);
         setNamespaces([]);
-        setNsError(errorText(e));
+        setNsError(message);
+        reportError({
+          title: "命名空间加载失败",
+          source: conn ? `${connectionDisplayLabel(conn)} / ${title}` : title,
+          message,
+          detail: message,
+          mergeKey: `diff:namespace:${conn?.id || source.connId}`,
+        });
       })
       .finally(() => {
         if (alive) setNsLoading(false);
@@ -135,8 +144,16 @@ function SourcePicker({
       })
       .catch((e) => {
         if (!alive) return;
+        const message = errorText(e);
         setConfigs([]);
-        setCfgError(errorText(e));
+        setCfgError(message);
+        reportError({
+          title: "配置列表加载失败",
+          source: conn ? `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${title}` : title,
+          message,
+          detail: message,
+          mergeKey: `diff:configs:${conn?.id || source.connId}:${source.tenant || "public"}`,
+        });
       })
       .finally(() => {
         if (alive) setCfgLoading(false);
@@ -337,7 +354,17 @@ export default function DiffView({ connections }: Props) {
       setMatchResults(common.map((dataId) => ({ dataId, leftGroup, rightGroup })));
       setSelectedIds(new Set(common));
     } catch (e) {
-      setError(errorText(e));
+      const message = errorText(e);
+      setError(message);
+      reportError({
+        title: "同名配置匹配失败",
+        source: t("app.diff"),
+        message,
+        detail: message,
+        mergeKey: "diff:match",
+        actionLabel: "重试",
+        onAction: () => doMatch(),
+      });
     } finally {
       setMatchLoading(false);
     }
@@ -366,7 +393,19 @@ export default function DiffView({ connections }: Props) {
       errors.push(`${t("diff.sourceB")}: ${errorText(rightResult.reason)}`);
     }
 
-    setError(errors.join("  ") || null);
+    const message = errors.join("  ");
+    setError(message || null);
+    if (message) {
+      reportError({
+        title: "配置对比加载失败",
+        source: t("app.diff"),
+        message,
+        detail: message,
+        mergeKey: `diff:load:${left.connId}:${left.tenant}:${left.group}:${left.dataId}:${right.connId}:${right.tenant}:${right.group}:${right.dataId}`,
+        actionLabel: "重试",
+        onAction: () => loadBoth(),
+      });
+    }
     setLoading(false);
   };
 
@@ -399,8 +438,23 @@ export default function DiffView({ connections }: Props) {
         })
       );
 
+      const errors: string[] = [];
       for (const item of settled) {
         if (item.status === "fulfilled") results.push(item.value);
+        else errors.push(errorText(item.reason));
+      }
+      if (errors.length) {
+        const message = errors.join("\n");
+        setError(message);
+        reportError({
+          title: "批量配置对比失败",
+          source: t("app.diff"),
+          message,
+          detail: message,
+          mergeKey: "diff:batch",
+          actionLabel: "重试",
+          onAction: () => loadBatch(),
+        });
       }
     }
 

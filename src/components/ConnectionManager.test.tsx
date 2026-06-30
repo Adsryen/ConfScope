@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @vitest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor, within } from "../test/react";
@@ -301,7 +301,7 @@ describe("ConnectionManager", () => {
     expect(screen.queryByText("dev")).not.toBeInTheDocument();
   });
 
-  it("shows connection test success and failure messages", async () => {
+  it("shows connection test success and failure as a link trace", async () => {
     apiMocks.testConnection.mockResolvedValueOnce({
       accessToken: "token",
       tokenTtl: 18000,
@@ -312,28 +312,34 @@ describe("ConnectionManager", () => {
     fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "dev" } });
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
 
-    expect(await screen.findByText(/连接成功（管理员账号，延迟 \d+ ms）/)).toBeInTheDocument();
+    expect(await screen.findByText("连接测试成功")).toBeInTheDocument();
+    expect(screen.getByText("连接参数检查")).toBeInTheDocument();
+    expect(screen.getByText("Nacos 接口")).toBeInTheDocument();
+    expect(screen.getByText("连接成功，当前账号为管理员账号。")).toBeInTheDocument();
 
     apiMocks.testConnection.mockRejectedValueOnce(new Error("403"));
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
 
-    expect(await screen.findByText(/Error: 403（延迟 \d+ ms）/)).toBeInTheDocument();
+    expect(await screen.findByText("连接测试失败")).toBeInTheDocument();
+    expect(screen.getByText("Error: 403")).toBeInTheDocument();
   });
 
-  it("copies connection test errors", async () => {
+  it("copies the full connection test trace", async () => {
     apiMocks.testConnection.mockRejectedValueOnce(new Error("403 forbidden"));
     clipboardMocks.copyText.mockResolvedValueOnce(true);
     renderManager();
 
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
-    const errorText = await screen.findByText(/Error: 403 forbidden（延迟 \d+ ms）/);
+    await screen.findByText("连接测试失败");
 
-    fireEvent.click(screen.getByRole("button", { name: "复制报错" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制链路" }));
 
-    expect(clipboardMocks.copyText).toHaveBeenCalledWith(errorText.textContent);
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("连接测试失败"));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("Nacos 接口"));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("Error: 403 forbidden"));
   });
 
-  it("shows a shortened connection test error but copies the full text", async () => {
+  it("keeps full long connection test errors in the copied trace", async () => {
     const rawError = `Nacos 返回 403: ${"x".repeat(500)}`;
     apiMocks.testConnection.mockRejectedValueOnce(new Error(rawError));
     clipboardMocks.copyText.mockResolvedValueOnce(true);
@@ -341,13 +347,55 @@ describe("ConnectionManager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
 
-    const shown = await screen.findByText(/Nacos 返回 403: x+/);
-    expect(shown.textContent?.length).toBeLessThan(rawError.length);
-    expect(shown.textContent).toContain("...");
+    expect(await screen.findByText("连接测试失败")).toBeInTheDocument();
+    expect(screen.getByText((text) => text.includes("Nacos 返回 403:"))).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "复制报错" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制链路" }));
 
     expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining(rawError));
+  });
+
+  it("classifies localhost tunnel reset errors as remote-forward failures", async () => {
+    const rawError = '登录请求失败: Post "http://localhost:1811/nacos/v1/auth/login": read tcp 127.0.0.1:12442->127.0.0.1:1811: wsarecv: An existing connection was forcibly closed by the remote host.';
+    apiMocks.testConnection.mockRejectedValueOnce(new Error(rawError));
+    clipboardMocks.copyText.mockResolvedValueOnce(true);
+    renderManager();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 用户名"), { target: { value: "ops" } });
+    fireEvent.change(fieldByLabel("SSH 密码"), { target: { value: "ssh-secret" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    expect(await screen.findByText("连接测试失败")).toBeInTheDocument();
+    expect(screen.getByText("SSH 配置").closest(".test-trace-step")).toHaveClass("ok");
+    expect(screen.getByText("本地隧道入口").closest(".test-trace-step")).toHaveClass("ok");
+    expect(screen.getByText("远端目标连通性").closest(".test-trace-step")).toHaveClass("error");
+    expect(screen.getByText("Nacos 接口").closest(".test-trace-step")).toHaveClass("skipped");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制链路" }));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("远端目标连通性"));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining(rawError));
+  });
+
+  it("hides the previous connection test result after editing the tested session", async () => {
+    apiMocks.testConnection.mockResolvedValueOnce({
+      accessToken: "token",
+      tokenTtl: 18000,
+      globalAdmin: false,
+    });
+    renderManager();
+
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://first.example.com/nacos" } });
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    expect(await screen.findByText("连接测试成功")).toBeInTheDocument();
+
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://second.example.com/nacos" } });
+
+    expect(screen.queryByText("连接测试成功")).not.toBeInTheDocument();
+    expect(screen.queryByText("连接成功。")).not.toBeInTheDocument();
   });
 
   it("does not block a new connection test after editing the tested snapshot", async () => {
