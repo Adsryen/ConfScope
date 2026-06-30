@@ -396,4 +396,39 @@ describe("nacos api compatibility bridge", () => {
       })
     );
   });
+
+  it("normalizes protocol-less Nacos URLs before creating SSH tunnels", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-protocol-less"),
+      baseUrl: "mse-5d1d31013-nacos-ans.mse.aliyuncs.com:8848/nacos",
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      username: "",
+      password: "",
+      accessKeyId: "ak-test",
+      accessKeySecret: "sk-test",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 22,
+        username: "ops",
+        authType: "password",
+        password: "secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValue(13380);
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledWith(
+      conn.id,
+      expect.objectContaining({
+        remoteHost: "mse-5d1d31013-nacos-ans.mse.aliyuncs.com",
+        remotePort: 8848,
+      })
+    );
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://localhost:13380/nacos" })
+    );
+  });
 });

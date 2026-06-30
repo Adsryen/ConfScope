@@ -6,14 +6,11 @@ import (
 	"strings"
 )
 
-// truncate 截断过长的 Nacos 响应文本，用于错误信息展示。
+// truncate 保留历史调用点名称，但不再截断响应体。
+//
+// 前端会自行控制展示长度；后端错误需要保留完整响应，便于复制排查网关、鉴权等问题。
 func truncate(text string) string {
-	text = strings.TrimSpace(text)
-	if len([]rune(text)) <= 300 {
-		return text
-	}
-	runes := []rune(text)
-	return string(runes[:300]) + "..."
+	return strings.TrimSpace(text)
 }
 
 // stringValue 将 Nacos 宽松 JSON 字段转换为字符串。

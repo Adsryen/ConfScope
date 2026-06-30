@@ -62,6 +62,12 @@ function latencyText(startedAt: number): string {
   return `延迟 ${Math.max(0, Date.now() - startedAt)} ms`;
 }
 
+function displayTestMessage(text: string): string {
+  const value = text.trim();
+  if (value.length <= 360) return value;
+  return `${value.slice(0, 360)}...`;
+}
+
 function connectionTestKey(draft: Draft): string {
   const sshConfig = normalizeSSHConfig(draft.sshConfig);
   return JSON.stringify({
@@ -1251,7 +1257,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
             {testMsg && (
               <div className={`test-msg ${testMsg.ok ? "ok" : "err"}`}>
-                <span className="test-msg-text">{testMsg.text}</span>
+                <span className="test-msg-text" title={testMsg.text}>{displayTestMessage(testMsg.text)}</span>
                 {!testMsg.ok && <CopyButton text={testMsg.text} label="复制报错" />}
               </div>
             )}

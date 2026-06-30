@@ -333,6 +333,23 @@ describe("ConnectionManager", () => {
     expect(clipboardMocks.copyText).toHaveBeenCalledWith(errorText.textContent);
   });
 
+  it("shows a shortened connection test error but copies the full text", async () => {
+    const rawError = `Nacos 返回 403: ${"x".repeat(500)}`;
+    apiMocks.testConnection.mockRejectedValueOnce(new Error(rawError));
+    clipboardMocks.copyText.mockResolvedValueOnce(true);
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    const shown = await screen.findByText(/Nacos 返回 403: x+/);
+    expect(shown.textContent?.length).toBeLessThan(rawError.length);
+    expect(shown.textContent).toContain("...");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制报错" }));
+
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining(rawError));
+  });
+
   it("does not block a new connection test after editing the tested snapshot", async () => {
     let resolveFirst!: (value: { accessToken: string; tokenTtl: number; globalAdmin: boolean }) => void;
     apiMocks.testConnection

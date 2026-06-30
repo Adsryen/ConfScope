@@ -33,11 +33,12 @@ func (p *NacosProvider) ListNamespaces(profile ConnectionProfile) ([]Namespace, 
 
 func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRequest) (ConfigPage, error) {
 	client := p.clientFor(profile)
+	namespace := normalizeMSERequestNamespace(profile, req.Namespace)
 	page, err := client.ListConfigs(
 		profile.BaseURL,
 		profile.AccessToken,
 		profile.APIVersion,
-		req.Namespace,
+		namespace,
 		req.DataID,
 		req.Group,
 		req.PageNo,
@@ -58,7 +59,7 @@ func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRe
 			Ref: ConfigRef{
 				Provider:     ProviderNacos,
 				ConnectionID: profile.ID,
-				Namespace:    req.Namespace,
+				Namespace:    namespace,
 				Group:        item.Group,
 				DataID:       item.DataId,
 			},
@@ -71,6 +72,7 @@ func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRe
 
 func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (ConfigDocument, error) {
 	client := p.clientFor(profile)
+	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
 	content, err := client.GetConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
 	if err != nil {
 		return ConfigDocument{}, err
@@ -84,18 +86,21 @@ func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (Con
 
 func (p *NacosProvider) PublishConfig(profile ConnectionProfile, req PublishConfigRequest) error {
 	ref := normalizeRef(profile, req.Ref)
+	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
 	client := p.clientFor(profile)
 	return client.PublishConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, req.Content, req.Format)
 }
 
 func (p *NacosProvider) DeleteConfig(profile ConnectionProfile, ref ConfigRef) error {
 	ref = normalizeRef(profile, ref)
+	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
 	client := p.clientFor(profile)
 	return client.DeleteConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
 }
 
 func (p *NacosProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, page PageRequest) (HistoryPage, error) {
 	ref = normalizeRef(profile, ref)
+	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
 	client := p.clientFor(profile)
 	history, err := client.HistoryList(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, page.PageNo, page.PageSize)
 	if err != nil {
@@ -123,6 +128,7 @@ func (p *NacosProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, pa
 
 func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRef, id string) (HistoryDetail, error) {
 	ref = normalizeRef(profile, ref)
+	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
 	client := p.clientFor(profile)
 	detail, err := client.HistoryDetail(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group, id)
 	if err != nil {
@@ -144,7 +150,7 @@ func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRe
 func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
 	client := p.clientFor(profile)
 	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK {
-		_, err := client.ListConfigs(profile.BaseURL, "", "v1", "public", "", "DEFAULT_GROUP", 1, 1)
+		_, err := client.ListConfigs(profile.BaseURL, "", "v1", "", "", "DEFAULT_GROUP", 1, 1)
 		return err
 	}
 	_, err := client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
@@ -160,6 +166,13 @@ func (p *NacosProvider) clientFor(profile ConnectionProfile) *nacos.Client {
 		AccessKeySecret: profile.AccessKeySecret,
 		SecurityToken:   profile.SecurityToken,
 	})
+}
+
+func normalizeMSERequestNamespace(profile ConnectionProfile, namespace string) string {
+	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK && namespace == "public" {
+		return ""
+	}
+	return namespace
 }
 
 func normalizeRef(profile ConnectionProfile, ref ConfigRef) ConfigRef {

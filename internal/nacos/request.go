@@ -24,35 +24,62 @@ func requestPath(req *http.Request) string {
 	return req.URL.Path + "?" + req.URL.RawQuery
 }
 
-func (c *Client) getText(baseURL, path string, query url.Values, accessToken string, version apiVersion) (string, error) {
-	if version == apiV1 && accessToken != "" {
-		query.Set("accessToken", accessToken)
-	}
+func requestURL(baseURL, path string, query url.Values) string {
 	reqURL := base(baseURL) + path
 	if encoded := query.Encode(); encoded != "" {
 		reqURL += "?" + encoded
 	}
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	return reqURL
+}
+
+func shouldRetryWithNacosContext(baseURL, path string, statusCode int) bool {
+	if statusCode != http.StatusNotFound || strings.HasPrefix(path, "/nacos/") {
+		return false
+	}
+	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return "", err
+		return false
 	}
-	if version == apiV3 && accessToken != "" {
-		req.Header.Set("accessToken", accessToken)
+	contextPath := strings.TrimRight(parsed.Path, "/")
+	return contextPath == "" || contextPath == "/"
+}
+
+func (c *Client) getText(baseURL, path string, query url.Values, accessToken string, version apiVersion) (string, error) {
+	if version == apiV1 && accessToken != "" {
+		query.Set("accessToken", accessToken)
 	}
-	c.applyMSEAuth(req, requestNamespace(query, nil), requestGroup(query, nil))
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	text, err := readBody(resp)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+
+	for attempt := 0; attempt < 2; attempt++ {
+		currentPath := path
+		if attempt == 1 {
+			currentPath = "/nacos" + path
+		}
+		req, err := http.NewRequest(http.MethodGet, requestURL(baseURL, currentPath, query), nil)
+		if err != nil {
+			return "", err
+		}
+		if version == apiV3 && accessToken != "" {
+			req.Header.Set("accessToken", accessToken)
+		}
+		c.applyMSEAuth(req, requestNamespace(query, nil), requestGroup(query, nil))
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("请求失败: %w", err)
+		}
+		text, err := readBody(resp)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("读取响应失败: %w", err)
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return text, nil
+		}
+		if attempt == 0 && shouldRetryWithNacosContext(baseURL, path, resp.StatusCode) {
+			continue
+		}
 		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text))
 	}
-	return text, nil
+	return "", fmt.Errorf("请求失败")
 }
 
 func (c *Client) getJSON(baseURL, path string, query url.Values, accessToken string, version apiVersion) (any, error) {
@@ -84,46 +111,52 @@ func (c *Client) sendForm(method, baseURL, path string, query url.Values, form u
 	if version == apiV1 && accessToken != "" {
 		query.Set("accessToken", accessToken)
 	}
-	reqURL := base(baseURL) + path
-	if encoded := query.Encode(); encoded != "" {
-		reqURL += "?" + encoded
-	}
 
-	var body io.Reader
-	if form != nil {
-		body = bytes.NewBufferString(form.Encode())
-	}
-	req, err := http.NewRequest(method, reqURL, body)
-	if err != nil {
-		return "", err
-	}
-	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-	if version == apiV3 && accessToken != "" {
-		req.Header.Set("accessToken", accessToken)
-	}
-	c.applyMSEAuth(req, requestNamespace(query, form), requestGroup(query, form))
-	resp, err := c.http.Do(req)
-	if err != nil {
-		switch method {
-		case http.MethodPost:
-			return "", fmt.Errorf("发布请求失败: %w", err)
-		case http.MethodDelete:
-			return "", fmt.Errorf("删除请求失败: %w", err)
-		default:
-			return "", fmt.Errorf("请求失败: %w", err)
+	for attempt := 0; attempt < 2; attempt++ {
+		currentPath := path
+		if attempt == 1 {
+			currentPath = "/nacos" + path
 		}
-	}
-	defer resp.Body.Close()
-	text, err := readBody(resp)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var body io.Reader
+		if form != nil {
+			body = bytes.NewBufferString(form.Encode())
+		}
+		req, err := http.NewRequest(method, requestURL(baseURL, currentPath, query), body)
+		if err != nil {
+			return "", err
+		}
+		if form != nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		if version == apiV3 && accessToken != "" {
+			req.Header.Set("accessToken", accessToken)
+		}
+		c.applyMSEAuth(req, requestNamespace(query, form), requestGroup(query, form))
+		resp, err := c.http.Do(req)
+		if err != nil {
+			switch method {
+			case http.MethodPost:
+				return "", fmt.Errorf("发布请求失败: %w", err)
+			case http.MethodDelete:
+				return "", fmt.Errorf("删除请求失败: %w", err)
+			default:
+				return "", fmt.Errorf("请求失败: %w", err)
+			}
+		}
+		text, err := readBody(resp)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("读取响应失败: %w", err)
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return text, nil
+		}
+		if attempt == 0 && shouldRetryWithNacosContext(baseURL, path, resp.StatusCode) {
+			continue
+		}
 		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text))
 	}
-	return text, nil
+	return "", fmt.Errorf("请求失败")
 }
 
 func readBody(resp *http.Response) (string, error) {
