@@ -9,7 +9,8 @@
     "retry": "重试",
     "edit": "编辑",
     "error": "错误",
-    "success": "成功"
+    "success": "成功",
+    "copy": "复制"
   },
   "app": {
     "title": "配置浏览",
@@ -62,6 +63,7 @@
     "httpProxy": "HTTP 代理",
     "httpsProxy": "HTTPS 代理",
     "noProxy": "不走代理",
+    "proxyOnlyForUpdate": "代理仅用于应用更新检查（Nacos 连接不走代理）",
     "settingsSaved": "设置已保存"
   },
   "ssh": {
@@ -388,10 +390,17 @@
     "updateTitle": "应用更新",
     "checkUpdate": "检查更新",
     "checkingUpdate": "检查中…",
+    "downloadUpdate": "下载更新",
+    "downloadingUpdate": "下载中…",
+    "installingUpdate": "安装更新",
+    "restartToInstall": "立即重启安装",
     "openDownload": "打开下载页",
     "updateAvailable": "发现新版本 v{version}",
     "updateSourceHit": "命中线路：{source}",
     "noUpdate": "当前已是最新版本",
+    "downloadComplete": "下载完成，校验通过",
+    "downloadFailed": "下载失败：{error}",
+    "sha256VerifyFailed": "SHA256 校验失败",
     "httpProxy": "HTTP 代理",
     "httpsProxy": "HTTPS 代理",
     "noProxy": "不走代理",

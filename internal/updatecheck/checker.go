@@ -2,11 +2,18 @@ package updatecheck
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -38,13 +45,42 @@ type Request struct {
 	Proxy          ProxyConfig `json:"proxy"`
 }
 
-type Manifest struct {
-	Version     string `json:"version"`
-	Notes       string `json:"notes"`
+// PlatformAsset 描述单个平台的下载信息。
+type PlatformAsset struct {
 	DownloadURL string `json:"downloadUrl"`
-	PublishedAt string `json:"publishedAt"`
 	SHA256      string `json:"sha256"`
-	Mandatory   bool   `json:"mandatory"`
+	FileName    string `json:"fileName"`
+}
+
+// Manifest 是 update.json 的结构。
+// 兼容旧版单一下载地址格式和新版多平台格式。
+type Manifest struct {
+	Version     string                   `json:"version"`
+	Notes       string                   `json:"notes"`
+	DownloadURL string                   `json:"downloadUrl,omitempty"`
+	PublishedAt string                   `json:"publishedAt"`
+	SHA256      string                   `json:"sha256,omitempty"`
+	Mandatory   bool                     `json:"mandatory"`
+	Platforms   map[string]PlatformAsset `json:"platforms,omitempty"`
+}
+
+// PlatformAsset 返回当前平台对应的资产信息。
+// 优先从 platforms 字段查找，fallback 到旧版顶级字段。
+func (m Manifest) PlatformAsset() (PlatformAsset, bool) {
+	key := CurrentPlatform()
+	if m.Platforms != nil {
+		if asset, ok := m.Platforms[key]; ok && asset.DownloadURL != "" {
+			return asset, true
+		}
+	}
+	if m.DownloadURL != "" {
+		return PlatformAsset{
+			DownloadURL: m.DownloadURL,
+			SHA256:      m.SHA256,
+			FileName:    filepath.Base(m.DownloadURL),
+		}, true
+	}
+	return PlatformAsset{}, false
 }
 
 type Result struct {
@@ -61,6 +97,18 @@ type Result struct {
 	CheckedAt      string `json:"checkedAt"`
 	Error          string `json:"error"`
 }
+
+// DownloadProgress 下载进度信息。
+type DownloadProgress struct {
+	Downloaded int64  `json:"downloaded"`
+	Total      int64  `json:"total"`
+	Percent    int    `json:"percent"`
+	Done       bool   `json:"done"`
+	Error      string `json:"error,omitempty"`
+}
+
+// ProgressCallback 用于报告下载进度。
+type ProgressCallback func(DownloadProgress)
 
 func Check(ctx context.Context, req Request) Result {
 	current := strings.TrimSpace(req.CurrentVersion)
@@ -94,17 +142,23 @@ func Check(ctx context.Context, req Request) Result {
 			continue
 		}
 
+		asset, ok := manifest.PlatformAsset()
+		if !ok {
+			failures = append(failures, fmt.Sprintf("%s: no asset for platform %s", source.Name, CurrentPlatform()))
+			continue
+		}
+
 		result.LatestVersion = manifest.Version
 		result.SourceName = source.Name
 		result.SourceURL = source.URL
-		result.DownloadURL = manifest.DownloadURL
+		result.DownloadURL = asset.DownloadURL
 		result.ReleaseNotes = manifest.Notes
 		result.PublishedAt = manifest.PublishedAt
-		result.SHA256 = manifest.SHA256
+		result.SHA256 = asset.SHA256
 		result.Mandatory = manifest.Mandatory
 		result.HasUpdate = CompareVersions(manifest.Version, current) > 0
 
-		if result.HasUpdate && !isHTTPS(manifest.DownloadURL) {
+		if result.HasUpdate && !isHTTPS(asset.DownloadURL) {
 			result.Error = "更新下载地址必须使用 HTTPS"
 		}
 		return result
@@ -116,6 +170,248 @@ func Check(ctx context.Context, req Request) Result {
 		result.Error = strings.Join(failures, "; ")
 	}
 	return result
+}
+
+// Download 下载更新文件到临时目录，通过回调报告进度。
+// 返回下载后的文件路径。
+func Download(ctx context.Context, downloadURL string, expectedSHA256 string, onProgress ProgressCallback) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "ConfScope update downloader")
+
+	client := &http.Client{
+		Timeout: 30 * time.Minute,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	total := resp.ContentLength
+	fileName := filepath.Base(downloadURL)
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = "ConfScope-update"
+	}
+	tmpDir := os.TempDir()
+	tmpFile, err := os.CreateTemp(tmpDir, "confscope-update-*"+filepath.Ext(fileName))
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	hasher := sha256.New()
+	writer := io.MultiWriter(tmpFile, hasher)
+
+	var downloaded int64
+	buf := make([]byte, 32*1024)
+	lastReport := time.Now()
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := writer.Write(buf[:n]); writeErr != nil {
+				tmpFile.Close()
+				os.Remove(tmpPath)
+				return "", fmt.Errorf("write file: %w", writeErr)
+			}
+			downloaded += int64(n)
+
+			// 每 200ms 报告一次进度
+			if onProgress != nil && time.Since(lastReport) > 200*time.Millisecond {
+				pct := 0
+				if total > 0 {
+					pct = int(downloaded * 100 / total)
+				}
+				onProgress(DownloadProgress{
+					Downloaded: downloaded,
+					Total:      total,
+					Percent:    pct,
+				})
+				lastReport = time.Now()
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", fmt.Errorf("read body: %w", readErr)
+		}
+	}
+	tmpFile.Close()
+
+	// 最终进度报告
+	if onProgress != nil {
+		pct := 100
+		if total > 0 {
+			pct = int(downloaded * 100 / total)
+		}
+		onProgress(DownloadProgress{
+			Downloaded: downloaded,
+			Total:      total,
+			Percent:    pct,
+			Done:       true,
+		})
+	}
+
+	// 校验 SHA256
+	if expectedSHA256 != "" {
+		actual := hex.EncodeToString(hasher.Sum(nil))
+		if !strings.EqualFold(actual, expectedSHA256) {
+			os.Remove(tmpPath)
+			return "", fmt.Errorf("SHA256 校验失败\n期望: %s\n实际: %s", expectedSHA256, actual)
+		}
+	}
+
+	return tmpPath, nil
+}
+
+// InstallAndRestart 执行安装并重启应用。
+// downloadedFile 是下载的更新文件路径。
+// exePath 是当前运行的可执行文件路径。
+func InstallAndRestart(downloadedFile string, exePath string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return installWindows(downloadedFile, exePath)
+	case "linux":
+		return installLinux(downloadedFile, exePath)
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+}
+
+func installWindows(downloadedFile string, exePath string) error {
+	// 如果是 .exe 直接替换，否则解压 tar.gz
+	newExe := downloadedFile
+	if strings.HasSuffix(downloadedFile, ".tar.gz") || strings.HasSuffix(downloadedFile, ".tgz") {
+		extracted, err := extractTarGz(downloadedFile)
+		if err != nil {
+			return fmt.Errorf("extract tar.gz: %w", err)
+		}
+		newExe = extracted
+	}
+
+	batPath := filepath.Join(os.TempDir(), "confscope-update.bat")
+	script := fmt.Sprintf(
+		"@echo off\r\n"+
+			"chcp 65001 >nul\r\n"+
+			"echo 正在更新 ConfScope...\r\n"+
+			":wait\r\n"+
+			"ping 127.0.0.1 -n 2 >nul\r\n"+
+			"if exist \"%s\" (\r\n"+
+			"  ping 127.0.0.1 -n 2 >nul\r\n"+
+			"  goto wait\r\n"+
+			")\r\n"+
+			"move /Y \"%s\" \"%s\"\r\n"+
+			"if errorlevel 1 (\r\n"+
+			"  echo 更新失败，请手动替换\r\n"+
+			"  pause\r\n"+
+			"  exit /b 1\r\n"+
+			")\r\n"+
+			"echo 更新完成，正在启动...\r\n"+
+			"start \"\" \"%s\"\r\n"+
+			"del \"%%~f0\"\r\n",
+		exePath, newExe, exePath, exePath,
+	)
+
+	if err := os.WriteFile(batPath, []byte(script), 0644); err != nil {
+		return fmt.Errorf("write batch script: %w", err)
+	}
+
+	cmd := exec.Command("cmd.exe", "/C", batPath)
+	cmd.SysProcAttr = windowsDetachProcess()
+	return cmd.Start()
+}
+
+func installLinux(downloadedFile string, exePath string) error {
+	newBin := downloadedFile
+	if strings.HasSuffix(downloadedFile, ".tar.gz") || strings.HasSuffix(downloadedFile, ".tgz") {
+		extracted, err := extractTarGz(downloadedFile)
+		if err != nil {
+			return fmt.Errorf("extract tar.gz: %w", err)
+		}
+		newBin = extracted
+	}
+
+	shPath := filepath.Join(os.TempDir(), "confscope-update.sh")
+	script := fmt.Sprintf(
+		"#!/bin/bash\n"+
+			"sleep 1\n"+
+			"while kill -0 %d 2>/dev/null; do sleep 0.5; done\n"+
+			"cp \"%s\" \"%s\"\n"+
+			"chmod +x \"%s\"\n"+
+			"nohup \"%s\" >/dev/null 2>&1 &\n"+
+			"rm -f \"$0\"\n",
+		os.Getpid(), newBin, exePath, exePath, exePath,
+	)
+
+	if err := os.WriteFile(shPath, []byte(script), 0755); err != nil {
+		return fmt.Errorf("write shell script: %w", err)
+	}
+
+	cmd := exec.Command("nohup", "bash", shPath)
+	cmd.SysProcAttr = linuxDetachProcess()
+	return cmd.Start()
+}
+
+// extractTarGz 从 tar.gz 中提取第一个可执行文件。
+func extractTarGz(tarPath string) (string, error) {
+	// 使用系统 tar 命令解压
+	tmpDir, err := os.MkdirTemp("", "confscope-extract-*")
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("tar", "xzf", tarPath, "-C", tmpDir)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("tar extract: %w", err)
+	}
+
+	// 找第一个可执行文件
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(tmpDir, entry.Name())
+		info, _ := entry.Info()
+		if info != nil && info.Mode()&0111 != 0 {
+			return path, nil
+		}
+		// 也接受非可执行文件（Windows 下载的 .exe 可能没有执行位）
+		if filepath.Ext(entry.Name()) == ".exe" || entry.Name() == "ConfScope" {
+			return path, nil
+		}
+	}
+
+	// fallback: 返回第一个文件
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return filepath.Join(tmpDir, entry.Name()), nil
+		}
+	}
+
+	os.RemoveAll(tmpDir)
+	return "", fmt.Errorf("no file found in tar.gz")
+}
+
+// CurrentPlatform 返回当前平台标识，如 "windows-amd64"、"linux-amd64"。
+func CurrentPlatform() string {
+	return fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
 }
 
 func fetchManifest(ctx context.Context, client *http.Client, rawURL string) (Manifest, error) {

@@ -87,7 +87,15 @@ jobs:
           name: ConfScope-windows-amd64
           path: build/bin/ConfScope.exe
 
-      # Linux 打包成 .deb + .rpm
+      # Linux 打包原始二进制 + .deb + .rpm
+      - name: Package Linux tarball
+        if: matrix.platform == 'linux'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd build/bin
+          tar czf "confscope-linux-amd64.tar.gz" ConfScope
+          echo "TARBALL=confscope-linux-amd64.tar.gz" >> $GITHUB_ENV
+
       - name: Package Linux .deb
         if: matrix.platform == 'linux'
         run: |
@@ -171,11 +179,78 @@ jobs:
         with:
           name: ConfScope-linux-amd64
           path: |
+            build/bin/confscope-linux-amd64.tar.gz
             build/bin/confscope-linux-amd64.deb
             build/bin/confscope-linux-amd64.rpm
 
-  release:
+  generate-manifest:
     needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.manifest.outputs.json }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate update.json
+        id: manifest
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES=$(gh release view "${GITHUB_REF_NAME}" --json body -q .body 2>/dev/null || echo "")
+
+          # Windows
+          WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe" | awk '{print $1}')
+
+          # Linux
+          LINUX_TAR_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz" | awk '{print $1}')
+          LINUX_DEB_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb" | awk '{print $1}')
+          LINUX_RPM_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm" | awk '{print $1}')
+
+          cat > update.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": ${NOTES:+$(echo "$NOTES" | jq -Rs .)}${NOTES:-"发行版 ${VERSION}"},
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "mandatory": false,
+            "platforms": {
+              "windows-amd64": {
+                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/ConfScope.exe",
+                "sha256": "${WIN_SHA256}",
+                "fileName": "ConfScope.exe"
+              },
+              "linux-amd64": {
+                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.tar.gz",
+                "sha256": "${LINUX_TAR_SHA256}",
+                "fileName": "confscope-linux-amd64.tar.gz"
+              },
+              "linux-amd64-deb": {
+                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.deb",
+                "sha256": "${LINUX_DEB_SHA256}",
+                "fileName": "confscope-linux-amd64.deb"
+              },
+              "linux-amd64-rpm": {
+                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.rpm",
+                "sha256": "${LINUX_RPM_SHA256}",
+                "fileName": "confscope-linux-amd64.rpm"
+              }
+            }
+          }
+          EOF
+
+          cat update.json
+          echo "json=$(cat update.json | jq -c .)" >> $GITHUB_OUTPUT
+          cp update.json artifacts/update.json
+
+      - name: Upload update.json as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-manifest
+          path: artifacts/update.json
+
+  release:
+    needs: [build, generate-manifest]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -189,5 +264,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/ConfScope-windows-amd64/ConfScope.exe
+            artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm
+            artifacts/update-manifest/update.json
