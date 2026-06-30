@@ -84,12 +84,63 @@ describe("DiffView", () => {
     });
   });
 
+  it("syncs the default namespace when the connection config changes", async () => {
+    const initialConn = { ...nacosConn, defaultNamespace: "" };
+    const nextConn = { ...nacosConn, defaultNamespace: "dev-tenant" };
+    const view = renderDiff([initialConn]);
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(initialConn, "", "", "", 1, 500);
+    });
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView connections={[nextConn]} />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "dev-tenant", "", "", 1, 500);
+    });
+  });
+
+  it("keeps a manually selected namespace when the connection default changes", async () => {
+    apiMocks.listNamespaces.mockResolvedValue([
+      { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 },
+      { namespace: "prod-tenant", namespaceShowName: "生产命名空间", configCount: 1, kind: 0 },
+    ]);
+
+    const view = renderDiff([nacosConn]);
+
+    await screen.findAllByText("开发命名空间");
+    const namespaceButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发命名空间"));
+    fireEvent.click(namespaceButtons[0]);
+    fireEvent.mouseDown(await screen.findByText("生产命名空间"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
+    });
+
+    const nextConn = { ...nacosConn, defaultNamespace: "qa-tenant" };
+    view.rerender(
+      <I18nProvider>
+        <DiffView connections={[nextConn]} />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "prod-tenant", "", "", 1, 500);
+    });
+  });
+
   it("shows namespace load failures instead of silently clearing the selector", async () => {
     apiMocks.listNamespaces.mockRejectedValue(new Error("connect timeout"));
 
     renderDiff([nacosConn]);
 
-    expect(await screen.findAllByText(/命名空间加载失败: connect timeout/)).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByText(/命名空间加载失败: connect timeout/)).toHaveLength(2);
+    });
   });
 
 
@@ -121,6 +172,48 @@ describe("DiffView", () => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
     });
   });
+
+  it("applies the only-changes toggle to all batch diff files", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    const loadCount = new Map<string, number>();
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => {
+      const count = loadCount.get(dataId) ?? 0;
+      loadCount.set(dataId, count + 1);
+      if (dataId === "app.yaml") return count === 0 ? "same-app\nleft-app" : "same-app\nright-app";
+      return count === 0 ? "same-gateway\nleft-gateway" : "same-gateway\nright-gateway";
+    });
+
+    renderDiff([nacosConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（2）" }));
+
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
+    expect(await screen.findByText("已生成 2 个文件对比")).toBeInTheDocument();
+    expect(await screen.findByText("app.yaml")).toBeInTheDocument();
+    expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
+    expect(screen.getAllByText("same-app")).toHaveLength(2);
+    expect(screen.getAllByText("same-gateway")).toHaveLength(2);
+    expect(screen.getAllByLabelText("仅显示变更")).toHaveLength(2);
+
+    fireEvent.click(screen.getByLabelText("全部仅显示变更"));
+
+    expect(screen.queryByText("same-app")).not.toBeInTheDocument();
+    expect(screen.queryByText("same-gateway")).not.toBeInTheDocument();
+    expect(screen.getByText("left-app")).toBeInTheDocument();
+    expect(screen.getByText("right-app")).toBeInTheDocument();
+    expect(screen.getByText("left-gateway")).toBeInTheDocument();
+    expect(screen.getByText("right-gateway")).toBeInTheDocument();
+  });
+
   it("marks local snapshot sources and shows the snapshot directory", async () => {
     renderDiff([snapshotConn]);
 

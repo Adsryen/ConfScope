@@ -10,6 +10,9 @@ interface Props {
   rightText: string;
   /** 提供时按该格式做语法高亮（TEXT 不高亮）。 */
   format?: Format;
+  onlyChanges?: boolean;
+  onOnlyChangesChange?: (value: boolean) => void;
+  hideOnlyChangesToggle?: boolean;
 }
 
 /** 渲染一个 diff 单元格：有可高亮格式时输出语法高亮 HTML，否则纯文本。 */
@@ -27,8 +30,22 @@ function Cell({ text, side, format }: { text: string | null; side: string; forma
 }
 
 /** 并排展示两段文本的智能行级差异：增/删/改高亮 + 变更统计，可只看变更行。 */
-export default function DiffPanel({ leftLabel, rightLabel, leftText, rightText, format }: Props) {
-  const [onlyChanges, setOnlyChanges] = useState(false);
+export default function DiffPanel({
+  leftLabel,
+  rightLabel,
+  leftText,
+  rightText,
+  format,
+  onlyChanges: controlledOnlyChanges,
+  onOnlyChangesChange,
+  hideOnlyChangesToggle = false,
+}: Props) {
+  const [localOnlyChanges, setLocalOnlyChanges] = useState(false);
+  const onlyChanges = controlledOnlyChanges ?? localOnlyChanges;
+  const setOnlyChanges = (value: boolean) => {
+    if (controlledOnlyChanges === undefined) setLocalOnlyChanges(value);
+    onOnlyChangesChange?.(value);
+  };
   const result = useMemo(() => diffLines(leftText, rightText), [leftText, rightText]);
 
   const rows = useMemo(
@@ -50,14 +67,16 @@ export default function DiffPanel({ leftLabel, rightLabel, leftText, rightText, 
             <span className="stat stat-mod">~{result.modified} 修改</span>
           </>
         )}
-        <label className="diff-toggle">
-          <input
-            type="checkbox"
-            checked={onlyChanges}
-            onChange={(e) => setOnlyChanges(e.target.checked)}
-          />
-          仅显示变更
-        </label>
+        {!hideOnlyChangesToggle && (
+          <label className="diff-toggle">
+            <input
+              type="checkbox"
+              checked={onlyChanges}
+              onChange={(e) => setOnlyChanges(e.target.checked)}
+            />
+            仅显示变更
+          </label>
+        )}
       </div>
 
       <div className="diff-head">

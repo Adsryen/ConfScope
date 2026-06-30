@@ -34,13 +34,14 @@ func (p *NacosProvider) ListNamespaces(profile ConnectionProfile) ([]Namespace, 
 func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRequest) (ConfigPage, error) {
 	client := p.clientFor(profile)
 	namespace := normalizeMSERequestNamespace(profile, req.Namespace)
+	group := normalizeMSERequestGroup(profile, req.Group)
 	page, err := client.ListConfigs(
 		profile.BaseURL,
 		profile.AccessToken,
 		profile.APIVersion,
 		namespace,
 		req.DataID,
-		req.Group,
+		group,
 		req.PageNo,
 		req.PageSize,
 	)
@@ -173,6 +174,13 @@ func normalizeMSERequestNamespace(profile ConnectionProfile, namespace string) s
 		return ""
 	}
 	return namespace
+}
+
+func normalizeMSERequestGroup(profile ConnectionProfile, group string) string {
+	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK && group == "" {
+		return "DEFAULT_GROUP"
+	}
+	return group
 }
 
 func normalizeRef(profile ConnectionProfile, ref ConfigRef) ConfigRef {

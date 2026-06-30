@@ -56,4 +56,22 @@ describe("DiffPanel", () => {
     expect(screen.getByText("old")).toBeInTheDocument();
     expect(screen.getByText("new")).toBeInTheDocument();
   });
+
+  it("can be controlled by a parent only-changes switch", () => {
+    render(
+      <DiffPanel
+        leftLabel="left"
+        rightLabel="right"
+        leftText={"same\nold"}
+        rightText={"same\nnew"}
+        onlyChanges
+        hideOnlyChangesToggle
+      />
+    );
+
+    expect(screen.queryByText("same")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("仅显示变更")).not.toBeInTheDocument();
+    expect(screen.getByText("old")).toBeInTheDocument();
+    expect(screen.getByText("new")).toBeInTheDocument();
+  });
 });

@@ -106,6 +106,7 @@ export default function App() {
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
+  const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
   const knownMode = ["browse", "diff", "connections", "ssh", "audit", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
     ? ui0.mode!
     : "browse";
@@ -135,12 +136,13 @@ export default function App() {
   useEffect(() => {
     if (!activeConn) {
       setNamespaces([]);
+      setTenant("");
+      setTenantFollowsDefault(true);
       return;
     }
     let alive = true;
     setNsLoading(true);
     setNsError(null);
-    setTenant(activeConn.defaultNamespace || "");
     listNamespaces(activeConn)
       .then((ns) => alive && setNamespaces(ns))
       .catch((e) => {
@@ -163,6 +165,15 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConnId, nsReload]);
+
+  useEffect(() => {
+    setTenantFollowsDefault(true);
+  }, [activeConnId]);
+
+  useEffect(() => {
+    if (!activeConn || !tenantFollowsDefault) return;
+    setTenant(activeConn.defaultNamespace || "");
+  }, [activeConn?.defaultNamespace, activeConnId, tenantFollowsDefault]);
 
   const navItems: { mode: Mode; label: string; unavailable?: boolean }[] = [
     { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
@@ -212,7 +223,10 @@ export default function App() {
                   label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
                 })),
             ]}
-            onChange={setTenant}
+            onChange={(value) => {
+              setTenant(value);
+              setTenantFollowsDefault(false);
+            }}
           />
         </div>
       </div>
