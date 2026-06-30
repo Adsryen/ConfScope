@@ -115,6 +115,14 @@ func TestLoginReturnsForbiddenAsCredentialError(t *testing.T) {
 	}
 }
 
+func TestTruncateKeepsFullResponseBody(t *testing.T) {
+	body := strings.Repeat("x", 500)
+	got := truncate("  " + body + "  ")
+	if got != body {
+		t.Fatalf("truncate length = %d, want %d", len(got), len(body))
+	}
+}
+
 func TestListConfigsMapsV1Response(t *testing.T) {
 	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/cs/configs" {

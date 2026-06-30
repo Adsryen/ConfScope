@@ -14,8 +14,21 @@ import (
 )
 
 func expectedProviderMSESignature(secret, namespace, group, timestamp string) string {
+	if namespace == "public" {
+		namespace = ""
+	}
+	resource := group
+	if namespace != "" && group != "" {
+		resource = namespace + "+" + group
+	} else if namespace != "" {
+		resource = namespace
+	}
+	signText := timestamp
+	if resource != "" {
+		signText = resource + "+" + timestamp
+	}
 	mac := hmac.New(sha1.New, []byte(secret))
-	_, _ = mac.Write([]byte(namespace + "+" + group + "+" + timestamp))
+	_, _ = mac.Write([]byte(signText))
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -173,7 +186,7 @@ func TestNacosProviderTestsMSEConnectionWithConfigList(t *testing.T) {
 		if r.URL.Path != "/v1/cs/configs" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.URL.Query().Get("tenant") != "public" || r.URL.Query().Get("group") != "DEFAULT_GROUP" || r.URL.Query().Get("pageSize") != "1" {
+		if r.URL.Query().Get("tenant") != "" || r.URL.Query().Get("group") != "DEFAULT_GROUP" || r.URL.Query().Get("pageSize") != "1" {
 			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
 		}
 		if r.Header.Get("Spas-AccessKey") != "ak-test" {
@@ -182,7 +195,7 @@ func TestNacosProviderTestsMSEConnectionWithConfigList(t *testing.T) {
 		if r.Header.Get("Timestamp") == "" {
 			t.Fatalf("missing Timestamp header")
 		}
-		wantSignature := expectedProviderMSESignature("sk-test", "public", "DEFAULT_GROUP", r.Header.Get("Timestamp"))
+		wantSignature := expectedProviderMSESignature("sk-test", "", "DEFAULT_GROUP", r.Header.Get("Timestamp"))
 		if r.Header.Get("Spas-Signature") != wantSignature {
 			t.Fatalf("Spas-Signature = %q, want %q", r.Header.Get("Spas-Signature"), wantSignature)
 		}

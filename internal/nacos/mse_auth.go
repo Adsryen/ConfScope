@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,7 @@ func (c *Client) applyMSEAuth(req *http.Request, namespace string, group string)
 	if !c.mseAuth.enabled() {
 		return
 	}
+	namespace = normalizeMSENamespace(namespace)
 	clock := c.clock
 	if clock == nil {
 		clock = time.Now
@@ -37,7 +39,25 @@ func (c *Client) applyMSEAuth(req *http.Request, namespace string, group string)
 }
 
 func signMSERequest(secret string, namespace string, group string, timestamp string) string {
+	namespace = normalizeMSENamespace(namespace)
+	resource := group
+	if namespace != "" && group != "" {
+		resource = namespace + "+" + group
+	} else if namespace != "" {
+		resource = namespace
+	}
+	signText := timestamp
+	if resource != "" {
+		signText = resource + "+" + timestamp
+	}
 	mac := hmac.New(sha1.New, []byte(secret))
-	_, _ = mac.Write([]byte(namespace + "+" + group + "+" + timestamp))
+	_, _ = mac.Write([]byte(signText))
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func normalizeMSENamespace(namespace string) string {
+	if strings.EqualFold(strings.TrimSpace(namespace), "public") {
+		return ""
+	}
+	return namespace
 }

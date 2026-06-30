@@ -26,17 +26,25 @@ import { connectionSSHConfig } from "../store/sshProfiles";
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
 
+function normalizeNacosBaseUrl(baseUrl: string): string {
+  const value = baseUrl.trim();
+  if (!value) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  return `http://${value}`;
+}
+
 /** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
 export async function resolveBaseUrl(conn: Connection): Promise<string> {
   if (conn.sourceType === "local-snapshot") return conn.localPath || conn.baseUrl;
+  const originalBaseUrl = normalizeNacosBaseUrl(conn.baseUrl);
   const sshConfig = connectionSSHConfig(conn);
-  if (!sshConfig) return conn.baseUrl;
+  if (!sshConfig) return originalBaseUrl;
 
   const cached = tunnelUrlCache.get(conn.id);
   if (cached) return cached;
 
   // 解析原始 baseUrl，提取 context-path 和协议
-  const url = new URL(conn.baseUrl);
+  const url = new URL(originalBaseUrl);
   const contextPath = url.pathname;
   const remotePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
 
