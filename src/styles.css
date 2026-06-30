@@ -1034,6 +1034,55 @@ select, button, .tab-btn { cursor: pointer; }
 .vs-prev { color: var(--blue); }
 .head-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .err-actions { display: flex; gap: 10px; margin-top: 4px; }
+.inline-error {
+  margin: 12px;
+  padding: 10px;
+  border: 1px solid rgba(244, 71, 71, 0.42);
+  border-left: 3px solid var(--red);
+  background: rgba(244, 71, 71, 0.1);
+  color: var(--text);
+  min-width: 0;
+}
+.inline-error-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.inline-error-title {
+  color: var(--red-h);
+  font-size: 12px;
+  font-weight: 600;
+}
+.inline-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.inline-error-body {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--red-h);
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.browser-list .inline-error {
+  margin: 8px;
+}
+.browser-list .inline-error-head {
+  align-items: flex-start;
+  flex-direction: column;
+}
+.browser-list .inline-error-actions {
+  flex-wrap: wrap;
+}
 
 /* ── 统一（单列）差异视图 ── */
 .udiff { flex: 1; overflow: auto; font-size: 12.5px; line-height: 1.5; }
@@ -1393,6 +1442,21 @@ select, button, .tab-btn { cursor: pointer; }
 .match-group { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
 
 .batch-diff { flex: 1; min-height: 0; overflow-y: auto; }
+.batch-diff-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.batch-diff-count {
+  color: var(--text-dim);
+  font-size: 12px;
+}
 .batch-diff-item { border-bottom: 2px solid var(--border); display: flex; flex-direction: column; }
 .batch-diff-item:last-child { border-bottom: none; }
 .batch-diff-header {

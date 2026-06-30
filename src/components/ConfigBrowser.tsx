@@ -24,6 +24,29 @@ interface Props {
 
 const PAGE_SIZE = 50;
 type Tab = "content" | "history";
+type InlineErrorProps = {
+  message: string;
+  onRetry?: () => void;
+};
+
+function InlineError({ message, onRetry }: InlineErrorProps) {
+  return (
+    <div className="inline-error" role="alert">
+      <div className="inline-error-head">
+        <span className="inline-error-title">操作失败</span>
+        <div className="inline-error-actions">
+          {onRetry && (
+            <button className="btn btn-ghost btn-sm" onClick={onRetry}>
+              重试
+            </button>
+          )}
+          <CopyButton text={message} label="复制错误" />
+        </div>
+      </div>
+      <pre className="inline-error-body">{message}</pre>
+    </div>
+  );
+}
 
 /** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
 export default function ConfigBrowser({ conn, tenant }: Props) {
@@ -274,7 +297,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         <div className="browser-count">{t('config.total', { count: total })}</div>
         <div className="browser-items">
           {listLoading && <div className="pad-msg">{t('config.loading')}</div>}
-          {listError && <div className="pad-msg err">{listError}</div>}
+          {listError && <InlineError message={listError} onRetry={() => fetchList(appliedTerm, pageNo)} />}
           {!listLoading && !listError && items.length === 0 && (
             <div className="pad-msg">{t('config.empty')}</div>
           )}
@@ -337,7 +360,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             {tab === "content" ? (
               <div className="content-box">
                 {contentLoading && <div className="pad-msg">{t('config.loading')}</div>}
-                {contentError && <div className="pad-msg err">{contentError}</div>}
+                {contentError && selected && (
+                  <InlineError message={contentError} onRetry={() => openConfig(selected)} />
+                )}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
@@ -348,7 +373,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         options={FORMATS.map((f) => ({ value: f, label: f }))}
                         onChange={(v) => setFmt(v as Format)}
                       />
-                      {saveError && <span className="fmt-msg err">{saveError}</span>}
+                      {saveError && <InlineError message={saveError} onRetry={saveEdit} />}
                       <span className="fmt-spacer" />
                       <button
                         className="btn btn-ghost btn-sm"

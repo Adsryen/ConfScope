@@ -145,6 +145,9 @@ func TestNacosProviderPassesMSEAuthToClient(t *testing.T) {
 		if r.URL.Path != "/v1/cs/configs" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("group") != "DEFAULT_GROUP" {
+			t.Fatalf("group = %q, want DEFAULT_GROUP; query: %s", r.URL.Query().Get("group"), r.URL.RawQuery)
+		}
 		if r.Header.Get("Spas-AccessKey") != "ak-test" {
 			t.Fatalf("missing Spas-AccessKey header")
 		}
@@ -171,7 +174,7 @@ func TestNacosProviderPassesMSEAuthToClient(t *testing.T) {
 		AccessKeySecret: "sk-test",
 	}, ListConfigsRequest{
 		Namespace: "public",
-		Group:     "DEFAULT_GROUP",
+		Group:     "",
 		DataID:    "app",
 		PageNo:    1,
 		PageSize:  20,

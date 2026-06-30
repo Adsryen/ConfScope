@@ -78,9 +78,9 @@ function expectedProfile(conn: Connection, accessToken = "token-1", apiVersion =
     baseUrl: conn.baseUrl,
     accessToken,
     apiVersion,
-    accessKeyId: "",
-    accessKeySecret: "",
-    securityToken: "",
+    accessKeyId: conn.accessKeyId ?? "",
+    accessKeySecret: conn.accessKeySecret ?? "",
+    securityToken: conn.securityToken ?? "",
     environment: "",
     safetyLevel: "",
   };
@@ -207,6 +207,36 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.NacosGetConfig).not.toHaveBeenCalled();
     expect(goApp.NacosHistoryList).not.toHaveBeenCalled();
     expect(goApp.NacosHistoryDetail).not.toHaveBeenCalled();
+  });
+
+  it("defaults empty MSE config-list group to DEFAULT_GROUP for signature compatibility", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-mse-list"),
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      username: "",
+      password: "",
+      accessKeyId: "ak-test",
+      accessKeySecret: "sk-test",
+    };
+    const ref = expectedRef(conn, "ns-a", "app.yaml", "DEFAULT_GROUP");
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "", format: "yaml" }],
+    });
+
+    await listConfigs(conn, "ns-a", "", "", 1, 50);
+
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(expectedProfile(conn, "", "v1"), {
+      namespace: "ns-a",
+      dataId: "",
+      group: "DEFAULT_GROUP",
+      pageNo: 1,
+      pageSize: 50,
+    });
   });
 
   it("refreshes token and retries configCenter reads on 403", async () => {

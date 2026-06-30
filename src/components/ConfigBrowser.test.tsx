@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @vitest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
@@ -91,6 +91,8 @@ describe("ConfigBrowser", () => {
 
     expect(await screen.findByText("app.json")).toBeInTheDocument();
 
+    expect(apiMocks.listConfigs).toHaveBeenCalledWith(conn, "public", "", "", 1, 50);
+
     fireEvent.click(screen.getByText("app.json"));
 
     await expectCodeContains('"server"', '"port"', "8080");
@@ -167,12 +169,21 @@ describe("ConfigBrowser", () => {
     expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
   });
 
-  it("records list loading failures in the message center", async () => {
+  it("shows list loading failures inline and records them in the message center", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);
     apiMocks.listConfigs.mockRejectedValueOnce(new Error("Nacos returned 403: Invalid signature"));
 
     renderBrowser();
+
+    const inlineError = await screen.findByRole("alert");
+    expect(inlineError).toHaveTextContent("操作失败");
+    expect(inlineError).toHaveTextContent("Nacos returned 403: Invalid signature");
+
+    await act(async () => {
+      fireEvent.click(within(inlineError).getByRole("button", { name: "复制错误" }));
+    });
+    expect(copyText).toHaveBeenCalledWith("Error: Nacos returned 403: Invalid signature");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByTitle("消息中心"));
@@ -181,11 +192,23 @@ describe("ConfigBrowser", () => {
     expect(panel).toBeInTheDocument();
     expect(panel).toHaveTextContent("Nacos returned 403: Invalid signature");
     expect(panel).toHaveTextContent("dev / public");
+  });
+
+  it("shows config content loading failures inline with copy action", async () => {
+    const { copyText } = await import("../lib/clipboard");
+    vi.mocked(copyText).mockResolvedValue(true);
+    apiMocks.getConfig.mockRejectedValueOnce(new Error("read config failed: EOF"));
+
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+
+    const inlineError = await screen.findByRole("alert");
+    expect(inlineError).toHaveTextContent("read config failed: EOF");
 
     await act(async () => {
-      fireEvent.click(within(panel).getAllByRole("button")[2]);
+      fireEvent.click(within(inlineError).getByRole("button", { name: "复制错误" }));
     });
-    expect(copyText).toHaveBeenCalledWith("Error: Nacos returned 403: Invalid signature");
+    expect(copyText).toHaveBeenCalledWith("Error: read config failed: EOF");
   });
 });
 

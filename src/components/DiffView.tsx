@@ -21,6 +21,7 @@ interface Source {
   tenant: string;
   dataId: string;
   group: string;
+  usesDefaultNamespace: boolean;
 }
 
 interface Loaded {
@@ -60,7 +61,17 @@ function emptySource(connId: string, connections: Connection[] = []): Source {
     tenant: conn?.defaultNamespace ?? "",
     dataId: "",
     group: "DEFAULT_GROUP",
+    usesDefaultNamespace: true,
   };
+}
+
+function syncDefaultNamespace(source: Source, connections: Connection[]): Source {
+  const conn = connections.find((item) => item.id === source.connId);
+  if (!conn) return source;
+  const nextTenant = conn.defaultNamespace ?? "";
+  if (!source.usesDefaultNamespace) return source;
+  if (source.tenant === nextTenant) return source;
+  return { ...source, tenant: nextTenant };
 }
 
 function errorText(e: unknown): string {
@@ -211,7 +222,7 @@ function SourcePicker({
           className="wide"
           value={source.tenant}
           options={namespaceOptions}
-          onChange={(value) => onChange({ ...source, tenant: value })}
+          onChange={(value) => onChange({ ...source, tenant: value, usesDefaultNamespace: false })}
         />
         {nsError && (
           <span className="field-error">
@@ -270,15 +281,27 @@ export default function DiffView({ connections }: Props) {
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
 
   const resetComparisonState = () => {
     setMatchResults(null);
     setBatchResults([]);
     setSelectedIds(new Set());
     setCollapsed(new Set());
+    setBatchOnlyChanges(new Set());
     setLeftLoaded(null);
     setRightLoaded(null);
   };
+
+  useEffect(() => {
+    const nextLeft = syncDefaultNamespace(left, connections);
+    const nextRight = syncDefaultNamespace(right, connections);
+    if (nextLeft !== left || nextRight !== right) {
+      resetComparisonState();
+      setLeft(nextLeft);
+      setRight(nextRight);
+    }
+  }, [connections]);
 
   const updateLeft = (source: Source) => {
     setLeft(source);
@@ -417,6 +440,7 @@ export default function DiffView({ connections }: Props) {
     setBatchLoading(true);
     setBatchResults([]);
     setError(null);
+    setBatchOnlyChanges(new Set());
 
     const results: BatchResult[] = [];
     for (let i = 0; i < toCompare.length; i += 5) {
@@ -481,6 +505,19 @@ export default function DiffView({ connections }: Props) {
       const next = new Set(prev);
       if (next.has(dataId)) next.delete(dataId);
       else next.add(dataId);
+      return next;
+    });
+  };
+
+  const batchAllOnlyChanges = batchResults.length > 0 && batchResults.every((item) => batchOnlyChanges.has(item.dataId));
+  const toggleBatchOnlyChanges = (checked: boolean) => {
+    setBatchOnlyChanges(checked ? new Set(batchResults.map((item) => item.dataId)) : new Set());
+  };
+  const toggleItemOnlyChanges = (dataId: string, checked: boolean) => {
+    setBatchOnlyChanges((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(dataId);
+      else next.delete(dataId);
       return next;
     });
   };
@@ -560,6 +597,18 @@ export default function DiffView({ connections }: Props) {
 
         {batchResults.length > 0 && (
           <div className="batch-diff">
+            <div className="batch-diff-toolbar">
+              <span className="batch-diff-count">已生成 {batchResults.length} 个文件对比</span>
+              <span className="fmt-spacer" />
+              <label className="diff-toggle">
+                <input
+                  type="checkbox"
+                  checked={batchAllOnlyChanges}
+                  onChange={(e) => toggleBatchOnlyChanges(e.target.checked)}
+                />
+                全部仅显示变更
+              </label>
+            </div>
             {batchResults.map((item) => (
               <div className="batch-diff-item" key={item.dataId}>
                 <div className="batch-diff-header" onClick={() => toggleCollapse(item.dataId)}>
@@ -573,6 +622,8 @@ export default function DiffView({ connections }: Props) {
                     leftText={item.leftText}
                     rightText={item.rightText}
                     format={item.format}
+                    onlyChanges={batchOnlyChanges.has(item.dataId)}
+                    onOnlyChangesChange={(checked) => toggleItemOnlyChanges(item.dataId, checked)}
                   />
                 )}
               </div>

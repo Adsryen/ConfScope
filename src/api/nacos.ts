@@ -339,7 +339,10 @@ export async function listConfigs(
   pageSize: number
 ): Promise<ConfigPage> {
   return withProfile(conn, async (profile) => {
-    const page = await configCenterListConfigs(profile, { namespace, dataId, group, pageNo, pageSize });
+    const normalizedGroup = conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group
+      ? "DEFAULT_GROUP"
+      : group;
+    const page = await configCenterListConfigs(profile, { namespace, dataId, group: normalizedGroup, pageNo, pageSize });
     return fromConfigCenterConfigPage(page);
   });
 }
