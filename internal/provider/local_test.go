@@ -104,6 +104,35 @@ func TestLocalProviderReadsFallbackLayout(t *testing.T) {
 	}
 }
 
+func TestLocalProviderTreatsManifestSiblingDirectoriesAsGroups(t *testing.T) {
+	root := t.TempDir()
+	writeLocalConfig(t, root, ".metadata.yml", "version: 1")
+	writeLocalConfig(t, root, "DEFAULT_GROUP/app.yaml", "a: 1")
+	writeLocalConfig(t, root, "OPS/routes/gateway.yaml", "route: true")
+
+	provider := NewLocalProvider()
+	profile := ConnectionProfile{ID: "local-groups", Provider: ProviderLocal, BaseURL: root}
+
+	page, err := provider.ListConfigs(profile, ListConfigsRequest{Group: "DEFAULT_GROUP", PageNo: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
+	}
+	if page.TotalCount != 1 || len(page.PageItems) != 1 {
+		t.Fatalf("page = %+v, want one DEFAULT_GROUP item", page)
+	}
+	if got := page.PageItems[0].Ref; got.Namespace != "" || got.Group != "DEFAULT_GROUP" || got.DataID != "app.yaml" {
+		t.Fatalf("ref = %+v, want public/DEFAULT_GROUP/app.yaml", got)
+	}
+
+	doc, err := provider.GetConfig(profile, ConfigRef{Namespace: "", Group: "OPS", DataID: "routes/gateway.yaml"})
+	if err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if doc.Content != "route: true" {
+		t.Fatalf("Content = %q, want route: true", doc.Content)
+	}
+}
+
 func TestLocalProviderRejectsWritesAndMissingConfigs(t *testing.T) {
 	root := t.TempDir()
 	writeLocalConfig(t, root, "configs/public/DEFAULT_GROUP/app.yaml", "a: 1")

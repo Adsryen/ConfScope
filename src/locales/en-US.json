@@ -54,7 +54,15 @@
     "sshProfileTestSuccess": "SSH connection passed, took {time}",
     "sshProfileTestFailed": "SSH connection failed: {error} ({time})",
     "sshProfileUpdateImpact": "This SSH profile is referenced by {count} connections. Saving will make those connections use the new config immediately. Review the impact list and save again to confirm.",
-    "sshProfileConfirmSave": "Confirm Save"
+    "sshProfileConfirmSave": "Confirm Save",
+    "comparePreferences": "Smart Compare",
+    "sortConnections": "Sort connection dropdowns by name",
+    "sortNamespaces": "Sort namespace dropdowns by name",
+    "networkProxy": "Network Proxy",
+    "httpProxy": "HTTP Proxy",
+    "httpsProxy": "HTTPS Proxy",
+    "noProxy": "No Proxy",
+    "settingsSaved": "Settings saved"
   },
   "ssh": {
     "pageSubtitle": "Manage reusable SSH jump-host profiles and references in one place. Connection Manager only selects or references these profiles.",
@@ -124,7 +132,7 @@
     "localPath": "Local Snapshot Directory",
     "localPathPlaceholder": "Enter or choose a local folder path",
     "localPathHelp": "Choose the exported config snapshot directory. Windows can use folder picker or type a path directly; Linux/macOS can type the path. The directory is validated after choosing.",
-    "localPathStructureHint": "Directory must contain confscope.snapshot.json / manifest.json / metadata.json / .metadata.yml, or configs/ / namespaces/ standard folders, and at least 1 comparable config file.",
+    "localPathStructureHint": "Directory must contain confscope.snapshot.json / manifest.json / metadata.json / .metadata.yml, or configs/ / namespaces/ standard folders, and at least 1 comparable config file. When metadata exists at root, sibling folders are treated as groups and file relative paths become dataIds.",
     "forceLocalSnapshot": "Force use this directory",
     "forceLocalSnapshotHelp": "Allow saving even when directory validation fails. Reading or comparison may fail later; use only when you know the directory is usable.",
     "selectFolder": "Choose Folder",
@@ -287,6 +295,13 @@
     "line": "line",
     "noContent": "(empty)",
     "fetchFailed": "Failed to fetch config",
+    "localSnapshotSource": "Local snapshot",
+    "localSnapshotHint": "Reading local snapshot directory",
+    "namespaceLoadFailed": "Failed to load namespaces",
+    "configListLoadFailed": "Failed to load config list",
+    "connectionRequired": "No connection selected",
+    "dataIdRequired": "dataId is required",
+    "noMatchedDataId": "No matching dataId found under the selected namespaces and groups",
     "pleaseSelect": "Please select first",
     "noConnection": "Please add Nacos connections in \"Connection Manager\" first",
     "sourceA": "Source A (Left)",
@@ -358,3 +373,4 @@
     "close": "Close"
   }
 }
+

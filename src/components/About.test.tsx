@@ -53,21 +53,23 @@ describe("About", () => {
 
   it("checks updates with built-in sources and global proxy settings", async () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    localStorage.setItem("cs.settings", JSON.stringify({
+      proxy: {
+        httpProxy: "http://127.0.0.1:7890",
+        httpsProxy: "http://127.0.0.1:7890",
+        noProxy: "localhost,127.0.0.1",
+      },
+      update: { skipVersion: "", lastCheckAt: "" },
+      compare: { sortConnections: true, sortNamespaces: true },
+    }));
+
     renderAbout();
 
     expect(await screen.findByText("v1.0.0")).toBeInTheDocument();
     expect(screen.getByText("GitHub 官方")).toBeInTheDocument();
     expect(screen.getByText("国内加速 1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("HTTP 代理")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("HTTP 代理"), {
-      target: { value: "http://127.0.0.1:7890" },
-    });
-    fireEvent.change(screen.getByLabelText("HTTPS 代理"), {
-      target: { value: "http://127.0.0.1:7890" },
-    });
-    fireEvent.change(screen.getByLabelText("不走代理"), {
-      target: { value: "localhost,127.0.0.1" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
     await waitFor(() => {
@@ -113,27 +115,5 @@ describe("About", () => {
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
     expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
-  });
-
-  it("still checks updates when proxy settings cannot be persisted", async () => {
-    const originalSetItem = Storage.prototype.setItem;
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
-      if (key === "cs.settings") throw new Error("storage blocked");
-      return originalSetItem.call(this, key, value);
-    });
-
-    try {
-      renderAbout();
-
-      await screen.findByText("v1.0.0");
-      fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
-
-      await waitFor(() => {
-        expect(apiMocks.checkForUpdates).toHaveBeenCalled();
-      });
-      expect(await screen.findByText("发现新版本 v1.1.0")).toBeInTheDocument();
-    } finally {
-      setItem.mockRestore();
-    }
   });
 });

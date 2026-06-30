@@ -9,9 +9,15 @@ export interface UpdateSettings {
   lastCheckAt: string;
 }
 
+export interface CompareSettings {
+  sortConnections: boolean;
+  sortNamespaces: boolean;
+}
+
 export interface AppSettings {
   proxy: ProxySettings;
   update: UpdateSettings;
+  compare: CompareSettings;
 }
 
 const KEY = "cs.settings";
@@ -19,6 +25,7 @@ const KEY = "cs.settings";
 const defaults: AppSettings = {
   proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
   update: { skipVersion: "", lastCheckAt: "" },
+  compare: { sortConnections: true, sortNamespaces: true },
 };
 
 export function loadSettings(): AppSettings {
@@ -47,6 +54,17 @@ export function updateProxySettings(proxy: Partial<ProxySettings>) {
   });
 }
 
+export function updateCompareSettings(compare: Partial<CompareSettings>) {
+  const current = loadSettings();
+  saveSettings({
+    ...current,
+    compare: {
+      ...current.compare,
+      ...compare,
+    },
+  });
+}
+
 function normalizeSettings(value: unknown): AppSettings {
   const input = value as Partial<AppSettings>;
   return {
@@ -59,9 +77,17 @@ function normalizeSettings(value: unknown): AppSettings {
       skipVersion: stringValue(input?.update?.skipVersion),
       lastCheckAt: stringValue(input?.update?.lastCheckAt),
     },
+    compare: {
+      sortConnections: boolValue(input?.compare?.sortConnections, defaults.compare.sortConnections),
+      sortNamespaces: boolValue(input?.compare?.sortNamespaces, defaults.compare.sortNamespaces),
+    },
   };
 }
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function boolValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }

@@ -26,6 +26,7 @@ import {
   type LocalSnapshotValidation,
 } from "../api/app";
 import { useTranslation } from "../i18n";
+import CopyButton from "./CopyButton";
 
 interface Props {
   onClose: () => void;
@@ -59,6 +60,25 @@ type HelpPopover = { text: string; top: number; left: number };
 
 function latencyText(startedAt: number): string {
   return `延迟 ${Math.max(0, Date.now() - startedAt)} ms`;
+}
+
+function connectionTestKey(draft: Draft): string {
+  const sshConfig = normalizeSSHConfig(draft.sshConfig);
+  return JSON.stringify({
+    id: draft.id ?? "",
+    sourceType: draft.sourceType ?? "nacos",
+    baseUrl: draft.baseUrl ?? "",
+    localPath: draft.localPath ?? "",
+    distribution: draft.distribution ?? "opensource",
+    authType: draft.authType ?? "none",
+    username: draft.username ?? "",
+    accessKeyId: draft.accessKeyId ?? "",
+    securityToken: draft.securityToken ?? "",
+    defaultNamespace: draft.defaultNamespace ?? "",
+    sshProfileId: draft.sshProfileId ?? "",
+    sshConfig: sshConfig.host ? sshConfig : undefined,
+    forceLocalSnapshot: !!draft.forceLocalSnapshot,
+  });
 }
 
 function sourceAddress(conn: Pick<Connection, "sourceType" | "localPath" | "baseUrl">): string {
@@ -133,7 +153,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [sshProfiles, setSSHProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
   const [draft, setDraft] = useState<Draft>(emptyDraft(defaultNewEnvironment));
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
   const [helpPopover, setHelpPopover] = useState<HelpPopover | null>(null);
   const [localValidation, setLocalValidation] = useState<LocalSnapshotValidation | null>(null);
   const [validatingLocal, setValidatingLocal] = useState(false);
@@ -150,6 +170,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [showSSHConfig, setShowSSHConfig] = useState(false);
   const [showSSHPwd, setShowSSHPwd] = useState(false);
   const [showSSHPassphrase, setShowSSHPassphrase] = useState(false);
+  const currentTestKey = connectionTestKey(draft);
+  const testingCurrent = testingKey === currentTestKey;
 
   // Esc 关闭弹框
   useEffect(() => {
@@ -163,7 +185,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
-    setTestMsg(null);
     if ("localPath" in patch || "sourceType" in patch) setLocalValidation(null);
   };
 
@@ -175,7 +196,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       username: distribution === "aliyun-mse" ? "" : d.username || "nacos",
       password: distribution === "aliyun-mse" ? "" : d.password,
     }));
-    setTestMsg(null);
   };
 
   const setSSH = (patch: Partial<SSHConfig>) => {
@@ -191,7 +211,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         ...patch,
       },
     }));
-    setTestMsg(null);
   };
 
   const selectedSSHProfile = sshProfiles.find((profile) => profile.id === draft.sshProfileId);
@@ -209,12 +228,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         },
       }));
       setShowSSHConfig(true);
-      setTestMsg(null);
       return;
     }
     setDraft((d) => ({ ...d, sshProfileId: profileId, sshConfig: undefined }));
     setShowSSHConfig(true);
-    setTestMsg(null);
   };
 
   const copySSHProfileToInline = () => {
@@ -225,7 +242,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       sshConfig: { ...selectedSSHProfile.config },
     }));
     setShowSSHConfig(true);
-    setTestMsg(null);
   };
 
   const saveInlineSSHAsProfile = () => {
@@ -248,7 +264,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     if (mode === "direct") {
       setDraft((d) => ({ ...d, sourceType: "nacos", sshConfig: undefined, sshProfileId: "" }));
       setShowSSHConfig(false);
-      setTestMsg(null);
       return;
     }
 
@@ -263,7 +278,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       },
     }));
     setShowSSHConfig(true);
-    setTestMsg(null);
   };
 
   const groupedConnections = list.reduce<
@@ -337,7 +351,6 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       };
     });
     setLocalValidation(null);
-    setTestMsg(null);
   };
 
   const refresh = () => {
@@ -484,15 +497,21 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
   const doTest = async () => {
     const startedAt = Date.now();
-    if (draft.sourceType === "local-snapshot") {
-      await doValidateLocalSnapshot(true, startedAt);
+    const snapshot: Draft = {
+      ...draft,
+      tags: [...(draft.tags ?? [])],
+      sshConfig: draft.sshConfig ? { ...draft.sshConfig } : undefined,
+    };
+    const snapshotKey = connectionTestKey(snapshot);
+
+    if (snapshot.sourceType === "local-snapshot") {
+      await validateLocalSnapshotPath(snapshot.localPath?.trim() ?? "", true, startedAt);
       return;
     }
-    setTesting(true);
-    setTestMsg(null);
+    setTestingKey(snapshotKey);
     try {
-      if (draft.authType === "aliyun-aksk" || draft.username) {
-        const r = await testConnection({ ...(draft as Connection), id: draft.id ?? "test" });
+      if (snapshot.authType === "aliyun-aksk" || snapshot.username) {
+        const r = await testConnection({ ...(snapshot as Connection), id: snapshot.id ?? "test" });
         const latency = latencyText(startedAt);
         setTestMsg({
           ok: true,
@@ -505,7 +524,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     } catch (e) {
       setTestMsg({ ok: false, text: `${String(e)}（${latencyText(startedAt)}）` });
     } finally {
-      setTesting(false);
+      setTestingKey((current) => (current === snapshotKey ? null : current));
     }
   };
 
@@ -1231,12 +1250,15 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             </div>}
 
             {testMsg && (
-              <div className={`test-msg ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
+              <div className={`test-msg ${testMsg.ok ? "ok" : "err"}`}>
+                <span className="test-msg-text">{testMsg.text}</span>
+                {!testMsg.ok && <CopyButton text={testMsg.text} label="复制报错" />}
+              </div>
             )}
 
             <div className="conn-form-actions">
-              <button className="btn btn-ghost" onClick={doTest} disabled={testing}>
-                {testing ? t('connection.testing') : t('connection.test')}
+              <button className="btn btn-ghost" onClick={doTest} disabled={testingCurrent}>
+                {testingCurrent ? t('connection.testing') : t('connection.test')}
               </button>
               <div className="spacer" />
               {draft.id && (

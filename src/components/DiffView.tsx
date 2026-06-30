@@ -1,25 +1,15 @@
 import { useEffect, useState } from "react";
-import { Connection, connectionDisplayLabel } from "../store/connections";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { keysDoc } from "../lib/keys";
+import { Connection, connectionDisplayLabel } from "../store/connections";
+import { loadSettings } from "../store/settings";
 import { useTranslation } from "../i18n";
 import Combobox from "./Combobox";
 import DiffPanel from "./DiffPanel";
 import Select from "./Select";
 
 type DiffMode = "text" | "key" | "lines";
-
-/** 忽略顺序的整行对比:去空行、按行排序后再 diff(保留值,只忽略顺序)。 */
-function sortedLinesDoc(content: string): string {
-  return content
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((l) => l.replace(/\s+$/, ""))
-    .filter((l) => l.trim() !== "")
-    .sort()
-    .join("\n");
-}
 
 interface Props {
   connections: Connection[];
@@ -38,111 +28,207 @@ interface Loaded {
   format: Format;
 }
 
-const emptySource = (connId: string): Source => ({
-  connId,
-  tenant: "",
-  dataId: "",
-  group: "DEFAULT_GROUP",
-});
+interface MatchResult {
+  dataId: string;
+  leftGroup: string;
+  rightGroup: string;
+}
+interface BatchResult {
+  dataId: string;
+  leftLabel: string;
+  rightLabel: string;
+  leftText: string;
+  rightText: string;
+  format: Format;
+}
 
-/** 单侧来源选择器：选连接 / 命名空间 / dataId / group（仅选择，加载由外层统一触发）。 */
+function sortedLinesDoc(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim() !== "")
+    .sort()
+    .join("\n");
+}
+
+function emptySource(connId: string, connections: Connection[] = []): Source {
+  const conn = connections.find((item) => item.id === connId);
+  return {
+    connId,
+    tenant: conn?.defaultNamespace ?? "",
+    dataId: "",
+    group: "DEFAULT_GROUP",
+  };
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+}
+
 function SourcePicker({
   title,
   connections,
   source,
   onChange,
+  sortConnections,
+  sortNamespaces,
 }: {
   title: string;
   connections: Connection[];
   source: Source;
-  onChange: (s: Source) => void;
+  onChange: (source: Source) => void;
+  sortConnections: boolean;
+  sortNamespaces: boolean;
 }) {
   const { t } = useTranslation();
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
+  const [nsError, setNsError] = useState<string | null>(null);
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
   const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgError, setCfgError] = useState<string | null>(null);
 
-  const conn = connections.find((c) => c.id === source.connId);
+  const conn = connections.find((item) => item.id === source.connId);
+  const isLocalSnapshot = conn?.sourceType === "local-snapshot";
+  const snapshotPath = conn?.localPath || conn?.baseUrl || "";
 
-  // 选定连接后拉取命名空间
   useEffect(() => {
     if (!conn) return;
     let alive = true;
     setNsLoading(true);
+    setNsError(null);
     setNamespaces([]);
+
     listNamespaces(conn)
-      .then((ns) => alive && setNamespaces(ns))
-      .catch(() => alive && setNamespaces([]))
-      .finally(() => alive && setNsLoading(false));
+      .then((items) => {
+        if (alive) setNamespaces(items);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setNamespaces([]);
+        setNsError(errorText(e));
+      })
+      .finally(() => {
+        if (alive) setNsLoading(false);
+      });
+
     return () => {
       alive = false;
     };
-  }, [source.connId]);
+  }, [conn]);
 
-  // 连接 / 命名空间确定后,拉取该范围下的配置列表用于下拉模糊选择
   useEffect(() => {
     if (!conn) return;
     let alive = true;
     setCfgLoading(true);
+    setCfgError(null);
     setConfigs([]);
+
     listConfigs(conn, source.tenant, "", "", 1, 500)
-      .then((page) => alive && setConfigs(page.pageItems))
-      .catch(() => alive && setConfigs([]))
-      .finally(() => alive && setCfgLoading(false));
+      .then((page) => {
+        if (alive) setConfigs(page.pageItems);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setConfigs([]);
+        setCfgError(errorText(e));
+      })
+      .finally(() => {
+        if (alive) setCfgLoading(false);
+      });
+
     return () => {
       alive = false;
     };
-  }, [source.connId, source.tenant]);
+  }, [conn, source.tenant]);
 
-  // dataId 候选（带 group 说明）；group 候选去重
-  const dataIdOptions = configs.map((c) => ({ value: c.dataId, sub: c.group }));
-  const groupOptions = Array.from(new Set(configs.map((c) => c.group))).map((g) => ({ value: g }));
+  const connectionOptions = [...connections]
+    .sort((a, b) => sortConnections ? compareText(connectionDisplayLabel(a), connectionDisplayLabel(b)) : 0)
+    .map((item) => ({ value: item.id, label: connectionDisplayLabel(item) }));
+  const namespaceItems = namespaces
+    .filter((item) => item.namespace)
+    .sort((a, b) => sortNamespaces ? compareText(a.namespaceShowName || a.namespace, b.namespaceShowName || b.namespace) : 0);
+  const namespaceOptions = [
+    { value: "", label: t("app.namespaceDefault") },
+    ...namespaceItems.map((item) => ({ value: item.namespace, label: item.namespaceShowName || item.namespace })),
+  ];
+  const dataIdOptions = configs.map((item) => ({ value: item.dataId, sub: item.group }));
+  const groupOptions = Array.from(new Set(configs.map((item) => item.group))).map((value) => ({ value }));
 
   return (
-    <div className="source-picker">
-      <div className="source-title">{title}</div>
+    <div className={`source-picker${isLocalSnapshot ? " local-source" : ""}`}>
+      <div className="source-title-row">
+        <div className="source-title">{title}</div>
+        <span className={`source-kind${isLocalSnapshot ? " local" : ""}`}>
+          {isLocalSnapshot ? t("connection.sourceTypeSnapshot") : t("connection.sourceTypeNacos")}
+        </span>
+      </div>
+
       <label className="field">
-        <span>{t('app.connection')}</span>
+        <span>{t("app.connection")}</span>
         <Select
           className="wide"
           value={source.connId}
-          options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
-          onChange={(v) => onChange({ ...emptySource(v) })}
+          options={connectionOptions}
+          onChange={(value) => onChange(emptySource(value, connections))}
         />
       </label>
+
+      {isLocalSnapshot && (
+        <div className="source-note">
+          <span>{t("diff.localSnapshotHint")}</span>
+          <strong title={snapshotPath}>{snapshotPath}</strong>
+        </div>
+      )}
+
       <label className="field">
-        <span>{t('app.namespace')} {nsLoading ? `（${t('common.loading')}）` : ""}</span>
+        <span>
+          {t("app.namespace")} {nsLoading ? `(${t("common.loading")})` : ""}
+        </span>
         <Select
           className="wide"
           value={source.tenant}
-          options={[
-            { value: "", label: t('app.namespaceDefault') },
-            ...namespaces
-              .filter((n) => n.namespace)
-              .map((n) => ({ value: n.namespace, label: n.namespaceShowName || n.namespace })),
-          ]}
-          onChange={(v) => onChange({ ...source, tenant: v })}
+          options={namespaceOptions}
+          onChange={(value) => onChange({ ...source, tenant: value })}
         />
+        {nsError && (
+          <span className="field-error">
+            {t("diff.namespaceLoadFailed")}: {nsError}
+          </span>
+        )}
       </label>
+
       <div className="field-row">
         <label className="field">
-          <span>dataId {cfgLoading ? `（${t('common.loading')}）` : `（${configs.length}）`}</span>
+          <span>
+            dataId {cfgLoading ? `(${t("common.loading")})` : `(${configs.length})`}
+          </span>
           <Combobox
             value={source.dataId}
-            placeholder={t('diff.dataIdPlaceholder')}
+            placeholder={t("diff.dataIdPlaceholder")}
             options={dataIdOptions}
-            onChange={(v) => onChange({ ...source, dataId: v })}
-            onPick={(o) => onChange({ ...source, dataId: o.value, group: o.sub || source.group })}
+            onChange={(value) => onChange({ ...source, dataId: value })}
+            onPick={(option) => onChange({ ...source, dataId: option.value, group: option.sub || source.group })}
           />
+          {cfgError && (
+            <span className="field-error">
+              {t("diff.configListLoadFailed")}: {cfgError}
+            </span>
+          )}
         </label>
+
         <label className="field">
           <span>group</span>
           <Combobox
             value={source.group}
             placeholder="DEFAULT_GROUP"
             options={groupOptions}
-            onChange={(v) => onChange({ ...source, group: v })}
+            onChange={(value) => onChange({ ...source, group: value })}
           />
         </label>
       </div>
@@ -150,169 +236,177 @@ function SourcePicker({
   );
 }
 
-/** 智能对比工作台：任选两个来源（可跨连接 / 跨命名空间 / 跨 dataId）做差异对比。 */
 export default function DiffView({ connections }: Props) {
   const { t } = useTranslation();
+  const settings = loadSettings();
   const firstId = connections[0]?.id ?? "";
-  const [left, setLeft] = useState<Source>(emptySource(firstId));
-  const [right, setRight] = useState<Source>(emptySource(firstId));
+  const [left, setLeft] = useState<Source>(emptySource(firstId, connections));
+  const [right, setRight] = useState<Source>(emptySource(firstId, connections));
   const [leftLoaded, setLeftLoaded] = useState<Loaded | null>(null);
   const [rightLoaded, setRightLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DiffMode>("text");
-
-  // 批量匹配相关状态
-  const [matchResults, setMatchResults] = useState<{ dataId: string; group: string }[] | null>(null);
+  const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [batchResults, setBatchResults] = useState<
-    { dataId: string; leftLabel: string; rightLabel: string; leftText: string; rightText: string; format: Format; identical: boolean }[]
-  >([]);
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  const resetComparisonState = () => {
+    setMatchResults(null);
+    setBatchResults([]);
+    setSelectedIds(new Set());
+    setCollapsed(new Set());
+    setLeftLoaded(null);
+    setRightLoaded(null);
+  };
+
+  const updateLeft = (source: Source) => {
+    setLeft(source);
+    resetComparisonState();
+  };
+
+  const updateRight = (source: Source) => {
+    setRight(source);
+    resetComparisonState();
+  };
+
   if (connections.length === 0) {
-    return <div className="pad-msg big">{t('diff.noConnection')}</div>;
+    return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
 
-  // 拉取单个来源内容并组装成 Loaded
-  const loadOne = async (src: Source, dataId?: string): Promise<Loaded> => {
-    const conn = connections.find((c) => c.id === src.connId);
-    if (!conn) throw "未选择连接";
-    const id = (dataId ?? src.dataId).trim();
-    if (!id) throw "未填写 dataId";
-    const group = src.group.trim() || "DEFAULT_GROUP";
-    const content = await getConfig(conn, src.tenant, id, group);
+  const loadOne = async (source: Source, dataId?: string, groupOverride?: string): Promise<Loaded> => {
+    const conn = connections.find((item) => item.id === source.connId);
+    if (!conn) throw new Error(t("diff.connectionRequired"));
+    const id = (dataId ?? source.dataId).trim();
+    if (!id) throw new Error(t("diff.dataIdRequired"));
+    const group = (groupOverride ?? source.group).trim() || "DEFAULT_GROUP";
+    const content = await getConfig(conn, source.tenant, id, group);
+
     return {
-      label: `${connectionDisplayLabel(conn)} / ${src.tenant || "public"} / ${id}`,
+      label: `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${id}`,
       content,
       format: detectFormat(id, "", content),
     };
   };
 
-  // 判断是否需要走批量匹配
+  const prepareText = (loaded: Loaded): string => {
+    if (mode === "key") return keysDoc(loaded.content, loaded.format);
+    if (mode === "lines") return sortedLinesDoc(loaded.content);
+    return loaded.content;
+  };
+
   const needMatch = !left.dataId.trim() || !right.dataId.trim();
 
-  // 匹配同名 dataId
   const doMatch = async () => {
     setMatchLoading(true);
     setError(null);
     setMatchResults(null);
     setBatchResults([]);
-    try {
-      const lConn = connections.find((c) => c.id === left.connId);
-      const rConn = connections.find((c) => c.id === right.connId);
-      if (!lConn || !rConn) throw "未选择连接";
-      const lGroup = left.group.trim() || "DEFAULT_GROUP";
-      const rGroup = right.group.trim() || "DEFAULT_GROUP";
 
-      const [lPage, rPage] = await Promise.all([
-        listConfigs(lConn, left.tenant, "", lGroup, 1, 500),
-        listConfigs(rConn, right.tenant, "", rGroup, 1, 500),
+    try {
+      const leftConn = connections.find((item) => item.id === left.connId);
+      const rightConn = connections.find((item) => item.id === right.connId);
+      if (!leftConn || !rightConn) throw new Error(t("diff.connectionRequired"));
+      const leftGroup = left.group.trim() || "DEFAULT_GROUP";
+      const rightGroup = right.group.trim() || "DEFAULT_GROUP";
+
+      const [leftPage, rightPage] = await Promise.all([
+        listConfigs(leftConn, left.tenant, "", leftGroup, 1, 500),
+        listConfigs(rightConn, right.tenant, "", rightGroup, 1, 500),
       ]);
 
-      const lIds = new Set(lPage.pageItems.map((c) => c.dataId));
-      const rIds = new Set(rPage.pageItems.map((c) => c.dataId));
-
-      // 如果某一侧指定了 dataId，只保留该 dataId
+      const leftIds = new Set(leftPage.pageItems.map((item) => item.dataId));
+      const rightIds = new Set(rightPage.pageItems.map((item) => item.dataId));
+      const leftId = left.dataId.trim();
+      const rightId = right.dataId.trim();
       let common: string[];
-      const lId = left.dataId.trim();
-      const rId = right.dataId.trim();
-      if (lId && rId) {
-        // 两侧都有 → 单一匹配，不应该走到这里，但兜底
-        common = [lId];
-      } else if (lId) {
-        common = rIds.has(lId) ? [lId] : [];
-      } else if (rId) {
-        common = lIds.has(rId) ? [rId] : [];
-      } else {
-        common = [...lIds].filter((id) => rIds.has(id)).sort();
-      }
+
+      if (leftId && rightId) common = [leftId];
+      else if (leftId) common = rightIds.has(leftId) ? [leftId] : [];
+      else if (rightId) common = leftIds.has(rightId) ? [rightId] : [];
+      else common = [...leftIds].filter((id) => rightIds.has(id)).sort();
 
       if (common.length === 0) {
-        setError("两侧命名空间+group 下没有找到同名 dataId");
-        setMatchResults([]);
-      } else {
-        setMatchResults(common.map((dataId) => ({ dataId, group: lGroup })));
-        setSelectedIds(new Set(common));
+        setError(t("diff.noMatchedDataId"));
+        return;
       }
+
+      setMatchResults(common.map((dataId) => ({ dataId, leftGroup, rightGroup })));
+      setSelectedIds(new Set(common));
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setMatchLoading(false);
     }
   };
 
-  // 一个按钮同时加载 A、B 并对比；任一失败只标记该侧（单个模式）
   const loadBoth = async () => {
     if (needMatch) {
       await doMatch();
       return;
     }
+
     setLoading(true);
     setError(null);
-    const [a, b] = await Promise.allSettled([loadOne(left), loadOne(right)]);
-    const errs: string[] = [];
-    if (a.status === "fulfilled") setLeftLoaded(a.value);
+    const [leftResult, rightResult] = await Promise.allSettled([loadOne(left), loadOne(right)]);
+    const errors: string[] = [];
+
+    if (leftResult.status === "fulfilled") setLeftLoaded(leftResult.value);
     else {
       setLeftLoaded(null);
-      errs.push(`来源 A：${a.reason}`);
+      errors.push(`${t("diff.sourceA")}: ${errorText(leftResult.reason)}`);
     }
-    if (b.status === "fulfilled") setRightLoaded(b.value);
+
+    if (rightResult.status === "fulfilled") setRightLoaded(rightResult.value);
     else {
       setRightLoaded(null);
-      errs.push(`来源 B：${b.reason}`);
+      errors.push(`${t("diff.sourceB")}: ${errorText(rightResult.reason)}`);
     }
-    setError(errs.join("    ") || null);
+
+    setError(errors.join("  ") || null);
     setLoading(false);
   };
 
-  // 批量对比选中的 dataId
   const loadBatch = async () => {
     if (!matchResults) return;
-    const toCompare = matchResults.filter((m) => selectedIds.has(m.dataId));
+    const toCompare = matchResults.filter((item) => selectedIds.has(item.dataId));
     if (toCompare.length === 0) return;
+
     setBatchLoading(true);
     setBatchResults([]);
     setError(null);
 
-    const results: typeof batchResults = [];
-    // 并发控制，每批 5 个
+    const results: BatchResult[] = [];
     for (let i = 0; i < toCompare.length; i += 5) {
       const chunk = toCompare.slice(i, i + 5);
       const settled = await Promise.allSettled(
-        chunk.map(async (m) => {
-          const [a, b] = await Promise.all([loadOne(left, m.dataId), loadOne(right, m.dataId)]);
-          const prep = (l: Loaded) =>
-            mode === "key" ? keysDoc(l.content, l.format) : mode === "lines" ? sortedLinesDoc(l.content) : l.content;
+        chunk.map(async (item) => {
+          const [leftItem, rightItem] = await Promise.all([
+            loadOne(left, item.dataId, item.leftGroup),
+            loadOne(right, item.dataId, item.rightGroup),
+          ]);
           return {
-            dataId: m.dataId,
-            leftLabel: a.label,
-            rightLabel: b.label,
-            leftText: prep(a),
-            rightText: prep(b),
-            format: (mode === "key" ? "TEXT" : a.format !== "TEXT" ? a.format : b.format) as Format,
-            identical: false, // 由 DiffPanel 计算
+            dataId: item.dataId,
+            leftLabel: leftItem.label,
+            rightLabel: rightItem.label,
+            leftText: prepareText(leftItem),
+            rightText: prepareText(rightItem),
+            format: (mode === "key" ? "TEXT" : leftItem.format !== "TEXT" ? leftItem.format : rightItem.format) as Format,
           };
         })
       );
-      for (const s of settled) {
-        if (s.status === "fulfilled") results.push(s.value);
+
+      for (const item of settled) {
+        if (item.status === "fulfilled") results.push(item.value);
       }
     }
+
     setBatchResults(results);
     setBatchLoading(false);
   };
-
-  const ready = leftLoaded && rightLoaded;
-  // 按对比模式决定喂给 diff 的文本
-  const prep = (l: Loaded) =>
-    mode === "key" ? keysDoc(l.content, l.format) : mode === "lines" ? sortedLinesDoc(l.content) : l.content;
-  const leftText = ready ? prep(leftLoaded!) : "";
-  const rightText = ready ? prep(rightLoaded!) : "";
-  const diffFormat =
-    mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
 
   const toggleSelect = (dataId: string) => {
     setSelectedIds((prev) => {
@@ -325,9 +419,7 @@ export default function DiffView({ connections }: Props) {
 
   const toggleAll = () => {
     if (!matchResults) return;
-    setSelectedIds((prev) =>
-      prev.size === matchResults.length ? new Set() : new Set(matchResults.map((m) => m.dataId))
-    );
+    setSelectedIds((prev) => (prev.size === matchResults.length ? new Set() : new Set(matchResults.map((item) => item.dataId))));
   };
 
   const toggleCollapse = (dataId: string) => {
@@ -339,86 +431,94 @@ export default function DiffView({ connections }: Props) {
     });
   };
 
+  const ready = leftLoaded && rightLoaded;
+  const leftText = ready ? prepareText(leftLoaded) : "";
+  const rightText = ready ? prepareText(rightLoaded) : "";
+  const diffFormat = mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
+
   return (
     <div className="diff-view">
       <div className="diff-sources">
-        <SourcePicker title={t('diff.sourceA')} connections={connections} source={left} onChange={setLeft} />
-        <SourcePicker title={t('diff.sourceB')} connections={connections} source={right} onChange={setRight} />
+        <SourcePicker
+          title={t("diff.sourceA")}
+          connections={connections}
+          source={left}
+          onChange={updateLeft}
+          sortConnections={settings.compare.sortConnections}
+          sortNamespaces={settings.compare.sortNamespaces}
+        />
+        <SourcePicker
+          title={t("diff.sourceB")}
+          connections={connections}
+          source={right}
+          onChange={updateRight}
+          sortConnections={settings.compare.sortConnections}
+          sortNamespaces={settings.compare.sortNamespaces}
+        />
       </div>
+
       <div className="diff-loadbar">
-        <span className="fmt-label">{t('diff.compareMode')}</span>
+        <span className="fmt-label">{t("diff.compareMode")}</span>
         <Select
           value={mode}
           options={[
-            { value: "text", label: t('diff.modeText') },
-            { value: "lines", label: t('diff.modeLines') },
-            { value: "key", label: t('diff.modeKey') },
+            { value: "text", label: t("diff.modeText") },
+            { value: "lines", label: t("diff.modeLines") },
+            { value: "key", label: t("diff.modeKey") },
           ]}
-          onChange={(v) => setMode(v as DiffMode)}
+          onChange={(value) => setMode(value as DiffMode)}
         />
         {matchResults ? (
           <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
-            {batchLoading ? t('diff.comparing') : t('diff.compareSelected', { count: selectedIds.size })}
+            {batchLoading ? t("diff.comparing") : t("diff.compareSelected", { count: selectedIds.size })}
           </button>
         ) : (
           <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
-            {loading || matchLoading ? t('common.loading') : t('diff.loadAndCompare')}
+            {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
           </button>
         )}
         {error && <span className="diff-loaderr">{error}</span>}
       </div>
+
       <div className="diff-result">
-        {/* 批量匹配列表 */}
         {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
           <div className="match-list">
             <div className="match-list-head">
               <label className="match-toggle-all">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.size === matchResults.length}
-                  onChange={toggleAll}
-                />
-                {t('diff.selectAll')}
+                <input type="checkbox" checked={selectedIds.size === matchResults.length} onChange={toggleAll} />
+                {t("diff.selectAll")}
               </label>
               <span className="match-count">
-                {t('diff.matchCount', { total: matchResults.length, selected: selectedIds.size })}
+                {t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}
               </span>
             </div>
             <div className="match-items">
-              {matchResults.map((m) => (
-                <label className="match-item" key={m.dataId}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(m.dataId)}
-                    onChange={() => toggleSelect(m.dataId)}
-                  />
-                  <span className="match-dataid">{m.dataId}</span>
-                  <span className="match-group">{m.group}</span>
+              {matchResults.map((item) => (
+                <label className="match-item" key={item.dataId}>
+                  <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
+                  <span className="match-dataid">{item.dataId}</span>
+                  <span className="match-group">{item.leftGroup === item.rightGroup ? item.leftGroup : `${item.leftGroup} / ${item.rightGroup}`}</span>
                 </label>
               ))}
             </div>
           </div>
         )}
 
-        {/* 批量对比结果 */}
         {batchResults.length > 0 && (
           <div className="batch-diff">
-            {batchResults.map((r) => (
-              <div className="batch-diff-item" key={r.dataId}>
-                <div
-                  className="batch-diff-header"
-                  onClick={() => toggleCollapse(r.dataId)}
-                >
-                  <span className="batch-diff-toggle">{collapsed.has(r.dataId) ? "▶" : "▼"}</span>
-                  <span className="batch-diff-title">{r.dataId}</span>
+            {batchResults.map((item) => (
+              <div className="batch-diff-item" key={item.dataId}>
+                <div className="batch-diff-header" onClick={() => toggleCollapse(item.dataId)}>
+                  <span className="batch-diff-toggle">{collapsed.has(item.dataId) ? ">" : "v"}</span>
+                  <span className="batch-diff-title">{item.dataId}</span>
                 </div>
-                {!collapsed.has(r.dataId) && (
+                {!collapsed.has(item.dataId) && (
                   <DiffPanel
-                    leftLabel={r.leftLabel}
-                    rightLabel={r.rightLabel}
-                    leftText={r.leftText}
-                    rightText={r.rightText}
-                    format={r.format}
+                    leftLabel={item.leftLabel}
+                    rightLabel={item.rightLabel}
+                    leftText={item.leftText}
+                    rightText={item.rightText}
+                    format={item.format}
                   />
                 )}
               </div>
@@ -426,24 +526,24 @@ export default function DiffView({ connections }: Props) {
           </div>
         )}
 
-        {/* 单个对比结果（原有逻辑） */}
         {!matchResults && ready ? (
           <DiffPanel
-            leftLabel={leftLoaded!.label}
-            rightLabel={rightLoaded!.label}
+            leftLabel={leftLoaded.label}
+            rightLabel={rightLoaded.label}
             leftText={leftText}
             rightText={rightText}
             format={diffFormat}
           />
         ) : !matchResults && !ready ? (
           <div className="pad-msg big">
-            {t('diff.selectHint')}
-            <div className="diff-hint">
-              {t('diff.supportHint')}
-            </div>
+            {t("diff.selectHint")}
+            <div className="diff-hint">{t("diff.supportHint")}</div>
           </div>
         ) : null}
       </div>
     </div>
   );
 }
+
+
+

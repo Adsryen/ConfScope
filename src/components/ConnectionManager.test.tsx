@@ -13,6 +13,12 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../api/nacos", () => apiMocks);
 
+const clipboardMocks = vi.hoisted(() => ({
+  copyText: vi.fn(),
+}));
+
+vi.mock("../lib/clipboard", () => clipboardMocks);
+
 const appApiMocks = vi.hoisted(() => ({
   selectLocalSnapshotDirectory: vi.fn(),
   validateLocalSnapshotDirectory: vi.fn(),
@@ -83,6 +89,7 @@ describe("ConnectionManager", () => {
     vi.setSystemTime(new Date("2026-06-27T00:00:00Z"));
     apiMocks.clearToken.mockReset();
     apiMocks.testConnection.mockReset();
+    clipboardMocks.copyText.mockReset();
     appApiMocks.selectLocalSnapshotDirectory.mockReset();
     appApiMocks.validateLocalSnapshotDirectory.mockReset();
   });
@@ -311,6 +318,43 @@ describe("ConnectionManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
 
     expect(await screen.findByText(/Error: 403（延迟 \d+ ms）/)).toBeInTheDocument();
+  });
+
+  it("copies connection test errors", async () => {
+    apiMocks.testConnection.mockRejectedValueOnce(new Error("403 forbidden"));
+    clipboardMocks.copyText.mockResolvedValueOnce(true);
+    renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+    const errorText = await screen.findByText(/Error: 403 forbidden（延迟 \d+ ms）/);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制报错" }));
+
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(errorText.textContent);
+  });
+
+  it("does not block a new connection test after editing the tested snapshot", async () => {
+    let resolveFirst!: (value: { accessToken: string; tokenTtl: number; globalAdmin: boolean }) => void;
+    apiMocks.testConnection
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockResolvedValueOnce({ accessToken: "token-2", tokenTtl: 18000, globalAdmin: false });
+    renderManager();
+
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://first.example.com/nacos" } });
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+    expect(screen.getByRole("button", { name: "测试中…" })).toBeDisabled();
+
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://second.example.com/nacos" } });
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    expect(apiMocks.testConnection).toHaveBeenCalledTimes(2);
+    expect(apiMocks.testConnection).toHaveBeenNthCalledWith(1, expect.objectContaining({ baseUrl: "http://first.example.com/nacos" }));
+    expect(apiMocks.testConnection).toHaveBeenNthCalledWith(2, expect.objectContaining({ baseUrl: "http://second.example.com/nacos" }));
+
+    resolveFirst({ accessToken: "token-1", tokenTtl: 18000, globalAdmin: true });
+    await waitFor(() => expect(apiMocks.testConnection).toHaveBeenCalledTimes(2));
   });
 
   it("saves SSH tunnel settings with the connection", async () => {

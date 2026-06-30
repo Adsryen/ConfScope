@@ -176,6 +176,7 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 	if !hasLocalSnapshotMarker(root) {
 		return nil, errors.New("local snapshot marker not found")
 	}
+	manifestLayout := hasLocalSnapshotManifest(root)
 
 	files := []localConfigFile{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -190,7 +191,7 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 		if readErr != nil {
 			return readErr
 		}
-		ref, ok := inferLocalConfigRef(root, path)
+		ref, ok := inferLocalConfigRef(root, path, manifestLayout)
 		if !ok {
 			return nil
 		}
@@ -211,7 +212,7 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 	return files, nil
 }
 
-func inferLocalConfigRef(root string, path string) (ConfigRef, bool) {
+func inferLocalConfigRef(root string, path string, manifestLayout bool) (ConfigRef, bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return ConfigRef{}, false
@@ -236,6 +237,22 @@ func inferLocalConfigRef(root string, path string) (ConfigRef, bool) {
 			DataID:    strings.Join(parts[3:], "/"),
 		}, true
 	}
+	if manifestLayout {
+		if len(parts) >= 2 {
+			return ConfigRef{
+				Provider:  ProviderLocal,
+				Namespace: "",
+				Group:     parts[0],
+				DataID:    strings.Join(parts[1:], "/"),
+			}, true
+		}
+		return ConfigRef{
+			Provider:  ProviderLocal,
+			Namespace: "",
+			Group:     "DEFAULT_GROUP",
+			DataID:    parts[0],
+		}, true
+	}
 	if len(parts) >= 3 {
 		return ConfigRef{
 			Provider:  ProviderLocal,
@@ -251,7 +268,6 @@ func inferLocalConfigRef(root string, path string) (ConfigRef, bool) {
 		DataID:    strings.Join(parts, "/"),
 	}, true
 }
-
 func normalizeLocalNamespace(namespace string) string {
 	if strings.EqualFold(namespace, "public") {
 		return ""
@@ -279,6 +295,21 @@ func hasLocalSnapshotMarker(root string) bool {
 	return false
 }
 
+func hasLocalSnapshotManifest(root string) bool {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if isLocalManifest(entry.Name()) {
+			return true
+		}
+	}
+	return false
+}
 func splitLocalPath(path string) []string {
 	raw := strings.FieldsFunc(filepath.ToSlash(path), func(r rune) bool { return r == '/' })
 	parts := make([]string, 0, len(raw))

@@ -229,13 +229,6 @@ export default function App() {
     <div className="app-shell">
       <div className="app-main">
         <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
-          <button
-            className="sidebar-toggle"
-            title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
-            onClick={() => setSidebarCollapsed((value) => !value)}
-          >
-            {sidebarCollapsed ? ">" : "<"}
-          </button>
           <nav className="side-nav">
             {navItems.map((item) => (
               <button
@@ -250,6 +243,13 @@ export default function App() {
               </button>
             ))}
           </nav>
+          <button
+            className="sidebar-toggle"
+            title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+          >
+            {sidebarCollapsed ? ">" : "<"}
+          </button>
         </aside>
 
         <main className="workspace">

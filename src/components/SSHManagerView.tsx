@@ -45,6 +45,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function sshTestKey(config: SSHConfig): string {
+  return JSON.stringify(normalizeSSHConfig(config));
+}
+
 export default function SSHManagerView() {
   const { t } = useTranslation();
   const [profiles, setProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
@@ -52,7 +56,7 @@ export default function SSHManagerView() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [blockedRefs, setBlockedRefs] = useState<string[]>([]);
   const [pendingSaveImpact, setPendingSaveImpact] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
 
   const connections = loadConnections();
   const referencedProfileIds = new Set(connections.map((conn) => conn.sshProfileId).filter(Boolean));
@@ -62,9 +66,10 @@ export default function SSHManagerView() {
   const activeRefs = blockedRefs.length > 0 ? blockedRefs : selectedRefs;
   const currentProfile = draft.id ? profiles.find((profile) => profile.id === draft.id) : undefined;
   const draftTitle = draft.name.trim() || currentProfile?.name || t('settings.newSSHProfile');
+  const currentTestKey = sshTestKey(draft.config);
+  const testingCurrent = testingKey === currentTestKey;
 
   const clearTransient = () => {
-    setMessage(null);
     setBlockedRefs([]);
     setPendingSaveImpact(false);
   };
@@ -144,7 +149,8 @@ export default function SSHManagerView() {
   };
 
   const testSSHProfile = async () => {
-    const config = normalizeSSHConfig(draft.config);
+    const config = normalizeSSHConfig({ ...draft.config });
+    const snapshotKey = sshTestKey(config);
     if (!config.host.trim() || !config.username.trim()) {
       setMessage({ ok: false, text: t('settings.sshProfileRequired') });
       return;
@@ -159,7 +165,7 @@ export default function SSHManagerView() {
     }
 
     const startedAt = Date.now();
-    setTesting(true);
+    setTestingKey(snapshotKey);
     setMessage({ ok: true, text: t('settings.sshProfileTesting') });
     setBlockedRefs([]);
     setPendingSaveImpact(false);
@@ -177,7 +183,7 @@ export default function SSHManagerView() {
           .replace("{time}", fallbackLatencyText(startedAt)),
       });
     } finally {
-      setTesting(false);
+      setTestingKey((current) => (current === snapshotKey ? null : current));
     }
   };
 
@@ -372,8 +378,8 @@ export default function SSHManagerView() {
               {message && <div className={`test-msg ${message.ok ? "ok" : "err"}`}>{message.text}</div>}
               <div className="conn-form-actions">
                 <div className="spacer" />
-                <button className="btn btn-ghost" onClick={testSSHProfile} disabled={testing}>
-                  {testing ? t('settings.sshProfileTesting') : t('settings.sshProfileTest')}
+                <button className="btn btn-ghost" onClick={testSSHProfile} disabled={testingCurrent}>
+                  {testingCurrent ? t('settings.sshProfileTesting') : t('settings.sshProfileTest')}
                 </button>
                 <button className="btn btn-primary" onClick={save}>
                   {pendingSaveImpact ? t('settings.sshProfileConfirmSave') : t('common.save')}

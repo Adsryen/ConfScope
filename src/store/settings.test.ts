@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadSettings, saveSettings, updateProxySettings } from "./settings";
+import { loadSettings, saveSettings, updateCompareSettings, updateProxySettings } from "./settings";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -30,6 +30,7 @@ describe("settings store", () => {
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "", lastCheckAt: "" },
+      compare: { sortConnections: true, sortNamespaces: true },
     });
 
     localStorage.setItem("cs.settings", "{bad json");
@@ -37,6 +38,7 @@ describe("settings store", () => {
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "", lastCheckAt: "" },
+      compare: { sortConnections: true, sortNamespaces: true },
     });
   });
 
@@ -58,6 +60,7 @@ describe("settings store", () => {
     saveSettings({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z" },
+      compare: { sortConnections: false, sortNamespaces: true },
     });
 
     updateProxySettings({ httpProxy: "http://proxy.local:8080" });
@@ -65,6 +68,16 @@ describe("settings store", () => {
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "http://proxy.local:8080", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z" },
+      compare: { sortConnections: false, sortNamespaces: true },
+    });
+  });
+
+  it("persists compare sorting preferences", () => {
+    updateCompareSettings({ sortConnections: false, sortNamespaces: false });
+
+    expect(loadSettings().compare).toEqual({
+      sortConnections: false,
+      sortNamespaces: false,
     });
   });
 });
