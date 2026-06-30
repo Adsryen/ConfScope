@@ -52,6 +52,25 @@ const snapshotConn: Connection = {
   defaultNamespace: "",
 };
 
+const prodConn: Connection = {
+  ...nacosConn,
+  id: "prod-nacos",
+  name: "prod",
+  environmentName: "生产",
+  sourceName: "云上公网",
+  baseUrl: "http://prod.example.com/nacos",
+  defaultNamespace: "prod-tenant",
+};
+
+const otherProjectConn: Connection = {
+  ...nacosConn,
+  id: "other-nacos",
+  projectName: "支付系统",
+  environmentName: "开发",
+  sourceName: "支付内网",
+  baseUrl: "http://pay.example.com/nacos",
+};
+
 function renderDiff(connections: Connection[], onConnectionsChange?: (connections: Connection[]) => void) {
   localStorage.setItem("locale", "zh-CN");
   return render(
@@ -82,6 +101,33 @@ describe("DiffView", () => {
     await waitFor(() => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
     });
+  });
+
+  it("filters smart-compare source choices by the selected project and highlights environments", async () => {
+    renderDiff([nacosConn, prodConn, otherProjectConn]);
+
+    await screen.findAllByText("开发");
+    expect(screen.getAllByText("订单系统").length).toBeGreaterThan(0);
+    expect(screen.queryByText("支付内网")).not.toBeInTheDocument();
+    expect(screen.getAllByText("开发").length).toBeGreaterThan(0);
+
+    const environmentButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发"));
+    fireEvent.click(environmentButtons[0]);
+    fireEvent.mouseDown(await screen.findByText("生产"));
+
+    expect(await screen.findAllByText("生产")).not.toHaveLength(0);
+    expect(screen.getAllByText((text) => text.includes("云上公网")).length).toBeGreaterThan(0);
+    expect(document.querySelector(".env-prod")).toBeInTheDocument();
+
+    const projectButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("订单系统"));
+    fireEvent.click(projectButtons[0]);
+    fireEvent.mouseDown(await screen.findByText("支付系统"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(otherProjectConn, "dev-tenant", "", "", 1, 500);
+    });
+    expect(screen.getAllByText((text) => text.includes("支付内网")).length).toBeGreaterThan(0);
+    expect(screen.queryByText((text) => text.includes("云上公网"))).not.toBeInTheDocument();
   });
 
   it("syncs the default namespace when the connection config changes", async () => {
@@ -171,6 +217,58 @@ describe("DiffView", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/命名空间加载失败: connect timeout/)).toHaveLength(2);
     });
+  });
+
+  it("keeps the selected source and retries config-list loading in place", async () => {
+    apiMocks.listConfigs
+      .mockRejectedValueOnce(new Error("EOF"))
+      .mockRejectedValueOnce(new Error("EOF"))
+      .mockResolvedValue({
+        totalCount: 1,
+        pageNumber: 1,
+        pagesAvailable: 1,
+        pageItems: [{ dataId: "retry.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+      });
+
+    renderDiff([nacosConn]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/配置列表加载失败: EOF/)).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "重试配置列表" })[0]);
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.getAllByText(/配置列表加载失败: EOF/)).toHaveLength(1);
+    expect(screen.getAllByRole("button").some((button) => button.textContent?.includes("云上内网"))).toBe(true);
+  });
+
+  it("collapses compare sources after matching and allows expanding them again", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+
+    renderDiff([nacosConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+
+    expect(await screen.findByText("找到 2 个同名 dataId，已选 2 个")).toBeInTheDocument();
+    expect(document.querySelector(".diff-sources")).toHaveAttribute("aria-hidden", "true");
+    expect(document.querySelector(".diff-sources")).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("button", { name: "展开来源" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开来源" }));
+
+    expect(document.querySelector(".diff-sources")).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByRole("button", { name: "收起来源" })).toBeInTheDocument();
   });
 
 
