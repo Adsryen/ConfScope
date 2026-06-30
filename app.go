@@ -18,7 +18,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-var appVersion = "1.0.0"
+var appVersion = "1.1.0"
 
 var errUnsupportedProvider = errors.New("unsupported config center provider")
 
