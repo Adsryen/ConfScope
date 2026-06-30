@@ -143,6 +143,35 @@ describe("SSHManagerView", () => {
     }));
   });
 
+  it("does not block a new SSH test after editing the tested snapshot", async () => {
+    let resolveFirst!: (value: { latencyMs: number }) => void;
+    goApp.TestSSHConnection
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockResolvedValueOnce({ latencyMs: 18 });
+    renderSSHManager();
+    const inputs = screen.getAllByRole("textbox") as HTMLInputElement[];
+    const hostInput = inputs[1];
+    const usernameInput = inputs[2];
+    const passwordInput = document.querySelector('input[type="password"]') as HTMLInputElement;
+
+    fireEvent.change(hostInput, { target: { value: "jump-a.example.com" } });
+    fireEvent.change(usernameInput, { target: { value: "ops" } });
+    fireEvent.change(passwordInput, { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "测试 SSH" }));
+    expect(screen.getByRole("button", { name: "SSH 测试中…" })).toBeDisabled();
+
+    fireEvent.change(hostInput, { target: { value: "jump-b.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "测试 SSH" }));
+
+    expect(goApp.TestSSHConnection).toHaveBeenCalledTimes(2);
+    expect(goApp.TestSSHConnection).toHaveBeenNthCalledWith(1, expect.objectContaining({ host: "jump-a.example.com" }));
+    expect(goApp.TestSSHConnection).toHaveBeenNthCalledWith(2, expect.objectContaining({ host: "jump-b.example.com" }));
+
+    resolveFirst({ latencyMs: 41 });
+  });
+
   it("requires confirmation before saving referenced SSH profile changes", () => {
     localStorage.setItem("cs.sshProfiles", JSON.stringify([
       {

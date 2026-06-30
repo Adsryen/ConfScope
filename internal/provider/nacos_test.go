@@ -168,6 +168,44 @@ func TestNacosProviderPassesMSEAuthToClient(t *testing.T) {
 	}
 }
 
+func TestNacosProviderTestsMSEConnectionWithConfigList(t *testing.T) {
+	server := newProviderIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/cs/configs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("tenant") != "public" || r.URL.Query().Get("group") != "DEFAULT_GROUP" || r.URL.Query().Get("pageSize") != "1" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("Spas-AccessKey") != "ak-test" {
+			t.Fatalf("missing Spas-AccessKey header")
+		}
+		if r.Header.Get("Timestamp") == "" {
+			t.Fatalf("missing Timestamp header")
+		}
+		wantSignature := expectedProviderMSESignature("sk-test", "public", "DEFAULT_GROUP", r.Header.Get("Timestamp"))
+		if r.Header.Get("Spas-Signature") != wantSignature {
+			t.Fatalf("Spas-Signature = %q, want %q", r.Header.Get("Spas-Signature"), wantSignature)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount":0,"pageNumber":1,"pagesAvailable":0,"pageItems":[]}`))
+	}))
+
+	p := NewNacosProvider(nacos.NewClient())
+	err := p.TestConnection(ConnectionProfile{
+		ID:              "conn-mse-test",
+		Provider:        ProviderNacos,
+		BaseURL:         server.URL,
+		APIVersion:      "v1",
+		Distribution:    DistributionAliyunMSE,
+		AuthType:        AuthAliyunAKSK,
+		AccessKeyID:     "ak-test",
+		AccessKeySecret: "sk-test",
+	})
+	if err != nil {
+		t.Fatalf("TestConnection returned error: %v", err)
+	}
+}
+
 func TestNacosProviderGetsPublishesDeletesAndReadsHistory(t *testing.T) {
 	server := newProviderIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

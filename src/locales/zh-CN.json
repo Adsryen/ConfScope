@@ -54,7 +54,15 @@
     "sshProfileTestSuccess": "SSH 连接成功，耗时 {time}",
     "sshProfileTestFailed": "SSH 连接失败：{error}（{time}）",
     "sshProfileUpdateImpact": "该 SSH 配置档案正在被 {count} 个连接引用，保存后这些连接会立即使用新配置。请确认影响范围后再次保存。",
-    "sshProfileConfirmSave": "确认保存"
+    "sshProfileConfirmSave": "确认保存",
+    "comparePreferences": "智能对比",
+    "sortConnections": "连接下拉按名称排序",
+    "sortNamespaces": "命名空间下拉按名称排序",
+    "networkProxy": "网络代理",
+    "httpProxy": "HTTP 代理",
+    "httpsProxy": "HTTPS 代理",
+    "noProxy": "不走代理",
+    "settingsSaved": "设置已保存"
   },
   "ssh": {
     "pageSubtitle": "统一管理可复用的 SSH 跳板机档案和引用关系。连接管理页只选择或引用这里的配置。",
@@ -124,7 +132,7 @@
     "localPath": "本地快照目录",
     "localPathPlaceholder": "输入或选择本地文件夹路径",
     "localPathHelp": "选择导出的配置快照目录。Windows 可点击选择文件夹，也可以直接输入路径；Linux/macOS 可直接输入路径。选择文件夹后会自动校验。",
-    "localPathStructureHint": "目录需包含 confscope.snapshot.json / manifest.json / metadata.json / .metadata.yml，或 configs/、namespaces/ 标准目录，并至少包含 1 个可对比配置文件。",
+    "localPathStructureHint": "目录需包含 confscope.snapshot.json / manifest.json / metadata.json / .metadata.yml，或 configs/、namespaces/ 标准目录，并至少包含 1 个可对比配置文件。根目录存在 metadata 时，同级文件夹会按 group 识别，文件相对路径作为 dataId。",
     "forceLocalSnapshot": "强制使用此目录",
     "forceLocalSnapshotHelp": "目录校验不通过时仍允许保存。后续读取或对比可能失败，请确认目录结构可被识别。",
     "selectFolder": "选择文件夹",
@@ -287,6 +295,13 @@
     "line": "行",
     "noContent": "（无内容）",
     "fetchFailed": "获取配置失败",
+    "localSnapshotSource": "本地快照",
+    "localSnapshotHint": "读取本地快照目录",
+    "namespaceLoadFailed": "命名空间加载失败",
+    "configListLoadFailed": "配置列表加载失败",
+    "connectionRequired": "未选择连接",
+    "dataIdRequired": "未填写 dataId",
+    "noMatchedDataId": "两侧命名空间和 group 下没有找到同名 dataId",
     "pleaseSelect": "请先选择",
     "noConnection": "请先在「连接管理」中添加 Nacos 连接",
     "sourceA": "来源 A（左）",
@@ -358,3 +373,4 @@
     "close": "关闭"
   }
 }
+

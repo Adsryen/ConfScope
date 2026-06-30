@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { checkForUpdates, getAppInfo, type AppInfo, type UpdateCheckResult } from "../api/app";
 import { useTranslation } from "../i18n";
-import { loadSettings, updateProxySettings, type ProxySettings } from "../store/settings";
+import { loadSettings } from "../store/settings";
 
 interface AboutProps {
   onClose?: () => void;
@@ -15,7 +15,6 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     version: "1.0.0",
     updateSources: [],
   });
-  const [proxy, setProxy] = useState<ProxySettings>(() => loadSettings().proxy);
   const [checking, setChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
 
@@ -44,18 +43,10 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     };
   }, []);
 
-  const setProxyField = (key: keyof ProxySettings, value: string) => {
-    setProxy((current) => ({ ...current, [key]: value }));
-  };
-
   const runUpdateCheck = async () => {
     setChecking(true);
     setUpdateResult(null);
-    try {
-      updateProxySettings(proxy);
-    } catch {
-      // localStorage can be unavailable; update checks should still work with in-memory proxy values.
-    }
+    const proxy = loadSettings().proxy;
     try {
       const result = await checkForUpdates({
         currentVersion: appInfo.version,
@@ -142,35 +133,6 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
                   {source.name}
                 </span>
               ))}
-            </div>
-            <div className="field-row update-proxy-row">
-              <label className="field">
-                <span>{t('about.httpProxy')}</span>
-                <input
-                  className="search-input"
-                  value={proxy.httpProxy}
-                  placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => setProxyField("httpProxy", e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>{t('about.httpsProxy')}</span>
-                <input
-                  className="search-input"
-                  value={proxy.httpsProxy}
-                  placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => setProxyField("httpsProxy", e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>{t('about.noProxy')}</span>
-                <input
-                  className="search-input"
-                  value={proxy.noProxy}
-                  placeholder="localhost,127.0.0.1"
-                  onChange={(e) => setProxyField("noProxy", e.target.value)}
-                />
-              </label>
             </div>
           </div>
 

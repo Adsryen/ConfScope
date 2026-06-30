@@ -10,14 +10,20 @@ import (
 	"strings"
 )
 
-// base 规整 Nacos base URL，避免拼接路径时出现重复斜杠。
 func base(baseURL string) string {
 	return strings.TrimRight(baseURL, "/")
 }
 
-// getText 发起 GET 请求并返回响应文本。
-//
-// accessToken 的传递方式由 API 版本决定：v1 放 query，v3 放 header。
+func requestPath(req *http.Request) string {
+	if req == nil || req.URL == nil {
+		return ""
+	}
+	if req.URL.RawQuery == "" {
+		return req.URL.Path
+	}
+	return req.URL.Path + "?" + req.URL.RawQuery
+}
+
 func (c *Client) getText(baseURL, path string, query url.Values, accessToken string, version apiVersion) (string, error) {
 	if version == apiV1 && accessToken != "" {
 		query.Set("accessToken", accessToken)
@@ -44,14 +50,11 @@ func (c *Client) getText(baseURL, path string, query url.Values, accessToken str
 		return "", fmt.Errorf("读取响应失败: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("Nacos 返回 %d: %s", resp.StatusCode, truncate(text))
+		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text))
 	}
 	return text, nil
 }
 
-// getJSON 发起 GET 请求并解析 JSON。
-//
-// 对 v3 响应会自动解开 {code,message,data} 信封，并在 code 非 0 时返回业务错误。
 func (c *Client) getJSON(baseURL, path string, query url.Values, accessToken string, version apiVersion) (any, error) {
 	text, err := c.getText(baseURL, path, query, accessToken, version)
 	if err != nil {
@@ -77,9 +80,6 @@ func (c *Client) getJSON(baseURL, path string, query url.Values, accessToken str
 	return v, nil
 }
 
-// sendForm 发起带表单或 query 参数的变更请求。
-//
-// 当前用于发布和删除配置；不同 HTTP 方法的网络错误会转换为更贴近用户操作的中文提示。
 func (c *Client) sendForm(method, baseURL, path string, query url.Values, form url.Values, accessToken string, version apiVersion) (string, error) {
 	if version == apiV1 && accessToken != "" {
 		query.Set("accessToken", accessToken)
@@ -121,12 +121,11 @@ func (c *Client) sendForm(method, baseURL, path string, query url.Values, form u
 		return "", fmt.Errorf("读取响应失败: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("Nacos 返回 %d: %s", resp.StatusCode, truncate(text))
+		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text))
 	}
 	return text, nil
 }
 
-// readBody 读取响应体并转换为字符串。
 func readBody(resp *http.Response) (string, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

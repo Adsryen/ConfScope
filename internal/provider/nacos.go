@@ -143,6 +143,10 @@ func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRe
 
 func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
 	client := p.clientFor(profile)
+	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK {
+		_, err := client.ListConfigs(profile.BaseURL, "", "v1", "public", "", "DEFAULT_GROUP", 1, 1)
+		return err
+	}
 	_, err := client.Namespaces(profile.BaseURL, profile.AccessToken, profile.APIVersion)
 	return err
 }
