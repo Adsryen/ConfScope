@@ -199,6 +199,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           NOTES=$(gh release view "${GITHUB_REF_NAME}" --json body -q .body 2>/dev/null || echo "")
+          if [ -z "$NOTES" ]; then
+            NOTES="发行版 ${VERSION}"
+          fi
 
           # Windows
           WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe" | awk '{print $1}')
@@ -208,36 +211,45 @@ jobs:
           LINUX_DEB_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb" | awk '{print $1}')
           LINUX_RPM_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm" | awk '{print $1}')
 
-          cat > update.json <<EOF
-          {
-            "version": "${VERSION}",
-            "notes": ${NOTES:+$(echo "$NOTES" | jq -Rs .)}${NOTES:-"发行版 ${VERSION}"},
-            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "mandatory": false,
-            "platforms": {
-              "windows-amd64": {
-                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/ConfScope.exe",
-                "sha256": "${WIN_SHA256}",
-                "fileName": "ConfScope.exe"
-              },
-              "linux-amd64": {
-                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.tar.gz",
-                "sha256": "${LINUX_TAR_SHA256}",
-                "fileName": "confscope-linux-amd64.tar.gz"
-              },
-              "linux-amd64-deb": {
-                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.deb",
-                "sha256": "${LINUX_DEB_SHA256}",
-                "fileName": "confscope-linux-amd64.deb"
-              },
-              "linux-amd64-rpm": {
-                "downloadUrl": "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/confscope-linux-amd64.rpm",
-                "sha256": "${LINUX_RPM_SHA256}",
-                "fileName": "confscope-linux-amd64.rpm"
+          DOWNLOAD_BASE="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+
+          jq -n \
+            --arg version "${VERSION}" \
+            --arg notes "${NOTES}" \
+            --arg publishedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg winSha256 "${WIN_SHA256}" \
+            --arg linuxTarSha256 "${LINUX_TAR_SHA256}" \
+            --arg linuxDebSha256 "${LINUX_DEB_SHA256}" \
+            --arg linuxRpmSha256 "${LINUX_RPM_SHA256}" \
+            --arg downloadBase "${DOWNLOAD_BASE}" \
+            '{
+              version: $version,
+              notes: $notes,
+              publishedAt: $publishedAt,
+              mandatory: false,
+              platforms: {
+                "windows-amd64": {
+                  downloadUrl: "\($downloadBase)/ConfScope.exe",
+                  sha256: $winSha256,
+                  fileName: "ConfScope.exe"
+                },
+                "linux-amd64": {
+                  downloadUrl: "\($downloadBase)/confscope-linux-amd64.tar.gz",
+                  sha256: $linuxTarSha256,
+                  fileName: "confscope-linux-amd64.tar.gz"
+                },
+                "linux-amd64-deb": {
+                  downloadUrl: "\($downloadBase)/confscope-linux-amd64.deb",
+                  sha256: $linuxDebSha256,
+                  fileName: "confscope-linux-amd64.deb"
+                },
+                "linux-amd64-rpm": {
+                  downloadUrl: "\($downloadBase)/confscope-linux-amd64.rpm",
+                  sha256: $linuxRpmSha256,
+                  fileName: "confscope-linux-amd64.rpm"
+                }
               }
-            }
-          }
-          EOF
+            }' > update.json
 
           cat update.json
           echo "json=$(cat update.json | jq -c .)" >> $GITHUB_OUTPUT
