@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useRef, useState } from "react";
-import { Connection } from "../store/connections";
+import { Connection, connectionDisplayLabel } from "../store/connections";
 import {
   formatTime,
   getHistoryDetail,
@@ -8,6 +8,7 @@ import {
   publishConfig,
 } from "../api/nacos";
 import { Format, nacosType } from "../lib/format";
+import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { useTranslation } from "../i18n";
 import CodeView from "./CodeView";
@@ -64,6 +65,7 @@ export default function HistoryView({
   const [rollingBack, setRollingBack] = useState(false);
 
   const histReqId = useRef(0);
+  const sourceLabel = `${connectionDisplayLabel(conn)} / ${tenant || "public"} / ${group} / ${dataId}`;
 
   const loadHistory = (page: number) => {
     const my = ++histReqId.current;
@@ -79,9 +81,18 @@ export default function HistoryView({
       })
       .catch((e) => {
         if (my !== histReqId.current) return;
-        setError(String(e));
+        const message = String(e);
+        setError(message);
         setItems([]);
         setPages(1);
+        reportError({
+          title: "历史版本加载失败",
+          source: sourceLabel,
+          message,
+          detail: message,
+          actionLabel: "重试",
+          onAction: () => loadHistory(page),
+        });
       })
       .finally(() => {
         if (my === histReqId.current) setLoading(false);
@@ -118,7 +129,14 @@ export default function HistoryView({
     try {
       await Promise.all(next.map(ensureContent));
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      setError(message);
+      reportError({
+        title: "历史版本内容加载失败",
+        source: sourceLabel,
+        message,
+        detail: message,
+      });
     }
   };
 
@@ -146,8 +164,17 @@ export default function HistoryView({
       onRolledBack();
       loadHistory(1);
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      setError(message);
       setRbConfirm(false);
+      reportError({
+        title: "配置回滚失败",
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: "重试回滚",
+        onAction: () => rollback(),
+      });
     } finally {
       setRollingBack(false);
     }
@@ -161,7 +188,16 @@ export default function HistoryView({
     Promise.all([
       ensureContent(nid),
       prev ? ensureContent(prev.id) : Promise.resolve(""),
-    ]).catch((e) => setError(String(e)));
+    ]).catch((e) => {
+      const message = String(e);
+      setError(message);
+      reportError({
+        title: "历史版本内容加载失败",
+        source: sourceLabel,
+        message,
+        detail: message,
+      });
+    });
   };
 
   // 对比：勾选 2 个 → 两版本对比；勾选 1 个 → 该版本 vs 当前线上

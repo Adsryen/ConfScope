@@ -1,11 +1,14 @@
-/**
+﻿/**
  * @vitest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { clearErrors } from "../lib/errorCenter";
 import type { Connection } from "../store/connections";
 import ConfigBrowser from "./ConfigBrowser";
+import ErrorDialog from "./ErrorDialog";
+import MessageCenter from "./MessageCenter";
 
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
@@ -24,6 +27,10 @@ vi.mock("../api/nacos", async () => {
     deleteConfig: apiMocks.deleteConfig,
   };
 });
+
+vi.mock("../lib/clipboard", () => ({
+  copyText: vi.fn(),
+}));
 
 const conn: Connection = {
   id: "dev",
@@ -48,6 +55,8 @@ function renderBrowser() {
   return render(
     <I18nProvider>
       <ConfigBrowser conn={conn} tenant="public" />
+      <MessageCenter />
+      <ErrorDialog />
     </I18nProvider>
   );
 }
@@ -66,6 +75,7 @@ async function expectCodeContains(...parts: string[]) {
 describe("ConfigBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearErrors();
     apiMocks.listConfigs.mockReset();
     apiMocks.getConfig.mockReset();
     apiMocks.publishConfig.mockReset();
@@ -80,7 +90,6 @@ describe("ConfigBrowser", () => {
     renderBrowser();
 
     expect(await screen.findByText("app.json")).toBeInTheDocument();
-    expect(screen.getByText("共 1 项")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("app.json"));
 
@@ -93,7 +102,7 @@ describe("ConfigBrowser", () => {
     await screen.findByText("app.json");
     vi.useFakeTimers();
 
-    fireEvent.change(screen.getByPlaceholderText("搜索 dataId…"), { target: { value: "gateway" } });
+    fireEvent.change(document.querySelector(".browser-search input")!, { target: { value: "gateway" } });
 
     await act(async () => {
       vi.advanceTimersByTime(400);
@@ -157,4 +166,26 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
     expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
   });
+
+  it("records list loading failures in the message center", async () => {
+    const { copyText } = await import("../lib/clipboard");
+    vi.mocked(copyText).mockResolvedValue(true);
+    apiMocks.listConfigs.mockRejectedValueOnce(new Error("Nacos returned 403: Invalid signature"));
+
+    renderBrowser();
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByTitle("消息中心"));
+
+    const panel = document.querySelector(".message-panel") as HTMLElement;
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveTextContent("Nacos returned 403: Invalid signature");
+    expect(panel).toHaveTextContent("dev / public");
+
+    await act(async () => {
+      fireEvent.click(within(panel).getAllByRole("button")[2]);
+    });
+    expect(copyText).toHaveBeenCalledWith("Error: Nacos returned 403: Invalid signature");
+  });
 });
+

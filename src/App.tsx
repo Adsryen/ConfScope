@@ -10,6 +10,9 @@ import Select from "./components/Select";
 import Toaster from "./components/Toaster";
 import SettingsView from "./components/SettingsView";
 import SSHManagerView from "./components/SSHManagerView";
+import ErrorDialog from "./components/ErrorDialog";
+import MessageCenter from "./components/MessageCenter";
+import { reportError } from "./lib/errorCenter";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
 
@@ -142,8 +145,17 @@ export default function App() {
       .then((ns) => alive && setNamespaces(ns))
       .catch((e) => {
         if (!alive) return;
-        setNsError(String(e));
+        const message = String(e);
+        setNsError(message);
         setNamespaces([]);
+        reportError({
+          title: "命名空间加载失败",
+          source: connectionDisplayLabel(activeConn),
+          message,
+          detail: message,
+          actionLabel: t('common.retry'),
+          onAction: () => setNsReload((x) => x + 1),
+        });
       })
       .finally(() => alive && setNsLoading(false));
     return () => {
@@ -243,13 +255,16 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <button
-            className="sidebar-toggle"
-            title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
-            onClick={() => setSidebarCollapsed((value) => !value)}
-          >
-            {sidebarCollapsed ? ">" : "<"}
-          </button>
+          <div className="sidebar-bottom">
+            <MessageCenter collapsed={sidebarCollapsed} />
+            <button
+              className="sidebar-toggle"
+              title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
+              onClick={() => setSidebarCollapsed((value) => !value)}
+            >
+              {sidebarCollapsed ? ">" : "<"}
+            </button>
+          </div>
         </aside>
 
         <main className="workspace">
@@ -287,6 +302,7 @@ export default function App() {
       </div>
 
       <Toaster />
+      <ErrorDialog />
     </div>
   );
 }

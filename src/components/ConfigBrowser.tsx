@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Connection } from "../store/connections";
+import { Connection, connectionDisplayLabel } from "../store/connections";
 import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
+import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
@@ -54,6 +55,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
   const dirty = editing && draft !== content;
+  const sourceLabel = `${connectionDisplayLabel(conn)} / ${tenant || "public"}`;
   const guardNav = (action: () => void) => {
     if (dirty) setPending(() => action);
     else action();
@@ -78,10 +80,19 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       setPages(Math.max(res.pagesAvailable || 1, 1));
     } catch (e) {
       if (my !== listReqId.current) return;
-      setListError(String(e));
+      const message = String(e);
+      setListError(message);
       setItems([]);
       setTotal(0);
       setPages(1);
+      reportError({
+        title: "配置列表加载失败",
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: "重试",
+        onAction: () => fetchList(term, page),
+      });
     } finally {
       if (my === listReqId.current) setListLoading(false);
     }
@@ -141,8 +152,17 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       setFmt(detectFormat(item.dataId, item.configType, text));
     } catch (e) {
       if (my !== reqId.current) return;
-      setContentError(String(e));
+      const message = String(e);
+      setContentError(message);
       setContent("");
+      reportError({
+        title: "配置内容加载失败",
+        source: `${sourceLabel} / ${item.group} / ${item.dataId}`,
+        message,
+        detail: message,
+        actionLabel: "重试",
+        onAction: () => openConfig(item),
+      });
     } finally {
       if (my === reqId.current) setContentLoading(false);
     }
@@ -176,7 +196,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       toast(t('config.published'));
       await openConfig(selected); // 重新拉取最新内容
     } catch (e) {
-      setSaveError(String(e));
+      const message = String(e);
+      setSaveError(message);
+      reportError({
+        title: "配置发布失败",
+        source: `${sourceLabel} / ${selected.group} / ${selected.dataId}`,
+        message,
+        detail: message,
+        actionLabel: "重试发布",
+        onAction: () => saveEdit(),
+      });
     } finally {
       setSaving(false);
     }
