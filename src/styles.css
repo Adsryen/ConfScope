@@ -1975,6 +1975,21 @@ select, button, .tab-btn { cursor: pointer; }
   border-radius: 3px;
   white-space: nowrap;
 }
+.conn-provider-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.conn-provider-badge.nacos {
+  color: #82c7ff;
+  background: rgba(79, 195, 247, 0.12);
+}
+.conn-provider-badge.local {
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.12);
+}
 .conn-item-url {
   display: flex;
   flex-wrap: wrap;

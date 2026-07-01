@@ -87,14 +87,6 @@ export default function SettingsView() {
               />
             </label>
           </div>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.update.proxyOnlyForUpdate}
-              onChange={(e) => update({ update: { ...settings.update, proxyOnlyForUpdate: e.target.checked } })}
-            />
-            <span>{t('settings.proxyOnlyForUpdate')}</span>
-          </label>
           {saved && <div className="test-msg ok">{t('settings.settingsSaved')}</div>}
         </section>
       </div>

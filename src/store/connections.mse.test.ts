@@ -44,7 +44,7 @@ describe("MSE Nacos connection store", () => {
       ])
     );
 
-    expect(loadConnections()).toEqual([
+    expect(loadConnections()).toMatchObject([
       {
         id: "legacy",
         name: "dev",

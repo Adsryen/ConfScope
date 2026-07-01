@@ -153,7 +153,7 @@ describe("ConnectionManager", () => {
     });
 
     expect(within(connectionList()).getByText("订单系统")).toBeInTheDocument();
-    expect(within(connectionList()).getByText("生产")).toBeInTheDocument();
+    expect(within(connectionList()).getAllByText("生产").length).toBeGreaterThanOrEqual(1);
     expect(within(connectionList()).getByText("云上公网")).toBeInTheDocument();
     expect(onChange).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -227,7 +227,7 @@ describe("ConnectionManager", () => {
       source: "云上公网",
     });
 
-    const envTitle = within(connectionList()).getByText("生产").closest(".conn-env-title") as HTMLElement;
+    const envTitle = connectionList().querySelector(".conn-env-name")?.closest(".conn-env-title") as HTMLElement;
     fireEvent.click(within(envTitle).getByTitle("新增来源"));
 
     expect(controlByLabel("项目").value).toBe("订单系统");
@@ -253,8 +253,8 @@ describe("ConnectionManager", () => {
   it("defaults the source entry to local snapshot for local snapshot sources", () => {
     renderManager();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "来源类型" }), {
-      target: { value: "local-snapshot" },
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), {
+      target: { value: "local" },
     });
 
     expect(fieldByLabel("来源名称")).toHaveValue("本地快照");
@@ -268,8 +268,8 @@ describe("ConnectionManager", () => {
     renderManager();
 
     fireEvent.change(fieldByLabel("来源名称"), { target: { value: "生产备份-202406" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "来源类型" }), {
-      target: { value: "local-snapshot" },
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), {
+      target: { value: "local" },
     });
 
     expect(fieldByLabel("来源名称")).toHaveValue("生产备份-202406");
@@ -282,7 +282,7 @@ describe("ConnectionManager", () => {
     expect(within(fieldLabel("备注（可选）")).queryByText("*")).not.toBeInTheDocument();
     expect(within(fieldLabel("项目")).getByText("*")).toBeInTheDocument();
     expect(within(fieldLabel("环境")).getByText("*")).toBeInTheDocument();
-    expect(within(fieldLabel("来源类型")).getByText("*")).toBeInTheDocument();
+    expect(within(fieldLabel("配置中心")).getByText("*")).toBeInTheDocument();
     expect(within(fieldLabel("来源名称")).getByText("*")).toBeInTheDocument();
     expect(within(fieldLabel("目标地址")).getByText("*")).toBeInTheDocument();
   });
@@ -308,9 +308,9 @@ describe("ConnectionManager", () => {
       expect.objectContaining({ projectName: "交易平台" }),
     ]);
 
-    const envTitle = within(connectionList()).getByText("生产").closest(".conn-env-title") as HTMLElement;
+    const envTitle = connectionList().querySelector(".conn-env-name")?.closest(".conn-env-title") as HTMLElement;
     expect(within(envTitle).queryByTitle("重命名环境")).not.toBeInTheDocument();
-    expect(within(connectionList()).getByText("生产")).toBeInTheDocument();
+    expect(within(connectionList()).getAllByText("生产").length).toBeGreaterThanOrEqual(1);
   });
 
   it("requires name and address before saving", () => {
@@ -604,8 +604,8 @@ describe("ConnectionManager", () => {
 
     fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "local-prod" } });
     fireEvent.change(fieldByLabel("来源名称"), { target: { value: "本地快照" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "来源类型" }), {
-      target: { value: "local-snapshot" },
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), {
+      target: { value: "local" },
     });
     fireEvent.change(screen.getByPlaceholderText("输入或选择本地文件夹路径"), {
       target: { value: "C:\\backup\\order-prod" },
@@ -651,8 +651,8 @@ describe("ConnectionManager", () => {
     renderManager(onChange);
 
     fireEvent.change(fieldByLabel("来源名称"), { target: { value: "临时本地目录" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "来源类型" }), {
-      target: { value: "local-snapshot" },
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), {
+      target: { value: "local" },
     });
     fireEvent.change(screen.getByPlaceholderText("输入或选择本地文件夹路径"), {
       target: { value: "C:\\backup\\loose" },
@@ -693,8 +693,8 @@ describe("ConnectionManager", () => {
     });
     renderManager();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "来源类型" }), {
-      target: { value: "local-snapshot" },
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), {
+      target: { value: "local" },
     });
     fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
 

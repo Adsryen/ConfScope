@@ -231,6 +231,18 @@ function connectionLabelMeta(conn: Pick<Connection, "name" | "sourceName">): str
   return label && label !== sourceName ? label : "";
 }
 
+function environmentTone(name: string): string {
+  const value = name.trim().toLowerCase();
+  if (!value) return "other";
+  if (value.includes("生产") || value.includes("prod")) return "prod";
+  if (value.includes("预发") || value.includes("staging") || value.includes("stage") || value.includes("uat")) return "staging";
+  if (value.includes("灰度") || value.includes("canary")) return "canary";
+  if (value.includes("测试") || value.includes("test") || value.includes("qa")) return "test";
+  if (value.includes("本地") || value.includes("local")) return "local";
+  if (value.includes("开发") || value.includes("dev")) return "dev";
+  return "other";
+}
+
 function copyLabel(value: string | undefined, fallback: string, suffix: string): string {
   const base = value?.trim() || fallback;
   return base.includes(suffix) ? base : `${base}${suffix}`;
@@ -488,7 +500,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     { label: t('connection.sourcePresetOffice'), mode: "direct" as const },
   ];
   const localSnapshotSourceNamePreset = { label: t('connection.sourcePresetLocalSnapshot'), mode: "direct" as const };
-  const sourceNamePresets = draft.sourceType === "local-snapshot"
+  const sourceNamePresets = draft.provider === "local"
     ? [localSnapshotSourceNamePreset]
     : nacosSourceNamePresets;
   const selectedSourcePreset = sourceNamePresets.some((item) => item.label === draft.sourceName)
@@ -500,7 +512,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     : "__new__";
   const showProjectInput = creatingProject || projectOptions.length === 0 || selectedProjectOption === "__new__";
 
-  const setSourceType = (sourceType: Draft["sourceType"]) => {
+  function deriveSourceType(provider: Draft["provider"]): Draft["sourceType"] {
+    if (provider === "local") return "local-snapshot";
+    return "nacos";
+  }
+
+  const setProvider = (provider: Draft["provider"]) => {
+    const sourceType = deriveSourceType(provider);
     setDraft((d) => {
       const wasUsingNacosPreset = nacosSourceNamePresets.some((item) => item.label === d.sourceName);
       const wasUsingLocalSnapshotPreset = d.sourceName === localSnapshotSourceNamePreset.label;
@@ -509,6 +527,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
       return {
         ...d,
+        provider,
         sourceType,
         sourceName: shouldDefaultLocalName
           ? localSnapshotSourceNamePreset.label
@@ -632,11 +651,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   };
 
   const save = () => {
-    if (!draft.sourceName?.trim() || (draft.sourceType !== "local-snapshot" && !draft.baseUrl.trim())) {
+    if (!draft.sourceName?.trim() || (draft.provider !== "local" && !draft.baseUrl.trim())) {
       setTestMsg({ ok: false, text: t('connection.nameAndAddressRequired') });
       return;
     }
-    if (draft.sourceType === "local-snapshot") {
+    if (draft.provider === "local") {
       if (!draft.localPath?.trim()) {
         setTestMsg({ ok: false, text: t('connection.localPathRequired') });
         return;
@@ -745,7 +764,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   };
 
   const loadDefaultNamespaceOptions = async () => {
-    if (draft.sourceType === "local-snapshot") return;
+    if (draft.provider === "local") return;
     if (!draft.baseUrl.trim()) {
       setNamespaceResultKey(currentNamespaceKey);
       setNamespaceOptions([]);
@@ -939,10 +958,12 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           <div className="conn-item-name">
                             {connectionSourceName(c)}
                             {c.isDefaultSource && <span className="conn-ssh-badge">{t('connection.defaultSource')}</span>}
+                            <span className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}>{connectionEnvironmentName(c)}</span>
+                            {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
+                            {c.provider === "local" && <span className="conn-provider-badge local">{t('connection.sourceTypeSnapshot')}</span>}
                             {(c.sshConfig || c.sshProfileId) && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
                           </div>
                           <div className="conn-item-url">
-                            <span>{c.sourceType === "local-snapshot" ? t('connection.sourceTypeSnapshot') : t('connection.sourceTypeNacos')}</span>
                             <span>{sourceAddress(c)}</span>
                             {connectionLabelMeta(c) && <span>{t('connection.connectionLabelShort')}: {connectionLabelMeta(c)}</span>}
                           </div>
@@ -1012,7 +1033,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             )}
 
             <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionOwnership')}</div>
+              <div className="conn-section-title">{t('connection.sectionBasic')}</div>
               <div className="field-row">
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} required tip={t('connection.projectHelp')}>{t('connection.project')}</FieldLabel>
@@ -1068,7 +1089,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             </section>
 
             <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionSource')}</div>
+              <div className="conn-section-title">{t('connection.sectionNetwork')}</div>
               <div className="field-row">
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} required tip={t('connection.sourceNameHelp')}>{t('connection.sourceName')}</FieldLabel>
@@ -1114,18 +1135,22 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   </select>
                 </label>
                 <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.sourceTypeHelp')}>{t('connection.sourceType')}</FieldLabel>
+                  <FieldLabel {...fieldLabelProps} required tip={t('connection.providerHelp')}>{t('connection.provider')}</FieldLabel>
                   <select
                     className="search-input wide"
-                    value={draft.sourceType ?? "nacos"}
-                    onChange={(e) => setSourceType(e.target.value as Draft["sourceType"])}
+                    value={draft.provider ?? "nacos"}
+                    onChange={(e) => setProvider(e.target.value as Draft["provider"])}
                   >
-                    <option value="nacos">{t('connection.sourceTypeNacos')}</option>
-                    <option value="local-snapshot">{t('connection.sourceTypeSnapshot')}</option>
+                    <option value="nacos">Nacos</option>
+                    <option value="apollo" disabled>Apollo（{t('app.planned')}）</option>
+                    <option value="local">{t('connection.sourceTypeSnapshot')}</option>
                   </select>
                 </label>
               </div>
-              {draft.sourceType === "local-snapshot" && (
+              {draft.provider === "apollo" && (
+                <div className="field-hint" style={{ padding: "12px 0" }}>Apollo {t('app.auditPlanned')}</div>
+              )}
+              {draft.provider === "local" && (
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} required tip={t('connection.localPathHelp')}>{t('connection.localPath')}</FieldLabel>
                   <div className="path-field">
@@ -1190,8 +1215,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 />
               </label>
             </section>
-            {draft.sourceType !== "local-snapshot" && <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionConnection')}</div>
+            {draft.provider !== "local" && <section className="conn-form-section">
+              <div className="conn-section-title">{t('connection.sectionAuth')}</div>
               <div className="field-row">
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} required tip={t('connection.distributionHelp')}>{t('connection.distribution')}</FieldLabel>
@@ -1242,8 +1267,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               </label>
             </section>}
 
-            {draft.sourceType !== "local-snapshot" && <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionCredential')}</div>
+            <section className="conn-form-section">
+              <div className="conn-section-title">{t('connection.sectionSecurity')}</div>
+              <div className="field-hint">{t('connection.sectionSecurityPlaceholder')}</div>
+            </section>
+
+            {draft.provider !== "local" && <section className="conn-form-section">
+              <div className="conn-section-title">{t('connection.sectionAdvanced')}</div>
               {draft.authType !== "aliyun-aksk" && (
               <div className="field-row">
                 <label className="field">
@@ -1384,7 +1414,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             </section>}
 
             {/* SSH 隧道配置 */}
-            {draft.sourceType !== "local-snapshot" && accessMode === "ssh" && <div className="ssh-section">
+            {draft.provider !== "local" && accessMode === "ssh" && <section className="conn-form-section">
+              <div className="conn-section-title">SSH</div>
               <button
                 type="button"
                 className="ssh-toggle"
@@ -1558,7 +1589,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   )}
                 </div>
               )}
-            </div>}
+            </section>}
 
             {visibleTestTrace ? (
               <TestTraceView trace={visibleTestTrace} />
