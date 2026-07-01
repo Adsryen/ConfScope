@@ -54,6 +54,10 @@ pnpm-debug.log*
 
 # AI tools
 .claude/
+.cursor/
+.codex/
 .agents/
 docs/superpowers/
 .trae/
+.trellis/
+AGENTS.MD

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
-import { reportError } from "../lib/errorCenter";
+import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
   Connection,
@@ -681,7 +681,8 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     setBatchOnlyChanges(new Set());
 
     const results: BatchResult[] = [];
-    let hadError = false;
+    const failed: { dataId: string; error: string }[] = [];
+
     for (let i = 0; i < toCompare.length; i += 5) {
       const chunk = toCompare.slice(i, i + 5);
       const settled = await Promise.allSettled(
@@ -701,29 +702,60 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
         })
       );
 
-      const errors: string[] = [];
-      for (const item of settled) {
-        if (item.status === "fulfilled") results.push(item.value);
-        else errors.push(errorText(item.reason));
-      }
-      if (errors.length) {
-        hadError = true;
-        const message = errors.join("\n");
-        setError(message);
-        reportError({
-          title: "批量配置对比失败",
-          source: t("app.diff"),
-          message,
-          detail: message,
-          mergeKey: "diff:batch",
-          actionLabel: "重试",
-          onAction: () => loadBatch(),
-        });
+      for (let j = 0; j < settled.length; j++) {
+        const item = settled[j];
+        if (item.status === "fulfilled") {
+          results.push(item.value);
+        } else {
+          failed.push({ dataId: chunk[j].dataId, error: errorText(item.reason) });
+        }
       }
     }
 
+    const total = toCompare.length;
+    const successCount = results.length;
+    const failCount = failed.length;
+
+    const detailLines = [`批量对比结果: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`];
+    if (failed.length > 0) {
+      detailLines.push("失败列表:");
+      for (const f of failed) detailLines.push(`  - ${f.dataId}: ${f.error}`);
+    }
+    const detail = detailLines.join("\n");
+
+    let level: "success" | "warning" | "error";
+    let title: string;
+    let message: string;
+
+    if (failCount === 0) {
+      level = "success";
+      title = `批量对比完成: ${successCount}/${total} 全部成功`;
+      message = `${successCount} 个配置全部加载成功`;
+    } else if (successCount === 0) {
+      level = "error";
+      title = `批量对比完成: ${failCount}/${total} 全部失败`;
+      message = `${failCount} 个配置全部加载失败: ${failed.map((f) => f.dataId).join(", ")}`;
+      setError("全部配置加载失败");
+    } else {
+      level = "warning";
+      title = `批量对比完成: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`;
+      message = `${failCount} 个配置加载失败: ${failed.map((f) => f.dataId).join(", ")}`;
+      setError(message);
+    }
+
+    reportMessage({
+      level,
+      title,
+      source: t("app.diff"),
+      message,
+      detail,
+      mergeKey: `diff:batch:summary:${Date.now()}`,
+      actionLabel: "重试",
+      onAction: () => loadBatch(),
+    });
+
     setBatchResults(results);
-    setSourcesCollapsed(results.length > 0 && !hadError);
+    setSourcesCollapsed(results.length > 0);
     setBatchLoading(false);
   };
 

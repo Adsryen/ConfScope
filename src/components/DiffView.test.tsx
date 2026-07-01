@@ -349,5 +349,52 @@ describe("DiffView", () => {
     expect(screen.getAllByText("读取本地快照目录")).toHaveLength(2);
     expect(screen.getAllByText("C:\\backup\\dev")).toHaveLength(2);
   });
+
+  it("shows inline error with failed dataIds when batch diff has partial failures", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 3,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "db.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => {
+      if (dataId === "gateway.yaml") throw new Error("connect timeout");
+      return `${dataId}-content`;
+    });
+
+    renderDiff([nacosConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
+
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(6));
+    expect(await screen.findByText("已生成 2 个文件对比")).toBeInTheDocument();
+    expect(screen.getByText(/gateway\.yaml/)).toBeInTheDocument();
+  });
+
+  it("shows inline error when all batch diff configs fail to load", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockRejectedValue(new Error("EOF"));
+
+    renderDiff([nacosConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（2）" }));
+
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
+    expect(await screen.findByText("全部配置加载失败")).toBeInTheDocument();
+  });
 });
 

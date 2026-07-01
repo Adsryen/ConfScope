@@ -120,13 +120,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     setUpdateResult(null);
     setErrorMessage("");
     const settings = loadSettings();
-    // 如果设置了"代理仅用于更新检查"，则传入代理配置
-    const proxy = settings.update.proxyOnlyForUpdate ? settings.proxy : { httpProxy: "", httpsProxy: "", noProxy: "" };
     try {
       const result = await checkForUpdates({
         currentVersion: appInfo.version,
         sources: appInfo.updateSources,
-        proxy,
+        proxy: settings.proxy,
       });
       setUpdateResult(result);
       if (result.error) {

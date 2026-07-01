@@ -7,7 +7,6 @@ export interface ProxySettings {
 export interface UpdateSettings {
   skipVersion: string;
   lastCheckAt: string;
-  proxyOnlyForUpdate: boolean;
 }
 
 export interface CompareSettings {
@@ -25,7 +24,7 @@ const KEY = "cs.settings";
 
 const defaults: AppSettings = {
   proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
-  update: { skipVersion: "", lastCheckAt: "", proxyOnlyForUpdate: true },
+  update: { skipVersion: "", lastCheckAt: "" },
   compare: { sortConnections: true, sortNamespaces: true },
 };
 
@@ -77,7 +76,6 @@ function normalizeSettings(value: unknown): AppSettings {
     update: {
       skipVersion: stringValue(input?.update?.skipVersion),
       lastCheckAt: stringValue(input?.update?.lastCheckAt),
-      proxyOnlyForUpdate: boolValue(input?.update?.proxyOnlyForUpdate, defaults.update.proxyOnlyForUpdate),
     },
     compare: {
       sortConnections: boolValue(input?.compare?.sortConnections, defaults.compare.sortConnections),

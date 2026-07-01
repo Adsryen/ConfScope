@@ -71,7 +71,7 @@ describe("About", () => {
         httpsProxy: "http://127.0.0.1:7890",
         noProxy: "localhost,127.0.0.1",
       },
-      update: { skipVersion: "", lastCheckAt: "", proxyOnlyForUpdate: true },
+      update: { skipVersion: "", lastCheckAt: "" },
       compare: { sortConnections: true, sortNamespaces: true },
     }));
 
