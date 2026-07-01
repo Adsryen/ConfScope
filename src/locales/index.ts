@@ -25,6 +25,7 @@ export function getTranslation(locale: Locale, key: string): string {
       value = value[k];
     } else {
       // 找不到翻译时返回 key 本身
+      // eslint-disable-next-line no-console
       console.warn(`Translation missing: ${key} for locale ${locale}`);
       return key;
     }

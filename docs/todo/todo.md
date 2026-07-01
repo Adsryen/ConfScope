@@ -239,11 +239,11 @@
   - [x] 启用无边框窗口，由应用自绘主布局承载内容区域。
   - [ ] 顶部栏只展示当前页面相关的上下文操作。
   - [ ] 侧边栏图标视觉继续统一到最终主题。
-- [ ] 工程质量。
-  - 配置 ESLint。
-  - 配置 Prettier。
-  - TypeScript strict 模式评估并逐步开启。
-  - 移除未使用代码。
+- [x] 工程质量。
+  - [x] 配置 ESLint。
+  - [x] 配置 Prettier。
+  - [x] TypeScript strict 模式已启用（原有），并开启 noUnusedLocals / noUnusedParameters。
+  - [x] 移除未使用代码。
 
 ---
 

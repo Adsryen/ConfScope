@@ -71,7 +71,6 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     if (updatePhase !== "downloading") return;
 
     let cleanup: (() => void) | undefined;
-    let timer: ReturnType<typeof setInterval> | undefined;
 
     // 尝试使用 Wails 事件系统
     const runtime = (window as any).runtime;
@@ -91,7 +90,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     }
 
     // 轮询作为 fallback
-    timer = setInterval(async () => {
+    const timer = setInterval(async () => {
       try {
         const p = await getDownloadProgress();
         setDownloadProgress(p);
@@ -249,8 +248,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               />
             </div>
             <div className="update-progress-text">
-              {downloadProgress?.total > 0
-                ? `${(downloadProgress.downloaded / 1024 / 1024).toFixed(1)} MB / ${(downloadProgress.total / 1024 / 1024).toFixed(1)} MB`
+              {(downloadProgress?.total ?? 0) > 0
+                ? `${((downloadProgress?.downloaded ?? 0) / 1024 / 1024).toFixed(1)} MB / ${((downloadProgress?.total ?? 0) / 1024 / 1024).toFixed(1)} MB`
                 : t("about.downloadingUpdate")}
               <span className="update-progress-pct">{downloadProgress?.percent ?? 0}%</span>
             </div>
