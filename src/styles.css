@@ -77,11 +77,17 @@ select, button, .tab-btn { cursor: pointer; }
 
 .sidebar-toggle {
   width: 100%;
-  height: 28px;
-  border: 1px solid var(--border);
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid transparent;
   border-radius: 5px;
-  background: var(--bg2);
+  background: transparent;
   color: var(--text-dim);
+  font-size: 13px;
 }
 
 .sidebar-toggle:hover {
@@ -96,12 +102,36 @@ select, button, .tab-btn { cursor: pointer; }
   min-height: 0;
 }
 
+.side-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.side-nav-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 0;
+}
+
+.side-nav-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px 2px;
+  user-select: none;
+}
+
 .sidebar-bottom {
   margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   position: relative;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .side-nav-item {
@@ -169,9 +199,9 @@ select, button, .tab-btn { cursor: pointer; }
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 5px;
-  background: var(--bg2);
+  background: transparent;
   color: var(--text);
   font-size: 13px;
   text-align: left;
@@ -402,6 +432,14 @@ select, button, .tab-btn { cursor: pointer; }
 .sidebar.collapsed .side-label,
 .sidebar.collapsed .nav-planned {
   display: none;
+}
+
+.sidebar.collapsed .side-nav-group-label {
+  display: none;
+}
+
+.sidebar.collapsed .side-nav-separator {
+  margin: 4px 0;
 }
 
 /* ── Inputs / buttons (复用百宝箱风格) ── */
