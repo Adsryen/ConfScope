@@ -63,6 +63,38 @@ function latencyText(startedAt: number): string {
   return `延迟 ${Math.max(0, Date.now() - startedAt)} ms`;
 }
 
+function TestButton({ onClick, running }: { onClick: () => void; running: boolean }) {
+  const { t } = useTranslation();
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (running) {
+      setElapsed(0);
+      intervalRef.current = setInterval(() => setElapsed((v) => v + 1), 1000);
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [running]);
+
+  const slow = elapsed > 3;
+  const label = running
+    ? slow
+      ? `重试中 (${elapsed}s)...`
+      : `${t('connection.testing')} (${elapsed}s)...`
+    : t('connection.test');
+
+  return (
+    <button className={`btn btn-ghost${slow ? " warn" : ""}`} onClick={onClick} disabled={running}>
+      {label}
+    </button>
+  );
+}
+
 function displayTestMessage(text: string): string {
   const value = text.trim();
   if (value.length <= 360) return value;
@@ -1614,9 +1646,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             )}
 
             <div className="conn-form-actions">
-              <button className="btn btn-ghost" onClick={doTest} disabled={testingCurrent}>
-                {testingCurrent ? t('connection.testing') : t('connection.test')}
-              </button>
+              <TestButton onClick={doTest} running={testingCurrent} />
               <div className="spacer" />
               {draft.id && (
                 <button className="btn btn-ghost" onClick={() => startNew()}>
