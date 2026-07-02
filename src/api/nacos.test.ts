@@ -83,6 +83,7 @@ function expectedProfile(conn: Connection, accessToken = "token-1", apiVersion =
     securityToken: conn.securityToken ?? "",
     environment: "",
     safetyLevel: "",
+    useProxy: false,
   };
 }
 

@@ -159,10 +159,14 @@ func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
 }
 
 func (p *NacosProvider) clientFor(profile ConnectionProfile) *nacos.Client {
-	if profile.Distribution != DistributionAliyunMSE || profile.AuthType != AuthAliyunAKSK {
-		return p.client
+	base := p.client
+	if profile.UseProxy {
+		base = nacos.NewClientWithProxy()
 	}
-	return p.client.WithMSEAuth(nacos.MSEAuth{
+	if profile.Distribution != DistributionAliyunMSE || profile.AuthType != AuthAliyunAKSK {
+		return base
+	}
+	return base.WithMSEAuth(nacos.MSEAuth{
 		AccessKeyID:     profile.AccessKeyID,
 		AccessKeySecret: profile.AccessKeySecret,
 		SecurityToken:   profile.SecurityToken,

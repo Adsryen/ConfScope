@@ -31,33 +31,24 @@ export default function SettingsView() {
         </div>
       </div>
       <div className="settings-body">
+        {/* 基础信息 */}
         <section className="settings-section">
-          <h4>{t('app.language')}</h4>
-          <LanguageSwitch />
-        </section>
-
-        <section className="settings-section">
-          <h4>{t('settings.comparePreferences')}</h4>
+          <h4>{t('settings.groupBasic')}</h4>
           <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.compare.sortConnections}
-              onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
-            />
-            <span>{t('settings.sortConnections')}</span>
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.compare.sortNamespaces}
-              onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
-            />
-            <span>{t('settings.sortNamespaces')}</span>
+            <span>{t('app.language')}</span>
+            <LanguageSwitch />
           </label>
         </section>
 
+        {/* 认证 */}
         <section className="settings-section">
-          <h4>{t('settings.networkProxy')}</h4>
+          <h4>{t('settings.groupAuth')}</h4>
+          <div className="field-hint">{t('settings.authPerConnection')}</div>
+        </section>
+
+        {/* 网络 */}
+        <section className="settings-section">
+          <h4>{t('settings.groupNetwork')}</h4>
           <div className="field-row update-proxy-row">
             <label className="field">
               <span>{t('settings.httpProxy')}</span>
@@ -87,8 +78,36 @@ export default function SettingsView() {
               />
             </label>
           </div>
-          {saved && <div className="test-msg ok">{t('settings.settingsSaved')}</div>}
         </section>
+
+        {/* 安全 */}
+        <section className="settings-section">
+          <h4>{t('settings.groupSecurity')}</h4>
+          <div className="field-hint">{t('settings.securityPerConnection')}</div>
+        </section>
+
+        {/* 高级 */}
+        <section className="settings-section">
+          <h4>{t('settings.groupAdvanced')}</h4>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.compare.sortConnections}
+              onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
+            />
+            <span>{t('settings.sortConnections')}</span>
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={settings.compare.sortNamespaces}
+              onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
+            />
+            <span>{t('settings.sortNamespaces')}</span>
+          </label>
+        </section>
+
+        {saved && <div className="test-msg ok">{t('settings.settingsSaved')}</div>}
       </div>
     </div>
   );

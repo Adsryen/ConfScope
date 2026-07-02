@@ -55,7 +55,9 @@ jobs:
         run: pnpm install
 
       - name: Build
-        run: wails build -clean
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          wails build -clean -ldflags "-X main.appVersion=${VERSION}"
         env:
           GOARCH: ${{ matrix.goarch }}
 

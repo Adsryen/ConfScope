@@ -41,6 +41,7 @@ describe("config center api", () => {
     securityToken: "",
     environment: "dev",
     safetyLevel: "test",
+    useProxy: false,
   };
   const ref: ConfigRef = {
     provider: "nacos",

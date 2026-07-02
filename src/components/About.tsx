@@ -12,7 +12,7 @@ import {
 import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
 import { reportError } from "../lib/errorCenter";
-import { loadSettings } from "../store/settings";
+import { loadSettings, updateUpdateSettings } from "../store/settings";
 
 interface AboutProps {
   onClose?: () => void;
@@ -126,6 +126,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         proxy: settings.proxy,
       });
       setUpdateResult(result);
+      // 保存检查状态
+      updateUpdateSettings({
+        lastCheckAt: new Date().toISOString(),
+        lastSeenVersion: result.latestVersion || "",
+      });
       if (result.error) {
         setErrorMessage(result.error);
         setUpdatePhase("error");
@@ -136,7 +141,12 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
           mergeKey: "update:check",
         });
       } else if (result.hasUpdate) {
-        setUpdatePhase("updateAvailable");
+        // 如果已忽略此版本且非 mandatory，跳过提示
+        if (!result.mandatory && settings.update.skipVersion === result.latestVersion) {
+          setUpdatePhase("upToDate");
+        } else {
+          setUpdatePhase("updateAvailable");
+        }
       } else {
         setUpdatePhase("upToDate");
       }
@@ -152,6 +162,23 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       });
     }
   }, [appInfo.version, appInfo.updateSources]);
+
+  const skipVersion = useCallback(() => {
+    if (!updateResult?.latestVersion) return;
+    updateUpdateSettings({ skipVersion: updateResult.latestVersion });
+    setUpdatePhase("upToDate");
+  }, [updateResult]);
+
+  // 进入 About 页自动检查（如果距上次检查 > 6 小时或未检查过）
+  useEffect(() => {
+    if (updatePhase !== "idle") return;
+    const settings = loadSettings();
+    const lastCheck = settings.update.lastCheckAt ? new Date(settings.update.lastCheckAt).getTime() : 0;
+    const hoursSinceCheck = (Date.now() - lastCheck) / 3600000;
+    if (hoursSinceCheck > 6 || !settings.update.lastCheckAt) {
+      runUpdateCheck();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startDownload = useCallback(async () => {
     if (!updateResult?.downloadUrl) return;
@@ -234,6 +261,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               <button className="btn btn-ghost btn-sm" onClick={runUpdateCheck}>
                 {t("about.checkUpdate")}
               </button>
+              {!updateResult!.mandatory && (
+                <button className="btn btn-ghost btn-sm" onClick={skipVersion}>
+                  {t("about.skipVersion")}
+                </button>
+              )}
             </div>
           </>
         );

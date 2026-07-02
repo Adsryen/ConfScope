@@ -241,6 +241,7 @@ function toConnectionProfile(
     securityToken: conn.securityToken ?? "",
     environment: optional.environment ?? "",
     safetyLevel: optional.safetyLevel ?? "",
+    useProxy: !!conn.useProxy,
   };
 }
 
