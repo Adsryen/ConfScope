@@ -20,9 +20,19 @@ import Select from "./Select";
 
 type DiffMode = "text" | "key" | "lines";
 
+interface DiffJumpParams {
+  leftConnId: string;
+  rightConnId: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+}
+
 interface Props {
   connections: Connection[];
   onConnectionsChange?: (connections: Connection[]) => void;
+  initialParams?: DiffJumpParams | null;
+  onInitialParamsConsumed?: () => void;
 }
 
 interface Source {
@@ -437,7 +447,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ connections, onConnectionsChange }: Props) {
+export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const firstId = connections[0]?.id ?? "";
@@ -523,6 +533,37 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     if (sourcesCollapsed) node.setAttribute("inert", "");
     else node.removeAttribute("inert");
   }, [sourcesCollapsed]);
+
+  // 处理从 AuditView 跳转过来的预填参数
+  useEffect(() => {
+    if (!initialParams) return;
+    const leftConn = connections.find((c) => c.id === initialParams.leftConnId);
+    const rightConn = connections.find((c) => c.id === initialParams.rightConnId);
+    if (!leftConn || !rightConn) {
+      onInitialParamsConsumed?.();
+      return;
+    }
+    // 设置项目
+    const projectName = connectionProjectName(leftConn);
+    setSelectedProject(projectName);
+    // 预填左右来源
+    setLeft({
+      connId: initialParams.leftConnId,
+      tenant: initialParams.namespace,
+      dataId: initialParams.dataId,
+      group: initialParams.group,
+      usesDefaultNamespace: false,
+    });
+    setRight({
+      connId: initialParams.rightConnId,
+      tenant: initialParams.namespace,
+      dataId: initialParams.dataId,
+      group: initialParams.group,
+      usesDefaultNamespace: false,
+    });
+    setSourcesCollapsed(true);
+    onInitialParamsConsumed?.();
+  }, [initialParams, connections, onInitialParamsConsumed]);
 
   const updateLeft = (source: Source) => {
     setLeft(source);

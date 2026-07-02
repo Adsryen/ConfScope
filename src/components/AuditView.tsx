@@ -6,16 +6,25 @@ import { normalizeConfig, type ConfigEntry, type ParseStatus } from "../lib/norm
 import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } from "../lib/audit";
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
+import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
 import Select from "./Select";
-import CopyButton from "./CopyButton";
+
+export interface DiffJumpParams {
+  leftConnId: string;
+  rightConnId: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+}
 
 interface Props {
   connections: Connection[];
+  onNavigateToDiff?: (params: DiffJumpParams) => void;
 }
 
 type AuditStatus = "consistent" | "partial" | "inconsistent" | "missing" | "parse_error" | "ignored";
 
-interface EnvSource {
+export interface EnvSource {
   conn: Connection;
   namespace: string;
   group: string;
@@ -31,12 +40,12 @@ interface NormalizeRule {
 }
 
 const STATUS_LABELS: Record<AuditStatus, string> = {
-  consistent: "一致",
-  partial: "部分一致",
-  inconsistent: "不一致",
-  missing: "缺失",
-  parse_error: "解析失败",
-  ignored: "已忽略",
+  consistent: "audit.statusConsistent",
+  partial: "audit.statusPartial",
+  inconsistent: "audit.statusInconsistent",
+  missing: "audit.statusMissing",
+  parse_error: "audit.statusParseError",
+  ignored: "audit.statusIgnored",
 };
 
 const STATUS_CLASS: Record<AuditStatus, string> = {
@@ -74,7 +83,7 @@ function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, s
       <span className="audit-summary-total">{t("audit.totalConfigs", { count: total })}</span>
       {items.map((item) => (
         <span key={item.status} className={`audit-summary-item ${STATUS_CLASS[item.status]}`}>
-          {STATUS_LABELS[item.status]}: {item.count}
+          {t(STATUS_LABELS[item.status])}: {item.count}
         </span>
       ))}
     </div>
@@ -90,7 +99,7 @@ function environmentToneShort(name: string): string {
   return "other";
 }
 
-export default function AuditView({ connections }: Props) {
+export default function AuditView({ connections, onNavigateToDiff }: Props) {
   const { t } = useTranslation();
   const firstProject = connections[0] ? connectionProjectName(connections[0]) : "";
   const projectNames = useMemo(() => {
@@ -143,6 +152,16 @@ export default function AuditView({ connections }: Props) {
     id: "", type: "prefix", pattern: "", replacement: "", caseSensitive: false,
   });
 
+  // 导出
+  const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
+  const [sanitizeExport, setSanitizeExport] = useState(false);
+
+  // 过滤与排序
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [hideIgnored, setHideIgnored] = useState(false);
+  const [sortKey, setSortKey] = useState<"dataId" | "key" | "status">("dataId");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   const genId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
   const addIgnoreRule = () => {
@@ -160,6 +179,43 @@ export default function AuditView({ connections }: Props) {
   };
 
   const removeNormalizeRule = (index: number) => setNormalizeRules((prev) => prev.filter((_, i) => i !== index));
+
+  // 环境 ID 列表
+  const envIds = useMemo(() => envSources.map(envKey), [envSources]);
+
+  // 导出处理
+  const handleExport = useCallback(() => {
+    if (rows.length === 0) return;
+    const opts = { sanitize: sanitizeExport };
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    if (exportFormat === "csv") {
+      const csv = exportAuditCSV(rows, envSources, opts);
+      downloadFile(csv, `audit-${timestamp}.csv`, "text/csv;charset=utf-8");
+    } else {
+      const json = exportAuditJSON(rows, envSources, opts);
+      downloadFile(JSON.stringify(json, null, 2), `audit-${timestamp}.json`, "application/json");
+    }
+  }, [rows, envSources, exportFormat, sanitizeExport]);
+
+  // 跳转 DiffView
+  const handleJumpToDiff = useCallback(() => {
+    if (!selectedRow || !baseline || !onNavigateToDiff) return;
+    const baselineCell = selectedRow.values[baseline];
+    // 找第一个值不匹配的环境
+    const targetEnvId = envIds.find((envId) => {
+      if (envId === baseline) return false;
+      const cell = selectedRow.values[envId];
+      return cell?.exists && cell.value !== baselineCell?.value;
+    }) ?? envIds.find((envId) => envId !== baseline);
+    if (!targetEnvId) return;
+    onNavigateToDiff({
+      leftConnId: baseline.split(":")[0],
+      rightConnId: targetEnvId.split(":")[0],
+      namespace: selectedRow.namespace,
+      group: selectedRow.group,
+      dataId: selectedRow.dataId,
+    });
+  }, [selectedRow, baseline, envIds, onNavigateToDiff]);
 
   const applyNormalize = useCallback(
     (name: string): string => {
@@ -272,7 +328,7 @@ export default function AuditView({ connections }: Props) {
       if (errors.length > 0) {
         reportError({
           title: t("audit.partialError"),
-          source: "审计矩阵",
+          source: t("app.audit"),
           message: errors.join(" | "),
         });
       }
@@ -283,7 +339,46 @@ export default function AuditView({ connections }: Props) {
     }
   }, [envSources, t]);
 
-  const envIds = useMemo(() => envSources.map(envKey), [envSources]);
+  // 过滤与排序后的行
+  const filteredRows = useMemo(() => {
+    let result = rows;
+    // 状态过滤
+    if (statusFilter.size > 0) {
+      result = result.filter((row) => statusFilter.has(row.status));
+    }
+    // 隐藏已忽略
+    if (hideIgnored) {
+      result = result.filter((row) => row.status !== "ignored");
+    }
+    // 排序
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "dataId") cmp = a.dataId.localeCompare(b.dataId);
+      else if (sortKey === "key") cmp = a.key.localeCompare(b.key);
+      else if (sortKey === "status") cmp = a.status.localeCompare(b.status);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [rows, statusFilter, hideIgnored, sortKey, sortDir]);
+
+  // 切换状态过滤
+  const toggleStatusFilter = (status: string) => {
+    setStatusFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
+  // 切换排序
+  const toggleSort = (key: "dataId" | "key" | "status") => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
@@ -357,14 +452,14 @@ export default function AuditView({ connections }: Props) {
           ))}
           {envSources.length < 6 && (
             <button className="btn btn-ghost btn-sm audit-add-env" onClick={addSource}>
-              + 环境
+              {t("audit.addEnv")}
             </button>
           )}
         </div>
 
         <div className="audit-settings-toggle">
           <button className="btn btn-ghost btn-sm" onClick={() => setShowSettings(!showSettings)}>
-            {showSettings ? "▼" : "▶"} 忽略规则 · 名称归一化
+            {showSettings ? "▼" : "▶"} {t("audit.settingsToggle")}
           </button>
         </div>
 
@@ -372,7 +467,7 @@ export default function AuditView({ connections }: Props) {
           <div className="audit-settings">
             {/* 忽略规则 */}
             <div className="audit-settings-section">
-              <h4>忽略规则</h4>
+              <h4>{t("audit.ignoreRulesTitle")}</h4>
               {ignoreRules.length > 0 && (
                 <div className="ignore-rules-list">
                   {ignoreRules.map((rule, i) => (
@@ -380,7 +475,7 @@ export default function AuditView({ connections }: Props) {
                       <span className="ignore-rule-text">
                         {rule.dataId && <span className="ignore-rule-dataid">{rule.dataId}</span>}
                         {rule.key && <span className="ignore-rule-key">{rule.key}</span>}
-                        {!rule.dataId && !rule.key && <span className="ignore-rule-dataid">全部</span>}
+                        {!rule.dataId && !rule.key && <span className="ignore-rule-dataid">{t("audit.ignoreRuleAll")}</span>}
                         <span className="ignore-rule-reason"> — {rule.reason}</span>
                       </span>
                       <button className="btn btn-ghost btn-sm" onClick={() => removeIgnoreRule(i)}>×</button>
@@ -391,36 +486,36 @@ export default function AuditView({ connections }: Props) {
               <div className="field-row">
                 <input
                   className="search-input"
-                  placeholder="dataId 过滤（可选）"
+                  placeholder={t("audit.ignoreDataIdPlaceholder")}
                   value={ignoreForm.dataId ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, dataId: e.target.value || undefined })}
                 />
                 <input
                   className="search-input"
-                  placeholder="key 过滤（可选）"
+                  placeholder={t("audit.ignoreKeyPlaceholder")}
                   value={ignoreForm.key ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, key: e.target.value || undefined })}
                 />
                 <input
                   className="search-input"
-                  placeholder="忽略原因"
+                  placeholder={t("audit.ignoreReasonPlaceholder")}
                   value={ignoreForm.reason}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, reason: e.target.value })}
                 />
-                <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>添加</button>
+                <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>{t("audit.addRule")}</button>
               </div>
             </div>
 
             {/* 名称归一化 */}
             <div className="audit-settings-section">
-              <h4>名称归一化</h4>
+              <h4>{t("audit.normalizeTitle")}</h4>
               <label className="check-row">
                 <input
                   type="checkbox"
                   checked={normalizeEnabled}
                   onChange={(e) => setNormalizeEnabled(e.target.checked)}
                 />
-                <span>启用名称归一化（对齐不同环境的 dataId）</span>
+                <span>{t("audit.normalizeEnabledLabel")}</span>
               </label>
               {normalizeEnabled && (
                 <>
@@ -429,9 +524,9 @@ export default function AuditView({ connections }: Props) {
                       {normalizeRules.map((rule, i) => (
                         <div className="ignore-rule-item" key={rule.id}>
                           <span className="ignore-rule-text">
-                            {rule.type === "prefix" ? "前缀" : rule.type === "suffix" ? "后缀" : "替换"}
-                            : {rule.pattern} → {rule.replacement || "(删除)"}
-                            {rule.caseSensitive ? " [区分大小写]" : ""}
+                            {rule.type === "prefix" ? t("audit.normalizePrefix") : rule.type === "suffix" ? t("audit.normalizeSuffix") : t("audit.normalizeReplace")}
+                            : {rule.pattern} → {rule.replacement || t("audit.normalizeDeleteHint")}
+                            {rule.caseSensitive ? ` [${t("audit.caseSensitive")}]` : ""}
                           </span>
                           <button className="btn btn-ghost btn-sm" onClick={() => removeNormalizeRule(i)}>×</button>
                         </div>
@@ -444,19 +539,19 @@ export default function AuditView({ connections }: Props) {
                       value={normalizeForm.type}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, type: e.target.value as NormalizeRule["type"] })}
                     >
-                      <option value="prefix">前缀裁剪</option>
-                      <option value="suffix">后缀裁剪</option>
-                      <option value="replace">精确替换</option>
+                      <option value="prefix">{t("audit.normalizePrefix")}</option>
+                      <option value="suffix">{t("audit.normalizeSuffix")}</option>
+                      <option value="replace">{t("audit.normalizeReplace")}</option>
                     </select>
                     <input
                       className="search-input mono"
-                      placeholder="匹配模式"
+                      placeholder={t("audit.matchPattern")}
                       value={normalizeForm.pattern}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
                     />
                     <input
                       className="search-input mono"
-                      placeholder="替换为（留空=删除）"
+                      placeholder={t("audit.replaceTo")}
                       value={normalizeForm.replacement}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, replacement: e.target.value })}
                     />
@@ -467,9 +562,9 @@ export default function AuditView({ connections }: Props) {
                       checked={normalizeForm.caseSensitive}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, caseSensitive: e.target.checked })}
                     />
-                    <span>区分大小写</span>
+                    <span>{t("audit.caseSensitive")}</span>
                   </label>
-                  <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>添加规则</button>
+                  <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>{t("audit.addNormalizeRule")}</button>
                 </>
               )}
             </div>
@@ -480,9 +575,67 @@ export default function AuditView({ connections }: Props) {
           <button className="btn btn-primary" onClick={runAudit} disabled={loading}>
             {loading ? t("common.loading") : t("audit.runAudit")}
           </button>
+          {rows.length > 0 && (
+            <div className="audit-export">
+              <button className="btn btn-ghost" onClick={handleExport}>
+                {t("audit.export")} ({exportFormat === "csv" ? "CSV" : "JSON"})
+              </button>
+              <label className="check-row audit-export-opt">
+                <input
+                  type="checkbox"
+                  checked={exportFormat === "json"}
+                  onChange={(e) => setExportFormat(e.target.checked ? "json" : "csv")}
+                />
+                <span>JSON</span>
+              </label>
+              <label className="check-row audit-export-opt">
+                <input
+                  type="checkbox"
+                  checked={sanitizeExport}
+                  onChange={(e) => setSanitizeExport(e.target.checked)}
+                />
+                <span>{t("audit.sanitizeToggle")}</span>
+              </label>
+            </div>
+          )}
           {error && <div className="test-msg err">{error}</div>}
         </div>
       </div>
+
+      {/* 过滤与排序 */}
+      {rows.length > 0 && (
+        <div className="audit-filter-bar">
+          <span className="audit-filter-label">{t("audit.filter")}:</span>
+          {(["consistent", "partial", "inconsistent", "missing", "parse_error", "ignored"] as const).map((status) => (
+            <button
+              key={status}
+              className={`btn btn-sm ${statusFilter.has(status) ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => toggleStatusFilter(status)}
+            >
+              {t(STATUS_LABELS[status])}
+            </button>
+          ))}
+          <label className="check-row audit-filter-opt">
+            <input
+              type="checkbox"
+              checked={hideIgnored}
+              onChange={(e) => setHideIgnored(e.target.checked)}
+            />
+            <span>{t("audit.hideIgnored")}</span>
+          </label>
+          <span className="audit-filter-sort">
+            {(["dataId", "key", "status"] as const).map((key) => (
+              <button
+                key={key}
+                className={`btn btn-sm ${sortKey === key ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => toggleSort(key)}
+              >
+                {key} {sortKey === key ? (sortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
 
       {/* 状态摘要 */}
       {rows.length > 0 && summaryBar(rows, t)}
@@ -498,7 +651,7 @@ export default function AuditView({ connections }: Props) {
                   <div className="audit-env-label">{envShortLabel(env)}</div>
                   {baseline !== envKey(env) && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setBaseline(envKey(env))}>
-                      设基准
+                      {t("audit.setBaseline")}
                     </button>
                   )}
                 </div>
@@ -507,7 +660,7 @@ export default function AuditView({ connections }: Props) {
           </div>
 
           <div className="audit-matrix-body">
-            {rows.map((row) => (
+            {filteredRows.map((row) => (
               <div
                 key={row.id}
                 className={`audit-matrix-row ${selectedRow?.id === row.id ? "selected" : ""}`}
@@ -515,7 +668,7 @@ export default function AuditView({ connections }: Props) {
               >
                 <div className="audit-cell key">
                   <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>
-                    {STATUS_LABELS[row.status]}
+                    {t(STATUS_LABELS[row.status])}
                   </span>
                   <div className="audit-key-path">
                     <span className="audit-dataid">{row.dataId}</span>
@@ -554,9 +707,16 @@ export default function AuditView({ connections }: Props) {
               <strong>{selectedRow.dataId}</strong>
               <span className="audit-detail-key"> / {selectedRow.key}</span>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedRow(null)}>
-              {t("common.close")}
-            </button>
+            <div className="audit-detail-actions">
+              {baseline && onNavigateToDiff && (
+                <button className="btn btn-primary btn-sm" onClick={handleJumpToDiff}>
+                  {t("audit.jumpToDiff")}
+                </button>
+              )}
+              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedRow(null)}>
+                {t("audit.close")}
+              </button>
+            </div>
           </div>
           <div className="audit-detail-body">
             {envIds.map((envId) => {
@@ -565,7 +725,7 @@ export default function AuditView({ connections }: Props) {
               return (
                 <div key={envId} className="audit-detail-env">
                   <div className="audit-detail-env-label">{env ? envShortLabel(env) : envId}</div>
-                  <pre className="audit-detail-value">{cell?.exists ? cell.value : "(缺失)"}</pre>
+                  <pre className="audit-detail-value">{cell?.exists ? cell.value : t("audit.detailMissing")}</pre>
                 </div>
               );
             })}
