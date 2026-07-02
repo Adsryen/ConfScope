@@ -217,16 +217,34 @@ export default function App() {
     setTenant(activeConn.defaultNamespace || "");
   }, [activeConn?.defaultNamespace, activeConnId, tenantFollowsDefault]);
 
-  const navItems: { mode: Mode; label: string; unavailable?: boolean }[] = [
-    { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
-    { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
-    { mode: "connections", label: t('app.connectionManage') },
-    { mode: "ssh", label: t('app.sshTunnels') },
-    { mode: "audit", label: t('app.audit') },
-    { mode: "backup", label: t('app.backup'), unavailable: true },
-    { mode: "tasks", label: t('app.tasks'), unavailable: true },
-    { mode: "settings", label: t('app.settings') },
-    { mode: "about", label: t('app.about') },
+  const navGroups: { group: string; label: string; items: { mode: Mode; label: string; unavailable?: boolean }[] }[] = [
+    {
+      group: "config",
+      label: t('app.navGroupConfig'),
+      items: [
+        { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
+        { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
+        { mode: "audit", label: t('app.audit') },
+      ],
+    },
+    {
+      group: "data",
+      label: t('app.navGroupData'),
+      items: [
+        { mode: "backup", label: t('app.backup'), unavailable: true },
+        { mode: "tasks", label: t('app.tasks'), unavailable: true },
+      ],
+    },
+    {
+      group: "system",
+      label: t('app.navGroupSystem'),
+      items: [
+        { mode: "connections", label: t('app.connectionManage') },
+        { mode: "ssh", label: t('app.sshTunnels') },
+        { mode: "settings", label: t('app.settings') },
+        { mode: "about", label: t('app.about') },
+      ],
+    },
   ];
 
   const plannedPage = (title: string, description: string) => (
@@ -299,17 +317,25 @@ export default function App() {
       <div className="app-main">
         <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
           <nav className="side-nav">
-            {navItems.map((item) => (
-              <button
-                key={item.mode}
-                className={`side-nav-item${mode === item.mode ? " active" : ""}`}
-                title={sidebarCollapsed ? item.label : undefined}
-                onClick={() => setMode(item.mode)}
-              >
-                <NavIcon mode={item.mode} />
-                <span className="side-label">{item.label}</span>
-                {item.unavailable && <span className="nav-planned">{t('app.planned')}</span>}
-              </button>
+            {navGroups.map((group, groupIndex) => (
+              <div key={group.group} className="side-nav-group">
+                {groupIndex > 0 && <div className="side-nav-separator" />}
+                {!sidebarCollapsed && (
+                  <div className="side-nav-group-label">{group.label}</div>
+                )}
+                {group.items.map((item) => (
+                  <button
+                    key={item.mode}
+                    className={`side-nav-item${mode === item.mode ? " active" : ""}`}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    onClick={() => setMode(item.mode)}
+                  >
+                    <NavIcon mode={item.mode} />
+                    <span className="side-label">{item.label}</span>
+                    {item.unavailable && <span className="nav-planned">{t('app.planned')}</span>}
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
           <div className="sidebar-bottom">
