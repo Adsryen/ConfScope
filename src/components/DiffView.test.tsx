@@ -345,7 +345,8 @@ describe("DiffView", () => {
   it("marks local snapshot sources and shows the snapshot directory", async () => {
     renderDiff([snapshotConn]);
 
-    expect(await screen.findAllByText("本地快照目录")).toHaveLength(2);
+    // 展开区 SourcePicker 各 1 + 收起区 sourceSummary 各 1 = 4
+    expect(await screen.findAllByText("本地快照目录")).toHaveLength(4);
     expect(screen.getAllByText("读取本地快照目录")).toHaveLength(2);
     expect(screen.getAllByText("C:\\backup\\dev")).toHaveLength(2);
   });

@@ -151,9 +151,15 @@ function EnvironmentBadge({ name }: { name: string }) {
   );
 }
 
-function sourceSummary(source: Source, connections: Connection[], autoMatch: string): string {
+function sourceSummary(source: Source, connections: Connection[], autoMatch: string, t: (key: string) => string): string {
   const conn = connections.find((item) => item.id === source.connId);
-  const label = conn ? `${connectionEnvironmentName(conn)} / ${connectionSourceName(conn)}` : source.connId;
+  const isLocal = conn?.sourceType === "local-snapshot";
+  const path = conn ? connectionSourceName(conn) : source.connId;
+  const label = isLocal
+    ? `${t("connection.sourceTypeSnapshot")} / ${path}`
+    : conn
+      ? `${connectionEnvironmentName(conn)} / ${path}`
+      : source.connId;
   const namespace = source.tenant || "public";
   const group = source.group.trim() || "DEFAULT_GROUP";
   const dataId = source.dataId.trim() || autoMatch;
@@ -450,6 +456,7 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
   const [matchLoading, setMatchLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [failedItems, setFailedItems] = useState<{ dataId: string; error: string; leftGroup: string; rightGroup: string }[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
@@ -470,6 +477,7 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
   const resetComparisonState = () => {
     setMatchResults(null);
     setBatchResults([]);
+    setFailedItems([]);
     setSelectedIds(new Set());
     setCollapsed(new Set());
     setBatchOnlyChanges(new Set());
@@ -588,6 +596,7 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     setNotice(null);
     setMatchResults(null);
     setBatchResults([]);
+    setFailedItems([]);
     setLeftFailed(false);
     setRightFailed(false);
 
@@ -727,12 +736,13 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
 
     setBatchLoading(true);
     setBatchResults([]);
+    setFailedItems([]);
     setError(null);
     setNotice(null);
     setBatchOnlyChanges(new Set());
 
     const results: BatchResult[] = [];
-    const failed: { dataId: string; error: string }[] = [];
+    const failedItems: { dataId: string; error: string; leftGroup: string; rightGroup: string }[] = [];
 
     for (let i = 0; i < toCompare.length; i += 5) {
       const chunk = toCompare.slice(i, i + 5);
@@ -758,19 +768,19 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
         if (item.status === "fulfilled") {
           results.push(item.value);
         } else {
-          failed.push({ dataId: chunk[j].dataId, error: errorText(item.reason) });
+          failedItems.push({ dataId: chunk[j].dataId, error: errorText(item.reason), leftGroup: chunk[j].leftGroup, rightGroup: chunk[j].rightGroup });
         }
       }
     }
 
     const total = toCompare.length;
     const successCount = results.length;
-    const failCount = failed.length;
+    const failCount = failedItems.length;
 
     const detailLines = [`批量对比结果: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`];
-    if (failed.length > 0) {
+    if (failedItems.length > 0) {
       detailLines.push("失败列表:");
-      for (const f of failed) detailLines.push(`  - ${f.dataId}: ${f.error}`);
+      for (const f of failedItems) detailLines.push(`  - ${f.dataId}: ${f.error}`);
     }
     const detail = detailLines.join("\n");
 
@@ -785,13 +795,12 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     } else if (successCount === 0) {
       level = "error";
       title = `批量对比完成: ${failCount}/${total} 全部失败`;
-      message = `${failCount} 个配置全部加载失败: ${failed.map((f) => f.dataId).join(", ")}`;
+      message = `${failCount} 个配置全部加载失败: ${failedItems.map((f) => f.dataId).join(", ")}`;
       setError("全部配置加载失败");
     } else {
       level = "warning";
       title = `批量对比完成: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`;
-      message = `${failCount} 个配置加载失败: ${failed.map((f) => f.dataId).join(", ")}`;
-      setError(message);
+      message = `${failCount} 个配置加载失败: ${failedItems.map((f) => f.dataId).join(", ")}`;
     }
 
     reportMessage({
@@ -806,6 +815,10 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     });
 
     setBatchResults(results);
+    setFailedItems(failedItems);
+    if (failedItems.length > 0) {
+      setNotice(`${failedItems.length} 个加载失败`);
+    }
     setSourcesCollapsed(results.length > 0);
     setBatchLoading(false);
   };
@@ -892,16 +905,24 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
         <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
           <div className="diff-source-summary-card">
             <span className="diff-source-summary-title">{t("diff.sourceA")}</span>
-            {leftConn && <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />}
-            <span className="diff-source-summary-text" title={sourceSummary(left, connections, t("diff.autoMatch"))}>
-              {sourceSummary(left, connections, t("diff.autoMatch"))}
+            {leftConn?.sourceType === "local-snapshot" ? (
+              <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+            ) : leftConn ? (
+              <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />
+            ) : null}
+            <span className="diff-source-summary-text" title={sourceSummary(left, connections, t("diff.autoMatch"), t)}>
+              {sourceSummary(left, connections, t("diff.autoMatch"), t)}
             </span>
           </div>
           <div className="diff-source-summary-card">
             <span className="diff-source-summary-title">{t("diff.sourceB")}</span>
-            {rightConn && <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />}
-            <span className="diff-source-summary-text" title={sourceSummary(right, connections, t("diff.autoMatch"))}>
-              {sourceSummary(right, connections, t("diff.autoMatch"))}
+            {rightConn?.sourceType === "local-snapshot" ? (
+              <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+            ) : rightConn ? (
+              <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />
+            ) : null}
+            <span className="diff-source-summary-text" title={sourceSummary(right, connections, t("diff.autoMatch"), t)}>
+              {sourceSummary(right, connections, t("diff.autoMatch"), t)}
             </span>
           </div>
         </div>
@@ -977,6 +998,15 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
               <span className="match-count">
                 {t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}
               </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => doMatch()}
+                disabled={matchLoading}
+                title={t("diff.refreshMatch")}
+              >
+                ⟳
+              </button>
             </div>
             <div className="match-items">
               {matchResults.map((item) => (
@@ -992,6 +1022,44 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
 
         {batchResults.length > 0 && (
           <div className="batch-diff">
+            {failedItems.length > 0 && (
+              <div className="batch-diff-failures">
+                <div className="batch-diff-failures-head">
+                  <span className="batch-diff-failures-count">加载失败 ({failedItems.length})</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      const retryItems = matchResults?.filter((m) => failedItems.some((f) => f.dataId === m.dataId)) ?? [];
+                      setSelectedIds(new Set(retryItems.map((r) => r.dataId)));
+                      void loadBatch();
+                    }}
+                    disabled={batchLoading}
+                  >
+                    全部重试
+                  </button>
+                </div>
+                <div className="batch-diff-failures-list">
+                  {failedItems.map((f) => (
+                    <div className="batch-diff-failures-item" key={f.dataId}>
+                      <span className="batch-diff-failures-dataid">{f.dataId}</span>
+                      <span className="batch-diff-failures-error">{f.error}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setSelectedIds(new Set([f.dataId]));
+                          void loadBatch();
+                        }}
+                        disabled={batchLoading}
+                      >
+                        重试
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="batch-diff-toolbar">
               <span className="batch-diff-count">已生成 {batchResults.length} 个文件对比</span>
               <span className="fmt-spacer" />

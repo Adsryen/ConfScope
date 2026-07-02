@@ -480,7 +480,7 @@ describe("ConnectionManager", () => {
 
     fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://first.example.com/nacos" } });
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
-    expect(screen.getByRole("button", { name: "测试中…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /测试中/ })).toBeDisabled();
 
     fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://second.example.com/nacos" } });
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
