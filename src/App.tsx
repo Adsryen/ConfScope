@@ -17,6 +17,7 @@ import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
+import type { DiffJumpParams } from "./components/AuditView";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
 
@@ -118,6 +119,8 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
+  // 跨视图导航参数（AuditView → DiffView）
+  const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
 
@@ -329,7 +332,13 @@ export default function App() {
             onChange={(conns) => setConnections(conns)}
           />
         ) : mode === "audit" ? (
-          <AuditView connections={connections} />
+          <AuditView
+            connections={connections}
+            onNavigateToDiff={(params) => {
+              setDiffInitialParams(params);
+              setMode("diff");
+            }}
+          />
         ) : mode === "backup" ? (
           plannedPage(t('app.backup'), t('app.backupPlanned'))
         ) : mode === "tasks" ? (
@@ -348,7 +357,12 @@ export default function App() {
         ) : mode === "browse" ? (
           browsePage
         ) : mode === "diff" ? (
-          <DiffView connections={connections} onConnectionsChange={setConnections} />
+          <DiffView
+            connections={connections}
+            onConnectionsChange={setConnections}
+            initialParams={diffInitialParams}
+            onInitialParamsConsumed={() => setDiffInitialParams(null)}
+          />
         ) : mode === "about" ? (
           <About embedded />
         ) : null}
