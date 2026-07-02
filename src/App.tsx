@@ -16,6 +16,7 @@ import MessageCenter from "./components/MessageCenter";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateUpdateSettings } from "./store/settings";
+import AuditView from "./components/AuditView";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
 
@@ -218,7 +219,7 @@ export default function App() {
     { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
     { mode: "connections", label: t('app.connectionManage') },
     { mode: "ssh", label: t('app.sshTunnels') },
-    { mode: "audit", label: t('app.audit'), unavailable: true },
+    { mode: "audit", label: t('app.audit') },
     { mode: "backup", label: t('app.backup'), unavailable: true },
     { mode: "tasks", label: t('app.tasks'), unavailable: true },
     { mode: "settings", label: t('app.settings') },
@@ -328,7 +329,7 @@ export default function App() {
             onChange={(conns) => setConnections(conns)}
           />
         ) : mode === "audit" ? (
-          plannedPage(t('app.audit'), t('app.auditPlanned'))
+          <AuditView connections={connections} />
         ) : mode === "backup" ? (
           plannedPage(t('app.backup'), t('app.backupPlanned'))
         ) : mode === "tasks" ? (
