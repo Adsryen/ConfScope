@@ -323,6 +323,8 @@
     "pleaseSelect": "请先选择",
     "noConnection": "请先在「连接管理」中添加 Nacos 连接",
     "sourceA": "来源 A（左）",
+    "sideUnavailable": "不可用",
+    "retryMatch": "重试匹配",
     "sourceB": "来源 B（右）",
     "compareMode": "对比模式",
     "modeText": "文本(逐行)",
