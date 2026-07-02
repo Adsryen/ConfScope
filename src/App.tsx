@@ -13,7 +13,9 @@ import SettingsView from "./components/SettingsView";
 import SSHManagerView from "./components/SSHManagerView";
 import ErrorDialog from "./components/ErrorDialog";
 import MessageCenter from "./components/MessageCenter";
-import { reportError } from "./lib/errorCenter";
+import { reportError, reportMessage } from "./lib/errorCenter";
+import { checkForUpdates, getAppInfo } from "./api/app";
+import { loadSettings, updateUpdateSettings } from "./store/settings";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
 
@@ -122,6 +124,41 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode, sidebarCollapsed }));
   }, [activeConnId, mode, sidebarCollapsed]);
+
+  // 启动后低频后台检查更新（延迟 5 分钟，仅一次）
+  useEffect(() => {
+    const settings = loadSettings();
+    const lastCheck = settings.update.lastCheckAt ? new Date(settings.update.lastCheckAt).getTime() : 0;
+    const hoursSince = (Date.now() - lastCheck) / 3600000;
+    if (hoursSince < 6) return; // 6 小时内不重复检查
+    const timer = setTimeout(async () => {
+      try {
+        const info = await getAppInfo();
+        const result = await checkForUpdates({
+          currentVersion: info.version,
+          sources: info.updateSources,
+          proxy: settings.proxy,
+        });
+        updateUpdateSettings({
+          lastCheckAt: new Date().toISOString(),
+          lastSeenVersion: result.latestVersion || "",
+        });
+        if (!result.hasUpdate || result.error) return;
+        if (!result.mandatory && settings.update.skipVersion === result.latestVersion) return;
+        reportMessage({
+          level: "info",
+          title: `有新版本 ${result.latestVersion} 可用`,
+          source: "应用更新",
+          message: result.releaseNotes || "",
+          actionLabel: "查看更新",
+          onAction: () => setMode("about"),
+        });
+      } catch {
+        // 后台检查失败静默忽略
+      }
+    }, 5 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {

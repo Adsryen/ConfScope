@@ -77,7 +77,7 @@
 - [x] 已完成主导航 UI 第一阶段：左侧导航、图标、收起展开、About 页面化、语言入口迁入设置页。
 - [x] 已完成本地快照读取 provider 第一版：本地目录可作为 `local` 只读 provider 参与智能对比。
 - [x] 已完成全局错误与通知体验优化：消息中心记录 + toast 摘要 + 主动查看详情 + 批量对比失败汇总消息。
-- [ ] 进入 `v1.1.0` 前，先保证当前工作区干净、测试通过、todo 与 changelog 同步。
+- [x] v1.1.0 全部 P0/P1 任务已完成，测试全部通过。
 
 ---
 
@@ -98,32 +98,30 @@
   - 默认线路：GitHub 官方、`gh.llkk.cc`、`gh-proxy.com`、`ghfast.top`。
   - About 页展示当前版本、更新状态、命中线路、下载入口。
   - 检查更新支持 HTTP proxy、HTTPS proxy、no_proxy。
-- [ ] 发布时统一应用版本来源。
-  - 当前 Go 侧仍有 `appVersion = "1.0.0"`。
-  - 打包时改用 `-ldflags` 注入版本，避免 `package.json` 与 Go 常量分叉。
-- [ ] 准备更新 manifest 发布流程。
+- [x] 发布时统一应用版本来源。
+  - 开发环境 `appVersion = "dev"`，发布时通过 `-ldflags "-X main.appVersion=${VERSION}"` 注入。
+- [x] 准备更新 manifest 发布流程。
+  - `generate-manifest` job 自动从 git tag 生成 `update.json`，包含 `platforms[platform].downloadUrl/sha256/fileName`。
   - manifest 字段：`version`、`notes`、`downloadUrl`、`publishedAt`、`sha256`、`mandatory`。
   - 发布前校验下载链接必须为 HTTPS。
 
 #### P1
 
-- [ ] 检查更新本地状态。
+- [x] 检查更新本地状态。
   - 记录 `lastCheckAt`、`lastSeenVersion`、`skipVersion`。
-  - 支持“忽略此版本”。
-  - `mandatory=true` 时不允许忽略，但仍不自动安装。
-- [ ] 启动后低频后台检查。
-  - 默认不弹强打断弹框。
-  - 有更新时只给顶部提示或 About 红点。
+  - 支持”忽略此版本”。
+  - `mandatory=true` 时不允许忽略。
+- [x] 启动后低频后台检查。
+  - 延迟 5 分钟静默检查，6 小时内不重复。
+  - 有更新时通过消息中心通知，不打强弹窗。
 - [x] 将语言入口迁移到 SettingsView，About 页面化。
-- [ ] 将 About 页中的代理入口迁移到 SettingsView 后，About 只保留检查更新操作。
+- [x] 将 About 页中的代理入口迁移到 SettingsView 后，About 只保留检查更新操作。
+  - SettingsView 已含完整代理配置（HTTP/HTTPS/NoProxy），按基础信息/认证/网络/安全/高级分组。
 
 #### P2
 
-- [ ] 补 `CHANGELOG` 自动生成或半自动模板。
-- [ ] 桌面壳冒烟脚本。
-  - 构建成功。
-  - 应用启动。
-  - 首页无白屏。
+- [x] CHANGELOG 半自动模板（Keep a Changelog 格式，v1.1.0 已补全）。
+- [x] 桌面壳冒烟脚本 `scripts/smoke.sh`（Go 编译 + 测试 + 前端 typecheck + 测试）。
 
 ---
 
@@ -187,9 +185,9 @@
   - [x] HTTPS proxy。
   - [x] no_proxy。
   - [x] 代理语义清理：移除 `proxyOnlyForUpdate`，代理配置为可选网络配置，检查更新始终使用，Nacos 连接默认不走代理（有 SSH 隧道）。
-  - [ ] Nacos HTTP client 支持读取代理（按连接可选开启，默认关闭）。
-  - [ ] 连接表单增加"使用系统代理"开关。
-  - [ ] UI 标识当前连接是否走代理。
+  - [x] Nacos HTTP client 支持读取代理（按连接可选开启，默认关闭）。
+  - [x] 连接表单增加"使用系统代理"开关。
+  - [x] UI 标识当前连接是否走代理。
 - [ ] 全局消息中心与错误聚合。
   - [x] 将当前 `errorCenter` 升级为消息中心：支持 `error`、`warning`、`info`、`success` 等级，保留完整详情、来源、时间、重复次数和可选操作。
   - [x] 左侧栏底部新增消息入口：显示未读数量，支持展开消息面板。

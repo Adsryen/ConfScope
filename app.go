@@ -18,7 +18,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-var appVersion = "1.1.0"
+// appVersion 由构建时 -ldflags 注入，开发环境默认 "dev"。
+var appVersion = "dev"
 
 var errUnsupportedProvider = errors.New("unsupported config center provider")
 

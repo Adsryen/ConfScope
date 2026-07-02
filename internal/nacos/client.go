@@ -8,6 +8,7 @@ package nacos
 import (
 	"crypto/tls"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -27,6 +28,15 @@ type Client struct {
 //
 // 为了兼容内网自签名证书，这里保持与原 Rust 版本一致的策略：允许无效 TLS 证书。
 func NewClient() *Client {
+	return newClientWithProxy(false)
+}
+
+// newClientWithProxy 创建 Nacos HTTP 客户端，可选择是否通过环境变量代理。
+func newClientWithProxy(useProxy bool) *Client {
+	var proxyFunc func(*http.Request) (*url.URL, error)
+	if useProxy {
+		proxyFunc = http.ProxyFromEnvironment
+	}
 	return &Client{
 		http: &http.Client{
 			Timeout: timeout,
@@ -34,10 +44,16 @@ func NewClient() *Client {
 				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // 兼容内网自签名 Nacos 部署。
 				IdleConnTimeout:     30 * time.Second,                      // 在公司防火墙断开前主动关闭空闲连接（防火墙通常 30-60s 断开）。
 				MaxIdleConnsPerHost: 4,                                     // 限制每 host 的空闲连接数，避免持有死连接。
+				Proxy:               proxyFunc,                             // 仅当 useProxy=true 时启用环境代理。
 			},
 		},
 		clock: time.Now,
 	}
+}
+
+// NewClientWithProxy 创建带环境代理的 Nacos HTTP 客户端。
+func NewClientWithProxy() *Client {
+	return newClientWithProxy(true)
 }
 
 func (c *Client) SetMSEAuth(auth MSEAuth) {

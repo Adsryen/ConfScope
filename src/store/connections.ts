@@ -67,6 +67,8 @@ export interface Connection {
   sshConfig?: SSHConfig;
   /** 全局 SSH 隧道配置档案引用；优先于 sshConfig。 */
   sshProfileId?: string;
+  /** 是否通过系统代理连接 Nacos（默认关闭）。 */
+  useProxy?: boolean;
 }
 
 const KEY = "cs.connections";
@@ -201,5 +203,6 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     defaultNamespace: raw.defaultNamespace ?? "",
     sshConfig: raw.sshConfig,
     sshProfileId: raw.sshProfileId ?? "",
+    useProxy: raw.useProxy ?? false,
   };
 }

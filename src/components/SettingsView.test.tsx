@@ -34,11 +34,14 @@ describe("SettingsView", () => {
 
     expect(screen.getByText("设置")).toBeInTheDocument();
     expect(screen.getByText("语言")).toBeInTheDocument();
-    expect(screen.getByText("智能对比")).toBeInTheDocument();
-    expect(screen.getByText("网络代理")).toBeInTheDocument();
+    expect(screen.getByText("基础信息")).toBeInTheDocument();
+    expect(screen.getByText("高级")).toBeInTheDocument();
+    expect(screen.getByText("网络")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("连接下拉按名称排序"));
-    fireEvent.change(screen.getByLabelText("HTTP 代理"), {
+    fireEvent.click(screen.getByText("连接下拉按名称排序"));
+    // HTTP/HTTPS 代理输入共用同一 placeholder，取第一个（HTTP）
+    const httpInputs = screen.getAllByPlaceholderText("http://127.0.0.1:7890");
+    fireEvent.change(httpInputs[0], {
       target: { value: "http://127.0.0.1:7890" },
     });
 

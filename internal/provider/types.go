@@ -36,6 +36,7 @@ type ConnectionProfile struct {
 	SecurityToken   string       `json:"securityToken"`
 	Environment     string       `json:"environment"`
 	SafetyLevel     string       `json:"safetyLevel"`
+	UseProxy        bool         `json:"useProxy"`
 }
 
 type ConfigRef struct {

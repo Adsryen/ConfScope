@@ -55,6 +55,7 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   defaultNamespace: "",
   sshConfig: undefined,
   sshProfileId: "",
+  useProxy: false,
 });
 
 type HelpPopover = { text: string; top: number; left: number };
@@ -1301,7 +1302,17 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
             <section className="conn-form-section">
               <div className="conn-section-title">{t('connection.sectionSecurity')}</div>
-              <div className="field-hint">{t('connection.sectionSecurityPlaceholder')}</div>
+              {draft.provider !== "local" && (
+              <label className="check-field">
+                <FieldLabel {...fieldLabelProps} tip={t('connection.useProxyHelp')}>{t('connection.useProxy')}</FieldLabel>
+                <input
+                  type="checkbox"
+                  checked={!!draft.useProxy}
+                  onChange={(e) => set({ useProxy: e.target.checked })}
+                />
+              </label>
+              )}
+              {!draft.useProxy && <div className="field-hint">{t('connection.proxyOffHint')}</div>}
             </section>
 
             {draft.provider !== "local" && <section className="conn-form-section">

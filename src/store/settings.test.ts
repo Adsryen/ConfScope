@@ -29,7 +29,7 @@ describe("settings store", () => {
   it("returns defaults when storage is empty or malformed", () => {
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
-      update: { skipVersion: "", lastCheckAt: "" },
+      update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
     });
 
@@ -37,7 +37,7 @@ describe("settings store", () => {
 
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
-      update: { skipVersion: "", lastCheckAt: "" },
+      update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
     });
   });
@@ -59,7 +59,7 @@ describe("settings store", () => {
   it("preserves unrelated settings when saving", () => {
     saveSettings({
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
-      update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z" },
+      update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
     });
 
@@ -67,7 +67,7 @@ describe("settings store", () => {
 
     expect(loadSettings()).toEqual({
       proxy: { httpProxy: "http://proxy.local:8080", httpsProxy: "", noProxy: "" },
-      update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z" },
+      update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
     });
   });

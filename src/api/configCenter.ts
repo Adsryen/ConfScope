@@ -27,6 +27,7 @@ export interface ConnectionProfile {
   securityToken: string;
   environment: string;
   safetyLevel: string;
+  useProxy: boolean;
 }
 
 export interface ConfigRef {
