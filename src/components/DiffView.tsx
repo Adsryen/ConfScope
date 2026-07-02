@@ -443,6 +443,8 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
   const [rightLoaded, setRightLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [leftFailed, setLeftFailed] = useState(false);
+  const [rightFailed, setRightFailed] = useState(false);
   const [mode, setMode] = useState<DiffMode>("text");
   const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
@@ -473,6 +475,8 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     setBatchOnlyChanges(new Set());
     setLeftLoaded(null);
     setRightLoaded(null);
+    setLeftFailed(false);
+    setRightFailed(false);
     setNotice(null);
   };
 
@@ -569,6 +573,13 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     return loaded.content;
   };
 
+  const loadSideSafe = async (source: Source, dataId: string, group: string, sideFailed: boolean): Promise<Loaded> => {
+    if (sideFailed) {
+      return { label: `(${t("diff.sideUnavailable")})`, content: "", format: "TEXT" as Format };
+    }
+    return loadOne(source, dataId, group);
+  };
+
   const needMatch = !left.dataId.trim() || !right.dataId.trim();
 
   const doMatch = async () => {
@@ -577,6 +588,8 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
     setNotice(null);
     setMatchResults(null);
     setBatchResults([]);
+    setLeftFailed(false);
+    setRightFailed(false);
 
     try {
       const leftConn = connections.find((item) => item.id === left.connId);
@@ -585,21 +598,59 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
       const leftGroup = left.group.trim() || "DEFAULT_GROUP";
       const rightGroup = right.group.trim() || "DEFAULT_GROUP";
 
-      const [leftPage, rightPage] = await Promise.all([
+      const [leftResult, rightResult] = await Promise.allSettled([
         listConfigs(leftConn, left.tenant, "", leftGroup, 1, 500),
         listConfigs(rightConn, right.tenant, "", rightGroup, 1, 500),
       ]);
 
-      const leftIds = new Set(leftPage.pageItems.map((item) => item.dataId));
-      const rightIds = new Set(rightPage.pageItems.map((item) => item.dataId));
+      const leftErr = leftResult.status === "rejected" ? errorText(leftResult.reason) : "";
+      const rightErr = rightResult.status === "rejected" ? errorText(rightResult.reason) : "";
+      const leftOk = leftResult.status === "fulfilled";
+      const rightOk = rightResult.status === "fulfilled";
+
+      // 两侧都失败 → 整体报错
+      if (!leftOk && !rightOk) {
+        setSourcesCollapsed(false);
+        setError(`${t("diff.sourceA")}: ${leftErr}  ${t("diff.sourceB")}: ${rightErr}`);
+        return;
+      }
+
+      // 标记失败侧
+      if (!leftOk) setLeftFailed(true);
+      if (!rightOk) setRightFailed(true);
+
+      // 单侧失败提示
+      if (!leftOk || !rightOk) {
+        const failSide = !leftOk ? t("diff.sourceA") : t("diff.sourceB");
+        const failMsg = !leftOk ? leftErr : rightErr;
+        setNotice(`${failSide} ${t("diff.sideUnavailable")}: ${failMsg}`);
+        setSourcesCollapsed(false);
+      }
+
+      const leftPage = leftResult.status === "fulfilled" ? leftResult.value : null;
+      const rightPage = rightResult.status === "fulfilled" ? rightResult.value : null;
+
+      const leftIds = leftPage ? new Set(leftPage.pageItems.map((item) => item.dataId)) : null;
+      const rightIds = rightPage ? new Set(rightPage.pageItems.map((item) => item.dataId)) : null;
       const leftId = left.dataId.trim();
       const rightId = right.dataId.trim();
       let common: string[];
 
-      if (leftId && rightId) common = [leftId];
-      else if (leftId) common = rightIds.has(leftId) ? [leftId] : [];
-      else if (rightId) common = leftIds.has(rightId) ? [rightId] : [];
-      else common = [...leftIds].filter((id) => rightIds.has(id)).sort();
+      if (leftId && rightId) {
+        common = [leftId];
+      } else if (leftId) {
+        if (rightOk) common = rightIds!.has(leftId) ? [leftId] : [];
+        else common = [leftId]; // 右侧不可用，用左侧指定 dataId
+      } else if (rightId) {
+        if (leftOk) common = leftIds!.has(rightId) ? [rightId] : [];
+        else common = [rightId]; // 左侧不可用，用右侧指定 dataId
+      } else if (leftOk && rightOk) {
+        common = [...leftIds!].filter((id) => rightIds!.has(id)).sort();
+      } else {
+        // 单侧可用 → 用可用侧全部配置
+        const ids = leftOk ? leftIds! : rightIds!;
+        common = [...ids].sort();
+      }
 
       if (common.length === 0) {
         setSourcesCollapsed(false);
@@ -688,16 +739,16 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
       const settled = await Promise.allSettled(
         chunk.map(async (item) => {
           const [leftItem, rightItem] = await Promise.all([
-            loadOne(left, item.dataId, item.leftGroup),
-            loadOne(right, item.dataId, item.rightGroup),
+            loadSideSafe(left, item.dataId, item.leftGroup, leftFailed),
+            loadSideSafe(right, item.dataId, item.rightGroup, rightFailed),
           ]);
           return {
             dataId: item.dataId,
             leftLabel: leftItem.label,
             rightLabel: rightItem.label,
-            leftText: prepareText(leftItem),
-            rightText: prepareText(rightItem),
-            format: (mode === "key" ? "TEXT" : leftItem.format !== "TEXT" ? leftItem.format : rightItem.format) as Format,
+            leftText: leftFailed ? "" : prepareText(leftItem),
+            rightText: rightFailed ? "" : prepareText(rightItem),
+            format: (mode === "key" ? "TEXT" : !leftFailed && leftItem.format !== "TEXT" ? leftItem.format : rightItem.format) as Format,
           };
         })
       );
@@ -796,6 +847,10 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
   };
 
   const retryCurrentCompare = () => {
+    if (leftFailed || rightFailed) {
+      setLeftFailed(false);
+      setRightFailed(false);
+    }
     if (matchResults) void loadBatch();
     else void loadBoth();
   };
@@ -894,7 +949,12 @@ export default function DiffView({ connections, onConnectionsChange }: Props) {
             {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
           </button>
         )}
-        {notice && <span className="diff-loadok">{notice}</span>}
+        {notice && (
+          <div className={`diff-loadok${(leftFailed || rightFailed) ? " warn" : ""}`}>
+            <span>{notice}</span>
+            {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
+          </div>
+        )}
         {error && (
           <div className="diff-loaderr">
             <span>{error}</span>

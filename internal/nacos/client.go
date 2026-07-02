@@ -31,7 +31,9 @@ func NewClient() *Client {
 		http: &http.Client{
 			Timeout: timeout,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Keep compatibility with existing self-signed Nacos deployments.
+				TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, // 兼容内网自签名 Nacos 部署。
+				IdleConnTimeout:     30 * time.Second,                      // 在公司防火墙断开前主动关闭空闲连接（防火墙通常 30-60s 断开）。
+				MaxIdleConnsPerHost: 4,                                     // 限制每 host 的空闲连接数，避免持有死连接。
 			},
 		},
 		clock: time.Now,

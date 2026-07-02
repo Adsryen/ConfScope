@@ -323,6 +323,8 @@
     "pleaseSelect": "Please select first",
     "noConnection": "Please add Nacos connections in \"Connection Manager\" first",
     "sourceA": "Source A (Left)",
+    "sideUnavailable": "Unavailable",
+    "retryMatch": "Retry Match",
     "sourceB": "Source B (Right)",
     "compareMode": "Compare Mode",
     "modeText": "Text (Line by Line)",

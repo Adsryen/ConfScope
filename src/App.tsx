@@ -4,6 +4,7 @@ import { listNamespaces, Namespace } from "./api/nacos";
 import { useTranslation } from "./i18n";
 import ConnectionManager from "./components/ConnectionManager";
 import ConfigBrowser from "./components/ConfigBrowser";
+import CopyButton from "./components/CopyButton";
 import DiffView from "./components/DiffView";
 import About from "./components/About";
 import Select from "./components/Select";
@@ -243,6 +244,7 @@ export default function App() {
             <button className="btn btn-ghost" onClick={() => setMode("connections")}>
               {t('app.connectionManage')}
             </button>
+            <CopyButton text={nsError} label={t('diff.copyError')} />
           </div>
         </div>
       ) : (

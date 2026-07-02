@@ -1404,8 +1404,21 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       </select>
                     )}
                     {visibleNamespaceError && (
-                      <div className="field-error">
-                        {t('connection.loadNamespacesFailed')}: {visibleNamespaceError}
+                      <div className="field-error-box">
+                        <span className="field-error">
+                          {t('connection.loadNamespacesFailed')}: {visibleNamespaceError}
+                        </span>
+                        <div className="field-error-actions">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={loadDefaultNamespaceOptions}
+                            disabled={loadingNamespaces}
+                          >
+                            {t('common.retry')}
+                          </button>
+                          <CopyButton text={`${t('connection.loadNamespacesFailed')}: ${visibleNamespaceError}`} label="复制报错" />
+                        </div>
                       </div>
                     )}
                   </div>
