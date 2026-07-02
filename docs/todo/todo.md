@@ -268,11 +268,12 @@
   - 主键：`normalizedName + namespace + group + dataId + key`。
   - 列：每个环境的 value、更新时间、存在状态。
   - 状态：一致、部分一致、不一致、缺失、无法解析、已忽略。
-- [ ] 新增 AuditView。
-  - 选择多个 Nacos 连接作为环境。
-  - 每个环境可选择 namespace、group、dataId 过滤条件。
-  - 支持同名 dataId 批量匹配。
-  - 支持按基准环境比较。
+- [x] 新增 AuditView 第一版。
+  - 选择多个 Nacos 连接作为环境（最多 6 个）。
+  - 按同名 dataId 批量匹配，key 级对比。
+  - 一致性状态：一致、部分一致、不一致、缺失、解析失败。
+  - 状态摘要栏 + 矩阵表格 + 基准环境 + 详情面板。
+  - 导航栏已开放审计矩阵入口。
 - [ ] AuditView UI。
   - 顶部条件栏：环境选择、namespace/group/dataId 范围、基准环境、比较模式。
   - 状态摘要条：总数、一致、不一致、缺失、无法解析、已忽略。

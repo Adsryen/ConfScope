@@ -389,6 +389,17 @@
     "rollbackToThis": "Rollback to this",
     "selectHint": "Click a version on the left to view, or pick versions to compare"
   },
+  "audit": {
+    "runAudit": "Run Audit",
+    "atLeastTwo": "At least 2 environments required",
+    "noData": "No config data retrieved",
+    "partialError": "Some configs failed to load",
+    "totalConfigs": "{count} items",
+    "filter": "Filter",
+    "allConfigs": "All configs",
+    "configItem": "Config Item",
+    "selectHint": "Select a project, configure environment sources, then click \"Run Audit\" to generate the matrix."
+  },
   "about": {
     "title": "About",
     "tagline": "Unified Configuration Center Management Tool",

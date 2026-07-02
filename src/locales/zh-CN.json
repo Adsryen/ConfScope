@@ -389,6 +389,17 @@
     "rollbackToThis": "回滚到此版本",
     "selectHint": "点击左侧版本查看内容，或勾选版本进行对比"
   },
+  "audit": {
+    "runAudit": "执行审计",
+    "atLeastTwo": "至少需要选择 2 个环境",
+    "noData": "未获取到任何配置数据",
+    "partialError": "部分配置加载失败",
+    "totalConfigs": "共 {count} 项",
+    "filter": "筛选",
+    "allConfigs": "全部配置",
+    "configItem": "配置项",
+    "selectHint": "选择项目并配置环境来源后，点击「执行审计」生成一致性矩阵。"
+  },
   "about": {
     "title": "关于",
     "tagline": "统一配置中心管理工具",
