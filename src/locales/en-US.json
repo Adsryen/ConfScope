@@ -10,7 +10,8 @@
     "edit": "Edit",
     "error": "Error",
     "success": "Success",
-    "copy": "Copy"
+    "copy": "Copy",
+    "copyError": "Copy Error"
   },
   "app": {
     "title": "Config Browser",
@@ -463,7 +464,71 @@
     "time": "Time",
     "operator": "Operator",
     "content": "Content",
-    "error": "Error"
+    "error": "Error",
+    "result": "Result",
+    "loadFailed": "Failed to load operation history",
+    "sourceCount": "{count} sources",
+    "failedCount": "{count} failed",
+    "emptyHint": "Publish, delete, and rollback operations will appear here.",
+    "copyRecord": "Copy Record",
+    "selectHint": "Select an operation record",
+    "selectHintDetail": "View config, source, result, and error details."
+  },
+  "backup": {
+    "pageSubtitle": "Manage and inspect local snapshots",
+    "snapshotCount": "{count} snapshots",
+    "totalConfigs": "{count} configs",
+    "refresh": "Refresh",
+    "loadFailed": "Load failed",
+    "deleteFailed": "Failed to delete snapshot",
+    "deleted": "Snapshot deleted",
+    "empty": "No local backups",
+    "emptyHint": "Create snapshots from Config Browser or Config Compare.",
+    "configCount": "{count} configs",
+    "delete": "Delete snapshot",
+    "deleteConfirm": "Delete this snapshot? This action cannot be undone.",
+    "copySnapshot": "Copy Snapshot",
+    "sourceConnection": "Source connection",
+    "namespace": "Namespace",
+    "createdAt": "Created at",
+    "configTotal": "Config count",
+    "configList": "Config list"
+  },
+  "tasks": {
+    "pageSubtitle": "View and manage background tasks",
+    "taskCount": "{count} tasks",
+    "runningCount": "{count} running",
+    "failedCount": "{count} failed",
+    "clearCompleted": "Clear completed",
+    "empty": "No tasks",
+    "emptyHint": "Batch export, backup, and restore tasks will appear here.",
+    "cancelled": "Task cancelled",
+    "deleted": "Task deleted",
+    "cleared": "Completed tasks cleared",
+    "statusPending": "Pending",
+    "statusRunning": "Running",
+    "statusSuccess": "Success",
+    "statusFailed": "Failed",
+    "statusCancelled": "Cancelled",
+    "typeExport": "Export",
+    "typeBackup": "Backup",
+    "typeApply": "Apply",
+    "typeRestore": "Restore",
+    "elapsed": "Elapsed {time}",
+    "startedAt": "Started at {time}",
+    "failedItems": "{count} failed",
+    "openDetail": "View detail",
+    "copyTask": "Copy Task",
+    "taskId": "Task ID",
+    "type": "Type",
+    "status": "Status",
+    "progress": "Progress",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "duration": "Duration",
+    "completedStat": "Completed: {count}",
+    "failedStat": "Failed: {count}",
+    "totalStat": "Total: {count}"
   },
   "about": {
     "title": "About",
@@ -501,4 +566,3 @@
     "close": "Close"
   }
 }
-

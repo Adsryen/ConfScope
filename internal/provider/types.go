@@ -128,3 +128,42 @@ type ConfigProvider interface {
 	GetHistoryDetail(profile ConnectionProfile, ref ConfigRef, id string) (HistoryDetail, error)
 	TestConnection(profile ConnectionProfile) error
 }
+
+// ── 快照相关类型 ──
+
+// SnapshotSource 快照来源。
+type SnapshotSource struct {
+	ConnectionID   string `json:"connectionId"`
+	ConnectionName string `json:"connectionName"`
+	Namespace      string `json:"namespace"`
+	NamespaceID    string `json:"namespaceId"`
+}
+
+// ConfigSnapshot 配置快照。
+type ConfigSnapshot struct {
+	DataID     string `json:"dataId"`
+	Group      string `json:"group"`
+	Content    string `json:"content"`
+	ConfigType string `json:"configType"`
+	UpdateTime string `json:"updateTime"`
+}
+
+// Snapshot 快照。
+type Snapshot struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	CreatedAt   string           `json:"createdAt"`
+	UpdatedAt   string           `json:"updatedAt"`
+	Source      SnapshotSource   `json:"source"`
+	Configs     []ConfigSnapshot `json:"configs"`
+}
+
+// SnapshotManager 快照管理器接口。
+type SnapshotManager interface {
+	CreateSnapshot(source SnapshotSource, configs []ConfigSnapshot) (*Snapshot, error)
+	GetSnapshot(id string) (*Snapshot, error)
+	ListSnapshots() ([]Snapshot, error)
+	DeleteSnapshot(id string) error
+	ValidateSnapshot(path string) error
+}

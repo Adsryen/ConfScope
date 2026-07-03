@@ -13,6 +13,8 @@ import SettingsView from "./components/SettingsView";
 import SSHManagerView from "./components/SSHManagerView";
 import ErrorDialog from "./components/ErrorDialog";
 import MessageCenter from "./components/MessageCenter";
+import BackupView from "./components/BackupView";
+import TaskCenter from "./components/TaskCenter";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateUpdateSettings } from "./store/settings";
@@ -23,41 +25,12 @@ import type { DiffJumpParams } from "./components/AuditView";
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
 const navIconPath: Record<Mode, string[]> = {
-  browse: [
-    "M4 5h16",
-    "M4 10h16",
-    "M4 15h10",
-    "M4 20h8",
-  ],
-  diff: [
-    "M6 4v5c0 2 1 3 3 3h6",
-    "M6 20v-5c0-2 1-3 3-3h6",
-    "M15 8l4 4-4 4",
-  ],
-  connections: [
-    "M5 5h9v6H5z",
-    "M10 11v4",
-    "M10 18h4",
-    "M17 15h2a2 2 0 012 2v1a2 2 0 01-2 2h-2a2 2 0 01-2-2v-1a2 2 0 012-2z",
-    "M7 8h5",
-  ],
-  ssh: [
-    "M5 12h5",
-    "M14 12h5",
-    "M10 8l4 4-4 4",
-    "M6 7a3 3 0 100 6 3 3 0 000-6z",
-    "M18 11a3 3 0 100 6 3 3 0 000-6z",
-  ],
-  audit: [
-    "M4 5h16v14H4z",
-    "M4 10h16",
-    "M9 5v14",
-    "M15 5v14",
-  ],
-  history: [
-    "M12 8v4l3 3",
-    "M12 22a10 10 0 100-20 10 10 0 000 20z",
-  ],
+  browse: ["M4 5h16", "M4 10h16", "M4 15h10", "M4 20h8"],
+  diff: ["M6 4v5c0 2 1 3 3 3h6", "M6 20v-5c0-2 1-3 3-3h6", "M15 8l4 4-4 4"],
+  connections: ["M5 5h9v6H5z", "M10 11v4", "M10 18h4", "M17 15h2a2 2 0 012 2v1a2 2 0 01-2 2h-2a2 2 0 01-2-2v-1a2 2 0 012-2z", "M7 8h5"],
+  ssh: ["M5 12h5", "M14 12h5", "M10 8l4 4-4 4", "M6 7a3 3 0 100 6 3 3 0 000-6z", "M18 11a3 3 0 100 6 3 3 0 000-6z"],
+  audit: ["M4 5h16v14H4z", "M4 10h16", "M9 5v14", "M15 5v14"],
+  history: ["M12 8v4l3 3", "M12 22a10 10 0 100-20 10 10 0 000 20z"],
   backup: [
     "M5 7c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z",
     "M5 7v8c0 1.7 3.1 3 7 3s7-1.3 7-3V7",
@@ -65,25 +38,9 @@ const navIconPath: Record<Mode, string[]> = {
     "M16 17l3 3",
     "M19 17l-3 3",
   ],
-  tasks: [
-    "M5 7l2 2 4-4",
-    "M13 8h6",
-    "M5 16l2 2 4-4",
-    "M13 17h6",
-  ],
-  settings: [
-    "M5 7h14",
-    "M5 12h14",
-    "M5 17h14",
-    "M9 5v4",
-    "M15 10v4",
-    "M11 15v4",
-  ],
-  about: [
-    "M12 11v6",
-    "M12 7h.01",
-    "M12 22a10 10 0 100-20 10 10 0 000 20z",
-  ],
+  tasks: ["M5 7l2 2 4-4", "M13 8h6", "M5 16l2 2 4-4", "M13 17h6"],
+  settings: ["M5 7h14", "M5 12h14", "M5 17h14", "M9 5v4", "M15 10v4", "M11 15v4"],
+  about: ["M12 11v6", "M12 7h.01", "M12 22a10 10 0 100-20 10 10 0 000 20z"],
 };
 
 function NavIcon({ mode }: { mode: Mode }) {
@@ -110,14 +67,16 @@ export default function App() {
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
   const ui0 = loadUI();
   const [activeConnId, setActiveConnId] = useState<string>(
-    connections.some((c) => c.id === ui0.connId) ? ui0.connId! : connections[0]?.id ?? ""
+    connections.some((c) => c.id === ui0.connId) ? ui0.connId! : (connections[0]?.id ?? "")
   );
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
-  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "history", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
+  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "history", "backup", "tasks", "settings", "about"].includes(
+    ui0.mode ?? ""
+  )
     ? ui0.mode!
     : "browse";
   const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
@@ -140,34 +99,37 @@ export default function App() {
     const lastCheck = settings.update.lastCheckAt ? new Date(settings.update.lastCheckAt).getTime() : 0;
     const hoursSince = (Date.now() - lastCheck) / 3600000;
     if (hoursSince < 6) return; // 6 小时内不重复检查
-    const timer = setTimeout(async () => {
-      try {
-        const info = await getAppInfo();
-        const result = await checkForUpdates({
-          currentVersion: info.version,
-          sources: info.updateSources,
-          proxy: settings.proxy,
-        });
-        updateUpdateSettings({
-          lastCheckAt: new Date().toISOString(),
-          lastSeenVersion: result.latestVersion || "",
-        });
-        if (!result.hasUpdate || result.error) return;
-        if (!result.mandatory && settings.update.skipVersion === result.latestVersion) return;
-        reportMessage({
-          level: "info",
-          title: `有新版本 ${result.latestVersion} 可用`,
-          source: "应用更新",
-          message: result.releaseNotes || "",
-          actionLabel: "查看更新",
-          onAction: () => setMode("about"),
-        });
-      } catch {
-        // 后台检查失败静默忽略
-      }
-    }, 5 * 60 * 1000);
+    const timer = setTimeout(
+      async () => {
+        try {
+          const info = await getAppInfo();
+          const result = await checkForUpdates({
+            currentVersion: info.version,
+            sources: info.updateSources,
+            proxy: settings.proxy,
+          });
+          updateUpdateSettings({
+            lastCheckAt: new Date().toISOString(),
+            lastSeenVersion: result.latestVersion || "",
+          });
+          if (!result.hasUpdate || result.error) return;
+          if (!result.mandatory && settings.update.skipVersion === result.latestVersion) return;
+          reportMessage({
+            level: "info",
+            title: `有新版本 ${result.latestVersion} 可用`,
+            source: "应用更新",
+            message: result.releaseNotes || "",
+            actionLabel: "查看更新",
+            onAction: () => setMode("about"),
+          });
+        } catch {
+          // 后台检查失败静默忽略
+        }
+      },
+      5 * 60 * 1000
+    );
     return () => clearTimeout(timer);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {
@@ -202,7 +164,7 @@ export default function App() {
           source: connectionDisplayLabel(activeConn),
           message,
           detail: message,
-          actionLabel: t('common.retry'),
+          actionLabel: t("common.retry"),
           onAction: () => setNsReload((x) => x + 1),
         });
       })
@@ -225,63 +187,55 @@ export default function App() {
   const navGroups: { group: string; label: string; items: { mode: Mode; label: string; unavailable?: boolean }[] }[] = [
     {
       group: "config",
-      label: t('app.navGroupConfig'),
+      label: t("app.navGroupConfig"),
       items: [
-        { mode: "browse", label: t('app.title'), unavailable: connections.length === 0 },
-        { mode: "diff", label: t('app.diff'), unavailable: connections.length === 0 },
-        { mode: "audit", label: t('app.audit') },
+        { mode: "browse", label: t("app.title"), unavailable: connections.length === 0 },
+        { mode: "diff", label: t("app.diff"), unavailable: connections.length === 0 },
+        { mode: "audit", label: t("app.audit") },
       ],
     },
     {
       group: "data",
-      label: t('app.navGroupData'),
+      label: t("app.navGroupData"),
       items: [
-        { mode: "history", label: t('app.history') },
-        { mode: "backup", label: t('app.backup'), unavailable: true },
-        { mode: "tasks", label: t('app.tasks'), unavailable: true },
+        { mode: "history", label: t("app.history") },
+        { mode: "backup", label: t("app.backup") },
+        { mode: "tasks", label: t("app.tasks") },
       ],
     },
     {
       group: "system",
-      label: t('app.navGroupSystem'),
+      label: t("app.navGroupSystem"),
       items: [
-        { mode: "connections", label: t('app.connectionManage') },
-        { mode: "ssh", label: t('app.sshTunnels') },
-        { mode: "settings", label: t('app.settings') },
-        { mode: "about", label: t('app.about') },
+        { mode: "connections", label: t("app.connectionManage") },
+        { mode: "ssh", label: t("app.sshTunnels") },
+        { mode: "settings", label: t("app.settings") },
+        { mode: "about", label: t("app.about") },
       ],
     },
   ];
-
-  const plannedPage = (title: string, description: string) => (
-    <div className="planned-page">
-      <div className="planned-badge">{t('app.planned')}</div>
-      <h2>{title}</h2>
-      <p>{description}</p>
-    </div>
-  );
 
   const browsePage = (
     <div className="page-surface browse-page">
       <div className="page-header browse-header">
         <div>
-          <h3>{t('app.title')}</h3>
-          <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t('app.selectConnection')}</div>
+          <h3>{t("app.title")}</h3>
+          <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t("app.selectConnection")}</div>
         </div>
         <div className="page-actions">
           <Select
             value={activeConnId}
             disabled={connections.length === 0}
-            title={t('app.connection')}
+            title={t("app.connection")}
             options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
             onChange={setActiveConnId}
           />
           <Select
             value={tenant}
             disabled={!activeConn || nsLoading}
-            title={t('app.namespace')}
+            title={t("app.namespace")}
             options={[
-              { value: "", label: nsLoading ? t('app.namespaceLoading') : t('app.namespaceDefault') },
+              { value: "", label: nsLoading ? t("app.namespaceLoading") : t("app.namespaceDefault") },
               ...namespaces
                 .filter((n) => n.namespace)
                 .map((n) => ({
@@ -297,19 +251,19 @@ export default function App() {
         </div>
       </div>
       {!activeConn ? (
-        <div className="pad-msg big">{t('app.selectConnection')}</div>
+        <div className="pad-msg big">{t("app.selectConnection")}</div>
       ) : nsError ? (
         <div className="pad-msg big err">
-          {t('app.cannotConnect', { name: activeConn.name })}
+          {t("app.cannotConnect", { name: activeConn.name })}
           <div className="diff-hint">{nsError}</div>
           <div className="err-actions">
             <button className="btn btn-primary" onClick={() => setNsReload((x) => x + 1)}>
-              {t('common.retry')}
+              {t("common.retry")}
             </button>
             <button className="btn btn-ghost" onClick={() => setMode("connections")}>
-              {t('app.connectionManage')}
+              {t("app.connectionManage")}
             </button>
-            <CopyButton text={nsError} label={t('diff.copyError')} />
+            <CopyButton text={nsError} label={t("diff.copyError")} />
           </div>
         </div>
       ) : (
@@ -326,9 +280,7 @@ export default function App() {
             {navGroups.map((group, groupIndex) => (
               <div key={group.group} className="side-nav-group">
                 {groupIndex > 0 && <div className="side-nav-separator" />}
-                {!sidebarCollapsed && (
-                  <div className="side-nav-group-label">{group.label}</div>
-                )}
+                {!sidebarCollapsed && <div className="side-nav-group-label">{group.label}</div>}
                 {group.items.map((item) => (
                   <button
                     key={item.mode}
@@ -338,7 +290,7 @@ export default function App() {
                   >
                     <NavIcon mode={item.mode} />
                     <span className="side-label">{item.label}</span>
-                    {item.unavailable && <span className="nav-planned">{t('app.planned')}</span>}
+                    {item.unavailable && <span className="nav-planned">{t("app.planned")}</span>}
                   </button>
                 ))}
               </div>
@@ -348,7 +300,7 @@ export default function App() {
             <MessageCenter collapsed={sidebarCollapsed} />
             <button
               className="sidebar-toggle"
-              title={sidebarCollapsed ? t('app.expandSidebar') : t('app.collapseSidebar')}
+              title={sidebarCollapsed ? t("app.expandSidebar") : t("app.collapseSidebar")}
               onClick={() => setSidebarCollapsed((value) => !value)}
             >
               {sidebarCollapsed ? ">" : "<"}
@@ -357,49 +309,49 @@ export default function App() {
         </aside>
 
         <main className="workspace">
-        {mode === "connections" ? (
-          <ConnectionManager
-            embedded
-            onClose={() => setMode(connections.length ? "browse" : "connections")}
-            onChange={(conns) => setConnections(conns)}
-          />
-        ) : mode === "audit" ? (
-          <AuditView
-            connections={connections}
-            onNavigateToDiff={(params) => {
-              setDiffInitialParams(params);
-              setMode("diff");
-            }}
-          />
-        ) : mode === "history" ? (
-          <OperationHistoryView connections={connections} />
-        ) : mode === "backup" ? (
-          plannedPage(t('app.backup'), t('app.backupPlanned'))
-        ) : mode === "tasks" ? (
-          plannedPage(t('app.tasks'), t('app.tasksPlanned'))
-        ) : mode === "ssh" ? (
-          <SSHManagerView />
-        ) : mode === "settings" ? (
-          <SettingsView />
-        ) : connections.length === 0 ? (
-          <div className="pad-msg big">
-            {t('app.noConnection')}
-            <button className="btn btn-primary" onClick={() => setMode("connections")}>
-              {t('app.addConnection')}
-            </button>
-          </div>
-        ) : mode === "browse" ? (
-          browsePage
-        ) : mode === "diff" ? (
-          <DiffView
-            connections={connections}
-            onConnectionsChange={setConnections}
-            initialParams={diffInitialParams}
-            onInitialParamsConsumed={() => setDiffInitialParams(null)}
-          />
-        ) : mode === "about" ? (
-          <About embedded />
-        ) : null}
+          {mode === "connections" ? (
+            <ConnectionManager
+              embedded
+              onClose={() => setMode(connections.length ? "browse" : "connections")}
+              onChange={(conns) => setConnections(conns)}
+            />
+          ) : mode === "audit" ? (
+            <AuditView
+              connections={connections}
+              onNavigateToDiff={(params) => {
+                setDiffInitialParams(params);
+                setMode("diff");
+              }}
+            />
+          ) : mode === "history" ? (
+            <OperationHistoryView connections={connections} />
+          ) : mode === "backup" ? (
+            <BackupView />
+          ) : mode === "tasks" ? (
+            <TaskCenter />
+          ) : mode === "ssh" ? (
+            <SSHManagerView />
+          ) : mode === "settings" ? (
+            <SettingsView />
+          ) : connections.length === 0 ? (
+            <div className="pad-msg big">
+              {t("app.noConnection")}
+              <button className="btn btn-primary" onClick={() => setMode("connections")}>
+                {t("app.addConnection")}
+              </button>
+            </div>
+          ) : mode === "browse" ? (
+            browsePage
+          ) : mode === "diff" ? (
+            <DiffView
+              connections={connections}
+              onConnectionsChange={setConnections}
+              initialParams={diffInitialParams}
+              onInitialParamsConsumed={() => setDiffInitialParams(null)}
+            />
+          ) : mode === "about" ? (
+            <About embedded />
+          ) : null}
         </main>
       </div>
 

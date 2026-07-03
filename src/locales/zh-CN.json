@@ -10,7 +10,8 @@
     "edit": "编辑",
     "error": "错误",
     "success": "成功",
-    "copy": "复制"
+    "copy": "复制",
+    "copyError": "复制错误"
   },
   "app": {
     "title": "配置浏览",
@@ -463,7 +464,71 @@
     "time": "时间",
     "operator": "操作人",
     "content": "配置内容",
-    "error": "错误信息"
+    "error": "错误信息",
+    "result": "结果",
+    "loadFailed": "操作历史加载失败",
+    "sourceCount": "{count} 个来源",
+    "failedCount": "{count} 条失败",
+    "emptyHint": "发布、删除和回滚操作会出现在这里。",
+    "copyRecord": "复制记录",
+    "selectHint": "选择一条操作记录",
+    "selectHintDetail": "查看配置、来源、结果和错误详情。"
+  },
+  "backup": {
+    "pageSubtitle": "管理和浏览本地快照",
+    "snapshotCount": "共 {count} 个快照",
+    "totalConfigs": "{count} 个配置",
+    "refresh": "刷新",
+    "loadFailed": "加载失败",
+    "deleteFailed": "删除快照失败",
+    "deleted": "快照已删除",
+    "empty": "暂无本地备份",
+    "emptyHint": "在配置浏览或对比页面可以创建快照。",
+    "configCount": "{count} 个配置",
+    "delete": "删除快照",
+    "deleteConfirm": "确定要删除这个快照吗？此操作不可恢复。",
+    "copySnapshot": "复制快照信息",
+    "sourceConnection": "来源连接",
+    "namespace": "命名空间",
+    "createdAt": "创建时间",
+    "configTotal": "配置数量",
+    "configList": "配置列表"
+  },
+  "tasks": {
+    "pageSubtitle": "查看和管理后台任务",
+    "taskCount": "共 {count} 个任务",
+    "runningCount": "{count} 个运行中",
+    "failedCount": "{count} 个失败",
+    "clearCompleted": "清除已完成",
+    "empty": "暂无任务",
+    "emptyHint": "批量导出、备份和恢复任务会显示在这里。",
+    "cancelled": "任务已取消",
+    "deleted": "任务已删除",
+    "cleared": "已清除已完成任务",
+    "statusPending": "待执行",
+    "statusRunning": "运行中",
+    "statusSuccess": "成功",
+    "statusFailed": "失败",
+    "statusCancelled": "已取消",
+    "typeExport": "导出",
+    "typeBackup": "备份",
+    "typeApply": "应用",
+    "typeRestore": "恢复",
+    "elapsed": "耗时 {time}",
+    "startedAt": "开始于 {time}",
+    "failedItems": "{count} 失败",
+    "openDetail": "查看详情",
+    "copyTask": "复制任务信息",
+    "taskId": "任务 ID",
+    "type": "类型",
+    "status": "状态",
+    "progress": "进度",
+    "startTime": "开始时间",
+    "endTime": "结束时间",
+    "duration": "耗时",
+    "completedStat": "已完成: {count}",
+    "failedStat": "失败: {count}",
+    "totalStat": "总计: {count}"
   },
   "about": {
     "title": "关于",
@@ -501,4 +566,3 @@
     "close": "关闭"
   }
 }
-

@@ -454,3 +454,69 @@ func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
 	result.Message = "本地快照目录结构有效"
 	return result
 }
+
+// ── 快照管理 Wails 绑定 ──
+
+// CreateSnapshot 创建本地快照。
+func (a *App) CreateSnapshot(source provider.SnapshotSource, configs []provider.ConfigSnapshot) (*provider.Snapshot, error) {
+	// 获取快照存储目录
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+		return nil, fmt.Errorf("创建快照目录失败: %w", err)
+	}
+
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	return mgr.CreateSnapshot(source, configs)
+}
+
+// GetSnapshot 获取快照。
+func (a *App) GetSnapshot(id string) (*provider.Snapshot, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	return mgr.GetSnapshot(id)
+}
+
+// ListSnapshots 列出所有快照。
+func (a *App) ListSnapshots() ([]provider.Snapshot, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	return mgr.ListSnapshots()
+}
+
+// DeleteSnapshot 删除快照。
+func (a *App) DeleteSnapshot(id string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	return mgr.DeleteSnapshot(id)
+}
+
+// ValidateSnapshot 校验快照目录。
+func (a *App) ValidateSnapshot(path string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	return mgr.ValidateSnapshot(path)
+}

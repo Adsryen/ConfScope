@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../i18n";
 import { useTaskManager, useTaskList, type Task, type TaskStatus } from "../lib/taskmanager";
 import { toast } from "../lib/toast";
+import CopyButton from "./CopyButton";
 
 interface Props {
   onNavigateToTask?: (taskId: string) => void;
@@ -14,37 +15,42 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
   const tasks = useTaskList(manager);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
+  useEffect(() => {
+    if (selectedTask && tasks.some((task) => task.id === selectedTask.id)) return;
+    setSelectedTask(tasks[0] ?? null);
+  }, [selectedTask, tasks]);
+
   const handleCancel = useCallback(
     (taskId: string) => {
       manager.cancelTask(taskId);
-      toast.info("任务已取消");
+      toast(t("tasks.cancelled"), "info");
     },
-    [manager]
+    [manager, t]
   );
 
   const handleDelete = useCallback(
     (taskId: string) => {
       manager.deleteTask(taskId);
-      toast.success("任务已删除");
+      toast(t("tasks.deleted"), "success");
       if (selectedTask?.id === taskId) {
         setSelectedTask(null);
       }
     },
-    [manager, selectedTask]
+    [manager, selectedTask, t]
   );
 
   const handleClearCompleted = useCallback(() => {
     manager.clearCompleted();
-    toast.success("已清除已完成任务");
-  }, [manager]);
+    toast(t("tasks.cleared"), "success");
+  }, [manager, t]);
 
   const getStatusLabel = (status: TaskStatus): string => {
     const labels: Record<TaskStatus, string> = {
-      pending: "待执行",
-      running: "运行中",
-      success: "成功",
-      failed: "失败",
-      cancelled: "已取消",
+      pending: t("tasks.statusPending"),
+      running: t("tasks.statusRunning"),
+      success: t("tasks.statusSuccess"),
+      failed: t("tasks.statusFailed"),
+      cancelled: t("tasks.statusCancelled"),
     };
     return labels[status] || status;
   };
@@ -62,50 +68,61 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
 
   const getTypeLabel = (type: string): string => {
     const labels: Record<string, string> = {
-      export: "导出",
-      backup: "备份",
-      apply: "应用",
-      restore: "恢复",
+      export: t("tasks.typeExport"),
+      backup: t("tasks.typeBackup"),
+      apply: t("tasks.typeApply"),
+      restore: t("tasks.typeRestore"),
     };
     return labels[type] || type;
   };
 
-  const formatTime = (ms: number): string => {
+  const formatDuration = (ms: number): string => {
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
   };
 
   return (
-    <div className="task-center">
-      <div className="task-center-header">
-        <h2 className="task-center-title">任务中心</h2>
-        <div className="task-center-actions">
+    <div className="page-surface data-page task-center">
+      <div className="page-header">
+        <div>
+          <h3>{t("app.tasks")}</h3>
+          <div className="page-subtitle">{tasks.length > 0 ? t("tasks.taskCount", { count: tasks.length }) : t("tasks.pageSubtitle")}</div>
+        </div>
+        <div className="page-actions data-summary">
+          <span className="data-pill running">
+            {t("tasks.runningCount", { count: tasks.filter((task) => task.status === "running").length })}
+          </span>
+          <span className="data-pill danger">
+            {t("tasks.failedCount", { count: tasks.filter((task) => task.status === "failed").length })}
+          </span>
           <button
             className="btn btn-ghost btn-sm"
             onClick={handleClearCompleted}
             disabled={!tasks.some((t) => t.status !== "running" && t.status !== "pending")}
           >
-            清除已完成
+            {t("tasks.clearCompleted")}
           </button>
         </div>
       </div>
 
-      <div className="task-center-content">
-        <div className="task-list">
+      <div className="data-split task-center-content">
+        <div className="data-list task-list">
           {tasks.length === 0 ? (
-            <div className="pad-msg big">暂无任务</div>
+            <div className="data-empty-state">
+              <div>{t("tasks.empty")}</div>
+              <span>{t("tasks.emptyHint")}</span>
+            </div>
           ) : (
             tasks.map((task) => (
               <div
                 key={task.id}
-                className={`task-item ${selectedTask?.id === task.id ? "active" : ""}`}
+                className={`data-list-item task-item${selectedTask?.id === task.id ? " active" : ""}`}
                 onClick={() => setSelectedTask(task)}
               >
+                <span className={`data-item-accent ${task.status === "failed" ? "danger" : task.status}`} />
                 <div className="task-item-header">
-                  <span className={`task-status ${getStatusClass(task.status)}`}>
-                    {getStatusLabel(task.status)}
-                  </span>
+                  <span className={`task-status ${getStatusClass(task.status)}`}>{getStatusLabel(task.status)}</span>
                   <span className="task-type">{getTypeLabel(task.type)}</span>
                 </div>
                 <div className="task-item-name">{task.name}</div>
@@ -120,10 +137,10 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 <div className="task-item-meta">
                   <span className="task-time">
                     {task.endTime
-                      ? `耗时 ${formatTime(task.elapsedTime)}`
-                      : `开始于 ${new Date(task.startTime).toLocaleTimeString()}`}
+                      ? t("tasks.elapsed", { time: formatDuration(task.elapsedTime) })
+                      : t("tasks.startedAt", { time: new Date(task.startTime).toLocaleTimeString() })}
                   </span>
-                  {task.failed > 0 && <span className="task-failed">{task.failed} 失败</span>}
+                  {task.failed > 0 && <span className="task-failed">{t("tasks.failedItems", { count: task.failed })}</span>}
                 </div>
                 <div className="task-item-actions">
                   {(task.status === "running" || task.status === "pending") && (
@@ -134,7 +151,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                         handleCancel(task.id);
                       }}
                     >
-                      取消
+                      {t("common.cancel")}
                     </button>
                   )}
                   {task.status !== "running" && (
@@ -145,7 +162,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                         handleDelete(task.id);
                       }}
                     >
-                      删除
+                      {t("common.delete")}
                     </button>
                   )}
                 </div>
@@ -155,63 +172,60 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
         </div>
 
         {selectedTask && (
-          <div className="task-detail">
-            <div className="task-detail-header">
-              <h3 className="task-detail-title">{selectedTask.name}</h3>
+          <div className="data-detail task-detail">
+            <div className="data-detail-header task-detail-header">
+              <div>
+                <h3 className="data-detail-title task-detail-title">{selectedTask.name}</h3>
+                <div className="data-detail-subtitle">
+                  {getTypeLabel(selectedTask.type)} · {getStatusLabel(selectedTask.status)}
+                </div>
+              </div>
               <div className="task-detail-actions">
                 {onNavigateToTask && (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => onNavigateToTask(selectedTask.id)}
-                  >
-                    查看详情
+                  <button className="btn btn-ghost btn-sm" onClick={() => onNavigateToTask(selectedTask.id)}>
+                    {t("tasks.openDetail")}
                   </button>
                 )}
+                <CopyButton text={JSON.stringify(selectedTask, null, 2)} label={t("tasks.copyTask")} />
               </div>
             </div>
 
-            <div className="task-detail-info">
+            <div className="data-info-grid task-detail-info">
               <div className="info-row">
-                <span className="info-label">任务 ID:</span>
+                <span className="info-label">{t("tasks.taskId")}:</span>
                 <span className="info-value mono">{selectedTask.id}</span>
               </div>
               <div className="info-row">
-                <span className="info-label">类型:</span>
+                <span className="info-label">{t("tasks.type")}:</span>
                 <span className="info-value">{getTypeLabel(selectedTask.type)}</span>
               </div>
               <div className="info-row">
-                <span className="info-label">状态:</span>
-                <span className={`info-value ${getStatusClass(selectedTask.status)}`}>
-                  {getStatusLabel(selectedTask.status)}
-                </span>
+                <span className="info-label">{t("tasks.status")}:</span>
+                <span className={`info-value ${getStatusClass(selectedTask.status)}`}>{getStatusLabel(selectedTask.status)}</span>
               </div>
               <div className="info-row">
-                <span className="info-label">进度:</span>
+                <span className="info-label">{t("tasks.progress")}:</span>
                 <span className="info-value">{selectedTask.progress}%</span>
               </div>
               <div className="info-row">
-                <span className="info-label">开始时间:</span>
-                <span className="info-value">
-                  {new Date(selectedTask.startTime).toLocaleString()}
-                </span>
+                <span className="info-label">{t("tasks.startTime")}:</span>
+                <span className="info-value">{new Date(selectedTask.startTime).toLocaleString()}</span>
               </div>
               {selectedTask.endTime && (
                 <div className="info-row">
-                  <span className="info-label">结束时间:</span>
-                  <span className="info-value">
-                    {new Date(selectedTask.endTime).toLocaleString()}
-                  </span>
+                  <span className="info-label">{t("tasks.endTime")}:</span>
+                  <span className="info-value">{new Date(selectedTask.endTime).toLocaleString()}</span>
                 </div>
               )}
               {selectedTask.elapsedTime > 0 && (
                 <div className="info-row">
-                  <span className="info-label">耗时:</span>
-                  <span className="info-value">{formatTime(selectedTask.elapsedTime)}</span>
+                  <span className="info-label">{t("tasks.duration")}:</span>
+                  <span className="info-value">{formatDuration(selectedTask.elapsedTime)}</span>
                 </div>
               )}
               {selectedTask.error && (
                 <div className="info-row">
-                  <span className="info-label">错误:</span>
+                  <span className="info-label">{t("common.error")}:</span>
                   <span className="info-value error">{selectedTask.error}</span>
                 </div>
               )}
@@ -223,9 +237,9 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                   <div className="progress-fill" style={{ width: `${selectedTask.progress}%` }} />
                 </div>
                 <div className="progress-stats">
-                  <span>已完成: {selectedTask.completed}</span>
-                  <span>失败: {selectedTask.failed}</span>
-                  <span>总计: {selectedTask.total}</span>
+                  <span>{t("tasks.completedStat", { count: selectedTask.completed })}</span>
+                  <span>{t("tasks.failedStat", { count: selectedTask.failed })}</span>
+                  <span>{t("tasks.totalStat", { count: selectedTask.total })}</span>
                 </div>
               </div>
             )}

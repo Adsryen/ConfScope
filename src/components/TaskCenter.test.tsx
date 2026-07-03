@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import TaskCenter from "./TaskCenter";
 import { I18nProvider } from "../i18n";
 
@@ -22,6 +22,11 @@ describe("TaskCenter", () => {
   const renderWithI18n = (ui: React.ReactElement) => {
     return render(<I18nProvider>{ui}</I18nProvider>);
   };
+
+  beforeEach(() => {
+    cleanup();
+    localStorage.setItem("locale", "zh-CN");
+  });
 
   it("renders empty state when no tasks", () => {
     renderWithI18n(<TaskCenter />);
