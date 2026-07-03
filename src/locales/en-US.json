@@ -354,6 +354,7 @@
     "sourceConfig": "Compare Sources",
     "collapseSources": "Collapse Sources",
     "expandSources": "Expand Sources",
+    "pageSubtitle": "Deep compare differences between two config sources",
     "sourceCollapsedHint": "Collapsed. Expand to change connection, namespace, and dataId.",
     "sourceEntry": "Source",
     "environmentUnknown": "Ungrouped",
