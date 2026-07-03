@@ -22,6 +22,7 @@
     "connectionManage": "连接管理",
     "sshTunnels": "SSH 隧道",
     "audit": "配置矩阵",
+    "history": "操作历史",
     "backup": "备份快照",
     "tasks": "任务中心",
     "settings": "设置",
@@ -31,6 +32,7 @@
     "expandSidebar": "展开侧边栏",
     "planned": "规划中",
     "auditPlanned": "多环境一致性矩阵、忽略规则、名称归一化和批量差异审计。",
+    "historyPlanned": "配置变更追溯、操作记录、历史版本查看。",
     "backupPlanned": "云端配置导出、本地快照浏览、本地与云端配置对比。",
     "tasksPlanned": "批量审计、备份、恢复、导出等长任务进度。",
     "settingsPlanned": "全局代理、安全策略、更新检查和高级配置。",
@@ -74,7 +76,9 @@
     "httpsProxy": "HTTPS 代理",
     "noProxy": "不走代理",
     "proxyOnlyForUpdate": "代理仅用于应用更新检查（Nacos 连接不走代理）",
-    "settingsSaved": "设置已保存"
+    "settingsSaved": "设置已保存",
+    "dangerZone": "危险操作",
+    "clearHistoryHint": "清空所有本地操作记录，此操作不可恢复。"
   },
   "ssh": {
     "pageSubtitle": "统一管理可复用的 SSH 跳板机档案和引用关系。连接管理页只选择或引用这里的配置。",
@@ -435,6 +439,30 @@
     "exportJSON": "导出 JSON",
     "sanitizeToggle": "脱敏导出（替换 password/token/secretKey/accessKey）",
     "hideIgnored": "隐藏已忽略"
+  },
+  "operationHistory": {
+    "opPublish": "发布",
+    "opDelete": "删除",
+    "opRollback": "回滚",
+    "resultSuccess": "成功",
+    "resultFailure": "失败",
+    "allConnections": "全部连接",
+    "allTypes": "全部类型",
+    "operationType": "操作类型",
+    "dataIdPlaceholder": "输入 dataId 筛选",
+    "noRecords": "暂无操作记录",
+    "recordCount": "共 {count} 条记录",
+    "filters": "筛选",
+    "fetchFromCenter": "从配置中心拉取",
+    "clearLocal": "清空本地记录",
+    "confirmClear": "确定清空所有本地操作记录？",
+    "connection": "连接",
+    "namespace": "命名空间",
+    "group": "分组",
+    "time": "时间",
+    "operator": "操作人",
+    "content": "配置内容",
+    "error": "错误信息"
   },
   "about": {
     "title": "关于",

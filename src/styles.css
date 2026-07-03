@@ -2769,3 +2769,658 @@ select, button, .tab-btn { cursor: pointer; }
   background: var(--bg2);
   color: var(--text);
 }
+
+/* ── AuditView / 配置矩阵 ── */
+
+.audit-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+}
+
+/* 工具栏 */
+.audit-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.audit-project-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.audit-envs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.audit-env-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 200px;
+  flex: 1;
+}
+
+.audit-env-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.env-dev { background: rgba(76, 175, 80, 0.15); color: #81c784; }
+.env-test { background: rgba(33, 150, 243, 0.15); color: #64b5f6; }
+.env-staging { background: rgba(255, 152, 0, 0.15); color: #ffb74d; }
+.env-prod { background: rgba(244, 67, 54, 0.15); color: #e57373; }
+.env-other { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
+
+.audit-env-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.audit-add-env {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+/* 设置区域 */
+.audit-settings-toggle {
+  padding-top: 4px;
+}
+
+.audit-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.audit-settings-section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+/* 忽略规则列表 */
+.ignore-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ignore-rule-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.ignore-rule-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.ignore-rule-dataid,
+.ignore-rule-key {
+  padding: 1px 6px;
+  background: rgba(0, 122, 204, 0.15);
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.ignore-rule-reason {
+  color: var(--text-dim);
+}
+
+/* 操作按钮区 */
+.audit-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 导出区域 */
+.audit-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.audit-export-opt {
+  font-size: 12px;
+}
+
+/* 过滤栏 */
+.audit-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.audit-filter-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.audit-filter-opt {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.audit-filter-sort {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* 状态摘要 */
+.audit-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.audit-summary-total {
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.audit-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.audit-summary-item.ok { background: rgba(76, 175, 80, 0.12); color: #81c784; }
+.audit-summary-item.warn { background: rgba(255, 152, 0, 0.12); color: #ffb74d; }
+.audit-summary-item.err { background: rgba(244, 67, 54, 0.12); color: #e57373; }
+.audit-summary-item.missing { background: rgba(158, 158, 158, 0.12); color: #9e9e9e; }
+.audit-summary-item.dim { background: rgba(158, 158, 158, 0.08); color: #757575; }
+
+/* 矩阵表格 */
+.audit-matrix {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.audit-matrix-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg3);
+}
+
+.audit-matrix-header .audit-matrix-row {
+  border-bottom: 2px solid var(--border);
+}
+
+.audit-matrix-row {
+  display: flex;
+  min-width: fit-content;
+}
+
+.audit-matrix-body .audit-matrix-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.audit-matrix-body .audit-matrix-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.audit-matrix-body .audit-matrix-row:hover {
+  background: var(--bg-hover);
+}
+
+.audit-matrix-body .audit-matrix-row.selected {
+  background: rgba(0, 122, 204, 0.12);
+  border-color: rgba(0, 122, 204, 0.25);
+}
+
+.audit-cell {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.audit-cell:last-child {
+  border-right: none;
+}
+
+.audit-cell.key {
+  min-width: 240px;
+  max-width: 320px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.audit-cell.env {
+  min-width: 160px;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.audit-cell.env.baseline {
+  background: rgba(0, 122, 204, 0.08);
+}
+
+.audit-cell.value {
+  min-width: 160px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-cell.value.differ {
+  background: rgba(255, 152, 0, 0.08);
+  color: var(--text-hi);
+}
+
+.audit-cell.missing {
+  min-width: 160px;
+  flex: 1;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.audit-env-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* 状态标签 */
+.audit-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.audit-status-badge.ok { background: rgba(76, 175, 80, 0.15); color: #81c784; }
+.audit-status-badge.warn { background: rgba(255, 152, 0, 0.15); color: #ffb74d; }
+.audit-status-badge.err { background: rgba(244, 67, 54, 0.15); color: #e57373; }
+.audit-status-badge.missing { background: rgba(158, 158, 158, 0.15); color: #9e9e9e; }
+.audit-status-badge.dim { background: rgba(158, 158, 158, 0.1); color: #757575; }
+
+.audit-key-path {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.audit-dataid {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-key {
+  font-size: 13px;
+  color: var(--text-hi);
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.audit-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.audit-parse-err {
+  margin-left: 4px;
+  color: #e57373;
+}
+
+/* 详情面板 */
+.audit-detail {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.audit-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-detail-head strong {
+  font-size: 14px;
+  color: var(--text-hi);
+}
+
+.audit-detail-key {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-family: monospace;
+}
+
+.audit-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.audit-detail-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1px;
+  background: var(--border);
+}
+
+.audit-detail-env {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--bg2);
+}
+
+.audit-detail-env-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.audit-detail-value {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text);
+  overflow: auto;
+  max-height: 200px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── OperationHistoryView / 操作历史 ── */
+
+.history-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 筛选栏（一行内） */
+.history-filters {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.history-filter-select {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  min-width: 120px;
+}
+
+.history-filter-select:focus {
+  border-color: var(--accent);
+}
+
+.history-filter-input {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  flex: 1;
+  min-width: 150px;
+}
+
+.history-filter-input:focus {
+  border-color: var(--accent);
+}
+
+.history-filter-input::placeholder {
+  color: var(--text-dim);
+}
+
+.history-loading {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 操作列表 */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-item {
+  padding: 12px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.history-item:hover {
+  background: var(--bg-hover);
+}
+
+.history-item.selected {
+  background: rgba(0, 122, 204, 0.12);
+  border-color: rgba(0, 122, 204, 0.25);
+}
+
+.history-item-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history-type {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.history-type.publish { background: rgba(76, 175, 80, 0.15); color: #81c784; }
+.history-type.delete { background: rgba(244, 67, 54, 0.15); color: #e57373; }
+.history-type.rollback { background: rgba(255, 152, 0, 0.15); color: #ffb74d; }
+
+.history-result {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.history-result.success { color: #81c784; }
+.history-result.failure { color: #e57373; }
+
+.history-dataid {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-time {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.history-item-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.history-item-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.history-detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.history-detail-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.history-detail-content,
+.history-detail-error {
+  margin: 0;
+  padding: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  overflow: auto;
+  max-height: 150px;
+  white-space: pre-wrap;
+}
+
+.history-detail-error {
+  border-color: rgba(244, 67, 54, 0.35);
+  color: #e57373;
+}
+
+/* 设置页危险操作区 */
+.settings-danger-zone {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(244, 67, 54, 0.08);
+  border: 1px solid rgba(244, 67, 54, 0.25);
+  border-radius: 6px;
+}
+
+.settings-danger-zone h5 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e57373;
+}
+
+.btn-danger {
+  color: #e57373;
+  border-color: rgba(244, 67, 54, 0.35);
+}
+
+.btn-danger:hover {
+  background: rgba(244, 67, 54, 0.15);
+}
