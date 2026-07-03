@@ -21,12 +21,22 @@
 
 ## 🎨 界面预览
 
-<p align="center">
-  <img src=".github/assets/page-1.png" alt="ConfScope 界面预览" />
-</p>
+### 配置浏览
 
 <p align="center">
-  <em>多配置中心统一管理 · 智能对比 · 洞察差异</em>
+  <img src=".github/assets/配置浏览.png" alt="配置浏览" />
+</p>
+
+### 配置对比
+
+<p align="center">
+  <img src=".github/assets/配置对比.png" alt="配置对比" />
+</p>
+
+### 配置矩阵
+
+<p align="center">
+  <img src=".github/assets/配置矩阵.png" alt="配置矩阵" />
 </p>
 
 ## ✨ 核心特性
