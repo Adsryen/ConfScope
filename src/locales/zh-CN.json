@@ -303,7 +303,16 @@
     "deleteHint": "请输入 dataId 以确认：",
     "deleting": "删除中…",
     "contentPlaceholder": "在此输入配置内容…",
-    "configCreated": "配置已创建"
+    "configCreated": "配置已创建",
+    "exportCurrentList": "导出当前列表",
+    "exportedCurrentList": "已导出配置列表",
+    "createSnapshot": "创建快照",
+    "creatingSnapshot": "创建中…",
+    "snapshotTaskName": "创建快照：{name} / {namespace}",
+    "snapshotCreated": "快照已创建：{name}",
+    "snapshotCreateFailed": "创建快照失败",
+    "snapshotNoConfigs": "当前列表没有可保存的配置内容",
+    "snapshotPartialFailed": "{count} 个配置保存失败"
   },
   "diff": {
     "title": "智能配置对比",
@@ -492,7 +501,11 @@
     "namespace": "命名空间",
     "createdAt": "创建时间",
     "configTotal": "配置数量",
-    "configList": "配置列表"
+    "configList": "配置列表",
+    "compareWithCloud": "与云端对比",
+    "compareUnavailable": "无法打开快照对比",
+    "sourceConnectionMissing": "快照来源连接不存在，请先恢复或重新创建对应连接。",
+    "snapshotPathMissing": "快照缺少本地路径，无法作为本地来源对比。"
   },
   "tasks": {
     "pageSubtitle": "查看和管理后台任务",

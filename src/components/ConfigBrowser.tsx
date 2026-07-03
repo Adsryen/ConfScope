@@ -7,6 +7,8 @@ import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
+import { createSnapshotFromConfigs } from "../api/snapshot";
+import { useTaskManager } from "../lib/taskmanager";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -52,6 +54,7 @@ function InlineError({ message, onRetry }: InlineErrorProps) {
 /** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
 export default function ConfigBrowser({ conn, tenant }: Props) {
   const { t } = useTranslation();
+  const taskManager = useTaskManager();
   const [search, setSearch] = useState("");
   const [appliedTerm, setAppliedTerm] = useState(""); // 已生效的搜索词（翻页时复用）
   const [items, setItems] = useState<ConfigItem[]>([]);
@@ -75,6 +78,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [snapshotSaving, setSnapshotSaving] = useState(false);
   // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
@@ -254,6 +258,68 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     fetchList(appliedTerm, pageNo);
   };
 
+  const createSnapshot = async () => {
+    if (items.length === 0 || snapshotSaving) return;
+    const namespace = tenant || "public";
+    const taskName = t("config.snapshotTaskName", { name: conn.name || connectionDisplayLabel(conn), namespace });
+    const task = taskManager.createTask(taskName, "backup");
+    taskManager.startTask(task.id);
+    setSnapshotSaving(true);
+
+    let completed = 0;
+    let failed = 0;
+    let lastError = "";
+    const configs: {
+      dataId: string;
+      group: string;
+      content: string;
+      configType: string;
+      updateTime: string;
+    }[] = [];
+
+    try {
+      for (const item of items) {
+        try {
+          const itemContent = await getConfig(conn, tenant, item.dataId, item.group);
+          configs.push({
+            dataId: item.dataId,
+            group: item.group,
+            content: itemContent,
+            configType: item.configType,
+            updateTime: "",
+          });
+          completed += 1;
+        } catch (e) {
+          failed += 1;
+          lastError = String(e);
+        }
+        taskManager.updateProgress(task.id, completed, failed, items.length);
+      }
+
+      if (configs.length === 0) {
+        throw new Error(lastError || t("config.snapshotNoConfigs"));
+      }
+
+      const snapshot = await createSnapshotFromConfigs(conn.id, conn.name || connectionDisplayLabel(conn), namespace, tenant, configs);
+      const partialError = failed > 0 ? t("config.snapshotPartialFailed", { count: failed }) : "";
+      taskManager.completeTask(task.id, failed === 0, partialError);
+      toast(t("config.snapshotCreated", { name: snapshot.name || snapshot.id }), failed > 0 ? "info" : "success");
+    } catch (e) {
+      const message = String(e);
+      taskManager.completeTask(task.id, false, message);
+      reportError({
+        title: t("config.snapshotCreateFailed"),
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: t("common.retry"),
+        onAction: () => createSnapshot(),
+      });
+    } finally {
+      setSnapshotSaving(false);
+    }
+  };
+
   return (
     <div className="browser">
       <div className="browser-list">
@@ -291,7 +357,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           {items.length > 0 && (
             <button
               className="btn btn-ghost btn-sm"
-              title="导出当前列表"
+              title={t("config.exportCurrentList")}
               onClick={() => {
                 const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
                 exportConfigs(
@@ -306,10 +372,15 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                   })),
                   opts
                 );
-                toast("已导出配置列表", "success");
+                toast(t("config.exportedCurrentList"), "success");
               }}
             >
               ↓
+            </button>
+          )}
+          {items.length > 0 && (
+            <button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading}>
+              {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
             </button>
           )}
         </div>

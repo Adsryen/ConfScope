@@ -9,12 +9,17 @@ import type { Connection } from "../store/connections";
 import ConfigBrowser from "./ConfigBrowser";
 import ErrorDialog from "./ErrorDialog";
 import MessageCenter from "./MessageCenter";
+import { getTaskManager } from "../lib/taskmanager";
 
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
   getConfig: vi.fn(),
   publishConfig: vi.fn(),
   deleteConfig: vi.fn(),
+}));
+
+const snapshotMocks = vi.hoisted(() => ({
+  createSnapshotFromConfigs: vi.fn(),
 }));
 
 vi.mock("../api/nacos", async () => {
@@ -25,6 +30,14 @@ vi.mock("../api/nacos", async () => {
     getConfig: apiMocks.getConfig,
     publishConfig: apiMocks.publishConfig,
     deleteConfig: apiMocks.deleteConfig,
+  };
+});
+
+vi.mock("../api/snapshot", async () => {
+  const actual = await vi.importActual<typeof import("../api/snapshot")>("../api/snapshot");
+  return {
+    ...actual,
+    createSnapshotFromConfigs: snapshotMocks.createSnapshotFromConfigs,
   };
 });
 
@@ -61,6 +74,16 @@ function renderBrowser() {
   );
 }
 
+function clearTasks() {
+  const manager = getTaskManager();
+  for (const task of manager.listTasks()) {
+    if (task.status === "running" || task.status === "pending") {
+      manager.cancelTask(task.id);
+    }
+    manager.deleteTask(task.id);
+  }
+}
+
 async function expectCodeContains(...parts: string[]) {
   await waitFor(() => {
     const code = document.querySelector(".code-area");
@@ -80,10 +103,27 @@ describe("ConfigBrowser", () => {
     apiMocks.getConfig.mockReset();
     apiMocks.publishConfig.mockReset();
     apiMocks.deleteConfig.mockReset();
+    snapshotMocks.createSnapshotFromConfigs.mockReset();
+    clearTasks();
     apiMocks.listConfigs.mockResolvedValue(configPage());
     apiMocks.getConfig.mockResolvedValue('{"server":{"port":8080}}');
     apiMocks.publishConfig.mockResolvedValue(undefined);
     apiMocks.deleteConfig.mockResolvedValue(undefined);
+    snapshotMocks.createSnapshotFromConfigs.mockResolvedValue({
+      id: "snap-1",
+      path: "C:\\Users\\tester\\.confscope\\backups\\snap-1",
+      name: "dev_public_20260101",
+      description: "",
+      createdAt: "2026-01-01T10:00:00Z",
+      updatedAt: "2026-01-01T10:00:00Z",
+      source: {
+        connectionId: "dev",
+        connectionName: "dev",
+        namespace: "public",
+        namespaceId: "public",
+      },
+      configs: [],
+    });
   });
 
   it("loads the config list and opens a selected config", async () => {
@@ -127,9 +167,7 @@ describe("ConfigBrowser", () => {
   });
 
   it("publishes edited content and reloads the selected config", async () => {
-    apiMocks.getConfig.mockResolvedValueOnce('{"server":{"port":8080}}').mockResolvedValueOnce(
-      '{"server":{"port":9090}}'
-    );
+    apiMocks.getConfig.mockResolvedValueOnce('{"server":{"port":8080}}').mockResolvedValueOnce('{"server":{"port":9090}}');
     renderBrowser();
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
@@ -141,14 +179,7 @@ describe("ConfigBrowser", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
 
     await waitFor(() => {
-      expect(apiMocks.publishConfig).toHaveBeenCalledWith(
-        conn,
-        "public",
-        "app.json",
-        "DEFAULT_GROUP",
-        '{"server":{"port":9090}}',
-        "json"
-      );
+      expect(apiMocks.publishConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP", '{"server":{"port":9090}}', "json");
     });
     await expectCodeContains('"server"', '"port"', "9090");
   });
@@ -210,5 +241,51 @@ describe("ConfigBrowser", () => {
     });
     expect(copyText).toHaveBeenCalledWith("Error: read config failed: EOF");
   });
-});
 
+  it("creates a snapshot from the current config page and records a backup task", async () => {
+    const items = [
+      { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+      { dataId: "db.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+    ];
+    apiMocks.listConfigs.mockResolvedValue(configPage(items));
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) =>
+      dataId === "app.json" ? '{"port":8080}' : "url: jdbc"
+    );
+
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
+
+    await waitFor(() => {
+      expect(snapshotMocks.createSnapshotFromConfigs).toHaveBeenCalledWith("dev", "dev", "public", "public", [
+        {
+          dataId: "app.json",
+          group: "DEFAULT_GROUP",
+          content: '{"port":8080}',
+          configType: "json",
+          updateTime: "",
+        },
+        {
+          dataId: "db.yaml",
+          group: "DEFAULT_GROUP",
+          content: "url: jdbc",
+          configType: "yaml",
+          updateTime: "",
+        },
+      ]);
+    });
+
+    const tasks = getTaskManager().listTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      name: "创建快照：dev / public",
+      type: "backup",
+      status: "success",
+      completed: 2,
+      failed: 0,
+      progress: 100,
+      total: 2,
+    });
+  });
+});

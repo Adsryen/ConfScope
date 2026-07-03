@@ -303,7 +303,16 @@
     "deleteHint": "Please enter the dataId to confirm:",
     "deleting": "Deleting…",
     "contentPlaceholder": "Enter configuration content here…",
-    "configCreated": "Configuration created"
+    "configCreated": "Configuration created",
+    "exportCurrentList": "Export current list",
+    "exportedCurrentList": "Config list exported",
+    "createSnapshot": "Create Snapshot",
+    "creatingSnapshot": "Creating…",
+    "snapshotTaskName": "Create snapshot: {name} / {namespace}",
+    "snapshotCreated": "Snapshot created: {name}",
+    "snapshotCreateFailed": "Failed to create snapshot",
+    "snapshotNoConfigs": "No config content can be saved from the current list",
+    "snapshotPartialFailed": "{count} configs failed to save"
   },
   "diff": {
     "title": "Smart Config Compare",
@@ -492,7 +501,11 @@
     "namespace": "Namespace",
     "createdAt": "Created at",
     "configTotal": "Config count",
-    "configList": "Config list"
+    "configList": "Config list",
+    "compareWithCloud": "Compare with cloud",
+    "compareUnavailable": "Cannot open snapshot compare",
+    "sourceConnectionMissing": "The source connection for this snapshot no longer exists. Restore or recreate it first.",
+    "snapshotPathMissing": "Snapshot local path is missing, so it cannot be used as a local compare source."
   },
   "tasks": {
     "pageSubtitle": "View and manage background tasks",

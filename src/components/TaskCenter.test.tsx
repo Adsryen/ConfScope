@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import TaskCenter from "./TaskCenter";
 import { I18nProvider } from "../i18n";
+import { getTaskManager } from "../lib/taskmanager";
 
 // 模拟 taskmanager
 vi.mock("../lib/taskmanager", async (importOriginal) => {
@@ -12,11 +13,18 @@ vi.mock("../lib/taskmanager", async (importOriginal) => {
 
 // 模拟 toast
 vi.mock("../lib/toast", () => ({
-  toast: {
-    success: vi.fn(),
-    info: vi.fn(),
-  },
+  toast: vi.fn(),
 }));
+
+function clearTasks() {
+  const manager = getTaskManager();
+  for (const task of manager.listTasks()) {
+    if (task.status === "running" || task.status === "pending") {
+      manager.cancelTask(task.id);
+    }
+    manager.deleteTask(task.id);
+  }
+}
 
 describe("TaskCenter", () => {
   const renderWithI18n = (ui: React.ReactElement) => {
@@ -26,6 +34,7 @@ describe("TaskCenter", () => {
   beforeEach(() => {
     cleanup();
     localStorage.setItem("locale", "zh-CN");
+    clearTasks();
   });
 
   it("renders empty state when no tasks", () => {
@@ -42,5 +51,19 @@ describe("TaskCenter", () => {
     expect(titles.length).toBeGreaterThan(0);
     const clearButtons = screen.getAllByText("清除已完成");
     expect(clearButtons.length).toBeGreaterThan(0);
+  });
+
+  it("shows tasks created outside TaskCenter", async () => {
+    renderWithI18n(<TaskCenter />);
+
+    await act(async () => {
+      const manager = getTaskManager();
+      const task = manager.createTask("外部快照任务", "backup");
+      manager.startTask(task.id);
+      manager.updateProgress(task.id, 1, 0, 2);
+    });
+
+    expect(await screen.findAllByText("外部快照任务")).toHaveLength(2);
+    expect(screen.getAllByText("50%").length).toBeGreaterThan(0);
   });
 });

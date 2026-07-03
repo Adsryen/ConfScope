@@ -1,39 +1,41 @@
-// @vitest-environment jsdom
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import BackupView from "./BackupView";
 import { I18nProvider } from "../i18n";
+import type { Snapshot } from "../api/snapshot";
 
-// 模拟 API
 vi.mock("../api/snapshot", () => ({
   listSnapshots: vi.fn(),
   deleteSnapshot: vi.fn(),
 }));
 
-// 模拟工具库
 vi.mock("../lib/snapshot", () => ({
-  getSnapshotStats: vi.fn(() => ({ totalConfigs: 2, totalGroups: 1, totalNamespaces: 1, latestUpdateTime: null })),
-  formatSnapshotName: vi.fn((snap) => snap.name),
-  formatTime: vi.fn((t) => t),
+  getSnapshotStats: vi.fn((snap: Snapshot) => ({
+    totalConfigs: snap.configs.length,
+    totalGroups: 1,
+    totalNamespaces: 1,
+    latestUpdateTime: null,
+  })),
+  formatSnapshotName: vi.fn((snap: Snapshot) => snap.name),
+  formatTime: vi.fn((time: string) => time),
 }));
 
-// 模拟错误中心
 vi.mock("../lib/errorCenter", () => ({
   reportError: vi.fn(),
 }));
 
-// 模拟 toast
 vi.mock("../lib/toast", () => ({
-  toast: {
-    success: vi.fn(),
-    info: vi.fn(),
-  },
+  toast: vi.fn(),
 }));
 
 describe("BackupView", () => {
-  const mockSnapshots = [
+  const mockSnapshots: Snapshot[] = [
     {
       id: "snap-1",
+      path: "C:\\Users\\tester\\.confscope\\backups\\snap-1",
       name: "dev-nacos_public_20240101",
       description: "",
       createdAt: "2024-01-01T10:00:00Z",
@@ -61,11 +63,10 @@ describe("BackupView", () => {
   };
 
   beforeEach(async () => {
-    cleanup();
     localStorage.setItem("locale", "zh-CN");
     vi.clearAllMocks();
     const { listSnapshots } = await import("../api/snapshot");
-    (listSnapshots as any).mockResolvedValue(mockSnapshots);
+    vi.mocked(listSnapshots).mockResolvedValue(mockSnapshots);
   });
 
   it("renders loading state", () => {
@@ -85,7 +86,7 @@ describe("BackupView", () => {
 
   it("shows empty state when no snapshots", async () => {
     const { listSnapshots } = await import("../api/snapshot");
-    (listSnapshots as any).mockResolvedValue([]);
+    vi.mocked(listSnapshots).mockResolvedValue([]);
 
     renderWithI18n(<BackupView />);
     await waitFor(() => {
@@ -111,11 +112,31 @@ describe("BackupView", () => {
 
   it("shows error state on load failure", async () => {
     const { listSnapshots } = await import("../api/snapshot");
-    (listSnapshots as any).mockRejectedValue(new Error("网络错误"));
+    vi.mocked(listSnapshots).mockRejectedValue(new Error("网络错误"));
 
     renderWithI18n(<BackupView />);
     await waitFor(() => {
       expect(screen.getByText("加载失败")).toBeDefined();
+    });
+  });
+
+  it("navigates a snapshot config to DiffView with local snapshot metadata", async () => {
+    const onNavigateToDiff = vi.fn();
+
+    renderWithI18n(<BackupView onNavigateToDiff={onNavigateToDiff} />);
+
+    const configList = await screen.findByText("配置列表");
+    const detail = configList.closest(".backup-detail") as HTMLElement;
+    fireEvent.click(within(detail).getByRole("button", { name: "与云端对比" }));
+
+    expect(onNavigateToDiff).toHaveBeenCalledWith({
+      snapshot: mockSnapshots[0],
+      config: mockSnapshots[0].configs[0],
+      sourceConnectionId: "conn-1",
+      sourceConnectionName: "dev-nacos",
+      namespace: "",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
     });
   });
 });

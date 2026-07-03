@@ -1,7 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
-import { createTaskManager } from "./taskmanager";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { createTaskManager, getTaskManager } from "./taskmanager";
+
+function clearSharedTasks() {
+  const manager = getTaskManager();
+  for (const task of manager.listTasks()) {
+    if (task.status === "running" || task.status === "pending") {
+      manager.cancelTask(task.id);
+    }
+    manager.deleteTask(task.id);
+  }
+}
 
 describe("createTaskManager", () => {
+  beforeEach(() => {
+    clearSharedTasks();
+  });
+
   it("creates a task", () => {
     const manager = createTaskManager();
     const task = manager.createTask("导出配置", "export");
@@ -145,5 +159,38 @@ describe("createTaskManager", () => {
     unsubscribe();
     manager.cancelTask(task.id);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the same shared manager across callers", () => {
+    const first = getTaskManager();
+    const second = getTaskManager();
+
+    const task = first.createTask("共享备份任务", "backup");
+
+    expect(second.getTask(task.id)?.name).toBe("共享备份任务");
+  });
+
+  it("notifies list subscribers after deleting and clearing tasks", () => {
+    const manager = createTaskManager();
+    const listener = vi.fn();
+    const unsubscribe = manager.onTaskUpdate(listener);
+    const task = manager.createTask("可删除任务", "export");
+
+    manager.deleteTask(task.id);
+
+    expect(manager.listTasks()).toHaveLength(0);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    const done = manager.createTask("已完成任务", "backup");
+    manager.startTask(done.id);
+    manager.completeTask(done.id, true);
+    listener.mockClear();
+
+    manager.clearCompleted();
+
+    expect(manager.listTasks()).toHaveLength(0);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
   });
 });

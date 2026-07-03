@@ -1,5 +1,5 @@
 // 前端任务管理器
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /** 任务状态 */
 export type TaskStatus = "pending" | "running" | "success" | "failed" | "cancelled";
@@ -37,7 +37,7 @@ export interface TaskManager {
   /** 开始任务 */
   startTask: (id: string) => void;
   /** 更新进度 */
-  updateProgress: (id: string, completed: number, failed: number) => void;
+  updateProgress: (id: string, completed: number, failed: number, total?: number) => void;
   /** 完成任务 */
   completeTask: (id: string, success: boolean, error?: string) => void;
   /** 取消任务 */
@@ -97,10 +97,10 @@ export function createTaskManager(): TaskManager {
       }
     },
 
-    updateProgress: (id, completed, failed) => {
+    updateProgress: (id, completed, failed, totalOverride) => {
       const task = tasks.get(id);
       if (task) {
-        const total = task.total > 0 ? task.total : completed + failed;
+        const total = totalOverride ?? (task.total > 0 ? task.total : completed + failed);
         const progress = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
         const updated = { ...task, completed, failed, progress, total };
         tasks = new Map(tasks).set(id, updated);
@@ -148,17 +148,22 @@ export function createTaskManager(): TaskManager {
         const newTasks = new Map(tasks);
         newTasks.delete(id);
         tasks = newTasks;
+        notify(task);
       }
     },
 
     clearCompleted: () => {
       const newTasks = new Map<string, Task>();
+      let removed: Task | null = null;
       tasks.forEach((task, id) => {
         if (task.status === "running" || task.status === "pending") {
           newTasks.set(id, task);
+        } else if (!removed) {
+          removed = task;
         }
       });
       tasks = newTasks;
+      if (removed) notify(removed);
     },
 
     onTaskUpdate: (callback) => {
@@ -170,13 +175,19 @@ export function createTaskManager(): TaskManager {
   };
 }
 
+let sharedTaskManager: TaskManager | null = null;
+
+/** 获取全局任务管理器。 */
+export function getTaskManager(): TaskManager {
+  if (!sharedTaskManager) {
+    sharedTaskManager = createTaskManager();
+  }
+  return sharedTaskManager;
+}
+
 /** 使用任务管理器的 Hook */
 export function useTaskManager(): TaskManager {
-  const managerRef = useRef<TaskManager | null>(null);
-  if (!managerRef.current) {
-    managerRef.current = createTaskManager();
-  }
-  return managerRef.current;
+  return getTaskManager();
 }
 
 /** 使用任务列表的 Hook */

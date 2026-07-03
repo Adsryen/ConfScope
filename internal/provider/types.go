@@ -151,6 +151,7 @@ type ConfigSnapshot struct {
 // Snapshot 快照。
 type Snapshot struct {
 	ID          string           `json:"id"`
+	Path        string           `json:"path"`
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
 	CreatedAt   string           `json:"createdAt"`
