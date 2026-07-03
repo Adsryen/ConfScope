@@ -32,6 +32,7 @@ func (m *snapshotManager) CreateSnapshot(source SnapshotSource, configs []Config
 
 	// 创建目录
 	snapshotDir := filepath.Join(m.baseDir, snapshot.ID)
+	snapshot.Path = snapshotDir
 	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
 		return nil, fmt.Errorf("创建快照目录失败: %w", err)
 	}
@@ -63,10 +64,11 @@ func (m *snapshotManager) GetSnapshot(id string) (*Snapshot, error) {
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return nil, fmt.Errorf("解析元信息失败: %w", err)
 	}
+	snapshot.Path = snapshotDir
 
 	// 读取配置内容
 	for i, cfg := range snapshot.Configs {
-		contentPath := filepath.Join(snapshotDir, "configs", cfg.Group, cfg.DataID)
+		contentPath := filepath.Join(snapshotDir, "configs", snapshotNamespaceDir(snapshot.Source), cfg.Group, cfg.DataID)
 		content, err := os.ReadFile(contentPath)
 		if err != nil {
 			continue
@@ -126,7 +128,7 @@ func (m *snapshotManager) saveConfigs(snapshot *Snapshot) error {
 	}
 
 	for _, cfg := range snapshot.Configs {
-		groupDir := filepath.Join(configsDir, cfg.Group)
+		groupDir := filepath.Join(configsDir, snapshotNamespaceDir(snapshot.Source), cfg.Group)
 		if err := os.MkdirAll(groupDir, 0755); err != nil {
 			return err
 		}
@@ -137,6 +139,17 @@ func (m *snapshotManager) saveConfigs(snapshot *Snapshot) error {
 	}
 
 	return nil
+}
+
+func snapshotNamespaceDir(source SnapshotSource) string {
+	namespace := source.NamespaceID
+	if namespace == "" {
+		namespace = source.Namespace
+	}
+	if namespace == "" {
+		return "public"
+	}
+	return namespace
 }
 
 // ValidateSnapshot 校验快照目录结构。

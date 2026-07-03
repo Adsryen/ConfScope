@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Connection, connectionDisplayLabel, loadConnections } from "./store/connections";
 import { listNamespaces, Namespace } from "./api/nacos";
 import { useTranslation } from "./i18n";
@@ -13,7 +13,7 @@ import SettingsView from "./components/SettingsView";
 import SSHManagerView from "./components/SSHManagerView";
 import ErrorDialog from "./components/ErrorDialog";
 import MessageCenter from "./components/MessageCenter";
-import BackupView from "./components/BackupView";
+import BackupView, { type BackupDiffJumpParams } from "./components/BackupView";
 import TaskCenter from "./components/TaskCenter";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
@@ -21,6 +21,7 @@ import { loadSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
 import OperationHistoryView from "./components/OperationHistoryView";
 import type { DiffJumpParams } from "./components/AuditView";
+import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/snapshotConnection";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
@@ -81,12 +82,17 @@ export default function App() {
     : "browse";
   const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
+  const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（AuditView → DiffView）
   const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
+  const diffConnections = useMemo(
+    () => [...connections, ...runtimeSnapshotConnections.filter((conn) => !connections.some((item) => item.id === conn.id))],
+    [connections, runtimeSnapshotConnections]
+  );
 
   // 记住上次的连接与模式
   useEffect(() => {
@@ -215,6 +221,39 @@ export default function App() {
     },
   ];
 
+  const navigateBackupToDiff = (params: BackupDiffJumpParams) => {
+    const sourceConnection = connections.find((conn) => conn.id === params.sourceConnectionId);
+    if (!sourceConnection) {
+      reportError({
+        title: t("backup.compareUnavailable"),
+        source: params.sourceConnectionName,
+        message: t("backup.sourceConnectionMissing"),
+        detail: JSON.stringify(params.snapshot, null, 2),
+      });
+      return;
+    }
+    if (!params.snapshot.path) {
+      reportError({
+        title: t("backup.compareUnavailable"),
+        source: params.snapshot.name || params.snapshot.id,
+        message: t("backup.snapshotPathMissing"),
+        detail: JSON.stringify(params.snapshot, null, 2),
+      });
+      return;
+    }
+
+    const snapshotConnection = buildSnapshotConnection(params.snapshot, sourceConnection);
+    setRuntimeSnapshotConnections((current) => mergeSnapshotRuntimeConnection(current, snapshotConnection));
+    setDiffInitialParams({
+      leftConnId: snapshotConnection.id,
+      rightConnId: params.sourceConnectionId,
+      namespace: params.namespace,
+      group: params.group,
+      dataId: params.dataId,
+    });
+    setMode("diff");
+  };
+
   const browsePage = (
     <div className="page-surface browse-page">
       <div className="page-header browse-header">
@@ -326,7 +365,7 @@ export default function App() {
           ) : mode === "history" ? (
             <OperationHistoryView connections={connections} />
           ) : mode === "backup" ? (
-            <BackupView />
+            <BackupView onNavigateToDiff={navigateBackupToDiff} />
           ) : mode === "tasks" ? (
             <TaskCenter />
           ) : mode === "ssh" ? (
@@ -344,7 +383,7 @@ export default function App() {
             browsePage
           ) : mode === "diff" ? (
             <DiffView
-              connections={connections}
+              connections={diffConnections}
               onConnectionsChange={setConnections}
               initialParams={diffInitialParams}
               onInitialParamsConsumed={() => setDiffInitialParams(null)}

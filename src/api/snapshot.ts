@@ -21,6 +21,7 @@ export interface ConfigSnapshot {
 /** 本地快照。 */
 export interface Snapshot {
   id: string;
+  path: string;
   name: string;
   description: string;
   createdAt: string;

@@ -1,18 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../i18n";
-import { listSnapshots, deleteSnapshot, type Snapshot } from "../api/snapshot";
+import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
 import { getSnapshotStats, formatSnapshotName, formatTime } from "../lib/snapshot";
+import { snapshotNamespaceForDiff } from "../lib/snapshotConnection";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 
+export interface BackupDiffJumpParams {
+  snapshot: Snapshot;
+  config: ConfigSnapshot;
+  sourceConnectionId: string;
+  sourceConnectionName: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+}
+
 interface Props {
-  onNavigateToDiff?: (params: { leftConnId: string; rightConnId: string; namespace: string; group: string; dataId: string }) => void;
+  onNavigateToDiff?: (params: BackupDiffJumpParams) => void;
 }
 
 /** 备份管理视图：展示本地快照列表，支持查看、删除、对比。 */
-export default function BackupView({ onNavigateToDiff: _onNavigateToDiff }: Props) {
+export default function BackupView({ onNavigateToDiff }: Props) {
   const { t } = useTranslation();
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(false);
@@ -59,6 +70,18 @@ export default function BackupView({ onNavigateToDiff: _onNavigateToDiff }: Prop
   );
 
   const selectedStats = selectedSnapshot ? getSnapshotStats(selectedSnapshot) : null;
+  const jumpToDiff = (snapshot: Snapshot, config: ConfigSnapshot) => {
+    if (!onNavigateToDiff) return;
+    onNavigateToDiff({
+      snapshot,
+      config,
+      sourceConnectionId: snapshot.source.connectionId,
+      sourceConnectionName: snapshot.source.connectionName,
+      namespace: snapshotNamespaceForDiff(snapshot),
+      group: config.group || "DEFAULT_GROUP",
+      dataId: config.dataId,
+    });
+  };
 
   return (
     <div className="page-surface data-page backup-view">
@@ -173,9 +196,21 @@ export default function BackupView({ onNavigateToDiff: _onNavigateToDiff }: Prop
                 <div className="backup-configs-list">
                   {selectedSnapshot.configs.map((cfg) => (
                     <div key={`${cfg.group}/${cfg.dataId}`} className="backup-config-item">
-                      <span className="backup-config-dataid">{cfg.dataId}</span>
-                      <span className="backup-config-group">{cfg.group}</span>
-                      <span className="backup-config-type">{cfg.configType}</span>
+                      <div className="backup-config-main">
+                        <span className="backup-config-dataid">{cfg.dataId}</span>
+                        <span className="backup-config-group">{cfg.group}</span>
+                        <span className="backup-config-type">{cfg.configType}</span>
+                      </div>
+                      {onNavigateToDiff && (
+                        <button
+                          className="btn btn-ghost btn-sm backup-config-compare"
+                          onClick={() => jumpToDiff(selectedSnapshot, cfg)}
+                          disabled={!selectedSnapshot.path}
+                          title={selectedSnapshot.path ? t("backup.compareWithCloud") : t("backup.snapshotPathMissing")}
+                        >
+                          {t("backup.compareWithCloud")}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

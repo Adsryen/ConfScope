@@ -1109,8 +1109,17 @@ button,
 .browser-search {
   display: flex;
   gap: 6px;
+  align-items: center;
   padding: 10px;
   border-bottom: 1px solid var(--border);
+}
+
+.browser-search .search-input {
+  min-width: 0;
+}
+
+.snapshot-action-btn {
+  flex-shrink: 0;
 }
 .browser-count {
   padding: 6px 12px;
@@ -4297,11 +4306,20 @@ button,
   display: flex;
   gap: 12px;
   align-items: center;
+  justify-content: space-between;
   padding: 6px 8px;
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 12px;
+}
+
+.backup-config-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
 }
 
 .backup-config-dataid {
@@ -4315,6 +4333,10 @@ button,
 
 .backup-config-type {
   color: var(--accent);
+}
+
+.backup-config-compare {
+  flex-shrink: 0;
 }
 
 /* ── TaskCenter 任务中心 ── */

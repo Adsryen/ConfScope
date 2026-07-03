@@ -10,6 +10,7 @@ import type { Snapshot } from "../api/snapshot";
 describe("snapshot", () => {
   const sampleSnapshot: Snapshot = {
     id: "snap_123",
+    path: "C:\\Users\\tester\\.confscope\\backups\\snap_123",
     name: "dev-nacos_public_20240101_100000",
     description: "",
     createdAt: "2024-01-01T10:00:00Z",
