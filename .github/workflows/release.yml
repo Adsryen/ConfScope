@@ -55,6 +55,7 @@ jobs:
         run: pnpm install
 
       - name: Build
+        shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           wails build -clean -ldflags "-X main.appVersion=${VERSION}"
