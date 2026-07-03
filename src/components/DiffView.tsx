@@ -918,21 +918,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
 
   return (
     <div className="diff-view">
-      <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
-        <div className="diff-source-toolbar">
-          <div className="diff-source-toolbar-title">
-            <span className="diff-source-heading">{t("diff.sourceConfig")}</span>
-            {sourcesCollapsed && <span className="diff-source-hint">{t("diff.sourceCollapsedHint")}</span>}
-          </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => setSourcesCollapsed((value) => !value)}
-          >
-            {sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
-          </button>
+      {/* 页面头部 */}
+      <div className="page-header diff-header">
+        <div>
+          <h3>{t("app.diff")}</h3>
+          <div className="page-subtitle">{t("diff.pageSubtitle")}</div>
         </div>
-        <div className="diff-project-row">
+        <div className="page-actions">
           <label className="diff-project-select">
             <span>{t("connection.project")}</span>
             <Select
@@ -942,7 +934,17 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               onChange={changeProject}
             />
           </label>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setSourcesCollapsed((value) => !value)}
+          >
+            {sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+          </button>
         </div>
+      </div>
+
+      <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
         <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
           <div className="diff-source-summary-card">
             <span className="diff-source-summary-title">{t("diff.sourceA")}</span>

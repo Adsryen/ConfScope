@@ -354,6 +354,7 @@
     "sourceConfig": "对比来源",
     "collapseSources": "收起来源",
     "expandSources": "展开来源",
+    "pageSubtitle": "深度对比两个配置来源的差异",
     "sourceCollapsedHint": "已收起，展开后可调整连接、命名空间和 dataId",
     "sourceEntry": "来源",
     "environmentUnknown": "未分组",
