@@ -6,6 +6,7 @@ import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
+import { exportConfigs, type ExportFormat, type ConfigExportOptions } from "../lib/export";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -293,6 +294,27 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           >
             ＋
           </button>
+          {items.length > 0 && (
+            <button
+              className="btn btn-ghost btn-sm"
+              title="导出当前列表"
+              onClick={() => {
+                const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
+                exportConfigs(items.map(it => ({
+                  dataId: it.dataId,
+                  group: it.group,
+                  content: it.content,
+                  configType: it.configType,
+                  namespace: tenant,
+                  namespaceId: tenant,
+                  updateTime: "",
+                })), opts);
+                toast.success("已导出配置列表");
+              }}
+            >
+              ↓
+            </button>
+          )}
         </div>
         <div className="browser-count">{t('config.total', { count: total })}</div>
         <div className="browser-items">

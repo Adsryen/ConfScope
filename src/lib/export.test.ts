@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { exportAuditCSV, exportAuditJSON } from "./export";
 import type { AuditRow } from "./audit";
 import type { EnvSource } from "../components/AuditView";
@@ -126,5 +127,139 @@ describe("exportAuditJSON", () => {
     expect(result.metadata.exportedAt).toBeTruthy();
     // 验证是合法的 ISO 时间
     expect(new Date(result.metadata.exportedAt).toISOString()).toBe(result.metadata.exportedAt);
+  });
+});
+
+// ── 通用配置导出测试 ──
+
+import { exportConfigs, exportDiff } from "./export";
+import type { ConfigItem, DiffItem, ConfigExportOptions, ExportFormat } from "./export";
+
+/** 模拟 Blob */
+class MockBlob {
+  parts: unknown[];
+  options?: unknown;
+  constructor(parts: unknown[], options?: unknown) {
+    this.parts = parts;
+    this.options = options;
+  }
+}
+globalThis.Blob = MockBlob as any;
+
+/** 模拟 URL.createObjectURL */
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
+let lastBlobUrl = "";
+
+beforeEach(() => {
+  lastBlobUrl = "";
+  URL.createObjectURL = vi.fn(() => {
+    lastBlobUrl = "blob:mock-url";
+    return lastBlobUrl;
+  });
+  URL.revokeObjectURL = vi.fn();
+  vi.spyOn(document.body, "appendChild").mockImplementation(() => null as any);
+  vi.spyOn(document.body, "removeChild").mockImplementation(() => null as any);
+});
+
+afterEach(() => {
+  URL.createObjectURL = originalCreateObjectURL;
+  URL.revokeObjectURL = originalRevokeObjectURL;
+  vi.restoreAllMocks();
+});
+
+describe("exportConfigs", () => {
+  const sampleConfigs: ConfigItem[] = [
+    {
+      dataId: "app.yaml",
+      group: "DEFAULT_GROUP",
+      content: "server:\n  port: 8080",
+      configType: "yaml",
+      namespace: "dev",
+      namespaceId: "",
+      updateTime: "2024-01-01 10:00:00",
+    },
+    {
+      dataId: "db.properties",
+      group: "DEFAULT_GROUP",
+      content: "db.url=jdbc:mysql://localhost:3306/test",
+      configType: "properties",
+      namespace: "dev",
+      namespaceId: "",
+      updateTime: "2024-01-02 12:00:00",
+    },
+  ];
+
+  it("CSV 格式导出不抛错", () => {
+    const opts: ConfigExportOptions = { format: "csv", sensitive: false, includeMeta: false };
+    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("JSON 格式导出不抛错", () => {
+    const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
+    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("YAML 格式导出不抛错", () => {
+    const opts: ConfigExportOptions = { format: "yaml", sensitive: false, includeMeta: true };
+    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+  });
+
+  it("Properties 格式导出不抛错", () => {
+    const opts: ConfigExportOptions = { format: "properties", sensitive: false, includeMeta: false };
+    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+  });
+
+  it("Diff 格式导出不抛错", () => {
+    const opts: ConfigExportOptions = { format: "diff", sensitive: false, includeMeta: false };
+    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+  });
+
+  it("不支持的格式抛出错误", () => {
+    const opts = { format: "unknown" as ExportFormat, sensitive: false, includeMeta: false };
+    expect(() => exportConfigs(sampleConfigs, opts)).toThrow("不支持的导出格式");
+  });
+
+  it("空配置列表也能正常导出", () => {
+    const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: false };
+    expect(() => exportConfigs([], opts)).not.toThrow();
+  });
+});
+
+describe("exportDiff", () => {
+  const sampleDiffs: DiffItem[] = [
+    {
+      dataId: "app.yaml",
+      group: "DEFAULT_GROUP",
+      namespace: "dev",
+      leftValue: "port: 8080",
+      rightValue: "port: 9090",
+      diffType: "modified",
+    },
+    {
+      dataId: "new.yaml",
+      group: "DEFAULT_GROUP",
+      namespace: "dev",
+      leftValue: "",
+      rightValue: "key: value",
+      diffType: "added",
+    },
+  ];
+
+  it("text 格式导出不抛错", () => {
+    expect(() => exportDiff(sampleDiffs, "text")).not.toThrow();
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("JSON 格式导出不抛错", () => {
+    expect(() => exportDiff(sampleDiffs, "json")).not.toThrow();
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("空差异列表也能正常导出", () => {
+    expect(() => exportDiff([], "text")).not.toThrow();
+    expect(() => exportDiff([], "json")).not.toThrow();
   });
 });
