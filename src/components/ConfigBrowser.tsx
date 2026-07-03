@@ -6,7 +6,7 @@ import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
-import { exportConfigs, type ExportFormat, type ConfigExportOptions } from "../lib/export";
+import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -138,9 +138,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   // 键盘上下键在列表中移动选中(从搜索框或列表触发)
   const moveSelection = (delta: number) => {
     if (!items.length) return;
-    const idx = items.findIndex(
-      (it) => selected && it.dataId === selected.dataId && it.group === selected.group
-    );
+    const idx = items.findIndex((it) => selected && it.dataId === selected.dataId && it.group === selected.group);
     const next = idx < 0 ? (delta > 0 ? 0 : items.length - 1) : idx + delta;
     const it = items[Math.min(Math.max(next, 0), items.length - 1)];
     if (it) guardNav(() => openConfig(it));
@@ -217,7 +215,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     try {
       await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
       setEditing(false);
-      toast(t('config.published'));
+      toast(t("config.published"));
       await openConfig(selected); // 重新拉取最新内容
     } catch (e) {
       const message = String(e);
@@ -252,7 +250,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setShowDelete(false);
     setSelected(null);
     setContent("");
-    toast(t('config.deleted'));
+    toast(t("config.deleted"));
     fetchList(appliedTerm, pageNo);
   };
 
@@ -262,7 +260,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         <div className="browser-search">
           <input
             className="search-input wide"
-            placeholder={t('config.searchPlaceholder')}
+            placeholder={t("config.searchPlaceholder")}
             value={search}
             autoCapitalize="off"
             autoCorrect="off"
@@ -282,16 +280,12 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => fetchList(appliedTerm, pageNo)}
-            title={t('config.refresh')}
+            title={t("config.refresh")}
             disabled={listLoading}
           >
             ⟳
           </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowNew(true)}
-            title={t('config.newConfig')}
-          >
+          <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)} title={t("config.newConfig")}>
             ＋
           </button>
           {items.length > 0 && (
@@ -300,29 +294,30 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               title="导出当前列表"
               onClick={() => {
                 const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
-                exportConfigs(items.map(it => ({
-                  dataId: it.dataId,
-                  group: it.group,
-                  content: it.content,
-                  configType: it.configType,
-                  namespace: tenant,
-                  namespaceId: tenant,
-                  updateTime: "",
-                })), opts);
-                toast.success("已导出配置列表");
+                exportConfigs(
+                  items.map((it) => ({
+                    dataId: it.dataId,
+                    group: it.group,
+                    content: it.content,
+                    configType: it.configType,
+                    namespace: tenant,
+                    namespaceId: tenant,
+                    updateTime: "",
+                  })),
+                  opts
+                );
+                toast("已导出配置列表", "success");
               }}
             >
               ↓
             </button>
           )}
         </div>
-        <div className="browser-count">{t('config.total', { count: total })}</div>
+        <div className="browser-count">{t("config.total", { count: total })}</div>
         <div className="browser-items">
-          {listLoading && <div className="pad-msg">{t('config.loading')}</div>}
+          {listLoading && <div className="pad-msg">{t("config.loading")}</div>}
           {listError && <InlineError message={listError} onRetry={() => fetchList(appliedTerm, pageNo)} />}
-          {!listLoading && !listError && items.length === 0 && (
-            <div className="pad-msg">{t('config.empty')}</div>
-          )}
+          {!listLoading && !listError && items.length === 0 && <div className="pad-msg">{t("config.empty")}</div>}
           {items.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
             return (
@@ -342,53 +337,40 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             );
           })}
         </div>
-        <Pager
-          page={pageNo}
-          pages={pages}
-          loading={listLoading}
-          onPage={(p) => fetchList(appliedTerm, p)}
-        />
+        <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p)} />
       </div>
 
       <div className="browser-detail">
         {!selected ? (
-          <div className="pad-msg big">{t('config.selectHint')}</div>
+          <div className="pad-msg big">{t("config.selectHint")}</div>
         ) : (
           <>
             <div className="detail-header">
               <div className="detail-title">
                 <span className="detail-dataid mono">{selected.dataId}</span>
                 <span className="detail-group">
-                  {t('config.group')}: {selected.group}
+                  {t("config.group")}: {selected.group}
                   {selected.configType ? ` · ${selected.configType}` : ""}
                 </span>
               </div>
               <div className="detail-tabs">
-                <button
-                  className={`tab-btn${tab === "content" ? " active" : ""}`}
-                  onClick={() => setTab("content")}
-                >
-                  {t('config.content')}
+                <button className={`tab-btn${tab === "content" ? " active" : ""}`} onClick={() => setTab("content")}>
+                  {t("config.content")}
                 </button>
-                <button
-                  className={`tab-btn${tab === "history" ? " active" : ""}`}
-                  onClick={() => setTab("history")}
-                >
-                  {t('config.history')}
+                <button className={`tab-btn${tab === "history" ? " active" : ""}`} onClick={() => setTab("history")}>
+                  {t("config.history")}
                 </button>
               </div>
             </div>
 
             {tab === "content" ? (
               <div className="content-box">
-                {contentLoading && <div className="pad-msg">{t('config.loading')}</div>}
-                {contentError && selected && (
-                  <InlineError message={contentError} onRetry={() => openConfig(selected)} />
-                )}
+                {contentLoading && <div className="pad-msg">{t("config.loading")}</div>}
+                {contentError && selected && <InlineError message={contentError} onRetry={() => openConfig(selected)} />}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
-                      <span className="fmt-label">{t('config.editFormat')}</span>
+                      <span className="fmt-label">{t("config.editFormat")}</span>
                       <Select
                         className="fmt-select"
                         value={fmt}
@@ -404,10 +386,10 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                           setSaveError(null);
                         }}
                       >
-                        {t('common.cancel')}
+                        {t("common.cancel")}
                       </button>
                       <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>
-                        {saving ? t('config.publishing') : t('config.savePublish')}
+                        {saving ? t("config.publishing") : t("config.savePublish")}
                       </button>
                     </div>
                     <div className="editor-host grow">
@@ -418,7 +400,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 {!contentLoading && !contentError && !editing && (
                   <>
                     <div className="fmt-bar">
-                      <span className="fmt-label">{t('config.format')}</span>
+                      <span className="fmt-label">{t("config.format")}</span>
                       <Select
                         className="fmt-select"
                         value={fmt}
@@ -428,26 +410,18 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => selected && openConfig(selected)}
-                        title={t('config.refreshContent')}
+                        title={t("config.refreshContent")}
                         disabled={contentLoading}
                       >
                         ⟳
                       </button>
                       <CopyButton text={content} />
                       <span className="fmt-spacer" />
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={startEdit}
-                        disabled={contentLoading}
-                      >
-                        {t('common.edit')}
+                      <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
+                        {t("common.edit")}
                       </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setShowDelete(true)}
-                        disabled={contentLoading}
-                      >
-                        {t('common.delete')}
+                      <button className="btn btn-ghost btn-sm" onClick={() => setShowDelete(true)} disabled={contentLoading}>
+                        {t("common.delete")}
                       </button>
                     </div>
                     <CodeView code={content} format={fmt} />
@@ -484,20 +458,15 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       )}
 
       {showDelete && selected && (
-        <DeleteConfirm
-          name={selected.dataId}
-          group={selected.group}
-          onCancel={() => setShowDelete(false)}
-          onConfirm={doDelete}
-        />
+        <DeleteConfirm name={selected.dataId} group={selected.group} onCancel={() => setShowDelete(false)} onConfirm={doDelete} />
       )}
 
       {pending && (
         <ConfirmModal
-          title={t('config.discardConfirm')}
-          message={t('config.discardMessage')}
-          confirmLabel={t('config.discardAndSwitch')}
-          cancelLabel={t('config.stayCurrent')}
+          title={t("config.discardConfirm")}
+          message={t("config.discardMessage")}
+          confirmLabel={t("config.discardAndSwitch")}
+          cancelLabel={t("config.stayCurrent")}
           danger
           onConfirm={() => {
             const act = pending;
@@ -510,11 +479,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       )}
 
       {validateErrs.length > 0 && (
-        <AlertModal
-          title={t('config.validateFailed')}
-          messages={validateErrs}
-          onClose={() => setValidateErrs([])}
-        />
+        <AlertModal title={t("config.validateFailed")} messages={validateErrs} onClose={() => setValidateErrs([])} />
       )}
     </div>
   );

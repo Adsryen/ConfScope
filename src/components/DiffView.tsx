@@ -184,9 +184,7 @@ function sourceOptionLabel(conn: Connection): string {
 }
 
 function chooseDefaultConnection(connections: Connection[], environment?: string): Connection | undefined {
-  const candidates = environment
-    ? connections.filter((conn) => connectionEnvironmentName(conn) === environment)
-    : connections;
+  const candidates = environment ? connections.filter((conn) => connectionEnvironmentName(conn) === environment) : connections;
   return candidates.find((conn) => conn.isDefaultSource) ?? candidates[0] ?? connections[0];
 }
 
@@ -306,7 +304,7 @@ function SourcePicker({
 
   const namespaceItems = namespaces
     .filter((item) => item.namespace)
-    .sort((a, b) => sortNamespaces ? compareText(a.namespaceShowName || a.namespace, b.namespaceShowName || b.namespace) : 0);
+    .sort((a, b) => (sortNamespaces ? compareText(a.namespaceShowName || a.namespace, b.namespaceShowName || b.namespace) : 0));
   const namespaceOptions = [
     { value: "", label: t("app.namespaceDefault") },
     ...namespaceItems.map((item) => ({ value: item.namespace, label: item.namespaceShowName || item.namespace })),
@@ -388,12 +386,7 @@ function SourcePicker({
               {t("diff.namespaceLoadFailed")}: {nsError}
             </span>
             <div className="field-error-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={nsLoading}
-                onClick={() => setNsReload((value) => value + 1)}
-              >
+              <button type="button" className="btn btn-ghost btn-sm" disabled={nsLoading} onClick={() => setNsReload((value) => value + 1)}>
                 {t("diff.retryNamespaces")}
               </button>
               <CopyButton text={`${t("diff.namespaceLoadFailed")}: ${nsError}`} label={t("diff.copyError")} />
@@ -404,9 +397,7 @@ function SourcePicker({
 
       <div className="field-row">
         <label className="field">
-          <span>
-            dataId {cfgLoading ? `(${t("common.loading")})` : `(${configs.length})`}
-          </span>
+          <span>dataId {cfgLoading ? `(${t("common.loading")})` : `(${configs.length})`}</span>
           <Combobox
             value={source.dataId}
             placeholder={t("diff.dataIdPlaceholder")}
@@ -478,7 +469,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     () => [...uniqueValues(connections.map((item) => connectionProjectName(item)))].sort((a, b) => compareText(a, b)),
     [connections]
   );
-  const activeProject = projectNames.includes(selectedProject) ? selectedProject : projectNames[0] ?? "";
+  const activeProject = projectNames.includes(selectedProject) ? selectedProject : (projectNames[0] ?? "");
   const projectConnections = useMemo(
     () => connections.filter((item) => connectionProjectName(item) === activeProject),
     [connections, activeProject]
@@ -810,7 +801,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         if (item.status === "fulfilled") {
           results.push(item.value);
         } else {
-          failedItems.push({ dataId: chunk[j].dataId, error: errorText(item.reason), leftGroup: chunk[j].leftGroup, rightGroup: chunk[j].rightGroup });
+          failedItems.push({
+            dataId: chunk[j].dataId,
+            error: errorText(item.reason),
+            leftGroup: chunk[j].leftGroup,
+            rightGroup: chunk[j].rightGroup,
+          });
         }
       }
     }
@@ -928,18 +924,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         <div className="page-actions">
           <label className="diff-project-select">
             <span>{t("connection.project")}</span>
-            <Select
-              className="wide"
-              value={activeProject}
-              options={projectOptions}
-              onChange={changeProject}
-            />
+            <Select className="wide" value={activeProject} options={projectOptions} onChange={changeProject} />
           </label>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setSourcesCollapsed((value) => !value)}
-          >
+          <button type="button" className="btn btn-ghost" onClick={() => setSourcesCollapsed((value) => !value)}>
             {sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
           </button>
         </div>
@@ -1015,7 +1002,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           </button>
         )}
         {notice && (
-          <div className={`diff-loadok${(leftFailed || rightFailed) ? " warn" : ""}`}>
+          <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>
             <span>{notice}</span>
             {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
           </div>
@@ -1023,7 +1010,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         {error && (
           <div className="diff-loaderr">
             <span>{error}</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={retryCurrentCompare} disabled={loading || matchLoading || batchLoading}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={retryCurrentCompare}
+              disabled={loading || matchLoading || batchLoading}
+            >
               {t("diff.retryCompare")}
             </button>
             <CopyButton text={error} label={t("diff.copyError")} />
@@ -1039,9 +1031,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <input type="checkbox" checked={selectedIds.size === matchResults.length} onChange={toggleAll} />
                 {t("diff.selectAll")}
               </label>
-              <span className="match-count">
-                {t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}
-              </span>
+              <span className="match-count">{t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}</span>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1057,7 +1047,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <label className="match-item" key={item.dataId}>
                   <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
                   <span className="match-dataid">{item.dataId}</span>
-                  <span className="match-group">{item.leftGroup === item.rightGroup ? item.leftGroup : `${item.leftGroup} / ${item.rightGroup}`}</span>
+                  <span className="match-group">
+                    {item.leftGroup === item.rightGroup ? item.leftGroup : `${item.leftGroup} / ${item.rightGroup}`}
+                  </span>
                 </label>
               ))}
             </div>
@@ -1108,24 +1100,20 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               <span className="batch-diff-count">已生成 {batchResults.length} 个文件对比</span>
               <span className="fmt-spacer" />
               <label className="diff-toggle">
-                <input
-                  type="checkbox"
-                  checked={batchAllOnlyChanges}
-                  onChange={(e) => toggleBatchOnlyChanges(e.target.checked)}
-                />
+                <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
                 全部仅显示变更
               </label>
               <button
                 className="btn btn-ghost btn-sm"
                 title="导出差异"
                 onClick={() => {
-                  const diffs: DiffItem[] = batchResults.map(item => ({
+                  const diffs: DiffItem[] = batchResults.map((item) => ({
                     dataId: item.dataId,
                     group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
-                    namespace: sourceLeft?.tenant || "",
+                    namespace: left.tenant || "",
                     leftValue: item.leftText,
                     rightValue: item.rightText,
-                    diffType: item.leftText === item.rightText ? "modified" as const : "modified" as const,
+                    diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
                   }));
                   exportDiff(diffs, "json");
                 }}
@@ -1173,6 +1161,3 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     </div>
   );
 }
-
-
-

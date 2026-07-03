@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createTaskManager, type Task } from "./taskmanager";
+import { createTaskManager } from "./taskmanager";
 
 describe("createTaskManager", () => {
   it("creates a task", () => {

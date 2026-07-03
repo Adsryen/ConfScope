@@ -1,5 +1,4 @@
-// Package snapshot 提供本地快照存储和管理功能。
-package snapshot
+package provider
 
 import (
 	"encoding/json"
@@ -9,52 +8,24 @@ import (
 	"time"
 )
 
-// Snapshot 表示一个快照。
-type Snapshot struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-	Source      SnapshotSource    `json:"source"`
-	Configs     []ConfigSnapshot  `json:"configs"`
-}
-
-// SnapshotSource 表示快照来源。
-type SnapshotSource struct {
-	ConnectionID   string `json:"connectionId"`
-	ConnectionName string `json:"connectionName"`
-	Namespace      string `json:"namespace"`
-	NamespaceID    string `json:"namespaceId"`
-}
-
-// ConfigSnapshot 表示单个配置快照。
-type ConfigSnapshot struct {
-	DataID     string `json:"dataId"`
-	Group      string `json:"group"`
-	Content    string `json:"content"`
-	ConfigType string `json:"configType"`
-	UpdateTime string `json:"updateTime"`
-}
-
-// SnapshotManager 管理本地快照。
-type SnapshotManager struct {
+// snapshotManager 实现 SnapshotManager 接口。
+type snapshotManager struct {
 	baseDir string
 }
 
 // NewSnapshotManager 创建快照管理器。
-func NewSnapshotManager(baseDir string) *SnapshotManager {
-	return &SnapshotManager{baseDir: baseDir}
+func NewSnapshotManager(baseDir string) SnapshotManager {
+	return &snapshotManager{baseDir: baseDir}
 }
 
 // CreateSnapshot 创建新快照。
-func (m *SnapshotManager) CreateSnapshot(source SnapshotSource, configs []ConfigSnapshot) (*Snapshot, error) {
+func (m *snapshotManager) CreateSnapshot(source SnapshotSource, configs []ConfigSnapshot) (*Snapshot, error) {
 	now := time.Now()
 	snapshot := &Snapshot{
 		ID:        fmt.Sprintf("snap_%d", now.UnixMilli()),
 		Name:      fmt.Sprintf("%s_%s_%s", source.ConnectionName, source.Namespace, now.Format("20060102_150405")),
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: now.Format(time.RFC3339),
+		UpdatedAt: now.Format(time.RFC3339),
 		Source:    source,
 		Configs:   configs,
 	}
@@ -79,7 +50,7 @@ func (m *SnapshotManager) CreateSnapshot(source SnapshotSource, configs []Config
 }
 
 // GetSnapshot 获取快照。
-func (m *SnapshotManager) GetSnapshot(id string) (*Snapshot, error) {
+func (m *snapshotManager) GetSnapshot(id string) (*Snapshot, error) {
 	snapshotDir := filepath.Join(m.baseDir, id)
 	metaPath := filepath.Join(snapshotDir, "metadata.json")
 
@@ -107,7 +78,7 @@ func (m *SnapshotManager) GetSnapshot(id string) (*Snapshot, error) {
 }
 
 // ListSnapshots 列出所有快照。
-func (m *SnapshotManager) ListSnapshots() ([]Snapshot, error) {
+func (m *snapshotManager) ListSnapshots() ([]Snapshot, error) {
 	entries, err := os.ReadDir(m.baseDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -132,13 +103,13 @@ func (m *SnapshotManager) ListSnapshots() ([]Snapshot, error) {
 }
 
 // DeleteSnapshot 删除快照。
-func (m *SnapshotManager) DeleteSnapshot(id string) error {
+func (m *snapshotManager) DeleteSnapshot(id string) error {
 	snapshotDir := filepath.Join(m.baseDir, id)
 	return os.RemoveAll(snapshotDir)
 }
 
 // saveMetadata 保存元信息。
-func (m *SnapshotManager) saveMetadata(snapshot *Snapshot) error {
+func (m *snapshotManager) saveMetadata(snapshot *Snapshot) error {
 	metaPath := filepath.Join(m.baseDir, snapshot.ID, "metadata.json")
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -148,7 +119,7 @@ func (m *SnapshotManager) saveMetadata(snapshot *Snapshot) error {
 }
 
 // saveConfigs 保存配置内容。
-func (m *SnapshotManager) saveConfigs(snapshot *Snapshot) error {
+func (m *snapshotManager) saveConfigs(snapshot *Snapshot) error {
 	configsDir := filepath.Join(m.baseDir, snapshot.ID, "configs")
 	if err := os.MkdirAll(configsDir, 0755); err != nil {
 		return err
@@ -169,7 +140,7 @@ func (m *SnapshotManager) saveConfigs(snapshot *Snapshot) error {
 }
 
 // ValidateSnapshot 校验快照目录结构。
-func (m *SnapshotManager) ValidateSnapshot(path string) error {
+func (m *snapshotManager) ValidateSnapshot(path string) error {
 	// 检查 metadata.json
 	metaPath := filepath.Join(path, "metadata.json")
 	if _, err := os.Stat(metaPath); err != nil {

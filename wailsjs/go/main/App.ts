@@ -78,6 +78,12 @@ type GoApp = {
   StopSSHTunnel(connectionId: string): Promise<void>;
   StopAllSSHTunnels(): Promise<void>;
   GetSSHTunnelLocalPort(connectionId: string): Promise<number>;
+  // 快照管理
+  CreateSnapshot(source: any, configs: any[]): Promise<any>;
+  GetSnapshot(id: string): Promise<any>;
+  ListSnapshots(): Promise<any[]>;
+  DeleteSnapshot(id: string): Promise<void>;
+  ValidateSnapshot(path: string): Promise<void>;
 };
 
 declare global {
@@ -218,5 +224,21 @@ export const StopAllSSHTunnels = () =>
 
 export const GetSSHTunnelLocalPort = (connectionId: string) =>
   app().GetSSHTunnelLocalPort(connectionId);
+
+// 快照管理
+export const CreateSnapshot = (source: any, configs: any[]) =>
+  app().CreateSnapshot(source, configs);
+
+export const GetSnapshot = (id: string) =>
+  app().GetSnapshot(id);
+
+export const ListSnapshots = () =>
+  app().ListSnapshots();
+
+export const DeleteSnapshot = (id: string) =>
+  app().DeleteSnapshot(id);
+
+export const ValidateSnapshot = (path: string) =>
+  app().ValidateSnapshot(path);
 
 export {};

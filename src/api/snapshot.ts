@@ -1,32 +1,47 @@
 // 快照 API 封装
-import {
-  CreateSnapshot,
-  GetSnapshot,
-  ListSnapshots,
-  DeleteSnapshot,
-  ValidateSnapshot,
-} from "../../wailsjs/go/main/App";
-import type { SnapshotSource, ConfigSnapshot, Snapshot } from "../../wailsjs/go/main/App";
+import { CreateSnapshot, GetSnapshot, ListSnapshots, DeleteSnapshot, ValidateSnapshot } from "../../wailsjs/go/main/App";
 
-// 快照来源
-export type { SnapshotSource, ConfigSnapshot, Snapshot };
+/** 快照来源。 */
+export interface SnapshotSource {
+  connectionId: string;
+  connectionName: string;
+  namespace: string;
+  namespaceId: string;
+}
+
+/** 快照中的单个配置。 */
+export interface ConfigSnapshot {
+  dataId: string;
+  group: string;
+  content: string;
+  configType: string;
+  updateTime: string;
+}
+
+/** 本地快照。 */
+export interface Snapshot {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  source: SnapshotSource;
+  configs: ConfigSnapshot[];
+}
 
 // 创建快照
-export async function createSnapshot(
-  source: SnapshotSource,
-  configs: ConfigSnapshot[]
-): Promise<Snapshot> {
-  return CreateSnapshot(source, configs);
+export async function createSnapshot(source: SnapshotSource, configs: ConfigSnapshot[]): Promise<Snapshot> {
+  return CreateSnapshot(source, configs) as Promise<Snapshot>;
 }
 
 // 获取快照
 export async function getSnapshot(id: string): Promise<Snapshot> {
-  return GetSnapshot(id);
+  return GetSnapshot(id) as Promise<Snapshot>;
 }
 
 // 列出所有快照
 export async function listSnapshots(): Promise<Snapshot[]> {
-  return ListSnapshots();
+  return ListSnapshots() as Promise<Snapshot[]>;
 }
 
 // 删除快照

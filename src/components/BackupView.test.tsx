@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import BackupView from "./BackupView";
 import { I18nProvider } from "../i18n";
 
@@ -61,19 +61,22 @@ describe("BackupView", () => {
   };
 
   beforeEach(async () => {
+    cleanup();
+    localStorage.setItem("locale", "zh-CN");
+    vi.clearAllMocks();
     const { listSnapshots } = await import("../api/snapshot");
     (listSnapshots as any).mockResolvedValue(mockSnapshots);
   });
 
   it("renders loading state", () => {
     renderWithI18n(<BackupView />);
-    expect(screen.getByText("加载中...")).toBeDefined();
+    expect(screen.getByText("加载中…")).toBeDefined();
   });
 
   it("renders snapshots list after loading", async () => {
     renderWithI18n(<BackupView />);
     await waitFor(() => {
-      expect(screen.queryByText("加载中...")).toBeNull();
+      expect(screen.queryByText("加载中…")).toBeNull();
     });
     // 快照名称出现在列表和详情中
     const nameElements = screen.getAllByText("dev-nacos_public_20240101");
@@ -93,7 +96,7 @@ describe("BackupView", () => {
   it("shows snapshot detail when clicked", async () => {
     renderWithI18n(<BackupView />);
     await waitFor(() => {
-      expect(screen.queryByText("加载中...")).toBeNull();
+      expect(screen.queryByText("加载中…")).toBeNull();
     });
 
     // 点击第一个快照项
