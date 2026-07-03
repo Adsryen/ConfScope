@@ -13,6 +13,7 @@ import {
 } from "../store/connections";
 import { loadSettings } from "../store/settings";
 import { useTranslation } from "../i18n";
+import { exportDiff, type DiffItem } from "../lib/export";
 import Combobox from "./Combobox";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -1114,6 +1115,23 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 />
                 全部仅显示变更
               </label>
+              <button
+                className="btn btn-ghost btn-sm"
+                title="导出差异"
+                onClick={() => {
+                  const diffs: DiffItem[] = batchResults.map(item => ({
+                    dataId: item.dataId,
+                    group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
+                    namespace: sourceLeft?.tenant || "",
+                    leftValue: item.leftText,
+                    rightValue: item.rightText,
+                    diffType: item.leftText === item.rightText ? "modified" as const : "modified" as const,
+                  }));
+                  exportDiff(diffs, "json");
+                }}
+              >
+                ↓ 导出
+              </button>
             </div>
             {batchResults.map((item) => (
               <div className="batch-diff-item" key={item.dataId}>
