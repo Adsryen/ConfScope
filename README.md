@@ -168,6 +168,11 @@ ConfScope/
 
 MIT License
 
+
+## 致谢
+
+- [Linux Do](https://linux.do) - 佬友开发社区
+
 ---
 
 <p align="center">
