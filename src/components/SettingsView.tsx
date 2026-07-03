@@ -1,6 +1,7 @@
 import LanguageSwitch from "./LanguageSwitch";
 import { useTranslation } from "../i18n";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
+import { clearOperationHistory } from "../store/operationHistory";
 import { useState } from "react";
 
 export default function SettingsView() {
@@ -105,6 +106,20 @@ export default function SettingsView() {
             />
             <span>{t('settings.sortNamespaces')}</span>
           </label>
+          <div className="settings-danger-zone">
+            <h5>{t('settings.dangerZone')}</h5>
+            <button
+              className="btn btn-ghost btn-danger"
+              onClick={() => {
+                if (confirm(t('operationHistory.confirmClear'))) {
+                  clearOperationHistory();
+                }
+              }}
+            >
+              {t('operationHistory.clearLocal')}
+            </button>
+            <div className="field-hint">{t('settings.clearHistoryHint')}</div>
+          </div>
         </section>
 
         {saved && <div className="test-msg ok">{t('settings.settingsSaved')}</div>}

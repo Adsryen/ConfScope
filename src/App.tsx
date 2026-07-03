@@ -17,9 +17,10 @@ import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
+import OperationHistoryView from "./components/OperationHistoryView";
 import type { DiffJumpParams } from "./components/AuditView";
 
-type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "backup" | "tasks" | "settings" | "about";
+type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
 const navIconPath: Record<Mode, string[]> = {
   browse: [
@@ -52,6 +53,10 @@ const navIconPath: Record<Mode, string[]> = {
     "M4 10h16",
     "M9 5v14",
     "M15 5v14",
+  ],
+  history: [
+    "M12 8v4l3 3",
+    "M12 22a10 10 0 100-20 10 10 0 000 20z",
   ],
   backup: [
     "M5 7c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z",
@@ -112,7 +117,7 @@ export default function App() {
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
-  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
+  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "history", "backup", "tasks", "settings", "about"].includes(ui0.mode ?? "")
     ? ui0.mode!
     : "browse";
   const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
@@ -231,6 +236,7 @@ export default function App() {
       group: "data",
       label: t('app.navGroupData'),
       items: [
+        { mode: "history", label: t('app.history') },
         { mode: "backup", label: t('app.backup'), unavailable: true },
         { mode: "tasks", label: t('app.tasks'), unavailable: true },
       ],
@@ -365,6 +371,8 @@ export default function App() {
               setMode("diff");
             }}
           />
+        ) : mode === "history" ? (
+          <OperationHistoryView connections={connections} />
         ) : mode === "backup" ? (
           plannedPage(t('app.backup'), t('app.backupPlanned'))
         ) : mode === "tasks" ? (

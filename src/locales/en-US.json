@@ -22,6 +22,7 @@
     "connectionManage": "Connections",
     "sshTunnels": "SSH Tunnels",
     "audit": "Config Matrix",
+    "history": "Operation History",
     "backup": "Backups",
     "tasks": "Tasks",
     "settings": "Settings",
@@ -31,6 +32,7 @@
     "expandSidebar": "Expand sidebar",
     "planned": "Planned",
     "auditPlanned": "Multi-environment consistency matrix, ignore rules, name normalization, and batch audits.",
+    "historyPlanned": "Configuration change tracking, operation records, and history version viewing.",
     "backupPlanned": "Cloud exports, local snapshots, and cloud-vs-local comparison.",
     "tasksPlanned": "Long-running audit, backup, restore, and export jobs.",
     "settingsPlanned": "Global proxy, safety policy, update checks, and advanced options.",
@@ -74,7 +76,9 @@
     "httpsProxy": "HTTPS Proxy",
     "noProxy": "No Proxy",
     "proxyOnlyForUpdate": "Use proxy only for update checks (Nacos connections bypass proxy)",
-    "settingsSaved": "Settings saved"
+    "settingsSaved": "Settings saved",
+    "dangerZone": "Danger Zone",
+    "clearHistoryHint": "Clear all local operation records. This action cannot be undone."
   },
   "ssh": {
     "pageSubtitle": "Manage reusable SSH jump-host profiles and references in one place. Connection Manager only selects or references these profiles.",
@@ -435,6 +439,30 @@
     "exportJSON": "Export JSON",
     "sanitizeToggle": "Sanitize export (replace password/token/secretKey/accessKey)",
     "hideIgnored": "Hide Ignored"
+  },
+  "operationHistory": {
+    "opPublish": "Publish",
+    "opDelete": "Delete",
+    "opRollback": "Rollback",
+    "resultSuccess": "Success",
+    "resultFailure": "Failure",
+    "allConnections": "All connections",
+    "allTypes": "All types",
+    "operationType": "Operation type",
+    "dataIdPlaceholder": "Filter by dataId",
+    "noRecords": "No operation records",
+    "recordCount": "{count} records",
+    "filters": "Filters",
+    "fetchFromCenter": "Fetch from config center",
+    "clearLocal": "Clear local records",
+    "confirmClear": "Are you sure to clear all local operation records?",
+    "connection": "Connection",
+    "namespace": "Namespace",
+    "group": "Group",
+    "time": "Time",
+    "operator": "Operator",
+    "content": "Content",
+    "error": "Error"
   },
   "about": {
     "title": "About",
