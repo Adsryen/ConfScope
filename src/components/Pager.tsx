@@ -1,3 +1,5 @@
+import { useTranslation } from "../i18n";
+
 interface Props {
   page: number;
   pages: number;
@@ -7,6 +9,7 @@ interface Props {
 
 /** 简单分页条：上一页 / 当前页 / 总页数 / 下一页。只有一页时不显示。 */
 export default function Pager({ page, pages, onPage, loading }: Props) {
+  const { t } = useTranslation();
   if (pages <= 1) return null;
   return (
     <div className="pager">
@@ -14,7 +17,7 @@ export default function Pager({ page, pages, onPage, loading }: Props) {
         className="btn btn-ghost btn-sm"
         disabled={loading || page <= 1}
         onClick={() => onPage(page - 1)}
-        title="上一页"
+        title={t("common.previousPage")}
       >
         ‹
       </button>
@@ -25,7 +28,7 @@ export default function Pager({ page, pages, onPage, loading }: Props) {
         className="btn btn-ghost btn-sm"
         disabled={loading || page >= pages}
         onClick={() => onPage(page + 1)}
-        title="下一页"
+        title={t("common.nextPage")}
       >
         ›
       </button>

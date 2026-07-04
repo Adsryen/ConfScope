@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
 
 interface Props {
@@ -7,7 +8,8 @@ interface Props {
 }
 
 /** 复制按钮：点击复制 text，短暂显示「已复制」反馈。 */
-export default function CopyButton({ text, label = "复制" }: Props) {
+export default function CopyButton({ text, label }: Props) {
+  const { t } = useTranslation();
   const [done, setDone] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
@@ -22,8 +24,8 @@ export default function CopyButton({ text, label = "复制" }: Props) {
   };
 
   return (
-    <button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} title="复制到剪贴板">
-      {done ? "✓ 已复制" : label}
+    <button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} title={t("common.copyToClipboard")}>
+      {done ? t("common.copied") : (label ?? t("common.copy"))}
     </button>
   );
 }
