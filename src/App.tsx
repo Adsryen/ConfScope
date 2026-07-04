@@ -178,8 +178,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConnId, nsReload]);
+  }, [activeConn, nsReload, t]);
 
   useEffect(() => {
     setTenantFollowsDefault(true);
@@ -188,7 +187,7 @@ export default function App() {
   useEffect(() => {
     if (!activeConn || !tenantFollowsDefault) return;
     setTenant(activeConn.defaultNamespace || "");
-  }, [activeConn?.defaultNamespace, activeConnId, tenantFollowsDefault]);
+  }, [activeConn, activeConnId, tenantFollowsDefault]);
 
   const navGroups: { group: string; label: string; items: { mode: Mode; label: string; unavailable?: boolean }[] }[] = [
     {

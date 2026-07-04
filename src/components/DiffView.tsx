@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { reportError, reportMessage } from "../lib/errorCenter";
@@ -216,6 +216,7 @@ function SourcePicker({
   const [cfgLoading, setCfgLoading] = useState(false);
   const [cfgError, setCfgError] = useState<string | null>(null);
   const [cfgReload, setCfgReload] = useState(0);
+  const onLoadErrorRef = useRef(onLoadError);
 
   const conn = connections.find((item) => item.id === source.connId);
   const isLocalSnapshot = conn?.sourceType === "local-snapshot";
@@ -246,7 +247,7 @@ function SourcePicker({
         const message = errorText(e);
         setNamespaces([]);
         setNsError(message);
-        onLoadError?.();
+        onLoadErrorRef.current?.();
         reportError({
           title: "命名空间加载失败",
           source: conn ? `${connectionDisplayLabel(conn)} / ${title}` : title,
@@ -264,7 +265,7 @@ function SourcePicker({
     return () => {
       alive = false;
     };
-  }, [conn, nsReload]);
+  }, [conn, nsReload, source.connId, t, title]);
 
   useEffect(() => {
     if (!conn) return;
@@ -282,7 +283,7 @@ function SourcePicker({
         const message = errorText(e);
         setConfigs([]);
         setCfgError(message);
-        onLoadError?.();
+        onLoadErrorRef.current?.();
         reportError({
           title: "配置列表加载失败",
           source: conn ? `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${title}` : title,
@@ -300,7 +301,7 @@ function SourcePicker({
     return () => {
       alive = false;
     };
-  }, [conn, source.tenant, cfgReload]);
+  }, [cfgReload, conn, source.connId, source.tenant, t, title]);
 
   const namespaceItems = namespaces
     .filter((item) => item.namespace)
@@ -312,6 +313,10 @@ function SourcePicker({
   const canSetDefaultNamespace = !!conn && conn.sourceType !== "local-snapshot" && source.tenant !== (conn.defaultNamespace ?? "");
   const dataIdOptions = configs.map((item) => ({ value: item.dataId, sub: item.group }));
   const groupOptions = Array.from(new Set(configs.map((item) => item.group))).map((value) => ({ value }));
+
+  useEffect(() => {
+    onLoadErrorRef.current = onLoadError;
+  }, [onLoadError]);
 
   return (
     <div className={`source-picker${isLocalSnapshot ? " local-source" : ""}`}>
@@ -476,7 +481,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   );
   const projectOptions = useMemo(() => projectNames.map((value) => ({ value, label: value })), [projectNames]);
 
-  const resetComparisonState = () => {
+  const resetComparisonState = useCallback(() => {
     setMatchResults(null);
     setBatchResults([]);
     setFailedItems([]);
@@ -488,7 +493,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setLeftFailed(false);
     setRightFailed(false);
     setNotice(null);
-  };
+  }, []);
 
   useEffect(() => {
     if (selectedProject !== activeProject) {
@@ -506,7 +511,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setSourcesCollapsed(false);
     if (!leftInProject) setLeft(emptySource(fallback.id, connections));
     if (!rightInProject) setRight(emptySource(fallback.id, connections));
-  }, [activeProject, projectConnections, left.connId, right.connId]);
+  }, [activeProject, connections, left.connId, projectConnections, resetComparisonState, right.connId, selectedProject]);
 
   useEffect(() => {
     const nextLeft = syncDefaultNamespace(left, connections);
@@ -517,7 +522,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       setLeft(nextLeft);
       setRight(nextRight);
     }
-  }, [connections]);
+  }, [connections, left, resetComparisonState, right]);
 
   useEffect(() => {
     const node = sourcesRef.current;

@@ -337,7 +337,7 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [envSources, t]);
+  }, [applyNormalize, envSources, ignoreRules, normalizeEnabled, t]);
 
   // 过滤与排序后的行
   const filteredRows = useMemo(() => {
