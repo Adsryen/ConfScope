@@ -268,6 +268,31 @@ describe("App", () => {
     expect(within(screen.getByRole("button", { name: /Config Compare/ })).queryByText("Planned")).not.toBeInTheDocument();
   });
 
+  it("opens the about page even when there are no connections", async () => {
+    localStorage.clear();
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        startup: { lastOpenedVersion: "1.3.0", lastShownWelcomeVersion: "1.3.0", lastShownChangelogVersion: "" },
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.getAppInfo).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /About/ }));
+
+    expect(screen.getByTestId("about")).toBeInTheDocument();
+    expect(screen.queryByText("No Nacos connections yet")).not.toBeInTheDocument();
+  });
+
   it("opens DiffView with a runtime local snapshot source from BackupView", async () => {
     render(
       <I18nProvider>
