@@ -296,7 +296,7 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
               entriesList.push({ dataId: item.dataId, entries, format: fmt });
             } catch {
               // 单个配置加载失败不影响整体
-              entriesList.push({ dataId: item.dataId, entries: [{ key: "__parse__", value: `加载失败`, valueType: "text" as const, sourcePath: "__parse__", parseStatus: "error" as ParseStatus }], format: "TEXT" });
+              entriesList.push({ dataId: item.dataId, entries: [{ key: "__parse__", value: t("audit.configLoadFailedValue"), valueType: "text" as const, sourcePath: "__parse__", parseStatus: "error" as ParseStatus }], format: "TEXT" });
             }
           }
           for (const item of entriesList) {

@@ -1,4 +1,5 @@
 import type { Snapshot } from "../api/snapshot";
+import { translate } from "../locales";
 import { DEFAULT_PROJECT_NAME, type Connection, connectionProjectName } from "../store/connections";
 
 export function snapshotConnectionId(snapshotId: string): string {
@@ -16,7 +17,7 @@ export function buildSnapshotConnection(snapshot: Snapshot, sourceConnection?: C
     id: snapshotConnectionId(snapshot.id),
     name,
     projectName: sourceConnection ? connectionProjectName(sourceConnection) : DEFAULT_PROJECT_NAME,
-    environmentName: "本地快照",
+    environmentName: translate("connection.sourcePresetLocalSnapshot"),
     sourceName: name,
     sourceType: "local-snapshot",
     localPath: snapshot.path,
