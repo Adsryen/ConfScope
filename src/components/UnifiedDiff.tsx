@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "../i18n";
 import { diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
@@ -17,6 +18,7 @@ type LineType = "ctx" | "add" | "del";
 /** 统一（单列）差异视图：以「当前版本」为主，改动行用背景色高亮——
  *  新增绿、删除红、修改展开为红(旧)+绿(新)。用于「这一版改了哪些」。 */
 export default function UnifiedDiff({ oldText, newText, format }: Props) {
+  const { t } = useTranslation();
   const hl = format && format !== "TEXT";
   const [onlyChanges, setOnlyChanges] = useState(false);
   const { rows, added, removed, modified } = useMemo(
@@ -53,12 +55,12 @@ export default function UnifiedDiff({ oldText, newText, format }: Props) {
     <div className="diff-panel">
       <div className="diff-stats">
         {identical ? (
-          <span className="diff-same">✓ 与上一版无差异</span>
+          <span className="diff-same">{t("diff.unifiedNoDiff")}</span>
         ) : (
           <>
-            <span className="stat stat-add">+{added} 新增</span>
-            <span className="stat stat-del">−{removed} 删除</span>
-            <span className="stat stat-mod">~{modified} 修改</span>
+            <span className="stat stat-add">{t("diff.unifiedAdded", { count: added })}</span>
+            <span className="stat stat-del">{t("diff.unifiedDeleted", { count: removed })}</span>
+            <span className="stat stat-mod">{t("diff.unifiedModified", { count: modified })}</span>
           </>
         )}
         <label className="diff-toggle">
@@ -67,7 +69,7 @@ export default function UnifiedDiff({ oldText, newText, format }: Props) {
             checked={onlyChanges}
             onChange={(e) => setOnlyChanges(e.target.checked)}
           />
-          仅显示变更
+          {t("diff.onlyChanges")}
         </label>
       </div>
       <div className="udiff mono">
