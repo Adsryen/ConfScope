@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
 import ConfigEditor from "./ConfigEditor";
@@ -29,10 +30,10 @@ const conn: Connection = {
   defaultNamespace: "",
 };
 
-function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}) {
+function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}, locale = "zh-CN") {
   const onClose = vi.fn();
   const onSaved = vi.fn();
-  localStorage.setItem("locale", "zh-CN");
+  localStorage.setItem("locale", locale);
   return {
     onClose,
     onSaved,
@@ -58,9 +59,19 @@ function editorTextarea(): HTMLTextAreaElement {
   return document.querySelector("textarea")!;
 }
 
+function latestError(): AppErrorItem | undefined {
+  let errors: AppErrorItem[] = [];
+  const unsubscribe = subscribeErrors((items) => {
+    errors = items;
+  });
+  unsubscribe();
+  return errors[errors.length - 1];
+}
+
 describe("ConfigEditor", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearErrors();
     apiMocks.publishConfig.mockReset();
     apiMocks.publishConfig.mockResolvedValue(undefined);
   });
@@ -135,6 +146,21 @@ describe("ConfigEditor", () => {
       afterContent: "server:\n  port: 8080",
       rollbackable: false,
       error: "Error: publish failed",
+    });
+  });
+
+  it("reports publish errors with localized message-center actions", async () => {
+    apiMocks.publishConfig.mockRejectedValue(new Error("publish failed"));
+    renderEditor({}, "en-US");
+
+    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByText("Error: publish failed")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to create config",
+      actionLabel: "Retry Publish",
     });
   });
 });

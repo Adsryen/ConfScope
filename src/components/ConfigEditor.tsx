@@ -90,11 +90,11 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
       });
       setError(message);
       reportError({
-        title: "新建配置失败",
+        title: t("config.createConfigFailed"),
         source: `${connectionName} / ${namespaceLabel} / ${targetGroup} / ${targetDataId}`,
         message,
         detail: message,
-        actionLabel: "重试发布",
+        actionLabel: t("config.retryPublish"),
         onAction: () => save(),
       });
     } finally {

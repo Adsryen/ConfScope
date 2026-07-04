@@ -87,11 +87,11 @@ export default function HistoryView({
         setItems([]);
         setPages(1);
         reportError({
-          title: "历史版本加载失败",
+          title: t("history.loadVersionsFailed"),
           source: sourceLabel,
           message,
           detail: message,
-          actionLabel: "重试",
+          actionLabel: t("common.retry"),
           onAction: () => loadHistory(page),
         });
       })
@@ -133,7 +133,7 @@ export default function HistoryView({
       const message = String(e);
       setError(message);
       reportError({
-        title: "历史版本内容加载失败",
+        title: t("history.contentLoadFailed"),
         source: sourceLabel,
         message,
         detail: message,
@@ -207,11 +207,11 @@ export default function HistoryView({
       setError(message);
       setRbConfirm(false);
       reportError({
-        title: "配置回滚失败",
+        title: t("history.rollbackConfigFailed"),
         source: sourceLabel,
         message,
         detail: message,
-        actionLabel: "重试回滚",
+        actionLabel: t("history.retryRollback"),
         onAction: () => rollback(),
       });
     } finally {
@@ -231,7 +231,7 @@ export default function HistoryView({
       const message = String(e);
       setError(message);
       reportError({
-        title: "历史版本内容加载失败",
+        title: t("history.contentLoadFailed"),
         source: sourceLabel,
         message,
         detail: message,

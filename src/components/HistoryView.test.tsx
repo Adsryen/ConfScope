@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
@@ -55,9 +56,9 @@ const historyItems = [
   },
 ];
 
-function renderHistory(props: Partial<Parameters<typeof HistoryView>[0]> = {}) {
+function renderHistory(props: Partial<Parameters<typeof HistoryView>[0]> = {}, locale = "zh-CN") {
   const onRolledBack = vi.fn();
-  localStorage.setItem("locale", "zh-CN");
+  localStorage.setItem("locale", locale);
   return {
     onRolledBack,
     ...render(
@@ -108,9 +109,19 @@ function mockHistoryDetail() {
   );
 }
 
+function latestError(): AppErrorItem | undefined {
+  let errors: AppErrorItem[] = [];
+  const unsubscribe = subscribeErrors((items) => {
+    errors = items;
+  });
+  unsubscribe();
+  return errors[errors.length - 1];
+}
+
 describe("HistoryView", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearErrors();
     apiMocks.listHistory.mockReset();
     apiMocks.getHistoryDetail.mockReset();
     apiMocks.publishConfig.mockReset();
@@ -231,6 +242,45 @@ describe("HistoryView", () => {
       afterContent: "server:\n  port: 9090",
       rollbackable: false,
       error: "Error: rollback denied",
+    });
+  });
+
+  it("reports history list errors with localized message-center actions", async () => {
+    apiMocks.listHistory.mockRejectedValueOnce(new Error("history denied"));
+    renderHistory({}, "en-US");
+
+    expect(await screen.findByText("Error: history denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to load history versions",
+      actionLabel: "Retry",
+    });
+  });
+
+  it("reports history content errors with localized message-center titles", async () => {
+    apiMocks.getHistoryDetail.mockRejectedValueOnce(new Error("detail denied"));
+    renderHistory({}, "en-US");
+
+    fireEvent.click(await screen.findByText("nid 2"));
+
+    expect(await screen.findByText("Error: detail denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to load history content",
+    });
+  });
+
+  it("reports rollback errors with localized message-center actions", async () => {
+    apiMocks.publishConfig.mockRejectedValueOnce(new Error("rollback denied"));
+    renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
+
+    fireEvent.click(await screen.findByText("nid 2"));
+    await screen.findByText(/Changes vs previous nid 1/);
+    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
+
+    expect(await screen.findByText("Error: rollback denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to rollback config",
+      actionLabel: "Retry Rollback",
     });
   });
 });

@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import DeleteConfirm from "./DeleteConfirm";
 
 function renderDeleteConfirm(props: Partial<Parameters<typeof DeleteConfirm>[0]> = {}) {
@@ -26,8 +27,19 @@ function renderDeleteConfirm(props: Partial<Parameters<typeof DeleteConfirm>[0]>
   };
 }
 
+function latestError(): AppErrorItem | undefined {
+  let errors: AppErrorItem[] = [];
+  const unsubscribe = subscribeErrors((items) => {
+    errors = items;
+  });
+  unsubscribe();
+  return errors[errors.length - 1];
+}
+
 describe("DeleteConfirm", () => {
   beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
     localStorage.setItem("locale", "zh-CN");
   });
 
@@ -68,5 +80,20 @@ describe("DeleteConfirm", () => {
     expect(await screen.findByText("Error: delete denied")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
+  });
+
+  it("reports deletion errors with localized message-center actions", async () => {
+    localStorage.setItem("locale", "en-US");
+    const onConfirm = vi.fn().mockRejectedValue(new Error("delete denied"));
+    renderDeleteConfirm({ onConfirm });
+
+    fireEvent.change(screen.getByPlaceholderText("app.json"), { target: { value: "app.json" } });
+    fireEvent.keyDown(screen.getByPlaceholderText("app.json"), { key: "Enter" });
+
+    expect(await screen.findByText("Error: delete denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to delete config",
+      actionLabel: "Retry Delete",
+    });
   });
 });
