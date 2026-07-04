@@ -26,6 +26,7 @@ vi.mock("../i18n", () => ({
         "audit.atLeastTwo": "At least 2 environments required",
         "audit.noData": "No config data retrieved",
         "audit.partialError": "Some configs failed to load",
+        "audit.configLoadFailedValue": "Config Load Failed",
         "audit.totalConfigs": `${params?.count ?? 0} items`,
         "audit.filter": "Filter",
         "audit.allConfigs": "All configs",
@@ -202,5 +203,24 @@ describe("AuditView", () => {
     await waitFor(() => {
       expect(screen.getByText("app.yaml")).toBeTruthy();
     });
+  });
+
+  it("localizes per-config load failure placeholder values", async () => {
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce("server:\n  port: 8080");
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    expect(await screen.findAllByText("Config Load Failed")).not.toHaveLength(0);
+    expect(screen.queryByText("加载失败")).not.toBeInTheDocument();
   });
 });

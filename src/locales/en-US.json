@@ -538,6 +538,7 @@
     "atLeastTwo": "At least 2 environments required",
     "noData": "No config data retrieved",
     "partialError": "Some configs failed to load",
+    "configLoadFailedValue": "Config Load Failed",
     "totalConfigs": "{count} items",
     "filter": "Filter",
     "allConfigs": "All configs",

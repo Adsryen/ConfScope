@@ -538,6 +538,7 @@
     "atLeastTwo": "至少需要选择 2 个环境",
     "noData": "未获取到任何配置数据",
     "partialError": "部分配置加载失败",
+    "configLoadFailedValue": "加载失败",
     "totalConfigs": "共 {count} 项",
     "filter": "筛选",
     "allConfigs": "全部配置",

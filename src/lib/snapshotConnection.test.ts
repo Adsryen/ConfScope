@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../api/snapshot";
 import type { Connection } from "../store/connections";
 import { buildSnapshotConnection, mergeSnapshotRuntimeConnection, snapshotConnectionId } from "./snapshotConnection";
@@ -32,6 +32,10 @@ const snapshot: Snapshot = {
 };
 
 describe("snapshotConnection", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("builds a readonly local snapshot connection for DiffView", () => {
     const conn = buildSnapshotConnection(snapshot, sourceConnection);
 
@@ -44,6 +48,14 @@ describe("snapshotConnection", () => {
     expect(conn.localPath).toBe(snapshot.path);
     expect(conn.baseUrl).toBe(snapshot.path);
     expect(conn.defaultNamespace).toBe("");
+  });
+
+  it("localizes the runtime snapshot environment name", () => {
+    vi.stubGlobal("localStorage", { getItem: () => "en-US" });
+
+    const conn = buildSnapshotConnection(snapshot, sourceConnection);
+
+    expect(conn.environmentName).toBe("Local Snapshot");
   });
 
   it("replaces an existing runtime snapshot connection without touching other connections", () => {
