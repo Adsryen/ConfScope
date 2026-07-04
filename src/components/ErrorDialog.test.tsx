@@ -3,6 +3,7 @@
  */
 import { act, fireEvent, render, screen, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../i18n";
 import ErrorDialog from "./ErrorDialog";
 import { clearErrors, reportError, showMessageDetail } from "../lib/errorCenter";
 
@@ -10,15 +11,25 @@ vi.mock("../lib/clipboard", () => ({
   copyText: vi.fn(),
 }));
 
+function renderErrorDialog(locale = "zh-CN") {
+  localStorage.setItem("locale", locale);
+  return render(
+    <I18nProvider>
+      <ErrorDialog />
+    </I18nProvider>
+  );
+}
+
 describe("ErrorDialog", () => {
   beforeEach(() => {
+    localStorage.clear();
     clearErrors();
   });
 
   it("shows reported errors, copies the full detail, and closes", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);
-    render(<ErrorDialog />);
+    renderErrorDialog();
 
     act(() => {
       const id = reportError({
@@ -47,7 +58,7 @@ describe("ErrorDialog", () => {
 
   it("runs the retry action after closing the dialog", () => {
     const onAction = vi.fn();
-    render(<ErrorDialog />);
+    renderErrorDialog();
 
     act(() => {
       const id = reportError({
@@ -63,5 +74,27 @@ describe("ErrorDialog", () => {
 
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("localizes dialog chrome and fallback action labels", () => {
+    const onAction = vi.fn();
+    renderErrorDialog("en-US");
+
+    act(() => {
+      const id = reportError({
+        title: "Load failed",
+        message: "Short message",
+        detail: "Full message\nline 2",
+        onAction,
+      });
+      showMessageDetail(id);
+    });
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Full Error")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Copy Full Error" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(within(dialog).getByTitle("Close")).toBeInTheDocument();
   });
 });

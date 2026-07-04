@@ -11,8 +11,16 @@
     "error": "Error",
     "success": "Success",
     "copy": "Copy",
+    "copied": "✓ Copied",
+    "copyToClipboard": "Copy to clipboard",
     "copyError": "Copy Error",
-    "operationFailed": "Operation failed"
+    "operationFailed": "Operation failed",
+    "previousPage": "Previous Page",
+    "nextPage": "Next Page"
+  },
+  "errorDialog": {
+    "fullError": "Full Error",
+    "copyFullError": "Copy Full Error"
   },
   "messageCenter": {
     "title": "Message Center",

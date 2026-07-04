@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "../i18n";
 import { AppErrorItem, closeMessageDetail, subscribeActiveError } from "../lib/errorCenter";
 import CopyButton from "./CopyButton";
 
@@ -7,6 +8,7 @@ function displayText(item: AppErrorItem): string {
 }
 
 export default function ErrorDialog() {
+  const { t } = useTranslation();
   const [current, setCurrent] = useState<AppErrorItem | null>(null);
 
   useEffect(() => subscribeActiveError(setCurrent), []);
@@ -38,7 +40,7 @@ export default function ErrorDialog() {
             <h3>{current.title}</h3>
             {current.source && <div className="error-source">{current.source}</div>}
           </div>
-          <button className="modal-x" onClick={close} title="关闭">
+          <button className="modal-x" onClick={close} title={t("common.close")}>
             ×
           </button>
         </div>
@@ -46,21 +48,21 @@ export default function ErrorDialog() {
           <div className="error-summary">{current.message}</div>
           {current.detail && current.detail !== current.message && (
             <>
-              <div className="error-detail-title">完整错误</div>
+              <div className="error-detail-title">{t("errorDialog.fullError")}</div>
               <pre className="error-detail">{current.detail}</pre>
             </>
           )}
         </div>
         <div className="modal-footer error-footer">
-          <CopyButton text={fullText} label="复制完整错误" />
+          <CopyButton text={fullText} label={t("errorDialog.copyFullError")} />
           <span className="spacer" />
           {current.onAction && (
             <button className="btn btn-ghost" onClick={runAction}>
-              {current.actionLabel || "重试"}
+              {current.actionLabel || t("common.retry")}
             </button>
           )}
           <button className="btn btn-primary" onClick={close}>
-            关闭
+            {t("common.close")}
           </button>
         </div>
       </div>
