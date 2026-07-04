@@ -123,10 +123,10 @@ export default function App() {
           if (!result.mandatory && settings.update.skipVersion === result.latestVersion) return;
           reportMessage({
             level: "info",
-            title: `有新版本 ${result.latestVersion} 可用`,
-            source: "应用更新",
+            title: t("about.updateAvailable", { version: result.latestVersion }),
+            source: t("about.updateTitle"),
             message: result.releaseNotes || "",
-            actionLabel: "查看更新",
+            actionLabel: t("about.openDownload"),
             onAction: () => setMode("about"),
           });
         } catch {
@@ -136,7 +136,7 @@ export default function App() {
       5 * 60 * 1000
     );
     return () => clearTimeout(timer);
-  }, []);
+  }, [t]);
 
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function App() {
         setNsError(message);
         setNamespaces([]);
         reportError({
-          title: "命名空间加载失败",
+          title: t("app.namespaceLoadFailed"),
           source: connectionDisplayLabel(activeConn),
           message,
           detail: message,

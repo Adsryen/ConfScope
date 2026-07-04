@@ -4,7 +4,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
-import { clearErrors } from "../lib/errorCenter";
+import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
 import ConfigBrowser from "./ConfigBrowser";
@@ -64,8 +64,8 @@ function configPage(items = [{ dataId: "app.json", group: "DEFAULT_GROUP", conte
   };
 }
 
-function renderBrowser() {
-  localStorage.setItem("locale", "zh-CN");
+function renderBrowser(locale = "zh-CN") {
+  localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
       <ConfigBrowser conn={conn} tenant="public" />
@@ -73,6 +73,15 @@ function renderBrowser() {
       <ErrorDialog />
     </I18nProvider>
   );
+}
+
+function latestError(): AppErrorItem | undefined {
+  let errors: AppErrorItem[] = [];
+  const unsubscribe = subscribeErrors((items) => {
+    errors = items;
+  });
+  unsubscribe();
+  return errors[errors.length - 1];
 }
 
 function clearTasks() {
@@ -302,6 +311,18 @@ describe("ConfigBrowser", () => {
     expect(panel).toHaveTextContent("dev / public");
   });
 
+  it("reports list loading errors with localized message-center actions", async () => {
+    apiMocks.listConfigs.mockRejectedValueOnce(new Error("list denied"));
+
+    renderBrowser("en-US");
+
+    expect(await screen.findByText("Error: list denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to load config list",
+      actionLabel: "Retry",
+    });
+  });
+
   it("shows config content loading failures inline with copy action", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);
@@ -317,6 +338,38 @@ describe("ConfigBrowser", () => {
       fireEvent.click(within(inlineError).getByRole("button", { name: "复制错误" }));
     });
     expect(copyText).toHaveBeenCalledWith("Error: read config failed: EOF");
+  });
+
+  it("reports content loading errors with localized message-center actions", async () => {
+    apiMocks.getConfig.mockRejectedValueOnce(new Error("content denied"));
+
+    renderBrowser("en-US");
+    fireEvent.click(await screen.findByText("app.json"));
+
+    expect(await screen.findByText("Error: content denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to load config content",
+      actionLabel: "Retry",
+    });
+  });
+
+  it("reports publish errors with localized message-center actions", async () => {
+    apiMocks.publishConfig.mockRejectedValueOnce(new Error("publish denied"));
+    renderBrowser("en-US");
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(document.querySelector("textarea")!, {
+      target: { value: '{"server":{"port":9090}}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
+
+    expect(await screen.findByText("Error: publish denied")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Failed to publish config",
+      actionLabel: "Retry Publish",
+    });
   });
 
   it("creates a snapshot from the current config page and records a backup task", async () => {
