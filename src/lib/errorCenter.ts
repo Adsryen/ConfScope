@@ -1,3 +1,4 @@
+import { getTranslation, Locale } from "../locales";
 import { toast, ToastType } from "./toast";
 
 export type MessageLevel = "success" | "info" | "warning" | "error";
@@ -50,6 +51,24 @@ function messageToastType(level: MessageLevel): ToastType {
   return "info";
 }
 
+function currentLocale(): Locale {
+  try {
+    const saved = localStorage.getItem("locale");
+    if (saved === "zh-CN" || saved === "en-US") return saved;
+    return navigator.language.startsWith("zh") ? "zh-CN" : "en-US";
+  } catch {
+    return "zh-CN";
+  }
+}
+
+function translate(key: string, params: Record<string, string | number>): string {
+  let text = getTranslation(currentLocale(), key);
+  for (const [name, value] of Object.entries(params)) {
+    text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+  }
+  return text;
+}
+
 function makeMergeKey(input: MessageInput): string {
   return input.mergeKey || `${input.level || "error"}:${input.title}:${input.source || ""}:${input.message}`;
 }
@@ -65,8 +84,8 @@ function notify(item: AppErrorItem, input: MessageInput) {
     typeof input.toast === "string"
       ? input.toast
       : item.count > 1
-        ? `${item.title}（${item.count} 次，已记录到消息中心）`
-        : `${item.title}，已记录到消息中心`;
+        ? translate("messageCenter.toastRecordedWithCount", { title: item.title, count: item.count })
+        : translate("messageCenter.toastRecorded", { title: item.title });
   toast(text, messageToastType(item.level));
 }
 

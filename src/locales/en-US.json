@@ -25,6 +25,8 @@
     "copyFull": "Copy Full Message",
     "delete": "Delete Message",
     "copied": "Copied",
+    "toastRecorded": "{title}, saved to Message Center",
+    "toastRecordedWithCount": "{title} ({count} times, saved to Message Center)",
     "levelError": "Error",
     "levelWarning": "Warning",
     "levelSuccess": "Success",
@@ -462,10 +464,12 @@
     "exportDiff": "Export Diff",
     "dataIdPlaceholder": "Leave empty to match all same-name dataIds",
     "unifiedNoDiff": "No differences with previous version",
-    "unifiedAdded": "+{count} added",
-    "unifiedDeleted": "-{count} deleted",
-    "unifiedModified": "~{count} modified",
-    "onlyChanges": "Only show changes"
+    "sideBySideIdentical": "Both sides are identical",
+    "statAdded": "+{count} added",
+    "statDeleted": "-{count} deleted",
+    "statModified": "~{count} modified",
+    "onlyChanges": "Only show changes",
+    "noDiffRows": "No difference rows"
   },
   "history": {
     "title": "History",

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "../i18n";
 import { diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
@@ -40,6 +41,7 @@ export default function DiffPanel({
   onOnlyChangesChange,
   hideOnlyChangesToggle = false,
 }: Props) {
+  const { t } = useTranslation();
   const [localOnlyChanges, setLocalOnlyChanges] = useState(false);
   const onlyChanges = controlledOnlyChanges ?? localOnlyChanges;
   const setOnlyChanges = (value: boolean) => {
@@ -59,12 +61,12 @@ export default function DiffPanel({
     <div className="diff-panel">
       <div className="diff-stats">
         {identical ? (
-          <span className="diff-same">✓ 两侧内容完全一致</span>
+          <span className="diff-same">{t("diff.sideBySideIdentical")}</span>
         ) : (
           <>
-            <span className="stat stat-add">+{result.added} 新增</span>
-            <span className="stat stat-del">−{result.removed} 删除</span>
-            <span className="stat stat-mod">~{result.modified} 修改</span>
+            <span className="stat stat-add">{t("diff.statAdded", { count: result.added })}</span>
+            <span className="stat stat-del">{t("diff.statDeleted", { count: result.removed })}</span>
+            <span className="stat stat-mod">{t("diff.statModified", { count: result.modified })}</span>
           </>
         )}
         {!hideOnlyChangesToggle && (
@@ -74,7 +76,7 @@ export default function DiffPanel({
               checked={onlyChanges}
               onChange={(e) => setOnlyChanges(e.target.checked)}
             />
-            仅显示变更
+            {t("diff.onlyChanges")}
           </label>
         )}
       </div>
@@ -90,7 +92,7 @@ export default function DiffPanel({
 
       <div className="diff-body mono">
         {rows.length === 0 ? (
-          <div className="diff-empty">无差异行</div>
+          <div className="diff-empty">{t("diff.noDiffRows")}</div>
         ) : (
           rows.map((r, idx) => (
             <div className={`diff-row ${r.type}`} key={idx}>

@@ -25,6 +25,8 @@
     "copyFull": "复制完整消息",
     "delete": "删除消息",
     "copied": "已复制",
+    "toastRecorded": "{title}，已记录到消息中心",
+    "toastRecordedWithCount": "{title}（{count} 次，已记录到消息中心）",
     "levelError": "错误",
     "levelWarning": "警告",
     "levelSuccess": "成功",
@@ -462,10 +464,12 @@
     "exportDiff": "导出差异",
     "dataIdPlaceholder": "留空则匹配所有同名 dataId",
     "unifiedNoDiff": "与上一版无差异",
-    "unifiedAdded": "+{count} 新增",
-    "unifiedDeleted": "−{count} 删除",
-    "unifiedModified": "~{count} 修改",
-    "onlyChanges": "仅显示变更"
+    "sideBySideIdentical": "✓ 两侧内容完全一致",
+    "statAdded": "+{count} 新增",
+    "statDeleted": "−{count} 删除",
+    "statModified": "~{count} 修改",
+    "onlyChanges": "仅显示变更",
+    "noDiffRows": "无差异行"
   },
   "history": {
     "title": "历史版本",
