@@ -415,7 +415,7 @@ describe("DiffView", () => {
     expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
   });
 
-  it("shows inline error with failed dataIds when batch diff has partial failures", async () => {
+  it("shows localized copyable errors when batch diff has partial failures", async () => {
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 3,
       pageNumber: 1,
@@ -431,14 +431,22 @@ describe("DiffView", () => {
       return `${dataId}-content`;
     });
 
-    renderDiff([nacosConn]);
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView connections={[nacosConn]} />
+      </I18nProvider>
+    );
 
-    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
-    fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load & Compare" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (3)" }));
 
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(6));
-    expect(await screen.findByText("已生成 2 个文件对比")).toBeInTheDocument();
+    expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
+    expect(screen.getByText("Load failed (1)")).toBeInTheDocument();
     expect(screen.getByText(/gateway\.yaml/)).toBeInTheDocument();
+    expect(screen.getByText("connect timeout")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
   });
 
   it("shows inline error when all batch diff configs fail to load", async () => {
