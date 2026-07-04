@@ -22,6 +22,7 @@ import AuditView from "./components/AuditView";
 import OperationHistoryView from "./components/OperationHistoryView";
 import type { DiffJumpParams } from "./components/AuditView";
 import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/snapshotConnection";
+import { toast } from "./lib/toast";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
@@ -251,6 +252,7 @@ export default function App() {
       dataId: params.dataId,
     });
     setMode("diff");
+    toast(t("backup.comparePrepared"), "info");
   };
 
   const browsePage = (

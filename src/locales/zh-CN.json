@@ -521,6 +521,7 @@
     "configTotal": "配置数量",
     "configList": "配置列表",
     "compareWithCloud": "与云端对比",
+    "comparePrepared": "已带入快照来源",
     "compareUnavailable": "无法打开快照对比",
     "sourceConnectionMissing": "快照来源连接不存在，请先恢复或重新创建对应连接。",
     "snapshotPathMissing": "快照缺少本地路径，无法作为本地来源对比。"
