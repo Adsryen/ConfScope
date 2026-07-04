@@ -15,10 +15,17 @@ export interface CompareSettings {
   sortNamespaces: boolean;
 }
 
+export interface StartupSettings {
+  lastOpenedVersion: string;
+  lastShownWelcomeVersion: string;
+  lastShownChangelogVersion: string;
+}
+
 export interface AppSettings {
   proxy: ProxySettings;
   update: UpdateSettings;
   compare: CompareSettings;
+  startup: StartupSettings;
 }
 
 const KEY = "cs.settings";
@@ -27,6 +34,7 @@ const defaults: AppSettings = {
   proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
   update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
   compare: { sortConnections: true, sortNamespaces: true },
+  startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
 };
 
 export function loadSettings(): AppSettings {
@@ -77,6 +85,17 @@ export function updateUpdateSettings(update: Partial<UpdateSettings>) {
   });
 }
 
+export function updateStartupSettings(startup: Partial<StartupSettings>) {
+  const current = loadSettings();
+  saveSettings({
+    ...current,
+    startup: {
+      ...current.startup,
+      ...startup,
+    },
+  });
+}
+
 function normalizeSettings(value: unknown): AppSettings {
   const input = value as Partial<AppSettings>;
   return {
@@ -93,6 +112,11 @@ function normalizeSettings(value: unknown): AppSettings {
     compare: {
       sortConnections: boolValue(input?.compare?.sortConnections, defaults.compare.sortConnections),
       sortNamespaces: boolValue(input?.compare?.sortNamespaces, defaults.compare.sortNamespaces),
+    },
+    startup: {
+      lastOpenedVersion: stringValue(input?.startup?.lastOpenedVersion),
+      lastShownWelcomeVersion: stringValue(input?.startup?.lastShownWelcomeVersion),
+      lastShownChangelogVersion: stringValue(input?.startup?.lastShownChangelogVersion),
     },
   };
 }

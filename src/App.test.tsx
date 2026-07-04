@@ -10,6 +10,7 @@ import type { DiffJumpParams } from "./components/AuditView";
 import App from "./App";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { toast } from "./lib/toast";
+import { loadSettings } from "./store/settings";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
@@ -138,12 +139,110 @@ describe("App", () => {
     localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.connections", JSON.stringify([sourceConnection]));
     localStorage.setItem("cs.ui", JSON.stringify({ mode: "backup", connId: "conn-1" }));
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        startup: { lastOpenedVersion: "1.3.0", lastShownWelcomeVersion: "", lastShownChangelogVersion: "1.3.0" },
+      })
+    );
     viewMocks.diffProps.length = 0;
     apiMocks.listNamespaces.mockResolvedValue([]);
     apiMocks.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.3.0", updateSources: [] });
     apiMocks.checkForUpdates.mockResolvedValue({ hasUpdate: false, latestVersion: "", releaseNotes: "" });
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      clearRect: vi.fn(),
+      fillRect: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      fillStyle: "",
+    } as unknown as CanvasRenderingContext2D);
     vi.mocked(reportError).mockClear();
     vi.mocked(reportMessage).mockClear();
+  });
+
+  it("shows the fresh-install welcome dialog once and records dismissal", async () => {
+    localStorage.clear();
+    localStorage.setItem("locale", "en-US");
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Welcome to ConfScope" })).toBeInTheDocument();
+    expect(screen.getByTestId("startup-fireworks")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start using" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Welcome to ConfScope" })).not.toBeInTheDocument();
+    });
+    expect(loadSettings().startup).toEqual({
+      lastOpenedVersion: "1.3.0",
+      lastShownWelcomeVersion: "1.3.0",
+      lastShownChangelogVersion: "",
+    });
+  });
+
+  it("shows update notes once for an existing profile and records dismissal", async () => {
+    localStorage.clear();
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection]));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Updated to v1.3.0" })).toBeInTheDocument();
+    expect(screen.getByText("Added local snapshots and backup management")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Updated to v1.3.0" })).not.toBeInTheDocument();
+    });
+    expect(loadSettings().startup).toEqual({
+      lastOpenedVersion: "1.3.0",
+      lastShownWelcomeVersion: "",
+      lastShownChangelogVersion: "1.3.0",
+    });
+  });
+
+  it("does not repeat a startup dialog already dismissed for the current version", async () => {
+    localStorage.clear();
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        startup: { lastOpenedVersion: "1.3.0", lastShownWelcomeVersion: "1.3.0", lastShownChangelogVersion: "" },
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.getAppInfo).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole("dialog", { name: "Welcome to ConfScope" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Updated to v1.3.0" })).not.toBeInTheDocument();
   });
 
   it("opens DiffView with a runtime local snapshot source from BackupView", async () => {

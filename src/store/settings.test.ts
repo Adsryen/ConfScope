@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadSettings, saveSettings, updateCompareSettings, updateProxySettings } from "./settings";
+import { loadSettings, saveSettings, updateCompareSettings, updateProxySettings, updateStartupSettings } from "./settings";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -31,6 +31,7 @@ describe("settings store", () => {
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
+      startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
     });
 
     localStorage.setItem("cs.settings", "{bad json");
@@ -39,6 +40,7 @@ describe("settings store", () => {
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
+      startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
     });
   });
 
@@ -61,6 +63,7 @@ describe("settings store", () => {
       proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
+      startup: { lastOpenedVersion: "1.2.0", lastShownWelcomeVersion: "", lastShownChangelogVersion: "1.2.0" },
     });
 
     updateProxySettings({ httpProxy: "http://proxy.local:8080" });
@@ -69,6 +72,7 @@ describe("settings store", () => {
       proxy: { httpProxy: "http://proxy.local:8080", httpsProxy: "", noProxy: "" },
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
+      startup: { lastOpenedVersion: "1.2.0", lastShownWelcomeVersion: "", lastShownChangelogVersion: "1.2.0" },
     });
   });
 
@@ -78,6 +82,19 @@ describe("settings store", () => {
     expect(loadSettings().compare).toEqual({
       sortConnections: false,
       sortNamespaces: false,
+    });
+  });
+
+  it("persists startup dialog state", () => {
+    updateStartupSettings({
+      lastOpenedVersion: "1.3.0",
+      lastShownWelcomeVersion: "1.3.0",
+    });
+
+    expect(loadSettings().startup).toEqual({
+      lastOpenedVersion: "1.3.0",
+      lastShownWelcomeVersion: "1.3.0",
+      lastShownChangelogVersion: "",
     });
   });
 });
