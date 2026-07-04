@@ -163,6 +163,7 @@ describe("App", () => {
       namespace: "",
       group: "DEFAULT_GROUP",
       dataId: "app.yaml",
+      autoCompare: true,
     });
     expect(latestProps.connections).toEqual(
       expect.arrayContaining([

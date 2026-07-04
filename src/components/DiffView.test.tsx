@@ -351,6 +351,39 @@ describe("DiffView", () => {
     expect(screen.getAllByText("C:\\backup\\dev")).toHaveLength(2);
   });
 
+  it("auto loads and compares when initial params request auto compare", async () => {
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "dev-snapshot" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+    const onInitialParamsConsumed = vi.fn();
+
+    localStorage.setItem("locale", "zh-CN");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[snapshotConn, nacosConn]}
+          initialParams={{
+            leftConnId: "dev-snapshot",
+            rightConnId: "dev-nacos",
+            namespace: "",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            autoCompare: true,
+          }}
+          onInitialParamsConsumed={onInitialParamsConsumed}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.getConfig).toHaveBeenCalledWith(snapshotConn, "", "app.yaml", "DEFAULT_GROUP");
+      expect(apiMocks.getConfig).toHaveBeenCalledWith(nacosConn, "", "app.yaml", "DEFAULT_GROUP");
+    });
+    expect(await screen.findByText("8080")).toBeInTheDocument();
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+    expect(onInitialParamsConsumed).toHaveBeenCalledTimes(1);
+  });
+
   it("shows inline error with failed dataIds when batch diff has partial failures", async () => {
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 3,
@@ -398,4 +431,3 @@ describe("DiffView", () => {
     expect(await screen.findByText("全部配置加载失败")).toBeInTheDocument();
   });
 });
-

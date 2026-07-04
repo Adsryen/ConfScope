@@ -15,6 +15,7 @@ export interface DiffJumpParams {
   namespace: string;
   group: string;
   dataId: string;
+  autoCompare?: boolean;
 }
 
 interface Props {
