@@ -22,6 +22,10 @@
     "fullError": "Full Error",
     "copyFullError": "Copy Full Error"
   },
+  "api": {
+    "localSnapshotPublishReadonly": "Local snapshot sources are read-only and cannot publish configs",
+    "localSnapshotDeleteReadonly": "Local snapshot sources are read-only and cannot delete configs"
+  },
   "messageCenter": {
     "title": "Message Center",
     "noMessages": "No messages",
@@ -489,6 +493,9 @@
     "version": "Version {n}",
     "current": "(current)",
     "rollback": "Rollback",
+    "opCreated": "Created",
+    "opUpdated": "Updated",
+    "opDeleted": "Deleted",
     "rollbackConfirm": "Rollback to this version?",
     "rollbackNote": "This will overwrite and publish to Nacos",
     "rollbackSuccess": "Rolled back to version {n}",

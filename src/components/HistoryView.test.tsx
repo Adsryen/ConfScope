@@ -148,6 +148,22 @@ describe("HistoryView", () => {
     );
   });
 
+  it("localizes history operation type labels", async () => {
+    apiMocks.listHistory.mockResolvedValueOnce(
+      historyPage([
+        { ...historyItems[0], opType: "U" },
+        { ...historyItems[1], opType: "I" },
+        { ...historyItems[1], id: "0", opType: "D" },
+      ])
+    );
+
+    renderHistory({}, "en-US");
+
+    expect(await screen.findByText("Updated")).toBeInTheDocument();
+    expect(screen.getByText("Created")).toBeInTheDocument();
+    expect(screen.getByText("Deleted")).toBeInTheDocument();
+  });
+
   it("opens a version and fetches its previous version for highlighted diff", async () => {
     renderHistory();
 
