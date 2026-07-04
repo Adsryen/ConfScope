@@ -58,9 +58,9 @@ export default function UnifiedDiff({ oldText, newText, format }: Props) {
           <span className="diff-same">{t("diff.unifiedNoDiff")}</span>
         ) : (
           <>
-            <span className="stat stat-add">{t("diff.unifiedAdded", { count: added })}</span>
-            <span className="stat stat-del">{t("diff.unifiedDeleted", { count: removed })}</span>
-            <span className="stat stat-mod">{t("diff.unifiedModified", { count: modified })}</span>
+            <span className="stat stat-add">{t("diff.statAdded", { count: added })}</span>
+            <span className="stat stat-del">{t("diff.statDeleted", { count: removed })}</span>
+            <span className="stat stat-mod">{t("diff.statModified", { count: modified })}</span>
           </>
         )}
         <label className="diff-toggle">

@@ -3,18 +3,28 @@
  */
 import { fireEvent, render, screen } from "../test/react";
 import { describe, expect, it } from "vitest";
+import { I18nProvider } from "../i18n";
 import DiffPanel from "./DiffPanel";
+
+function renderDiffPanel(props: Parameters<typeof DiffPanel>[0], locale = "zh-CN") {
+  localStorage.setItem("locale", locale);
+  return render(
+    <I18nProvider>
+      <DiffPanel {...props} />
+    </I18nProvider>
+  );
+}
 
 describe("DiffPanel", () => {
   it("shows an identical state and both labels", () => {
-    render(
-      <DiffPanel
-        leftLabel="dev/app.yaml"
-        rightLabel="prod/app.yaml"
-        leftText="server.port=8080"
-        rightText="server.port=8080"
-        format="TEXT"
-      />
+    renderDiffPanel(
+      {
+        leftLabel: "dev/app.yaml",
+        rightLabel: "prod/app.yaml",
+        leftText: "server.port=8080",
+        rightText: "server.port=8080",
+        format: "TEXT",
+      }
     );
 
     expect(screen.getByText("✓ 两侧内容完全一致")).toBeInTheDocument();
@@ -23,14 +33,14 @@ describe("DiffPanel", () => {
   });
 
   it("shows diff counters for changed content", () => {
-    render(
-      <DiffPanel
-        leftLabel="left"
-        rightLabel="right"
-        leftText={"a\nb"}
-        rightText={"a\nc\nd"}
-        format="TEXT"
-      />
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "a\nb",
+        rightText: "a\nc\nd",
+        format: "TEXT",
+      }
     );
 
     expect(document.querySelector(".stat-add")).toHaveTextContent("+1 新增");
@@ -39,13 +49,13 @@ describe("DiffPanel", () => {
   });
 
   it("can show only changed rows", () => {
-    render(
-      <DiffPanel
-        leftLabel="left"
-        rightLabel="right"
-        leftText={"same\nold"}
-        rightText={"same\nnew"}
-      />
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "same\nold",
+        rightText: "same\nnew",
+      }
     );
 
     expect(screen.getAllByText("same")).toHaveLength(2);
@@ -58,20 +68,54 @@ describe("DiffPanel", () => {
   });
 
   it("can be controlled by a parent only-changes switch", () => {
-    render(
-      <DiffPanel
-        leftLabel="left"
-        rightLabel="right"
-        leftText={"same\nold"}
-        rightText={"same\nnew"}
-        onlyChanges
-        hideOnlyChangesToggle
-      />
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "same\nold",
+        rightText: "same\nnew",
+        onlyChanges: true,
+        hideOnlyChangesToggle: true,
+      }
     );
 
     expect(screen.queryByText("same")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("仅显示变更")).not.toBeInTheDocument();
     expect(screen.getByText("old")).toBeInTheDocument();
     expect(screen.getByText("new")).toBeInTheDocument();
+  });
+
+  it("localizes stats, toggle, and empty changed-row state", () => {
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "server.port=8080",
+        rightText: "server.port=8080",
+        format: "TEXT",
+      },
+      "en-US"
+    );
+
+    expect(screen.getByText("Both sides are identical")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Only show changes"));
+    expect(screen.getByText("No difference rows")).toBeInTheDocument();
+  });
+
+  it("localizes changed diff counters", () => {
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "a\nb",
+        rightText: "a\nc\nd",
+        format: "TEXT",
+      },
+      "en-US"
+    );
+
+    expect(document.querySelector(".stat-add")).toHaveTextContent("+1 added");
+    expect(document.querySelector(".stat-del")).toHaveTextContent("-0 deleted");
+    expect(document.querySelector(".stat-mod")).toHaveTextContent("~1 modified");
   });
 });
