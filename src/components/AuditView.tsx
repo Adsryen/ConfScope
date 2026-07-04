@@ -7,6 +7,7 @@ import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } fr
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
+import CopyButton from "./CopyButton";
 import Select from "./Select";
 
 export interface DiffJumpParams {
@@ -599,7 +600,12 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
               </label>
             </div>
           )}
-          {error && <div className="test-msg err">{error}</div>}
+          {error && (
+            <div className="test-msg err">
+              <span>{error}</span>
+              <CopyButton text={error} label={t("common.copyError")} />
+            </div>
+          )}
         </div>
       </div>
 

@@ -125,6 +125,7 @@ describe("ConfigEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "发布" }));
 
     expect(await screen.findByText("Error: publish failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByText("新建配置")).toBeInTheDocument();
     expect(loadOperationHistory()[0]).toMatchObject({

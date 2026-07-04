@@ -69,6 +69,7 @@ vi.mock("../i18n", () => ({
         "connection.project": "Project",
         "common.delete": "Delete",
         "common.loading": "Loading...",
+        "common.copyError": "Copy Error",
       };
       return map[key] ?? key;
     },
@@ -125,6 +126,7 @@ describe("AuditView", () => {
     await waitFor(() => {
       expect(screen.getByText("At least 2 environments required")).toBeTruthy();
     });
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeTruthy();
   });
 
   it("渲染忽略规则设置区域", () => {

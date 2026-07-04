@@ -255,7 +255,12 @@ export default function HistoryView({
         </div>
         <div className="history-items">
         {loading && <div className="pad-msg">{t('common.loading')}</div>}
-        {error && <div className="pad-msg err">{error}</div>}
+        {error && (
+          <div className="pad-msg err">
+            <span>{error}</span>
+            <CopyButton text={error} label={t("common.copyError")} />
+          </div>
+        )}
         {!loading && !error && items.length === 0 && <div className="pad-msg">{t('history.empty')}</div>}
         {items.map((h) => (
           <div

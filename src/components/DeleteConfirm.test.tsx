@@ -66,6 +66,7 @@ describe("DeleteConfirm", () => {
     fireEvent.keyDown(screen.getByPlaceholderText("app.json"), { key: "Enter" });
 
     expect(await screen.findByText("Error: delete denied")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
   });
 });

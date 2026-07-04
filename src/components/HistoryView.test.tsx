@@ -222,6 +222,7 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认回滚?" }));
 
     expect(await screen.findByText("Error: rollback denied")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "rollback",
       result: "failure",
