@@ -18,9 +18,9 @@ class MemoryStorage {
   }
 }
 
-function renderSettings() {
+function renderSettings(locale: "zh-CN" | "en-US" = "en-US") {
   vi.stubGlobal("localStorage", new MemoryStorage());
-  localStorage.setItem("locale", "zh-CN");
+  localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
       <SettingsView />
@@ -29,22 +29,31 @@ function renderSettings() {
 }
 
 describe("SettingsView", () => {
-  it("keeps language and app preferences on the settings page", () => {
-    renderSettings();
+  it("renders a grouped settings workbench without empty standalone sections", () => {
+    renderSettings("en-US");
 
-    expect(screen.getByText("设置")).toBeInTheDocument();
-    expect(screen.getByText("语言")).toBeInTheDocument();
-    expect(screen.getByText("基础信息")).toBeInTheDocument();
-    expect(screen.getByText("高级")).toBeInTheDocument();
-    expect(screen.getByText("网络")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Network" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Smart Compare" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Local Data" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Connection-specific credentials, SSH tunnels, and security policies stay in Connection Manager.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Security" })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByText("连接下拉按名称排序"));
-    // HTTP/HTTPS 代理输入共用同一 placeholder，取第一个（HTTP）
+  it("keeps language, proxy, compare, and local data controls working", () => {
+    renderSettings("en-US");
+
+    fireEvent.click(screen.getByLabelText("Sort connection dropdowns by name"));
     const httpInputs = screen.getAllByPlaceholderText("http://127.0.0.1:7890");
     fireEvent.change(httpInputs[0], {
       target: { value: "http://127.0.0.1:7890" },
     });
 
+    expect(screen.getByRole("button", { name: "Clear Local History" })).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("cs.settings") || "{}")).toEqual(
       expect.objectContaining({
         compare: expect.objectContaining({ sortConnections: false }),
