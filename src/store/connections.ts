@@ -44,6 +44,7 @@ export interface Connection {
   forceLocalSnapshot?: boolean;
   localValidation?: {
     valid: boolean;
+    code?: string;
     message: string;
     configCount: number;
     checkedAt: string;

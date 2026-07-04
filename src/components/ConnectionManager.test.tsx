@@ -711,6 +711,33 @@ describe("ConnectionManager", () => {
     ]);
   });
 
+  it("localizes local snapshot validation failures by backend code", async () => {
+    appApiMocks.validateLocalSnapshotDirectory.mockResolvedValueOnce({
+      valid: false,
+      path: "C:\\backup\\loose",
+      code: "missing_structure",
+      message: "未找到快照清单或标准目录结构",
+      configCount: 0,
+      hasManifest: false,
+      matchedMarkers: [],
+      checkedAt: "2026-06-29T00:00:00Z",
+    });
+    renderManager(vi.fn(), vi.fn(), "en-US");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Config Center" }), {
+      target: { value: "local" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Enter or choose a local folder path"), {
+      target: { value: "C:\\backup\\loose" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Snapshot manifest or standard directory structure was not found").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("未找到快照清单或标准目录结构")).not.toBeInTheDocument();
+  });
+
   it("validates automatically after choosing a local snapshot folder", async () => {
     appApiMocks.selectLocalSnapshotDirectory.mockResolvedValueOnce("C:\\backup\\picked-prod");
     appApiMocks.validateLocalSnapshotDirectory.mockResolvedValueOnce({

@@ -32,6 +32,7 @@ type AppInfo struct {
 type LocalSnapshotValidation struct {
 	Valid          bool     `json:"valid"`
 	Path           string   `json:"path"`
+	Code           string   `json:"code"`
 	Message        string   `json:"message"`
 	ConfigCount    int      `json:"configCount"`
 	HasManifest    bool     `json:"hasManifest"`
@@ -366,6 +367,7 @@ func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
 		CheckedAt: time.Now().Format(time.RFC3339),
 	}
 	if result.Path == "" {
+		result.Code = "empty_path"
 		result.Message = "本地快照目录不能为空"
 		return result
 	}
@@ -373,13 +375,16 @@ func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
 	info, err := os.Stat(result.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			result.Code = "not_found"
 			result.Message = "目录不存在"
 		} else {
+			result.Code = "stat_error"
 			result.Message = err.Error()
 		}
 		return result
 	}
 	if !info.IsDir() {
+		result.Code = "not_directory"
 		result.Message = "路径不是文件夹"
 		return result
 	}
@@ -408,6 +413,7 @@ func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
 
 	entries, err := os.ReadDir(result.Path)
 	if err != nil {
+		result.Code = "read_error"
 		result.Message = err.Error()
 		return result
 	}
@@ -442,15 +448,18 @@ func validateLocalSnapshotDirectory(path string) LocalSnapshotValidation {
 	result.ConfigCount = configCount
 
 	if !result.HasManifest && len(result.MatchedMarkers) == 0 {
+		result.Code = "missing_structure"
 		result.Message = "未找到快照清单或标准目录结构"
 		return result
 	}
 	if result.ConfigCount == 0 {
+		result.Code = "missing_configs"
 		result.Message = "未找到可对比的配置文件"
 		return result
 	}
 
 	result.Valid = true
+	result.Code = "valid"
 	result.Message = "本地快照目录结构有效"
 	return result
 }

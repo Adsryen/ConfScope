@@ -103,6 +103,22 @@ function displayTestMessage(text: string): string {
   return `${value.slice(0, 360)}...`;
 }
 
+function localSnapshotValidationMessage(
+  result: Pick<LocalSnapshotValidation, "valid" | "code" | "message" | "configCount">,
+  t: Translate
+): string {
+  if (result.valid) return t("connection.localValidationOk").replace("{count}", String(result.configCount));
+  const keyByCode: Record<string, string> = {
+    empty_path: "connection.localValidationEmptyPath",
+    not_found: "connection.localValidationNotFound",
+    not_directory: "connection.localValidationNotDirectory",
+    missing_structure: "connection.localValidationMissingStructure",
+    missing_configs: "connection.localValidationMissingConfigs",
+  };
+  const key = result.code ? keyByCode[result.code] : undefined;
+  return key ? t(key) : result.message;
+}
+
 function elapsedMs(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
 }
@@ -612,6 +628,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setLocalValidation(c.localValidation ? {
       valid: c.localValidation.valid,
       path: c.localPath ?? "",
+      code: c.localValidation.code ?? "",
       message: c.localValidation.message,
       configCount: c.localValidation.configCount,
       hasManifest: false,
@@ -645,6 +662,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setLocalValidation(c.localValidation ? {
       valid: c.localValidation.valid,
       path: c.localPath ?? "",
+      code: c.localValidation.code ?? "",
       message: c.localValidation.message,
       configCount: c.localValidation.configCount,
       hasManifest: false,
@@ -726,6 +744,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       forceLocalSnapshot: !!toSave.forceLocalSnapshot,
       localValidation: localValidation ? {
         valid: localValidation.valid,
+        code: localValidation.code,
         message: localValidation.message,
         configCount: localValidation.configCount,
         checkedAt: localValidation.checkedAt,
@@ -867,9 +886,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       setLocalValidation(result);
       setTestMsg({
         ok: result.valid,
-        text: (result.valid
-          ? t('connection.localValidationOk').replace("{count}", String(result.configCount))
-          : result.message) + (showLatency ? `（${latencyText(t, startedAt)}）` : ""),
+        text: localSnapshotValidationMessage(result, t) + (showLatency ? `（${latencyText(t, startedAt)}）` : ""),
       });
       return result;
     } catch (e) {
@@ -1246,7 +1263,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     <div className={`local-validation ${localValidation.valid ? "ok" : "err"}`}>
                       {localValidation.valid
                         ? t('connection.localValidationOk').replace("{count}", String(localValidation.configCount))
-                        : localValidation.message}
+                        : localSnapshotValidationMessage(localValidation, t)}
                       <span className="local-validation-path">{localValidation.path}</span>
                     </div>
                   )}
