@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor } from "./test/react";
+import { act, fireEvent, render, screen, waitFor, within } from "./test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "./i18n";
 import type { Connection } from "./store/connections";
@@ -243,6 +243,29 @@ describe("App", () => {
     });
     expect(screen.queryByRole("dialog", { name: "Welcome to ConfScope" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Updated to v1.3.0" })).not.toBeInTheDocument();
+  });
+
+  it("does not mark config navigation as planned when there are no connections", async () => {
+    localStorage.clear();
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        startup: { lastOpenedVersion: "1.3.0", lastShownWelcomeVersion: "1.3.0", lastShownChangelogVersion: "" },
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.getAppInfo).toHaveBeenCalled();
+    });
+    expect(within(screen.getByRole("button", { name: /Config Browser/ })).queryByText("Planned")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: /Config Compare/ })).queryByText("Planned")).not.toBeInTheDocument();
   });
 
   it("opens DiffView with a runtime local snapshot source from BackupView", async () => {

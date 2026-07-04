@@ -222,8 +222,8 @@ export default function App() {
       group: "config",
       label: t("app.navGroupConfig"),
       items: [
-        { mode: "browse", label: t("app.title"), unavailable: connections.length === 0 },
-        { mode: "diff", label: t("app.diff"), unavailable: connections.length === 0 },
+        { mode: "browse", label: t("app.title") },
+        { mode: "diff", label: t("app.diff") },
         { mode: "audit", label: t("app.audit") },
       ],
     },
