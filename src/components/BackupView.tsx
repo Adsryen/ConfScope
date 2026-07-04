@@ -5,6 +5,7 @@ import { getSnapshotStats, formatSnapshotName, formatTime } from "../lib/snapsho
 import { snapshotNamespaceForDiff } from "../lib/snapshotConnection";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
+import { recordOperation } from "../store/operationHistory";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 
@@ -13,6 +14,7 @@ export interface BackupDiffJumpParams {
   config: ConfigSnapshot;
   sourceConnectionId: string;
   sourceConnectionName: string;
+  snapshotPath: string;
   namespace: string;
   group: string;
   dataId: string;
@@ -53,8 +55,24 @@ export default function BackupView({ onNavigateToDiff }: Props) {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const deletingSnapshot = snapshots.find((snap) => snap.id === id) ?? null;
       try {
         await deleteSnapshot(id);
+        if (deletingSnapshot) {
+          recordOperation({
+            type: "snapshot_delete",
+            result: "success",
+            connectionId: deletingSnapshot.source.connectionId,
+            connectionName: deletingSnapshot.source.connectionName,
+            namespace: deletingSnapshot.source.namespace || deletingSnapshot.source.namespaceId || "public",
+            group: "*",
+            dataId: "*",
+            rollbackable: false,
+            rollbackReason: "operationHistory.rollbackSnapshotOnly",
+            resourceId: deletingSnapshot.id,
+            resourceName: formatSnapshotName(deletingSnapshot),
+          });
+        }
         toast(t("backup.deleted"), "success");
         void loadSnapshots();
         if (selectedSnapshot?.id === id) {
@@ -62,11 +80,27 @@ export default function BackupView({ onNavigateToDiff }: Props) {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (deletingSnapshot) {
+          recordOperation({
+            type: "snapshot_delete",
+            result: "failure",
+            connectionId: deletingSnapshot.source.connectionId,
+            connectionName: deletingSnapshot.source.connectionName,
+            namespace: deletingSnapshot.source.namespace || deletingSnapshot.source.namespaceId || "public",
+            group: "*",
+            dataId: "*",
+            rollbackable: false,
+            rollbackReason: "operationHistory.rollbackOnlySuccess",
+            resourceId: deletingSnapshot.id,
+            resourceName: formatSnapshotName(deletingSnapshot),
+            error: msg,
+          });
+        }
         reportError({ title: t("backup.deleteFailed"), message: msg, detail: msg });
       }
       setShowDeleteConfirm(null);
     },
-    [loadSnapshots, selectedSnapshot, t]
+    [loadSnapshots, selectedSnapshot, snapshots, t]
   );
 
   const selectedStats = selectedSnapshot ? getSnapshotStats(selectedSnapshot) : null;
@@ -77,6 +111,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
       config,
       sourceConnectionId: snapshot.source.connectionId,
       sourceConnectionName: snapshot.source.connectionName,
+      snapshotPath: snapshot.path,
       namespace: snapshotNamespaceForDiff(snapshot),
       group: config.group || "DEFAULT_GROUP",
       dataId: config.dataId,

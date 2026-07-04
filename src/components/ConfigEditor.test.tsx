@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
+import { loadOperationHistory } from "../store/operationHistory";
 import ConfigEditor from "./ConfigEditor";
 
 const apiMocks = vi.hoisted(() => ({
@@ -105,6 +106,14 @@ describe("ConfigEditor", () => {
       );
     });
     expect(onSaved).toHaveBeenCalledWith("app.yaml", "DEFAULT_GROUP");
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "success",
+      dataId: "app.yaml",
+      afterContent: "server:\n  port: 8080",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackMissingContent",
+    });
   });
 
   it("shows publish errors without closing the editor", async () => {
@@ -118,5 +127,13 @@ describe("ConfigEditor", () => {
     expect(await screen.findByText("Error: publish failed")).toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByText("新建配置")).toBeInTheDocument();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "failure",
+      dataId: "app.yaml",
+      afterContent: "server:\n  port: 8080",
+      rollbackable: false,
+      error: "Error: publish failed",
+    });
   });
 });

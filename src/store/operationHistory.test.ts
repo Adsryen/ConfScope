@@ -4,6 +4,8 @@ import {
   recordOperation,
   clearOperationHistory,
   filterOperationHistory,
+  isRollbackableOperation,
+  rollbackUnavailableReason,
   type OperationRecord,
 } from "./operationHistory";
 
@@ -51,6 +53,31 @@ describe("loadOperationHistory", () => {
   it("返回空数组当存储数据格式错误时", () => {
     localStorageMock.setItem("cs.operationHistory", "invalid json");
     expect(loadOperationHistory()).toEqual([]);
+  });
+
+  it("将旧 content 字段迁移为可回滚元数据", () => {
+    const records = [
+      {
+        id: "legacy-1",
+        type: "publish",
+        result: "success",
+        timestamp: "2026-07-04T00:00:00Z",
+        connectionId: "c1",
+        connectionName: "dev",
+        namespace: "public",
+        group: "DEFAULT_GROUP",
+        dataId: "app.yaml",
+        previousContent: "old",
+        content: "new",
+      },
+    ];
+    localStorageMock.setItem("cs.operationHistory", JSON.stringify(records));
+
+    const [record] = loadOperationHistory();
+
+    expect(record.beforeContent).toBe("old");
+    expect(record.afterContent).toBe("new");
+    expect(isRollbackableOperation(record)).toBe(true);
   });
 });
 
@@ -115,6 +142,55 @@ describe("recordOperation", () => {
     expect(history).toHaveLength(2);
     expect(history[0].dataId).toBe("second.yaml");
     expect(history[1].dataId).toBe("first.yaml");
+  });
+
+  it("记录快照和导出操作但标记为不可回滚", () => {
+    const snapshotRecord = recordOperation({
+      type: "snapshot",
+      result: "success",
+      connectionId: "c1",
+      connectionName: "dev",
+      namespace: "public",
+      group: "*",
+      dataId: "*",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
+    });
+
+    const exportRecord = recordOperation({
+      type: "export",
+      result: "success",
+      connectionId: "c1",
+      connectionName: "dev",
+      namespace: "public",
+      group: "*",
+      dataId: "*",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackExportOnly",
+    });
+
+    expect(isRollbackableOperation(snapshotRecord)).toBe(false);
+    expect(isRollbackableOperation(exportRecord)).toBe(false);
+    expect(rollbackUnavailableReason(snapshotRecord)).toBe("operationHistory.rollbackSnapshotOnly");
+    expect(rollbackUnavailableReason(exportRecord)).toBe("operationHistory.rollbackExportOnly");
+  });
+
+  it("只有成功且带操作前内容的配置变更可回滚", () => {
+    const record = recordOperation({
+      type: "publish",
+      result: "success",
+      connectionId: "c1",
+      connectionName: "dev",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      beforeContent: "old",
+      afterContent: "new",
+      rollbackable: true,
+    });
+
+    expect(isRollbackableOperation(record)).toBe(true);
+    expect(rollbackUnavailableReason(record)).toBe("");
   });
 });
 

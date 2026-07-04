@@ -6,6 +6,7 @@ import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
+import { recordOperation } from "../store/operationHistory";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import Select from "./Select";
@@ -27,6 +28,8 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
+  const connectionName = conn.name || connectionDisplayLabel(conn);
+  const namespaceLabel = namespace || "public";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -46,23 +49,48 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
     }
     setSaving(true);
     setError(null);
+    const targetDataId = dataId.trim();
+    const targetGroup = group.trim() || "DEFAULT_GROUP";
+    const configType = nacosType(fmt);
     try {
-      await publishConfig(
-        conn,
-        namespace,
-        dataId.trim(),
-        group.trim() || "DEFAULT_GROUP",
+      await publishConfig(conn, namespace, targetDataId, targetGroup, content, configType);
+      recordOperation({
+        type: "publish",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: targetGroup,
+        dataId: targetDataId,
         content,
-        nacosType(fmt)
-      );
+        afterContent: content,
+        configType,
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackMissingContent",
+      });
       toast(t('config.configCreated'));
-      onSaved(dataId.trim(), group.trim() || "DEFAULT_GROUP");
+      onSaved(targetDataId, targetGroup);
     } catch (e) {
       const message = String(e);
+      recordOperation({
+        type: "publish",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: targetGroup,
+        dataId: targetDataId,
+        content,
+        afterContent: content,
+        configType,
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
       setError(message);
       reportError({
         title: "新建配置失败",
-        source: `${connectionDisplayLabel(conn)} / ${namespace || "public"} / ${group.trim() || "DEFAULT_GROUP"} / ${dataId.trim()}`,
+        source: `${connectionName} / ${namespaceLabel} / ${targetGroup} / ${targetDataId}`,
         message,
         detail: message,
         actionLabel: "重试发布",

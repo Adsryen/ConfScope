@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors } from "../lib/errorCenter";
 import type { Connection } from "../store/connections";
+import { loadOperationHistory } from "../store/operationHistory";
 import ConfigBrowser from "./ConfigBrowser";
 import ErrorDialog from "./ErrorDialog";
 import MessageCenter from "./MessageCenter";
@@ -104,6 +105,9 @@ describe("ConfigBrowser", () => {
     apiMocks.publishConfig.mockReset();
     apiMocks.deleteConfig.mockReset();
     snapshotMocks.createSnapshotFromConfigs.mockReset();
+    Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:confscope-test"), configurable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
+    Object.defineProperty(HTMLAnchorElement.prototype, "click", { value: vi.fn(), configurable: true });
     clearTasks();
     apiMocks.listConfigs.mockResolvedValue(configPage());
     apiMocks.getConfig.mockResolvedValue('{"server":{"port":8080}}');
@@ -182,6 +186,39 @@ describe("ConfigBrowser", () => {
       expect(apiMocks.publishConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP", '{"server":{"port":9090}}', "json");
     });
     await expectCodeContains('"server"', '"port"', "9090");
+
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "success",
+      dataId: "app.json",
+      beforeContent: '{"server":{"port":8080}}',
+      afterContent: '{"server":{"port":9090}}',
+      rollbackable: true,
+    });
+  });
+
+  it("records publish failures with the attempted content", async () => {
+    apiMocks.publishConfig.mockRejectedValueOnce(new Error("publish denied"));
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(document.querySelector("textarea")!, {
+      target: { value: '{"server":{"port":9090}}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+
+    expect(await screen.findByText("Error: publish denied")).toBeInTheDocument();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "failure",
+      dataId: "app.json",
+      beforeContent: '{"server":{"port":8080}}',
+      afterContent: '{"server":{"port":9090}}',
+      rollbackable: false,
+      error: "Error: publish denied",
+    });
   });
 
   it("opens and cancels the delete confirmation", async () => {
@@ -198,6 +235,46 @@ describe("ConfigBrowser", () => {
 
     expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
     expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
+  });
+
+  it("records delete success as rollbackable restore operation", async () => {
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    const dialog = screen.getByText("删除配置").closest(".modal") as HTMLElement;
+    fireEvent.change(within(dialog).getByPlaceholderText("app.json"), { target: { value: "app.json" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => {
+      expect(apiMocks.deleteConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
+    });
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "delete",
+      result: "success",
+      dataId: "app.json",
+      beforeContent: '{"server":{"port":8080}}',
+      rollbackable: true,
+    });
+  });
+
+  it("records current list export as not rollbackable", async () => {
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    fireEvent.click(screen.getByTitle("导出当前列表"));
+
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "export",
+      result: "success",
+      connectionId: "dev",
+      namespace: "public",
+      group: "*",
+      dataId: "*",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackExportOnly",
+    });
   });
 
   it("shows list loading failures inline and records them in the message center", async () => {
@@ -255,7 +332,7 @@ describe("ConfigBrowser", () => {
     renderBrowser();
     await screen.findByText("app.json");
 
-    fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建当前列表快照" }));
 
     await waitFor(() => {
       expect(snapshotMocks.createSnapshotFromConfigs).toHaveBeenCalledWith("dev", "dev", "public", "public", [
@@ -279,13 +356,25 @@ describe("ConfigBrowser", () => {
     const tasks = getTaskManager().listTasks();
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({
-      name: "创建快照：dev / public",
+      name: "创建当前列表快照：dev / public",
       type: "backup",
       status: "success",
       completed: 2,
       failed: 0,
       progress: 100,
       total: 2,
+    });
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "snapshot",
+      result: "success",
+      connectionId: "dev",
+      namespace: "public",
+      group: "*",
+      dataId: "*",
+      resourceId: "snap-1",
+      resourceName: "dev_public_20260101",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
     });
   });
 });

@@ -40,6 +40,7 @@ describe("TaskCenter", () => {
   it("renders empty state when no tasks", () => {
     renderWithI18n(<TaskCenter />);
     expect(screen.getByText("暂无任务")).toBeDefined();
+    expect(screen.getByText("选择一个任务")).toBeDefined();
   });
 
   it("renders task list with items", async () => {
@@ -49,8 +50,7 @@ describe("TaskCenter", () => {
     // 由于测试环境限制，这里主要验证组件渲染
     const titles = screen.getAllByText("任务中心");
     expect(titles.length).toBeGreaterThan(0);
-    const clearButtons = screen.getAllByText("清除已完成");
-    expect(clearButtons.length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "清除已完成" })).toBeDefined();
   });
 
   it("shows tasks created outside TaskCenter", async () => {
@@ -65,5 +65,19 @@ describe("TaskCenter", () => {
 
     expect(await screen.findAllByText("外部快照任务")).toHaveLength(2);
     expect(screen.getAllByText("50%").length).toBeGreaterThan(0);
+  });
+
+  it("shows task detail actions with accessible labels", async () => {
+    const onNavigateToTask = vi.fn();
+    renderWithI18n(<TaskCenter onNavigateToTask={onNavigateToTask} />);
+
+    await act(async () => {
+      const manager = getTaskManager();
+      const task = manager.createTask("导出配置任务", "export");
+      manager.completeTask(task.id, true);
+    });
+
+    expect(await screen.findByRole("button", { name: "查看详情" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "复制任务信息" })).toBeDefined();
   });
 });

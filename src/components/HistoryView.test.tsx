@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { toast } from "../lib/toast";
 import type { Connection } from "../store/connections";
+import { loadOperationHistory } from "../store/operationHistory";
 import HistoryView from "./HistoryView";
 
 const apiMocks = vi.hoisted(() => ({
@@ -180,7 +181,7 @@ describe("HistoryView", () => {
   });
 
   it("publishes the selected version again after rollback confirmation", async () => {
-    const { onRolledBack } = renderHistory();
+    const { onRolledBack } = renderHistory({ currentContent: "server:\n  port: 1000" });
 
     fireEvent.click(await screen.findByText("nid 2"));
     await screen.findByText(/相对上一版 nid 1 的变更/);
@@ -200,5 +201,35 @@ describe("HistoryView", () => {
     expect(onRolledBack).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith("已回滚到版本 2");
     expect(apiMocks.listHistory).toHaveBeenCalledTimes(2);
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "rollback",
+      result: "success",
+      dataId: "app.yaml",
+      beforeContent: "server:\n  port: 1000",
+      afterContent: "server:\n  port: 9090",
+      rollbackable: true,
+      resourceId: "2",
+    });
+  });
+
+  it("records rollback failures", async () => {
+    apiMocks.publishConfig.mockRejectedValueOnce(new Error("rollback denied"));
+    renderHistory({ currentContent: "server:\n  port: 1000" });
+
+    fireEvent.click(await screen.findByText("nid 2"));
+    await screen.findByText(/相对上一版 nid 1 的变更/);
+    fireEvent.click(screen.getByRole("button", { name: "回滚" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认回滚?" }));
+
+    expect(await screen.findByText("Error: rollback denied")).toBeInTheDocument();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "rollback",
+      result: "failure",
+      dataId: "app.yaml",
+      beforeContent: "server:\n  port: 1000",
+      afterContent: "server:\n  port: 9090",
+      rollbackable: false,
+      error: "Error: rollback denied",
+    });
   });
 });

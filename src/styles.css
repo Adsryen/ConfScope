@@ -4062,6 +4062,15 @@ button,
   background: rgba(255, 152, 0, 0.15);
   color: #ffb74d;
 }
+.history-type.snapshot,
+.history-type.snapshot_delete {
+  background: rgba(0, 188, 212, 0.15);
+  color: #4dd0e1;
+}
+.history-type.export {
+  background: rgba(156, 39, 176, 0.15);
+  color: #ba68c8;
+}
 
 .history-result {
   display: inline-flex;
@@ -4122,6 +4131,21 @@ button,
   font-weight: 600;
   color: var(--text-dim);
   text-transform: uppercase;
+}
+
+.history-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.history-rollback-state.available {
+  color: #81c784;
+}
+
+.history-rollback-state.unavailable {
+  color: var(--text-dim);
 }
 
 .history-detail-content,
@@ -4640,6 +4664,12 @@ button,
   background: var(--bg-hover);
 }
 
+.data-list-item:focus-visible {
+  outline: 2px solid rgba(0, 122, 204, 0.72);
+  outline-offset: -2px;
+  background: rgba(0, 122, 204, 0.1);
+}
+
 .data-list-item.active,
 .data-list-item.selected {
   background: rgba(0, 122, 204, 0.14);
@@ -4677,6 +4707,13 @@ button,
 
 .data-item-accent.running {
   background: var(--blue);
+}
+
+.data-item-accent.pending,
+.data-item-accent.snapshot,
+.data-item-accent.snapshot_delete,
+.data-item-accent.export {
+  background: #4dd0e1;
 }
 
 .data-detail {
@@ -4780,6 +4817,8 @@ button,
 
 .history-filters {
   border-radius: 4px;
+  display: flex;
+  gap: 8px;
 }
 
 .history-content {
@@ -4819,6 +4858,11 @@ button,
   margin-top: 14px;
 }
 
+.history-detail-actions {
+  justify-content: flex-start;
+  margin: -4px 0 16px;
+}
+
 .history-detail-content,
 .history-detail-error {
   max-height: 280px;
@@ -4839,6 +4883,11 @@ button,
   padding-left: 18px;
 }
 
+.backup-item:hover,
+.task-item:hover {
+  background: var(--bg-hover);
+}
+
 .backup-item.active,
 .task-item.active {
   background: rgba(0, 122, 204, 0.14);
@@ -4851,6 +4900,12 @@ button,
 .backup-detail,
 .task-detail {
   padding: 18px;
+}
+
+.backup-detail .data-empty-state,
+.task-detail .data-empty-state,
+.history-detail-panel .data-empty-state {
+  min-height: 220px;
 }
 
 .backup-detail-header,
