@@ -384,6 +384,37 @@ describe("DiffView", () => {
     expect(onInitialParamsConsumed).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a copyable inline error when auto compare fails from initial params", async () => {
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) => {
+      if (conn.id === "dev-nacos") throw new Error("cloud EOF");
+      return "server:\n  port: 8080";
+    });
+
+    localStorage.setItem("locale", "zh-CN");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[snapshotConn, nacosConn]}
+          initialParams={{
+            leftConnId: "dev-snapshot",
+            rightConnId: "dev-nacos",
+            namespace: "",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            autoCompare: true,
+          }}
+        />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiMocks.getConfig).toHaveBeenCalledWith(snapshotConn, "", "app.yaml", "DEFAULT_GROUP");
+      expect(apiMocks.getConfig).toHaveBeenCalledWith(nacosConn, "", "app.yaml", "DEFAULT_GROUP");
+    });
+    expect(await screen.findByText("来源 B（右）: cloud EOF")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
+  });
+
   it("shows inline error with failed dataIds when batch diff has partial failures", async () => {
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 3,
