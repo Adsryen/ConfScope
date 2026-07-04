@@ -83,7 +83,8 @@ export default function App() {
   )
     ? ui0.mode!
     : "browse";
-  const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
+  const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
   const [appVersion, setAppVersion] = useState("");
@@ -410,6 +411,8 @@ export default function App() {
             <SSHManagerView />
           ) : mode === "settings" ? (
             <SettingsView />
+          ) : mode === "about" ? (
+            <About embedded />
           ) : connections.length === 0 ? (
             <div className="pad-msg big">
               {t("app.noConnection")}
@@ -426,8 +429,6 @@ export default function App() {
               initialParams={diffInitialParams}
               onInitialParamsConsumed={() => setDiffInitialParams(null)}
             />
-          ) : mode === "about" ? (
-            <About embedded />
           ) : null}
         </main>
       </div>
