@@ -243,7 +243,7 @@ func TestValidateLocalSnapshotDirectoryAcceptsDotMetadataYaml(t *testing.T) {
 func TestValidateLocalSnapshotDirectoryRejectsInvalidPaths(t *testing.T) {
 	app := NewApp()
 
-	if result := app.ValidateLocalSnapshotDirectory(""); result.Valid || result.Message == "" {
+	if result := app.ValidateLocalSnapshotDirectory(""); result.Valid || result.Message == "" || result.Code != "empty_path" {
 		t.Fatalf("empty path result = %+v", result)
 	}
 
@@ -251,12 +251,12 @@ func TestValidateLocalSnapshotDirectoryRejectsInvalidPaths(t *testing.T) {
 	if err := os.WriteFile(file, []byte("a: 1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if result := app.ValidateLocalSnapshotDirectory(file); result.Valid || result.Message != "路径不是文件夹" {
+	if result := app.ValidateLocalSnapshotDirectory(file); result.Valid || result.Message != "路径不是文件夹" || result.Code != "not_directory" {
 		t.Fatalf("file path result = %+v", result)
 	}
 
 	emptyDir := t.TempDir()
-	if result := app.ValidateLocalSnapshotDirectory(emptyDir); result.Valid || result.Message != "未找到快照清单或标准目录结构" {
+	if result := app.ValidateLocalSnapshotDirectory(emptyDir); result.Valid || result.Message != "未找到快照清单或标准目录结构" || result.Code != "missing_structure" {
 		t.Fatalf("empty dir result = %+v", result)
 	}
 }

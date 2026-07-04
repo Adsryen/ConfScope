@@ -79,12 +79,14 @@ describe("app api", () => {
     goApp.ValidateLocalSnapshotDirectory.mockResolvedValue({
       valid: true,
       path: "C:\\backup\\prod",
+      code: "valid",
       configCount: 3,
     });
 
     await expect(selectLocalSnapshotDirectory()).resolves.toBe("C:\\backup\\prod");
     await expect(validateLocalSnapshotDirectory("C:\\backup\\prod")).resolves.toMatchObject({
       valid: true,
+      code: "valid",
       configCount: 3,
     });
 

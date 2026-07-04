@@ -53,6 +53,7 @@ export interface DownloadProgress {
 export interface LocalSnapshotValidation {
   valid: boolean;
   path: string;
+  code: string;
   message: string;
   configCount: number;
   hasManifest: boolean;
