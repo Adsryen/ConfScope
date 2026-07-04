@@ -20,26 +20,12 @@ import {
   type HistoryPage as ConfigCenterHistoryPage,
   type Namespace as ConfigCenterNamespace,
 } from "./configCenter";
-import { getTranslation, type Locale } from "../locales";
+import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
-
-function currentLocale(): Locale {
-  try {
-    const saved = localStorage.getItem("locale");
-    if (saved === "zh-CN" || saved === "en-US") return saved;
-    return navigator.language.startsWith("zh") ? "zh-CN" : "en-US";
-  } catch {
-    return "zh-CN";
-  }
-}
-
-function t(key: string): string {
-  return getTranslation(currentLocale(), key);
-}
 
 function normalizeNacosBaseUrl(baseUrl: string): string {
   const value = baseUrl.trim();
@@ -402,7 +388,7 @@ export async function publishConfig(
   configType: string
 ): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
-    throw new Error(t("api.localSnapshotPublishReadonly"));
+    throw new Error(translate("api.localSnapshotPublishReadonly"));
   }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
@@ -417,7 +403,7 @@ export async function deleteConfig(
   group: string
 ): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
-    throw new Error(t("api.localSnapshotDeleteReadonly"));
+    throw new Error(translate("api.localSnapshotDeleteReadonly"));
   }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>

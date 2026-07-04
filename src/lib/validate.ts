@@ -1,6 +1,7 @@
 // 发布前的格式校验:语法错误 + 重复 key。返回问题列表(空=通过)。
 
 import { parseDocument } from "yaml";
+import { translate } from "../locales";
 import type { Format } from "./format";
 
 /** 行式重复 key 检测(properties / env / toml),按 [section] 分组避免误报。 */
@@ -22,14 +23,18 @@ function dupKeysByLine(content: string): string[] {
     if (seen.has(key)) dups.add(m[1]);
     seen.add(key);
   }
-  return [...dups].map((k) => `重复的键:${k}`);
+  return [...dups].map((k) => translate("validation.duplicateKey", { key: k }));
+}
+
+function xmlError(message: string): string {
+  return translate("validation.xmlFormatError", { message });
 }
 
 function validateXml(content: string): string[] {
   if (typeof DOMParser !== "undefined") {
     const doc = new DOMParser().parseFromString(content, "application/xml");
     const pe = doc.querySelector("parsererror");
-    return pe ? [`XML 格式错误:${(pe.textContent || "解析失败").split("\n")[0]}`] : [];
+    return pe ? [xmlError((pe.textContent || translate("validation.parseFailed")).split("\n")[0])] : [];
   }
 
   const stack: string[] = [];
@@ -42,12 +47,12 @@ function validateXml(content: string): string[] {
     const tail = match[3].trim();
     if (tail.endsWith("/") || name.startsWith("?") || name.startsWith("!")) continue;
     if (closing) {
-      if (stack.pop() !== name) return [`XML 格式错误:标签不匹配:${name}`];
+      if (stack.pop() !== name) return [xmlError(translate("validation.xmlTagMismatch", { name }))];
     } else {
       stack.push(name);
     }
   }
-  if (!matched || stack.length) return ["XML 格式错误:解析失败"];
+  if (!matched || stack.length) return [xmlError(translate("validation.parseFailed"))];
   return [];
 }
 
@@ -60,7 +65,7 @@ export function validateConfig(content: string, fmt: Format): string[] {
       try {
         JSON.parse(content);
       } catch (e) {
-        return [`JSON 解析失败:${(e as Error).message}`];
+        return [translate("validation.jsonParseFailed", { message: (e as Error).message })];
       }
       return [];
     }
