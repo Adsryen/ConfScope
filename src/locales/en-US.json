@@ -26,6 +26,16 @@
     "localSnapshotPublishReadonly": "Local snapshot sources are read-only and cannot publish configs",
     "localSnapshotDeleteReadonly": "Local snapshot sources are read-only and cannot delete configs"
   },
+  "validation": {
+    "duplicateKey": "Duplicate key:{key}",
+    "xmlFormatError": "XML format error:{message}",
+    "xmlTagMismatch": "Tag mismatch:{name}",
+    "parseFailed": "Parse failed",
+    "jsonParseFailed": "JSON parse failed:{message}"
+  },
+  "export": {
+    "unsupportedFormat": "Unsupported export format: {format}"
+  },
   "messageCenter": {
     "title": "Message Center",
     "noMessages": "No messages",

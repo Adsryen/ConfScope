@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { validateConfig } from "./validate";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("validateConfig", () => {
   it("allows empty content for every format", () => {
@@ -12,6 +16,16 @@ describe("validateConfig", () => {
 
     expect(issues).toHaveLength(1);
     expect(issues[0]).toContain("JSON 解析失败:");
+  });
+
+  it("localizes validation errors from the current locale", () => {
+    vi.stubGlobal("localStorage", { getItem: () => "en-US" });
+
+    expect(validateConfig("server.port=8080\nserver.port=9090", "Properties")).toEqual([
+      "Duplicate key:server.port",
+    ]);
+    expect(validateConfig('{"server":', "JSON")[0]).toContain("JSON parse failed:");
+    expect(validateConfig("<root>", "XML")[0]).toContain("XML format error:");
   });
 
   it("accepts valid JSON and YAML content", () => {

@@ -2,6 +2,7 @@
 // 配置导出：CSV / JSON / YAML / Properties / Diff
 import type { AuditRow } from "./audit";
 import type { EnvSource } from "../components/AuditView";
+import { translate } from "../locales";
 
 /** 导出选项 */
 export interface ExportOptions {
@@ -280,7 +281,7 @@ export function exportConfigs(items: ConfigItem[], opts: ConfigExportOptions): v
       content = generateDiffText(items);
       break;
     default:
-      throw new Error(`不支持的导出格式: ${opts.format}`);
+      throw new Error(translate("export.unsupportedFormat", { format: opts.format }));
   }
 
   const filename = `configs_${Date.now()}.${getFileExt(opts.format)}`;

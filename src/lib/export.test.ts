@@ -218,8 +218,16 @@ describe("exportConfigs", () => {
   });
 
   it("不支持的格式抛出错误", () => {
+    localStorage.setItem("locale", "zh-CN");
     const opts = { format: "unknown" as ExportFormat, sensitive: false, includeMeta: false };
     expect(() => exportConfigs(sampleConfigs, opts)).toThrow("不支持的导出格式");
+  });
+
+  it("localizes unsupported export format errors", () => {
+    localStorage.setItem("locale", "en-US");
+    const opts = { format: "unknown" as ExportFormat, sensitive: false, includeMeta: false };
+
+    expect(() => exportConfigs(sampleConfigs, opts)).toThrow("Unsupported export format: unknown");
   });
 
   it("空配置列表也能正常导出", () => {

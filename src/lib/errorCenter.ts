@@ -1,4 +1,4 @@
-import { getTranslation, Locale } from "../locales";
+import { translate } from "../locales";
 import { toast, ToastType } from "./toast";
 
 export type MessageLevel = "success" | "info" | "warning" | "error";
@@ -49,24 +49,6 @@ function messageToastType(level: MessageLevel): ToastType {
   if (level === "success") return "success";
   if (level === "error") return "error";
   return "info";
-}
-
-function currentLocale(): Locale {
-  try {
-    const saved = localStorage.getItem("locale");
-    if (saved === "zh-CN" || saved === "en-US") return saved;
-    return navigator.language.startsWith("zh") ? "zh-CN" : "en-US";
-  } catch {
-    return "zh-CN";
-  }
-}
-
-function translate(key: string, params: Record<string, string | number>): string {
-  let text = getTranslation(currentLocale(), key);
-  for (const [name, value] of Object.entries(params)) {
-    text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
-  }
-  return text;
 }
 
 function makeMergeKey(input: MessageInput): string {

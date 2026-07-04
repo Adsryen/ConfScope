@@ -26,6 +26,16 @@
     "localSnapshotPublishReadonly": "本地快照来源只读，不能发布配置",
     "localSnapshotDeleteReadonly": "本地快照来源只读，不能删除配置"
   },
+  "validation": {
+    "duplicateKey": "重复的键:{key}",
+    "xmlFormatError": "XML 格式错误:{message}",
+    "xmlTagMismatch": "标签不匹配:{name}",
+    "parseFailed": "解析失败",
+    "jsonParseFailed": "JSON 解析失败:{message}"
+  },
+  "export": {
+    "unsupportedFormat": "不支持的导出格式: {format}"
+  },
   "messageCenter": {
     "title": "消息中心",
     "noMessages": "暂无消息",
