@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { reportError } from "../lib/errorCenter";
 import { useTranslation } from "../i18n";
+import CopyButton from "./CopyButton";
 
 interface Props {
   /** 需要输入以确认的名称（dataId）。 */
@@ -76,7 +77,12 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && confirm()}
           />
-          {error && <div className="test-msg err">{error}</div>}
+          {error && (
+            <div className="test-msg err">
+              <span>{error}</span>
+              <CopyButton text={error} label={t("common.copyError")} />
+            </div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>

@@ -9,6 +9,7 @@ import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
+import CopyButton from "./CopyButton";
 import Select from "./Select";
 
 interface Props {
@@ -157,7 +158,12 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
               />
             </div>
           </label>
-          {error && <div className="test-msg err">{error}</div>}
+          {error && (
+            <div className="test-msg err">
+              <span>{error}</span>
+              <CopyButton text={error} label={t("common.copyError")} />
+            </div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>
