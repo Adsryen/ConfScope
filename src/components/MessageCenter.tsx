@@ -67,6 +67,7 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
   const [open, setOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const closeTimer = useRef<number | undefined>(undefined);
+  const copiedTimer = useRef<number | undefined>(undefined);
   const unread = items.filter((item) => !item.read).length;
   const sorted = useMemo(() => [...items].sort((a, b) => b.id - a.id), [items]);
 
@@ -74,7 +75,13 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
   useEffect(() => {
     if (open && unread > 0) markAllMessagesRead();
   }, [open, unread]);
-  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(closeTimer.current);
+      window.clearTimeout(copiedTimer.current);
+    },
+    []
+  );
 
   const openPanel = () => {
     window.clearTimeout(closeTimer.current);
@@ -88,8 +95,9 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
 
   const copyMessage = async (item: AppErrorItem) => {
     if (await copyText(fullText(item))) {
+      window.clearTimeout(copiedTimer.current);
       setCopiedId(item.id);
-      window.setTimeout(() => setCopiedId((id) => (id === item.id ? null : id)), 1200);
+      copiedTimer.current = window.setTimeout(() => setCopiedId((id) => (id === item.id ? null : id)), 1200);
     }
   };
 
