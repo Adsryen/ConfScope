@@ -22,6 +22,10 @@
     "fullError": "完整错误",
     "copyFullError": "复制完整错误"
   },
+  "api": {
+    "localSnapshotPublishReadonly": "本地快照来源只读，不能发布配置",
+    "localSnapshotDeleteReadonly": "本地快照来源只读，不能删除配置"
+  },
   "messageCenter": {
     "title": "消息中心",
     "noMessages": "暂无消息",
@@ -489,6 +493,9 @@
     "version": "版本 {n}",
     "current": "（当前）",
     "rollback": "回滚",
+    "opCreated": "新增",
+    "opUpdated": "更新",
+    "opDeleted": "删除",
     "rollbackConfirm": "确认回滚到该历史版本？",
     "rollbackNote": "将覆盖当前配置并发布到 Nacos",
     "rollbackSuccess": "已回滚到版本 {n}",

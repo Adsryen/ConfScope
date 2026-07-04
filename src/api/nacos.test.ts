@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getConfig,
   getHistoryDetail,
+  deleteConfig,
   listConfigs,
   listHistory,
   listNamespaces,
+  publishConfig,
   testConnection,
 } from "./nacos";
 import type { Connection } from "../store/connections";
@@ -347,6 +349,25 @@ describe("nacos api compatibility bridge", () => {
     });
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(localProfile, ref);
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(localProfile);
+  });
+
+  it("rejects writes to local snapshot sources with localized readonly errors", async () => {
+    localStorage.setItem("locale", "en-US");
+    const conn: Connection = {
+      ...makeConnection("conn-local-readonly"),
+      sourceType: "local-snapshot",
+      localPath: "C:\\backup\\prod",
+      baseUrl: "C:\\backup\\prod",
+      username: "",
+      password: "",
+    };
+
+    await expect(publishConfig(conn, "", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).rejects.toThrow(
+      "Local snapshot sources are read-only and cannot publish configs"
+    );
+    await expect(deleteConfig(conn, "", "app.yaml", "DEFAULT_GROUP")).rejects.toThrow(
+      "Local snapshot sources are read-only and cannot delete configs"
+    );
   });
 
   it("derives SSH tunnel target from the Nacos base URL", async () => {

@@ -32,8 +32,12 @@ interface Props {
 }
 
 const PAGE_SIZE = 50;
-const opLabel = (t: string) =>
-  ({ I: "新增", U: "更新", D: "删除" } as Record<string, string>)[t] ?? t ?? "—";
+const opLabel = (opType: string, t: (key: string) => string) => {
+  if (opType === "I") return t("history.opCreated");
+  if (opType === "U") return t("history.opUpdated");
+  if (opType === "D") return t("history.opDeleted");
+  return opType || "—";
+};
 
 /** 历史版本：左侧版本列表（可勾选两个对比），右侧展示选中版本内容或两版本 diff。 */
 export default function HistoryView({
@@ -278,7 +282,7 @@ export default function HistoryView({
             <div className="history-item-main" onClick={() => view(h.id)}>
               <div className="history-item-time">{formatTime(h.lastModifiedTime)}</div>
               <div className="history-item-meta">
-                <span className={`op op-${h.opType || "x"}`}>{opLabel(h.opType)}</span>
+                <span className={`op op-${h.opType || "x"}`}>{opLabel(h.opType, t)}</span>
                 <span className="history-item-id mono">nid {h.id}</span>
               </div>
             </div>
