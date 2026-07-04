@@ -550,7 +550,38 @@ describe("ConnectionManager", () => {
         }),
       ]);
     });
-    expect(screen.getByTitle("SSH 隧道")).toBeInTheDocument();
+    expect(screen.getByTitle("SSH 隧道配置")).toBeInTheDocument();
+  });
+
+  it("localizes the saved connection SSH badge title", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "ssh-conn",
+          name: "ssh-dev",
+          sourceName: "Cloud Intranet",
+          projectName: "Order Service",
+          environmentName: "Development",
+          baseUrl: "http://dev.example.com/nacos",
+          username: "",
+          password: "",
+          defaultNamespace: "",
+          sshConfig: {
+            host: "jump.example.com",
+            port: 22,
+            username: "ops",
+            authType: "password",
+            password: "ssh-secret",
+          },
+        },
+      ])
+    );
+
+    renderManager(vi.fn(), vi.fn(), "en-US");
+
+    expect(screen.getByTitle("SSH Tunnel Config")).toBeInTheDocument();
+    expect(screen.queryByTitle("SSH 隧道")).not.toBeInTheDocument();
   });
 
   it("saves inline SSH settings as a reusable profile and references it from the connection", async () => {

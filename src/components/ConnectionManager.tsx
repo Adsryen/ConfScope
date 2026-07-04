@@ -1028,7 +1028,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             <span className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}>{connectionEnvironmentName(c)}</span>
                             {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
                             {c.provider === "local" && <span className="conn-provider-badge local">{t('connection.sourceTypeSnapshot')}</span>}
-                            {(c.sshConfig || c.sshProfileId) && <span className="conn-ssh-badge" title="SSH 隧道">🔒SSH</span>}
+                            {(c.sshConfig || c.sshProfileId) && <span className="conn-ssh-badge" title={t("connection.sshConfig")}>🔒SSH</span>}
                           </div>
                           <div className="conn-item-url">
                             <span>{sourceAddress(c)}</span>
