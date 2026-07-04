@@ -11,6 +11,7 @@ import { Format, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { useTranslation } from "../i18n";
+import { recordOperation } from "../store/operationHistory";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -155,16 +156,54 @@ export default function HistoryView({
     }
     setRollingBack(true);
     setError(null);
+    const targetVersion = viewing;
+    let targetContent = "";
     try {
-      const text = await ensureContent(viewing);
-      await publishConfig(conn, tenant, dataId, group, text, nacosType(format));
+      const text = await ensureContent(targetVersion);
+      targetContent = text;
+      const configType = nacosType(format);
+      await publishConfig(conn, tenant, dataId, group, text, configType);
+      recordOperation({
+        type: "rollback",
+        result: "success",
+        connectionId: conn.id,
+        connectionName: conn.name || connectionDisplayLabel(conn),
+        namespace: tenant || "public",
+        group,
+        dataId,
+        content: text,
+        previousContent: currentContent,
+        beforeContent: currentContent,
+        afterContent: text,
+        configType,
+        rollbackable: true,
+        resourceId: targetVersion,
+      });
       setRbConfirm(false);
       setViewing(null);
-      toast(t('history.rollbackSuccess', { n: viewing }));
+      toast(t('history.rollbackSuccess', { n: targetVersion }));
       onRolledBack();
       loadHistory(1);
     } catch (e) {
       const message = String(e);
+      recordOperation({
+        type: "rollback",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName: conn.name || connectionDisplayLabel(conn),
+        namespace: tenant || "public",
+        group,
+        dataId,
+        content: targetContent || undefined,
+        previousContent: currentContent,
+        beforeContent: currentContent,
+        afterContent: targetContent || undefined,
+        configType: nacosType(format),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        resourceId: targetVersion,
+        error: message,
+      });
       setError(message);
       setRbConfirm(false);
       reportError({

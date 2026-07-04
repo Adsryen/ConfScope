@@ -9,6 +9,7 @@ import { useTranslation } from "../i18n";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import { createSnapshotFromConfigs } from "../api/snapshot";
 import { useTaskManager } from "../lib/taskmanager";
+import { recordOperation } from "../store/operationHistory";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -83,7 +84,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
   const dirty = editing && draft !== content;
-  const sourceLabel = `${connectionDisplayLabel(conn)} / ${tenant || "public"}`;
+  const connectionName = conn.name || connectionDisplayLabel(conn);
+  const namespaceLabel = tenant || "public";
+  const sourceLabel = `${connectionName} / ${namespaceLabel}`;
   const guardNav = (action: () => void) => {
     if (dirty) setPending(() => action);
     else action();
@@ -218,11 +221,43 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setSaveError(null);
     try {
       await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
+      recordOperation({
+        type: "publish",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: selected.group,
+        dataId: selected.dataId,
+        content: draft,
+        previousContent: content,
+        beforeContent: content,
+        afterContent: draft,
+        configType: nacosType(fmt),
+        rollbackable: true,
+      });
       setEditing(false);
       toast(t("config.published"));
       await openConfig(selected); // 重新拉取最新内容
     } catch (e) {
       const message = String(e);
+      recordOperation({
+        type: "publish",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: selected.group,
+        dataId: selected.dataId,
+        content: draft,
+        previousContent: content,
+        beforeContent: content,
+        afterContent: draft,
+        configType: nacosType(fmt),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
       setSaveError(message);
       reportError({
         title: "配置发布失败",
@@ -250,12 +285,45 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
   const doDelete = async () => {
     if (!selected) return;
-    await deleteConfig(conn, tenant, selected.dataId, selected.group);
-    setShowDelete(false);
-    setSelected(null);
-    setContent("");
-    toast(t("config.deleted"));
-    fetchList(appliedTerm, pageNo);
+    try {
+      await deleteConfig(conn, tenant, selected.dataId, selected.group);
+      recordOperation({
+        type: "delete",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: selected.group,
+        dataId: selected.dataId,
+        previousContent: content,
+        beforeContent: content,
+        configType: selected.configType || nacosType(fmt),
+        rollbackable: true,
+      });
+      setShowDelete(false);
+      setSelected(null);
+      setContent("");
+      toast(t("config.deleted"));
+      fetchList(appliedTerm, pageNo);
+    } catch (e) {
+      const message = String(e);
+      recordOperation({
+        type: "delete",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: selected.group,
+        dataId: selected.dataId,
+        previousContent: content,
+        beforeContent: content,
+        configType: selected.configType || nacosType(fmt),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
+      throw e;
+    }
   };
 
   const createSnapshot = async () => {
@@ -300,12 +368,37 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         throw new Error(lastError || t("config.snapshotNoConfigs"));
       }
 
-      const snapshot = await createSnapshotFromConfigs(conn.id, conn.name || connectionDisplayLabel(conn), namespace, tenant, configs);
+      const snapshot = await createSnapshotFromConfigs(conn.id, connectionName, namespace, tenant, configs);
+      recordOperation({
+        type: "snapshot",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace,
+        group: "*",
+        dataId: "*",
+        resourceId: snapshot.id,
+        resourceName: snapshot.name || snapshot.id,
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackSnapshotOnly",
+      });
       const partialError = failed > 0 ? t("config.snapshotPartialFailed", { count: failed }) : "";
       taskManager.completeTask(task.id, failed === 0, partialError);
       toast(t("config.snapshotCreated", { name: snapshot.name || snapshot.id }), failed > 0 ? "info" : "success");
     } catch (e) {
       const message = String(e);
+      recordOperation({
+        type: "snapshot",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace,
+        group: "*",
+        dataId: "*",
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
       taskManager.completeTask(task.id, false, message);
       reportError({
         title: t("config.snapshotCreateFailed"),
@@ -360,19 +453,54 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               title={t("config.exportCurrentList")}
               onClick={() => {
                 const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
-                exportConfigs(
-                  items.map((it) => ({
-                    dataId: it.dataId,
-                    group: it.group,
-                    content: it.content,
-                    configType: it.configType,
-                    namespace: tenant,
-                    namespaceId: tenant,
-                    updateTime: "",
-                  })),
-                  opts
-                );
-                toast(t("config.exportedCurrentList"), "success");
+                try {
+                  exportConfigs(
+                    items.map((it) => ({
+                      dataId: it.dataId,
+                      group: it.group,
+                      content: it.content,
+                      configType: it.configType,
+                      namespace: tenant,
+                      namespaceId: tenant,
+                      updateTime: "",
+                    })),
+                    opts
+                  );
+                  recordOperation({
+                    type: "export",
+                    result: "success",
+                    connectionId: conn.id,
+                    connectionName,
+                    namespace: namespaceLabel,
+                    group: "*",
+                    dataId: "*",
+                    resourceName: t("config.exportCurrentList"),
+                    rollbackable: false,
+                    rollbackReason: "operationHistory.rollbackExportOnly",
+                  });
+                  toast(t("config.exportedCurrentList"), "success");
+                } catch (e) {
+                  const message = String(e);
+                  recordOperation({
+                    type: "export",
+                    result: "failure",
+                    connectionId: conn.id,
+                    connectionName,
+                    namespace: namespaceLabel,
+                    group: "*",
+                    dataId: "*",
+                    resourceName: t("config.exportCurrentList"),
+                    rollbackable: false,
+                    rollbackReason: "operationHistory.rollbackOnlySuccess",
+                    error: message,
+                  });
+                  reportError({
+                    title: t("config.exportCurrentList"),
+                    source: sourceLabel,
+                    message,
+                    detail: message,
+                  });
+                }
               }}
             >
               ↓

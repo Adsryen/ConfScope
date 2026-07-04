@@ -171,7 +171,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
           )}
         </div>
 
-        {selectedTask && (
+        {selectedTask ? (
           <div className="data-detail task-detail">
             <div className="data-detail-header task-detail-header">
               <div>
@@ -243,6 +243,13 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 </div>
               </div>
             )}
+          </div>
+        ) : (
+          <div className="data-detail task-detail">
+            <div className="data-empty-state detail-empty">
+              <div>{t("tasks.selectHint")}</div>
+              <span>{t("tasks.selectHintDetail")}</span>
+            </div>
           </div>
         )}
       </div>

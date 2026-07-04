@@ -2,8 +2,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
 import { Connection } from "../store/connections";
-import { loadOperationHistory, filterOperationHistory, type OperationRecord, type OperationType } from "../store/operationHistory";
-import { listHistory } from "../api/nacos";
+import { detectFormat, nacosType } from "../lib/format";
+import { reportError } from "../lib/errorCenter";
+import { toast } from "../lib/toast";
+import {
+  loadOperationHistory,
+  filterOperationHistory,
+  isRollbackableOperation,
+  recordOperation,
+  rollbackUnavailableReason,
+  type OperationRecord,
+  type OperationType,
+} from "../store/operationHistory";
+import { getConfig, listHistory, publishConfig } from "../api/nacos";
 import CopyButton from "./CopyButton";
 
 interface Props {
@@ -14,6 +25,9 @@ const OPERATION_LABELS: Record<OperationType, string> = {
   publish: "operationHistory.opPublish",
   delete: "operationHistory.opDelete",
   rollback: "operationHistory.opRollback",
+  snapshot: "operationHistory.opSnapshot",
+  snapshot_delete: "operationHistory.opSnapshotDelete",
+  export: "operationHistory.opExport",
 };
 
 const RESULT_LABELS: Record<string, string> = {
@@ -36,6 +50,8 @@ export default function OperationHistoryView({ connections }: Props) {
   const [filterType, setFilterType] = useState<OperationType | "">("");
   const [filterDataId, setFilterDataId] = useState("");
   const [selectedRecord, setSelectedRecord] = useState<OperationRecord | null>(null);
+  const [rollbackConfirmId, setRollbackConfirmId] = useState<string | null>(null);
+  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
   // 加载本地记录
   useEffect(() => {
@@ -98,6 +114,63 @@ export default function OperationHistoryView({ connections }: Props) {
   const failedCount = allRecords.filter((record) => record.result === "failure").length;
   const sourceCount = new Set(allRecords.map((record) => record.connectionId)).size;
 
+  const rollbackRecord = async (record: OperationRecord) => {
+    const conn = connections.find((item) => item.id === record.connectionId);
+    const restoreContent = record.beforeContent;
+    if (!conn || typeof restoreContent !== "string") return;
+    if (rollbackConfirmId !== record.id) {
+      setRollbackConfirmId(record.id);
+      return;
+    }
+
+    setRollingBackId(record.id);
+    setError(null);
+    try {
+      const current = await getConfig(conn, record.namespace, record.dataId, record.group).catch(() => record.afterContent ?? "");
+      const configType = record.configType || nacosType(detectFormat(record.dataId, "", restoreContent));
+      await publishConfig(conn, record.namespace, record.dataId, record.group, restoreContent, configType);
+      recordOperation({
+        type: "rollback",
+        result: "success",
+        connectionId: conn.id,
+        connectionName: conn.name,
+        namespace: record.namespace,
+        group: record.group,
+        dataId: record.dataId,
+        beforeContent: current,
+        afterContent: restoreContent,
+        content: restoreContent,
+        previousContent: current,
+        configType,
+        rollbackable: true,
+        resourceId: record.id,
+      });
+      setLocalRecords(loadOperationHistory());
+      setRollbackConfirmId(null);
+      toast(t("operationHistory.rollbackSuccess"), "success");
+    } catch (e) {
+      const message = String(e);
+      recordOperation({
+        type: "rollback",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName: conn.name,
+        namespace: record.namespace,
+        group: record.group,
+        dataId: record.dataId,
+        beforeContent: restoreContent,
+        error: message,
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+      });
+      setLocalRecords(loadOperationHistory());
+      setError(message);
+      reportError({ title: t("operationHistory.rollbackFailed"), source: record.dataId, message, detail: message });
+    } finally {
+      setRollingBackId(null);
+    }
+  };
+
   // 格式化时间
   const formatTime = (timestamp: string) => {
     try {
@@ -147,6 +220,9 @@ export default function OperationHistoryView({ connections }: Props) {
           <option value="publish">{t("operationHistory.opPublish")}</option>
           <option value="delete">{t("operationHistory.opDelete")}</option>
           <option value="rollback">{t("operationHistory.opRollback")}</option>
+          <option value="snapshot">{t("operationHistory.opSnapshot")}</option>
+          <option value="snapshot_delete">{t("operationHistory.opSnapshotDelete")}</option>
+          <option value="export">{t("operationHistory.opExport")}</option>
         </select>
         <input
           className="history-filter-input"
@@ -203,6 +279,14 @@ export default function OperationHistoryView({ connections }: Props) {
         <div className="data-detail history-detail-panel">
           {selectedVisibleRecord ? (
             <>
+              {(() => {
+                const rollbackable = isRollbackableOperation(selectedVisibleRecord);
+                const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
+                const isRollingBack = rollingBackId === selectedVisibleRecord.id;
+                const isConfirmingRollback = rollbackConfirmId === selectedVisibleRecord.id;
+
+                return (
+                  <>
               <div className="data-detail-header">
                 <div>
                   <h3 className="data-detail-title">{selectedVisibleRecord.dataId}</h3>
@@ -227,7 +311,30 @@ export default function OperationHistoryView({ connections }: Props) {
                   <span className="info-label">{t("operationHistory.time")}:</span>
                   <span className="info-value">{formatTime(selectedVisibleRecord.timestamp)}</span>
                 </div>
+                <div className="info-row">
+                  <span className="info-label">{t("operationHistory.rollbackState")}:</span>
+                  <span className={`info-value history-rollback-state ${rollbackable ? "available" : "unavailable"}`}>
+                    {rollbackable ? t("operationHistory.rollbackable") : t("operationHistory.notRollbackable")}
+                  </span>
+                </div>
+                {!rollbackable && rollbackReason && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.rollbackReason")}:</span>
+                    <span className="info-value">{t(rollbackReason)}</span>
+                  </div>
+                )}
               </div>
+              {rollbackable && (
+                <div className="history-detail-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => rollbackRecord(selectedVisibleRecord)} disabled={isRollingBack}>
+                    {isRollingBack
+                      ? t("operationHistory.rollingBack")
+                      : isConfirmingRollback
+                        ? t("operationHistory.confirmRollback")
+                        : t("operationHistory.rollbackThis")}
+                  </button>
+                </div>
+              )}
               {selectedVisibleRecord.content && (
                 <div className="history-detail-field">
                   <label>{t("operationHistory.content")}</label>
@@ -243,6 +350,9 @@ export default function OperationHistoryView({ connections }: Props) {
                   <pre className="history-detail-error">{selectedVisibleRecord.error}</pre>
                 </div>
               )}
+                  </>
+                );
+              })()}
             </>
           ) : (
             <div className="data-empty-state detail-empty">

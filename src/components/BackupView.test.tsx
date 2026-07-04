@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import BackupView from "./BackupView";
 import { I18nProvider } from "../i18n";
 import type { Snapshot } from "../api/snapshot";
+import { loadOperationHistory } from "../store/operationHistory";
 
 vi.mock("../api/snapshot", () => ({
   listSnapshots: vi.fn(),
@@ -63,6 +64,7 @@ describe("BackupView", () => {
   };
 
   beforeEach(async () => {
+    localStorage.clear();
     localStorage.setItem("locale", "zh-CN");
     vi.clearAllMocks();
     const { listSnapshots } = await import("../api/snapshot");
@@ -134,9 +136,38 @@ describe("BackupView", () => {
       config: mockSnapshots[0].configs[0],
       sourceConnectionId: "conn-1",
       sourceConnectionName: "dev-nacos",
+      snapshotPath: "C:\\Users\\tester\\.confscope\\backups\\snap-1",
       namespace: "",
       group: "DEFAULT_GROUP",
       dataId: "app.yaml",
+    });
+  });
+
+  it("records snapshot delete as not rollbackable", async () => {
+    const { deleteSnapshot } = await import("../api/snapshot");
+    vi.mocked(deleteSnapshot).mockResolvedValue(undefined);
+
+    renderWithI18n(<BackupView />);
+
+    fireEvent.click(await screen.findByTitle("删除快照"));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    await waitFor(() => {
+      expect(deleteSnapshot).toHaveBeenCalledWith("snap-1");
+    });
+
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "snapshot_delete",
+      result: "success",
+      connectionId: "conn-1",
+      connectionName: "dev-nacos",
+      namespace: "public",
+      group: "*",
+      dataId: "*",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
+      resourceId: "snap-1",
+      resourceName: "dev-nacos_public_20240101",
     });
   });
 });
