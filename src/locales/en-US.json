@@ -521,6 +521,7 @@
     "configTotal": "Config count",
     "configList": "Config list",
     "compareWithCloud": "Compare with cloud",
+    "comparePrepared": "Snapshot source loaded for compare",
     "compareUnavailable": "Cannot open snapshot compare",
     "sourceConnectionMissing": "The source connection for this snapshot no longer exists. Restore or recreate it first.",
     "snapshotPathMissing": "Snapshot local path is missing, so it cannot be used as a local compare source."
