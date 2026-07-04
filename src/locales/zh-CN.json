@@ -691,6 +691,20 @@
     "failedStat": "失败: {count}",
     "totalStat": "总计: {count}"
   },
+  "startupDialog": {
+    "kicker": "版本提示",
+    "welcomeTitle": "欢迎使用 ConfScope",
+    "updateTitle": "已更新到 v{version}",
+    "welcomeItemConnections": "统一管理配置中心连接",
+    "welcomeItemCompare": "浏览、对比、审计配置差异",
+    "welcomeItemSnapshots": "支持本地快照与操作历史",
+    "updateItemSnapshots": "新增本地快照与备份管理",
+    "updateItemSnapshotDiff": "支持快照与云端配置对比",
+    "updateItemHistory": "完善操作历史与可回滚记录",
+    "updateItemPolish": "优化数据管理页面与多语言文案",
+    "start": "开始使用",
+    "gotIt": "知道了"
+  },
   "about": {
     "title": "关于",
     "tagline": "统一配置中心管理工具",

@@ -15,14 +15,16 @@ import ErrorDialog from "./components/ErrorDialog";
 import MessageCenter from "./components/MessageCenter";
 import BackupView, { type BackupDiffJumpParams } from "./components/BackupView";
 import TaskCenter from "./components/TaskCenter";
+import StartupDialog from "./components/StartupDialog";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
-import { loadSettings, updateUpdateSettings } from "./store/settings";
+import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
 import OperationHistoryView from "./components/OperationHistoryView";
 import type { DiffJumpParams } from "./components/AuditView";
 import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/snapshotConnection";
 import { toast } from "./lib/toast";
+import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
@@ -84,6 +86,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>(connections.length === 0 ? "connections" : knownMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
+  const [appVersion, setAppVersion] = useState("");
+  const [startupDialog, setStartupDialog] = useState<StartupDialogKind | null>(null);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（AuditView → DiffView）
@@ -94,6 +98,29 @@ export default function App() {
     () => [...connections, ...runtimeSnapshotConnections.filter((conn) => !connections.some((item) => item.id === conn.id))],
     [connections, runtimeSnapshotConnections]
   );
+
+  useEffect(() => {
+    let alive = true;
+    const hasExistingAppData = hasExistingStartupData();
+    const applyVersion = (version: string) => {
+      if (!alive) return;
+      setAppVersion(version);
+      const settings = loadSettings();
+      const kind = startupDialogKind({ currentVersion: version, settings, hasExistingAppData });
+      setStartupDialog(kind);
+      if (!kind) {
+        updateStartupSettings({ lastOpenedVersion: version });
+      }
+    };
+
+    getAppInfo()
+      .then((info) => applyVersion(info.version || "dev"))
+      .catch(() => applyVersion("dev"));
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 记住上次的连接与模式
   useEffect(() => {
@@ -256,6 +283,15 @@ export default function App() {
     toast(t("backup.comparePrepared"), "info");
   };
 
+  const closeStartupDialog = () => {
+    if (!startupDialog || !appVersion) return;
+    updateStartupSettings({
+      lastOpenedVersion: appVersion,
+      ...(startupDialog === "welcome" ? { lastShownWelcomeVersion: appVersion } : { lastShownChangelogVersion: appVersion }),
+    });
+    setStartupDialog(null);
+  };
+
   const browsePage = (
     <div className="page-surface browse-page">
       <div className="page-header browse-header">
@@ -398,6 +434,7 @@ export default function App() {
 
       <Toaster />
       <ErrorDialog />
+      {startupDialog && appVersion && <StartupDialog kind={startupDialog} version={appVersion} onClose={closeStartupDialog} />}
     </div>
   );
 }

@@ -691,6 +691,20 @@
     "failedStat": "Failed: {count}",
     "totalStat": "Total: {count}"
   },
+  "startupDialog": {
+    "kicker": "Release notes",
+    "welcomeTitle": "Welcome to ConfScope",
+    "updateTitle": "Updated to v{version}",
+    "welcomeItemConnections": "Manage config-center connections in one place",
+    "welcomeItemCompare": "Browse, compare, and audit configuration differences",
+    "welcomeItemSnapshots": "Use local snapshots and operation history",
+    "updateItemSnapshots": "Added local snapshots and backup management",
+    "updateItemSnapshotDiff": "Compare snapshots with cloud configs",
+    "updateItemHistory": "Improved operation history and rollback records",
+    "updateItemPolish": "Polished data management pages and multilingual copy",
+    "start": "Start using",
+    "gotIt": "Got it"
+  },
   "about": {
     "title": "About",
     "tagline": "Unified Configuration Center Management Tool",
