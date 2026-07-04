@@ -11,7 +11,8 @@
     "error": "错误",
     "success": "成功",
     "copy": "复制",
-    "copyError": "复制错误"
+    "copyError": "复制错误",
+    "operationFailed": "操作失败"
   },
   "app": {
     "title": "配置浏览",
@@ -42,6 +43,7 @@
     "addConnection": "添加连接",
     "selectConnection": "请选择一个连接",
     "cannotConnect": "无法连接到 {name}",
+    "namespaceLoadFailed": "命名空间加载失败",
     "navGroupConfig": "配置管理",
     "navGroupData": "数据管理",
     "navGroupSystem": "系统设置"
@@ -283,6 +285,9 @@
     "newConfig": "新建配置",
     "published": "配置已发布",
     "deleted": "配置已删除",
+    "listLoadFailed": "配置列表加载失败",
+    "contentLoadFailed": "配置内容加载失败",
+    "publishConfigFailed": "配置发布失败",
     "group": "GROUP",
     "newConfigTitle": "新建配置",
     "editConfigTitle": "编辑配置",
@@ -616,6 +621,9 @@
     "noUpdate": "当前已是最新版本",
     "downloadComplete": "下载完成，校验通过",
     "skipVersion": "忽略此版本",
+    "updateCheckFailed": "更新检查失败",
+    "updateCheckError": "更新检查异常",
+    "updateDownloadFailed": "更新下载失败",
     "downloadFailed": "下载失败：{error}",
     "sha256VerifyFailed": "SHA256 校验失败",
     "httpProxy": "HTTP 代理",

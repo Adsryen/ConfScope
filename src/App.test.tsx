@@ -1,13 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "./test/react";
+import { act, fireEvent, render, screen, waitFor } from "./test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "./i18n";
 import type { Connection } from "./store/connections";
 import type { BackupDiffJumpParams } from "./components/BackupView";
 import type { DiffJumpParams } from "./components/AuditView";
 import App from "./App";
+import { reportError, reportMessage } from "./lib/errorCenter";
 import { toast } from "./lib/toast";
 
 const apiMocks = vi.hoisted(() => ({
@@ -132,6 +133,7 @@ const sourceConnection: Connection = {
 
 describe("App", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
     localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.connections", JSON.stringify([sourceConnection]));
@@ -140,6 +142,8 @@ describe("App", () => {
     apiMocks.listNamespaces.mockResolvedValue([]);
     apiMocks.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.3.0", updateSources: [] });
     apiMocks.checkForUpdates.mockResolvedValue({ hasUpdate: false, latestVersion: "", releaseNotes: "" });
+    vi.mocked(reportError).mockClear();
+    vi.mocked(reportMessage).mockClear();
   });
 
   it("opens DiffView with a runtime local snapshot source from BackupView", async () => {
@@ -177,5 +181,58 @@ describe("App", () => {
       ])
     );
     expect(toast).toHaveBeenCalledWith("Snapshot source loaded for compare", "info");
+  });
+
+  it("reports namespace loading errors with localized message-center actions", async () => {
+    apiMocks.listNamespaces.mockRejectedValueOnce(new Error("namespace denied"));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await waitFor(() => {
+      expect(reportError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Failed to load namespaces",
+          actionLabel: "Retry",
+        })
+      );
+    });
+  });
+
+  it("reports background update notifications with localized message-center actions", async () => {
+    vi.useFakeTimers();
+    try {
+      apiMocks.checkForUpdates.mockResolvedValueOnce({
+        hasUpdate: true,
+        latestVersion: "1.4.0",
+        releaseNotes: "release notes",
+        error: "",
+        mandatory: false,
+      });
+
+      render(
+        <I18nProvider>
+          <App />
+        </I18nProvider>
+      );
+
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync();
+        await Promise.resolve();
+      });
+
+      expect(reportMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "New version v1.4.0 available",
+          source: "App Updates",
+          actionLabel: "Open Download Page",
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

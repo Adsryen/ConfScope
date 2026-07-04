@@ -29,22 +29,25 @@ interface Props {
 const PAGE_SIZE = 50;
 type Tab = "content" | "history";
 type InlineErrorProps = {
+  title: string;
   message: string;
+  retryLabel: string;
+  copyLabel: string;
   onRetry?: () => void;
 };
 
-function InlineError({ message, onRetry }: InlineErrorProps) {
+function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineErrorProps) {
   return (
     <div className="inline-error" role="alert">
       <div className="inline-error-head">
-        <span className="inline-error-title">操作失败</span>
+        <span className="inline-error-title">{title}</span>
         <div className="inline-error-actions">
           {onRetry && (
             <button className="btn btn-ghost btn-sm" onClick={onRetry}>
-              重试
+              {retryLabel}
             </button>
           )}
-          <CopyButton text={message} label="复制错误" />
+          <CopyButton text={message} label={copyLabel} />
         </div>
       </div>
       <pre className="inline-error-body">{message}</pre>
@@ -87,6 +90,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
+  const inlineErrorLabels = {
+    title: t("common.operationFailed"),
+    retryLabel: t("common.retry"),
+    copyLabel: t("common.copyError"),
+  };
   const guardNav = (action: () => void) => {
     if (dirty) setPending(() => action);
     else action();
@@ -117,11 +125,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       setTotal(0);
       setPages(1);
       reportError({
-        title: "配置列表加载失败",
+        title: t("config.listLoadFailed"),
         source: sourceLabel,
         message,
         detail: message,
-        actionLabel: "重试",
+        actionLabel: t("common.retry"),
         onAction: () => fetchList(term, page),
       });
     } finally {
@@ -185,11 +193,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       setContentError(message);
       setContent("");
       reportError({
-        title: "配置内容加载失败",
+        title: t("config.contentLoadFailed"),
         source: `${sourceLabel} / ${item.group} / ${item.dataId}`,
         message,
         detail: message,
-        actionLabel: "重试",
+        actionLabel: t("common.retry"),
         onAction: () => openConfig(item),
       });
     } finally {
@@ -260,11 +268,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       });
       setSaveError(message);
       reportError({
-        title: "配置发布失败",
+        title: t("config.publishConfigFailed"),
         source: `${sourceLabel} / ${selected.group} / ${selected.dataId}`,
         message,
         detail: message,
-        actionLabel: "重试发布",
+        actionLabel: t("config.retryPublish"),
         onAction: () => saveEdit(),
       });
     } finally {
@@ -515,7 +523,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         <div className="browser-count">{t("config.total", { count: total })}</div>
         <div className="browser-items">
           {listLoading && <div className="pad-msg">{t("config.loading")}</div>}
-          {listError && <InlineError message={listError} onRetry={() => fetchList(appliedTerm, pageNo)} />}
+          {listError && <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo)} />}
           {!listLoading && !listError && items.length === 0 && <div className="pad-msg">{t("config.empty")}</div>}
           {items.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
@@ -565,7 +573,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             {tab === "content" ? (
               <div className="content-box">
                 {contentLoading && <div className="pad-msg">{t("config.loading")}</div>}
-                {contentError && selected && <InlineError message={contentError} onRetry={() => openConfig(selected)} />}
+                {contentError && selected && <InlineError {...inlineErrorLabels} message={contentError} onRetry={() => openConfig(selected)} />}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
@@ -576,7 +584,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                         options={FORMATS.map((f) => ({ value: f, label: f }))}
                         onChange={(v) => setFmt(v as Format)}
                       />
-                      {saveError && <InlineError message={saveError} onRetry={saveEdit} />}
+                      {saveError && <InlineError {...inlineErrorLabels} message={saveError} onRetry={saveEdit} />}
                       <span className="fmt-spacer" />
                       <button
                         className="btn btn-ghost btn-sm"

@@ -135,8 +135,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         setErrorMessage(result.error);
         setUpdatePhase("error");
         reportError({
-          title: "更新检查失败",
-          source: "应用更新",
+          title: t("about.updateCheckFailed"),
+          source: t("about.updateTitle"),
           message: result.error,
           mergeKey: "update:check",
         });
@@ -155,13 +155,13 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       setErrorMessage(msg);
       setUpdatePhase("error");
       reportError({
-        title: "更新检查异常",
-        source: "应用更新",
+        title: t("about.updateCheckError"),
+        source: t("about.updateTitle"),
         message: msg,
         mergeKey: "update:check",
       });
     }
-  }, [appInfo.version, appInfo.updateSources]);
+  }, [appInfo.version, appInfo.updateSources, t]);
 
   const skipVersion = useCallback(() => {
     if (!updateResult?.latestVersion) return;
@@ -194,13 +194,13 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       setErrorMessage(msg);
       setUpdatePhase("error");
       reportError({
-        title: "更新下载失败",
-        source: "应用更新",
+        title: t("about.updateDownloadFailed"),
+        source: t("about.updateTitle"),
         message: msg,
         mergeKey: "update:download",
       });
     }
-  }, [updateResult]);
+  }, [updateResult, t]);
 
   const runInstall = useCallback(async () => {
     if (!downloadedFile.current) return;

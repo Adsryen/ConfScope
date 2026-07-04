@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import About from "./About";
 
 const apiMocks = vi.hoisted(() => ({
@@ -16,8 +17,8 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../api/app", () => apiMocks);
 
-function renderAbout() {
-  localStorage.setItem("locale", "zh-CN");
+function renderAbout(locale = "zh-CN") {
+  localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
       <About onClose={vi.fn()} />
@@ -25,9 +26,30 @@ function renderAbout() {
   );
 }
 
+function latestError(): AppErrorItem | undefined {
+  let errors: AppErrorItem[] = [];
+  const unsubscribe = subscribeErrors((items) => {
+    errors = items;
+  });
+  unsubscribe();
+  return errors[errors.length - 1];
+}
+
+function disableAutoUpdateCheck() {
+  localStorage.setItem(
+    "cs.settings",
+    JSON.stringify({
+      proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
+      update: { skipVersion: "", lastCheckAt: new Date().toISOString() },
+      compare: { sortConnections: true, sortNamespaces: true },
+    })
+  );
+}
+
 describe("About", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearErrors();
     apiMocks.getAppInfo.mockReset();
     apiMocks.checkForUpdates.mockReset();
     apiMocks.downloadUpdate.mockReset();
@@ -132,5 +154,65 @@ describe("About", () => {
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
     expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
+  });
+
+  it("reports update result errors with localized message-center titles", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.checkForUpdates.mockResolvedValue({
+      currentVersion: "1.0.0",
+      latestVersion: "",
+      hasUpdate: false,
+      sourceName: "",
+      sourceUrl: "",
+      downloadUrl: "",
+      releaseNotes: "",
+      publishedAt: "",
+      sha256: "",
+      mandatory: false,
+      checkedAt: "2026-06-28T00:00:00Z",
+      error: "registry timeout",
+    });
+
+    renderAbout("en-US");
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    expect(await screen.findByText("registry timeout")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Update check failed",
+      source: "App Updates",
+    });
+  });
+
+  it("reports thrown update check errors with localized message-center titles", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.checkForUpdates.mockRejectedValueOnce(new Error("network offline"));
+
+    renderAbout("en-US");
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    expect(await screen.findByText("Error: network offline")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Update check error",
+      source: "App Updates",
+    });
+  });
+
+  it("reports update download errors with localized message-center titles", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.downloadUpdate.mockRejectedValueOnce(new Error("download timeout"));
+
+    renderAbout("en-US");
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+    expect(await screen.findByText("New version v1.1.0 available")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download Update" }));
+
+    expect(await screen.findByText("Error: download timeout")).toBeInTheDocument();
+    expect(latestError()).toMatchObject({
+      title: "Update download failed",
+      source: "App Updates",
+    });
   });
 });

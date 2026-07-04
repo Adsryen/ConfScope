@@ -11,7 +11,8 @@
     "error": "Error",
     "success": "Success",
     "copy": "Copy",
-    "copyError": "Copy Error"
+    "copyError": "Copy Error",
+    "operationFailed": "Operation failed"
   },
   "app": {
     "title": "Config Browser",
@@ -42,6 +43,7 @@
     "addConnection": "Add Connection",
     "selectConnection": "Please select a connection",
     "cannotConnect": "Cannot connect to {name}",
+    "namespaceLoadFailed": "Failed to load namespaces",
     "navGroupConfig": "Config",
     "navGroupData": "Data",
     "navGroupSystem": "System"
@@ -283,6 +285,9 @@
     "newConfig": "New Config",
     "published": "Config published",
     "deleted": "Config deleted",
+    "listLoadFailed": "Failed to load config list",
+    "contentLoadFailed": "Failed to load config content",
+    "publishConfigFailed": "Failed to publish config",
     "group": "GROUP",
     "newConfigTitle": "New Configuration",
     "editConfigTitle": "Edit Configuration",
@@ -616,6 +621,9 @@
     "noUpdate": "You are on the latest version",
     "downloadComplete": "Download complete, verification passed",
     "skipVersion": "Skip this version",
+    "updateCheckFailed": "Update check failed",
+    "updateCheckError": "Update check error",
+    "updateDownloadFailed": "Update download failed",
     "downloadFailed": "Download failed: {error}",
     "sha256VerifyFailed": "SHA256 verification failed",
     "httpProxy": "HTTP Proxy",
