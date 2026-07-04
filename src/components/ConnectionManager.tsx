@@ -59,9 +59,10 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
 });
 
 type HelpPopover = { text: string; top: number; left: number };
+type Translate = (key: string, params?: Record<string, string | number>) => string;
 
-function latencyText(startedAt: number): string {
-  return `延迟 ${Math.max(0, Date.now() - startedAt)} ms`;
+function latencyText(t: Translate, startedAt: number): string {
+  return t("connection.testLatency", { time: Math.max(0, Date.now() - startedAt) });
 }
 
 function TestButton({ onClick, running }: { onClick: () => void; running: boolean }) {
@@ -85,7 +86,7 @@ function TestButton({ onClick, running }: { onClick: () => void; running: boolea
   const slow = elapsed > 3;
   const label = running
     ? slow
-      ? `重试中 (${elapsed}s)...`
+      ? `${t('connection.retrying')} (${elapsed}s)...`
       : `${t('connection.testing')} (${elapsed}s)...`
     : t('connection.test');
 
@@ -115,14 +116,14 @@ function traceHasSSH(snapshot: Draft): boolean {
   return !!snapshot.sshProfileId || !!sshConfig?.host;
 }
 
-function traceProviderName(snapshot: Draft): string {
-  return snapshot.distribution === "aliyun-mse" ? "阿里云 MSE Nacos" : "Nacos";
+function traceProviderName(snapshot: Draft, t: Translate): string {
+  return snapshot.distribution === "aliyun-mse" ? t("connection.aliyunMseNacos") : "Nacos";
 }
 
-function sshTraceDetail(snapshot: Draft): string {
+function sshTraceDetail(snapshot: Draft, t: Translate): string {
   const sshConfig = traceSshConfig(snapshot);
-  if (snapshot.sshProfileId) return "已选择 SSH 档案，后续步骤会验证本地隧道入口和远端目标。";
-  if (!sshConfig?.host) return "未配置 SSH 隧道。";
+  if (snapshot.sshProfileId) return t("connection.traceSshProfileSelected");
+  if (!sshConfig?.host) return t("connection.traceSshNotConfigured");
   return `${sshConfig.host}:${sshConfig.port} / ${sshConfig.username}`;
 }
 
@@ -155,66 +156,69 @@ function looksLikeConfigCenterResponse(message: string): boolean {
   );
 }
 
-function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, detail: string): TestTrace {
+function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, detail: string, t: Translate): TestTrace {
   const hasSSH = traceHasSSH(snapshot);
   const tunnelForwardError = hasSSH && !ok && looksLikeTunnelForwardError(detail);
   const configCenterResponse = ok || looksLikeConfigCenterResponse(detail);
   const sshSetupError = hasSSH && !ok && !tunnelForwardError && !configCenterResponse;
-  const interfaceName = snapshot.distribution === "aliyun-mse" ? "MSE/Nacos 接口" : "Nacos 接口";
+  const interfaceName = snapshot.distribution === "aliyun-mse" ? t("connection.traceMseNacosApi") : t("connection.traceNacosApi");
   const steps: TraceStep[] = [
     {
-      name: "连接参数检查",
+      name: t("connection.traceConnectionParams"),
       status: "checked",
-      detail: `目标配置：${traceProviderName(snapshot)} / ${snapshot.baseUrl}。这里只表示本地连接参数已读取，不代表已经连通配置中心。`,
+      detail: t("connection.traceConnectionParamsDetail", {
+        provider: traceProviderName(snapshot, t),
+        baseUrl: snapshot.baseUrl,
+      }),
     },
   ];
   if (hasSSH) {
     steps.push({
-      name: "SSH 配置",
+      name: t("connection.traceSshConfig"),
       status: "ok",
-      detail: sshTraceDetail(snapshot),
+      detail: sshTraceDetail(snapshot, t),
     });
     steps.push({
-      name: "本地隧道入口",
+      name: t("connection.traceLocalTunnel"),
       status: sshSetupError ? "error" : "ok",
       detail: tunnelForwardError
-        ? "请求已经进入本地隧道入口，但后续远端转发失败。"
+        ? t("connection.traceLocalTunnelForwardFailed")
         : configCenterResponse
-          ? "请求已通过本地隧道入口继续转发。"
-          : "未确认本地隧道入口可用，请检查 SSH 登录、私钥、端口占用和本地转发创建情况。",
+          ? t("connection.traceLocalTunnelForwarded")
+          : t("connection.traceLocalTunnelUnknown"),
     });
     steps.push({
-      name: "远端目标连通性",
+      name: t("connection.traceRemoteTarget"),
       status: tunnelForwardError ? "error" : sshSetupError ? "skipped" : "ok",
       detail: tunnelForwardError
-        ? `本地端口已接收请求，但转发到远端目标时连接被关闭或重置。请检查 SSH 档案指向的跳板机、Nacos 内网地址、目标端口和防火墙策略。\n原始错误：${detail}`
+        ? t("connection.traceRemoteTargetForwardFailed", { error: detail })
         : sshSetupError
-          ? "本地隧道入口未确认可用，尚不能判断远端目标是否连通。"
+          ? t("connection.traceRemoteTargetSkipped")
           : ok
-          ? "远端目标已连通。"
-          : "已收到配置中心响应，远端目标连通性已确认。",
+          ? t("connection.traceRemoteTargetConnected")
+          : t("connection.traceRemoteTargetConfirmed"),
     });
   }
   steps.push({
     name: interfaceName,
     status: tunnelForwardError || sshSetupError ? "skipped" : ok ? "ok" : "error",
     detail: tunnelForwardError
-      ? "远端目标未连通，尚不能判断配置中心接口本身是否正常。"
+      ? t("connection.traceApiSkippedRemoteFailed")
       : sshSetupError
-        ? "SSH 会话或本地隧道入口未建立，尚不能判断配置中心接口本身是否正常。"
+        ? t("connection.traceApiSkippedSshFailed")
       : detail,
     latencyMs: elapsedMs(startedAt),
   });
   return {
     ok,
-    title: ok ? "连接测试成功" : "连接测试失败",
+    title: ok ? t("connection.traceSuccessTitle") : t("connection.traceFailureTitle"),
     summary: ok
-      ? hasSSH ? "SSH 入口、远端目标与配置中心接口均通过。" : "配置中心接口通过。"
+      ? hasSSH ? t("connection.traceSuccessSshSummary") : t("connection.traceSuccessDirectSummary")
       : tunnelForwardError
-        ? "请求进入本地隧道入口，但远端目标未连通，请优先排查 SSH 档案、目标内网地址、目标端口和防火墙。"
+        ? t("connection.traceFailureTunnelSummary")
         : sshSetupError
-          ? "SSH 会话或本地隧道入口未建立，请优先排查 SSH 登录、私钥、端口占用和本地转发创建情况。"
-        : hasSSH ? "已到达配置中心链路，接口返回失败，请按接口错误排查鉴权、路径、命名空间或 MSE 签名配置。" : "配置中心接口测试失败。",
+          ? t("connection.traceFailureSshSummary")
+        : hasSSH ? t("connection.traceFailureSshApiSummary") : t("connection.traceFailureDirectSummary"),
     steps,
   };
 }
@@ -774,23 +778,36 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       if (snapshot.authType === "aliyun-aksk" || snapshot.username) {
         const r = await testConnection({ ...(snapshot as Connection), id: snapshot.id ?? "test" });
         if (currentTestKeyRef.current !== snapshotKey) return;
-        const latency = latencyText(startedAt);
+        const latency = latencyText(t, startedAt);
         setTestMsg({
           ok: true,
-          text: r.globalAdmin ? `连接成功（管理员账号，${latency}）` : `连接成功（${latency}）`,
+          text: r.globalAdmin
+            ? t("connection.testConnectedAdmin", { latency })
+            : t("connection.testConnected", { latency }),
         });
-        setTestTrace(buildConnectionTrace(snapshot, startedAt, true, r.globalAdmin ? "连接成功，当前账号为管理员账号。" : "连接成功。"));
+        setTestTrace(
+          buildConnectionTrace(
+            snapshot,
+            startedAt,
+            true,
+            r.globalAdmin ? t("connection.traceConnectedAdmin") : t("connection.traceConnected"),
+            t
+          )
+        );
       } else {
         // 无账号：尝试无鉴权访问命名空间接口验证可达性
         if (currentTestKeyRef.current !== snapshotKey) return;
-        setTestMsg({ ok: true, text: `未配置账号，将以免鉴权方式连接（${latencyText(startedAt)}）` });
-        setTestTrace(buildConnectionTrace(snapshot, startedAt, true, "未配置账号，将以免鉴权方式连接。"));
+        setTestMsg({
+          ok: true,
+          text: t("connection.testConnectedNoAuth", { latency: latencyText(t, startedAt) }),
+        });
+        setTestTrace(buildConnectionTrace(snapshot, startedAt, true, t("connection.traceConnectedNoAuth"), t));
       }
     } catch (e) {
       if (currentTestKeyRef.current !== snapshotKey) return;
       const message = String(e);
-      setTestMsg({ ok: false, text: `${message}（${latencyText(startedAt)}）` });
-      setTestTrace(buildConnectionTrace(snapshot, startedAt, false, message));
+      setTestMsg({ ok: false, text: t("connection.testFailedWithLatency", { message, latency: latencyText(t, startedAt) }) });
+      setTestTrace(buildConnectionTrace(snapshot, startedAt, false, message, t));
     } finally {
       setTestingKey((current) => (current === snapshotKey ? null : current));
     }
@@ -852,7 +869,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         ok: result.valid,
         text: (result.valid
           ? t('connection.localValidationOk').replace("{count}", String(result.configCount))
-          : result.message) + (showLatency ? `（${latencyText(startedAt)}）` : ""),
+          : result.message) + (showLatency ? `（${latencyText(t, startedAt)}）` : ""),
       });
       return result;
     } catch (e) {
@@ -1460,7 +1477,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           >
                             {t('common.retry')}
                           </button>
-                          <CopyButton text={`${t('connection.loadNamespacesFailed')}: ${visibleNamespaceError}`} label="复制报错" />
+                          <CopyButton text={`${t('connection.loadNamespacesFailed')}: ${visibleNamespaceError}`} label={t("common.copyError")} />
                         </div>
                       </div>
                     )}
@@ -1652,7 +1669,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             ) : visibleTestMsg && (
               <div className={`test-msg ${visibleTestMsg.ok ? "ok" : "err"}`}>
                 <span className="test-msg-text" title={visibleTestMsg.text}>{displayTestMessage(visibleTestMsg.text)}</span>
-                {!visibleTestMsg.ok && <CopyButton text={visibleTestMsg.text} label="复制报错" />}
+                {!visibleTestMsg.ok && <CopyButton text={visibleTestMsg.text} label={t("common.copyError")} />}
               </div>
             )}
 

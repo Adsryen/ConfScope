@@ -27,8 +27,8 @@ const appApiMocks = vi.hoisted(() => ({
 
 vi.mock("../api/app", () => appApiMocks);
 
-function renderManager(onChange = vi.fn(), onClose = vi.fn()) {
-  localStorage.setItem("locale", "zh-CN");
+function renderManager(onChange = vi.fn(), onClose = vi.fn(), locale = "zh-CN") {
+  localStorage.setItem("locale", locale);
   return {
     onChange,
     onClose,
@@ -393,6 +393,37 @@ describe("ConnectionManager", () => {
 
     expect(await screen.findByText("连接测试失败")).toBeInTheDocument();
     expect(screen.getByText("Error: 403")).toBeInTheDocument();
+  });
+
+  it("localizes connection test traces and copied trace text", async () => {
+    apiMocks.testConnection.mockResolvedValueOnce({
+      accessToken: "token",
+      tokenTtl: 18000,
+      globalAdmin: true,
+    });
+    clipboardMocks.copyText.mockResolvedValue(true);
+    renderManager(vi.fn(), vi.fn(), "en-US");
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
+
+    expect(await screen.findByText("Connection test succeeded")).toBeInTheDocument();
+    expect(screen.getByText("Connection parameter check")).toBeInTheDocument();
+    expect(screen.getByText("Nacos API")).toBeInTheDocument();
+    expect(screen.getByText("Connected successfully. Current account is an administrator.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Trace" }));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("Connection test succeeded"));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("[Checked] Connection parameter check"));
+
+    apiMocks.testConnection.mockRejectedValueOnce(new Error("403 forbidden"));
+    fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
+
+    expect(await screen.findByText("Connection test failed")).toBeInTheDocument();
+    expect(screen.getByText("Config center API test failed.")).toBeInTheDocument();
+    expect(screen.getByText("Error: 403 forbidden")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Trace" }));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("[Failed] Nacos API"));
   });
 
   it("copies the full connection test trace", async () => {
