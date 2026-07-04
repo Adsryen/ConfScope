@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
 import {
   AppErrorItem,
@@ -9,20 +10,20 @@ import {
   subscribeErrors,
 } from "../lib/errorCenter";
 
-function levelLabel(level: AppErrorItem["level"]) {
-  if (level === "error") return "错误";
-  if (level === "warning") return "警告";
-  if (level === "success") return "成功";
-  return "信息";
+function levelLabel(level: AppErrorItem["level"], t: (key: string) => string) {
+  if (level === "error") return t("messageCenter.levelError");
+  if (level === "warning") return t("messageCenter.levelWarning");
+  if (level === "success") return t("messageCenter.levelSuccess");
+  return t("messageCenter.levelInfo");
 }
 
 function fullText(item: AppErrorItem) {
   return item.detail || item.message;
 }
 
-function formatTime(value: string) {
+function formatTime(value: string, locale: string) {
   try {
-    return new Date(value).toLocaleTimeString("zh-CN", { hour12: false });
+    return new Date(value).toLocaleTimeString(locale, { hour12: false });
   } catch {
     return "";
   }
@@ -61,6 +62,7 @@ function DetailIcon() {
 }
 
 export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
+  const { locale, t } = useTranslation();
   const [items, setItems] = useState<AppErrorItem[]>([]);
   const [open, setOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -102,14 +104,14 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
         className={`message-center-btn${open ? " active" : ""}`}
         onClick={() => setOpen((value) => !value)}
         onFocus={openPanel}
-        title="消息中心"
+        title={t("messageCenter.title")}
       >
         <svg className="side-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 6h14v10H8l-3 3V6z" />
           <path d="M8 9h8" />
           <path d="M8 12h5" />
         </svg>
-        {!collapsed && <span className="side-label">消息中心</span>}
+        {!collapsed && <span className="side-label">{t("messageCenter.title")}</span>}
         {unread > 0 && <span className="message-badge">{unread > 99 ? "99+" : unread}</span>}
       </button>
 
@@ -117,41 +119,60 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
         <div className="message-panel" onMouseEnter={openPanel} onMouseLeave={scheduleClose}>
           <div className="message-panel-head">
             <div>
-              <h3>消息中心</h3>
-              <span>{items.length ? `${items.length} 条消息` : "暂无消息"}</span>
+              <h3>{t("messageCenter.title")}</h3>
+              <span>
+                {items.length
+                  ? t(items.length === 1 ? "messageCenter.messageCountOne" : "messageCenter.messageCount", { count: items.length })
+                  : t("messageCenter.noMessages")}
+              </span>
             </div>
             <button
               className="message-icon-btn"
               onClick={clearErrors}
               disabled={items.length === 0}
-              title="清空消息"
-              aria-label="清空消息"
+              title={t("messageCenter.clear")}
+              aria-label={t("messageCenter.clear")}
             >
               <TrashIcon />
             </button>
           </div>
           <div className="message-list">
             {sorted.length === 0 ? (
-              <div className="message-empty">错误、同步进度和系统通知会显示在这里。</div>
+              <div className="message-empty">{t("messageCenter.emptyHint")}</div>
             ) : (
               sorted.map((item) => (
                 <div key={item.id} className={`message-item message-${item.level}${item.read ? "" : " unread"}`}>
                   <div className="message-item-top">
-                    <span className="message-level">{levelLabel(item.level)}</span>
-                    <span className="message-time">{formatTime(item.createdAt)}</span>
+                    <span className="message-level">{levelLabel(item.level, t)}</span>
+                    <span className="message-time">{formatTime(item.createdAt, locale)}</span>
                     {item.count > 1 && <span className="message-count">x{item.count}</span>}
                   </div>
                   <div className="message-title">{item.title}</div>
                   {item.source && <div className="message-source">{item.source}</div>}
                   <div className="message-text">{item.message}</div>
                   <div className="message-actions">
-                    <button className="message-icon-btn" onClick={() => showMessageDetail(item.id)} title="查看详情" aria-label="查看详情">
+                    <button
+                      className="message-icon-btn"
+                      onClick={() => showMessageDetail(item.id)}
+                      title={t("messageCenter.viewDetail")}
+                      aria-label={t("messageCenter.viewDetail")}
+                    >
                       <DetailIcon />
                     </button>
-                    <button className="message-icon-btn wide" onClick={() => copyMessage(item)} title="复制完整消息" aria-label="复制完整消息">
-                      {copiedId === item.id ? <span className="message-copied">已复制</span> : <CopyIcon />}
+                    <button
+                      className="message-icon-btn wide"
+                      onClick={() => copyMessage(item)}
+                      title={t("messageCenter.copyFull")}
+                      aria-label={t("messageCenter.copyFull")}
+                    >
+                      {copiedId === item.id ? <span className="message-copied">{t("messageCenter.copied")}</span> : <CopyIcon />}
                     </button>
-                    <button className="message-icon-btn danger" onClick={() => removeMessage(item.id)} title="删除消息" aria-label="删除消息">
+                    <button
+                      className="message-icon-btn danger"
+                      onClick={() => removeMessage(item.id)}
+                      title={t("messageCenter.delete")}
+                      aria-label={t("messageCenter.delete")}
+                    >
                       <TrashIcon />
                     </button>
                   </div>

@@ -14,6 +14,22 @@
     "copyError": "Copy Error",
     "operationFailed": "Operation failed"
   },
+  "messageCenter": {
+    "title": "Message Center",
+    "noMessages": "No messages",
+    "messageCountOne": "{count} message",
+    "messageCount": "{count} messages",
+    "emptyHint": "Errors, sync progress, and system notifications appear here.",
+    "clear": "Clear Messages",
+    "viewDetail": "View Details",
+    "copyFull": "Copy Full Message",
+    "delete": "Delete Message",
+    "copied": "Copied",
+    "levelError": "Error",
+    "levelWarning": "Warning",
+    "levelSuccess": "Success",
+    "levelInfo": "Info"
+  },
   "app": {
     "title": "Config Browser",
     "diff": "Config Compare",
@@ -444,7 +460,12 @@
     "batchGenerated": "Generated {count} file comparisons",
     "batchOnlyChanges": "Only show changes for all",
     "exportDiff": "Export Diff",
-    "dataIdPlaceholder": "Leave empty to match all same-name dataIds"
+    "dataIdPlaceholder": "Leave empty to match all same-name dataIds",
+    "unifiedNoDiff": "No differences with previous version",
+    "unifiedAdded": "+{count} added",
+    "unifiedDeleted": "-{count} deleted",
+    "unifiedModified": "~{count} modified",
+    "onlyChanges": "Only show changes"
   },
   "history": {
     "title": "History",

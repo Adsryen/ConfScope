@@ -14,6 +14,22 @@
     "copyError": "复制错误",
     "operationFailed": "操作失败"
   },
+  "messageCenter": {
+    "title": "消息中心",
+    "noMessages": "暂无消息",
+    "messageCountOne": "{count} 条消息",
+    "messageCount": "{count} 条消息",
+    "emptyHint": "错误、同步进度和系统通知会显示在这里。",
+    "clear": "清空消息",
+    "viewDetail": "查看详情",
+    "copyFull": "复制完整消息",
+    "delete": "删除消息",
+    "copied": "已复制",
+    "levelError": "错误",
+    "levelWarning": "警告",
+    "levelSuccess": "成功",
+    "levelInfo": "信息"
+  },
   "app": {
     "title": "配置浏览",
     "diff": "配置对比",
@@ -444,7 +460,12 @@
     "batchGenerated": "已生成 {count} 个文件对比",
     "batchOnlyChanges": "全部仅显示变更",
     "exportDiff": "导出差异",
-    "dataIdPlaceholder": "留空则匹配所有同名 dataId"
+    "dataIdPlaceholder": "留空则匹配所有同名 dataId",
+    "unifiedNoDiff": "与上一版无差异",
+    "unifiedAdded": "+{count} 新增",
+    "unifiedDeleted": "−{count} 删除",
+    "unifiedModified": "~{count} 修改",
+    "onlyChanges": "仅显示变更"
   },
   "history": {
     "title": "历史版本",
