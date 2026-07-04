@@ -37,11 +37,11 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
       const message = String(e);
       setError(message);
       reportError({
-        title: "删除配置失败",
+        title: t("config.deleteConfigFailed"),
         source: `${group} / ${name}`,
         message,
         detail: message,
-        actionLabel: "重试删除",
+        actionLabel: t("config.retryDelete"),
         onAction: () => confirm(),
       });
       setBusy(false);
