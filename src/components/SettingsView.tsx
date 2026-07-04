@@ -1,13 +1,20 @@
-import LanguageSwitch from "./LanguageSwitch";
-import { useTranslation } from "../i18n";
-import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
-import { clearOperationHistory } from "../store/operationHistory";
 import { useState } from "react";
+import { useTranslation } from "../i18n";
+import { clearOperationHistory } from "../store/operationHistory";
+import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
+import LanguageSwitch from "./LanguageSwitch";
 
 export default function SettingsView() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [saved, setSaved] = useState(false);
+
+  const sectionLinks = [
+    { id: "settings-general", label: t("settings.groupBasic") },
+    { id: "settings-network", label: t("settings.groupNetwork") },
+    { id: "settings-compare", label: t("settings.comparePreferences") },
+    { id: "settings-local-data", label: t("settings.localData") },
+  ];
 
   const update = (patch: Partial<AppSettings>) => {
     const next = {
@@ -27,102 +34,121 @@ export default function SettingsView() {
     <div className="page-surface settings-page">
       <div className="page-header">
         <div>
-          <h3>{t('app.settings')}</h3>
-          <div className="page-subtitle">{t('app.settingsSubtitle')}</div>
+          <h3>{t("app.settings")}</h3>
+          <div className="page-subtitle">{t("app.settingsSubtitle")}</div>
         </div>
+        {saved && <div className="test-msg ok">{t("settings.settingsSaved")}</div>}
       </div>
-      <div className="settings-body">
-        {/* 基础信息 */}
-        <section className="settings-section">
-          <h4>{t('settings.groupBasic')}</h4>
-          <label className="check-row">
-            <span>{t('app.language')}</span>
-            <LanguageSwitch />
-          </label>
-        </section>
-
-        {/* 认证 */}
-        <section className="settings-section">
-          <h4>{t('settings.groupAuth')}</h4>
-          <div className="field-hint">{t('settings.authPerConnection')}</div>
-        </section>
-
-        {/* 网络 */}
-        <section className="settings-section">
-          <h4>{t('settings.groupNetwork')}</h4>
-          <div className="field-row update-proxy-row">
-            <label className="field">
-              <span>{t('settings.httpProxy')}</span>
-              <input
-                className="search-input"
-                value={settings.proxy.httpProxy}
-                placeholder="http://127.0.0.1:7890"
-                onChange={(e) => update({ proxy: { ...settings.proxy, httpProxy: e.target.value } })}
-              />
-            </label>
-            <label className="field">
-              <span>{t('settings.httpsProxy')}</span>
-              <input
-                className="search-input"
-                value={settings.proxy.httpsProxy}
-                placeholder="http://127.0.0.1:7890"
-                onChange={(e) => update({ proxy: { ...settings.proxy, httpsProxy: e.target.value } })}
-              />
-            </label>
-            <label className="field">
-              <span>{t('settings.noProxy')}</span>
-              <input
-                className="search-input"
-                value={settings.proxy.noProxy}
-                placeholder="localhost,127.0.0.1"
-                onChange={(e) => update({ proxy: { ...settings.proxy, noProxy: e.target.value } })}
-              />
-            </label>
-          </div>
-        </section>
-
-        {/* 安全 */}
-        <section className="settings-section">
-          <h4>{t('settings.groupSecurity')}</h4>
-          <div className="field-hint">{t('settings.securityPerConnection')}</div>
-        </section>
-
-        {/* 高级 */}
-        <section className="settings-section">
-          <h4>{t('settings.groupAdvanced')}</h4>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.compare.sortConnections}
-              onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
-            />
-            <span>{t('settings.sortConnections')}</span>
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={settings.compare.sortNamespaces}
-              onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
-            />
-            <span>{t('settings.sortNamespaces')}</span>
-          </label>
-          <div className="settings-danger-zone">
-            <h5>{t('settings.dangerZone')}</h5>
+      <div className="settings-workbench">
+        <aside className="settings-rail" aria-label={t("app.settings")}>
+          {sectionLinks.map((item) => (
             <button
-              className="btn btn-ghost btn-danger"
-              onClick={() => {
-                if (confirm(t('operationHistory.confirmClear'))) {
-                  clearOperationHistory();
-                }
-              }}
+              key={item.id}
+              type="button"
+              className="settings-rail-item"
+              onClick={() => document.getElementById(item.id)?.scrollIntoView()}
             >
-              {t('operationHistory.clearLocal')}
+              {item.label}
             </button>
-            <div className="field-hint">{t('settings.clearHistoryHint')}</div>
-          </div>
-        </section>
+          ))}
+        </aside>
 
-        {saved && <div className="test-msg ok">{t('settings.settingsSaved')}</div>}
+        <div className="settings-panels">
+          <section id="settings-general" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.groupBasic")}</h4>
+              <div className="settings-panel-description">{t("settings.generalDescription")}</div>
+            </div>
+            <label className="settings-setting-row">
+              <span>{t("app.language")}</span>
+              <LanguageSwitch />
+            </label>
+            <div className="settings-panel-note">{t("settings.connectionScopedNote")}</div>
+          </section>
+
+          <section id="settings-network" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.groupNetwork")}</h4>
+              <div className="settings-panel-description">{t("settings.networkDescription")}</div>
+            </div>
+            <div className="settings-proxy-grid">
+              <label className="field">
+                <span>{t("settings.httpProxy")}</span>
+                <input
+                  className="search-input"
+                  value={settings.proxy.httpProxy}
+                  placeholder="http://127.0.0.1:7890"
+                  onChange={(e) => update({ proxy: { ...settings.proxy, httpProxy: e.target.value } })}
+                />
+              </label>
+              <label className="field">
+                <span>{t("settings.httpsProxy")}</span>
+                <input
+                  className="search-input"
+                  value={settings.proxy.httpsProxy}
+                  placeholder="http://127.0.0.1:7890"
+                  onChange={(e) => update({ proxy: { ...settings.proxy, httpsProxy: e.target.value } })}
+                />
+              </label>
+              <label className="field">
+                <span>{t("settings.noProxy")}</span>
+                <input
+                  className="search-input"
+                  value={settings.proxy.noProxy}
+                  placeholder="localhost,127.0.0.1"
+                  onChange={(e) => update({ proxy: { ...settings.proxy, noProxy: e.target.value } })}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section id="settings-compare" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.comparePreferences")}</h4>
+              <div className="settings-panel-description">{t("settings.compareDescription")}</div>
+            </div>
+            <label className="settings-setting-row">
+              <span>{t("settings.sortConnections")}</span>
+              <input
+                type="checkbox"
+                checked={settings.compare.sortConnections}
+                onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
+              />
+            </label>
+            <label className="settings-setting-row">
+              <span>{t("settings.sortNamespaces")}</span>
+              <input
+                type="checkbox"
+                checked={settings.compare.sortNamespaces}
+                onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
+              />
+            </label>
+          </section>
+
+          <section id="settings-local-data" className="settings-panel settings-panel-danger">
+            <div className="settings-panel-head">
+              <h4>{t("settings.localData")}</h4>
+              <div className="settings-panel-description">{t("settings.localDataDescription")}</div>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.dangerZone")}</strong>
+                <div className="settings-panel-description">{t("settings.clearHistoryHint")}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-danger"
+                onClick={() => {
+                  if (confirm(t("operationHistory.confirmClear"))) {
+                    clearOperationHistory();
+                  }
+                }}
+              >
+                {t("settings.clearLocalHistory")}
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );
