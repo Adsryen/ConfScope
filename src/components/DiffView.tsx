@@ -250,7 +250,7 @@ function SourcePicker({
         setNsError(message);
         onLoadErrorRef.current?.();
         reportError({
-          title: "命名空间加载失败",
+          title: t("diff.namespaceLoadFailed"),
           source: conn ? `${connectionDisplayLabel(conn)} / ${title}` : title,
           message,
           detail: message,
@@ -286,7 +286,7 @@ function SourcePicker({
         setCfgError(message);
         onLoadErrorRef.current?.();
         reportError({
-          title: "配置列表加载失败",
+          title: t("diff.configListLoadFailed"),
           source: conn ? `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${title}` : title,
           message,
           detail: message,
@@ -713,12 +713,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       setSourcesCollapsed(false);
       setError(message);
       reportError({
-        title: "同名配置匹配失败",
+        title: t("diff.matchFailed"),
         source: t("app.diff"),
         message,
         detail: message,
         mergeKey: "diff:match",
-        actionLabel: "重试",
+        actionLabel: t("diff.retryMatch"),
         onAction: () => doMatch(),
       });
     } finally {
@@ -755,12 +755,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setSourcesCollapsed(!message);
     if (message) {
       reportError({
-        title: "配置对比加载失败",
+        title: t("diff.compareLoadFailed"),
         source: t("app.diff"),
         message,
         detail: message,
         mergeKey: `diff:load:${left.connId}:${left.tenant}:${left.group}:${left.dataId}:${right.connId}:${right.tenant}:${right.group}:${right.dataId}`,
-        actionLabel: "重试",
+        actionLabel: t("diff.retryCompare"),
         onAction: () => loadBoth(),
       });
     }
@@ -837,9 +837,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     const successCount = results.length;
     const failCount = failedItems.length;
 
-    const detailLines = [`批量对比结果: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`];
+    const detailLines = [t("diff.batchCompareDetailSummary", { successCount, total, failCount })];
     if (failedItems.length > 0) {
-      detailLines.push("失败列表:");
+      detailLines.push(t("diff.batchFailureList"));
       for (const f of failedItems) detailLines.push(`  - ${f.dataId}: ${f.error}`);
     }
     const detail = detailLines.join("\n");
@@ -850,17 +850,17 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
 
     if (failCount === 0) {
       level = "success";
-      title = `批量对比完成: ${successCount}/${total} 全部成功`;
-      message = `${successCount} 个配置全部加载成功`;
+      title = t("diff.batchCompareAllSuccessTitle", { successCount, total });
+      message = t("diff.batchAllSuccessMessage", { count: successCount });
     } else if (successCount === 0) {
       level = "error";
-      title = `批量对比完成: ${failCount}/${total} 全部失败`;
-      message = `${failCount} 个配置全部加载失败: ${failedItems.map((f) => f.dataId).join(", ")}`;
-      setError("全部配置加载失败");
+      title = t("diff.batchCompareAllFailedTitle", { failCount, total });
+      message = t("diff.batchAllFailedMessage", { count: failCount, dataIds: failedItems.map((f) => f.dataId).join(", ") });
+      setError(t("diff.batchAllFailedInline"));
     } else {
       level = "warning";
-      title = `批量对比完成: 成功 ${successCount}/${total}, 失败 ${failCount}/${total}`;
-      message = `${failCount} 个配置加载失败: ${failedItems.map((f) => f.dataId).join(", ")}`;
+      title = t("diff.batchComparePartialTitle", { successCount, total, failCount });
+      message = t("diff.batchPartialFailedMessage", { count: failCount, dataIds: failedItems.map((f) => f.dataId).join(", ") });
     }
 
     reportMessage({
@@ -870,14 +870,14 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       message,
       detail,
       mergeKey: `diff:batch:summary:${Date.now()}`,
-      actionLabel: "重试",
+      actionLabel: t("common.retry"),
       onAction: () => loadBatch(),
     });
 
     setBatchResults(results);
     setFailedItems(failedItems);
     if (failedItems.length > 0) {
-      setNotice(`${failedItems.length} 个加载失败`);
+      setNotice(t("diff.batchFailedNotice", { count: failedItems.length }));
     }
     setSourcesCollapsed(results.length > 0);
     setBatchLoading(false);
@@ -1087,7 +1087,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             {failedItems.length > 0 && (
               <div className="batch-diff-failures">
                 <div className="batch-diff-failures-head">
-                  <span className="batch-diff-failures-count">加载失败 ({failedItems.length})</span>
+                  <span className="batch-diff-failures-count">{t("diff.batchFailureHeader", { count: failedItems.length })}</span>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
@@ -1098,7 +1098,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                     }}
                     disabled={batchLoading}
                   >
-                    全部重试
+                    {t("diff.retryAll")}
                   </button>
                 </div>
                 <div className="batch-diff-failures-list">
@@ -1106,6 +1106,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                     <div className="batch-diff-failures-item" key={f.dataId}>
                       <span className="batch-diff-failures-dataid">{f.dataId}</span>
                       <span className="batch-diff-failures-error">{f.error}</span>
+                      <CopyButton text={`${f.dataId}: ${f.error}`} label={t("diff.copyError")} />
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
@@ -1115,7 +1116,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                         }}
                         disabled={batchLoading}
                       >
-                        重试
+                        {t("common.retry")}
                       </button>
                     </div>
                   ))}
@@ -1123,15 +1124,15 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               </div>
             )}
             <div className="batch-diff-toolbar">
-              <span className="batch-diff-count">已生成 {batchResults.length} 个文件对比</span>
+              <span className="batch-diff-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
               <span className="fmt-spacer" />
               <label className="diff-toggle">
                 <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
-                全部仅显示变更
+                {t("diff.batchOnlyChanges")}
               </label>
               <button
                 className="btn btn-ghost btn-sm"
-                title="导出差异"
+                title={t("diff.exportDiff")}
                 onClick={() => {
                   const diffs: DiffItem[] = batchResults.map((item) => ({
                     dataId: item.dataId,
@@ -1144,7 +1145,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                   exportDiff(diffs, "json");
                 }}
               >
-                ↓ 导出
+                {t("diff.exportDiff")}
               </button>
             </div>
             {batchResults.map((item) => (
