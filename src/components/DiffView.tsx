@@ -27,6 +27,7 @@ interface DiffJumpParams {
   namespace: string;
   group: string;
   dataId: string;
+  autoCompare?: boolean;
 }
 
 interface Props {
@@ -469,7 +470,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
+  const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const sourcesRef = useRef<HTMLDivElement>(null);
+  const loadBothRef = useRef<(() => Promise<void>) | null>(null);
   const projectNames = useMemo(
     () => [...uniqueValues(connections.map((item) => connectionProjectName(item)))].sort((a, b) => compareText(a, b)),
     [connections]
@@ -559,6 +562,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       usesDefaultNamespace: false,
     });
     setSourcesCollapsed(true);
+    if (initialParams.autoCompare) setPendingAutoCompare(initialParams);
     onInitialParamsConsumed?.();
   }, [initialParams, connections, onInitialParamsConsumed]);
 
@@ -593,10 +597,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setNotice(t("diff.defaultNamespaceSaved"));
     setError(null);
   };
-
-  if (connections.length === 0) {
-    return <div className="pad-msg big">{t("diff.noConnection")}</div>;
-  }
 
   const loadOne = async (source: Source, dataId?: string, groupOverride?: string): Promise<Loaded> => {
     const conn = connections.find((item) => item.id === source.connId);
@@ -766,6 +766,23 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     }
     setLoading(false);
   };
+  loadBothRef.current = loadBoth;
+
+  useEffect(() => {
+    if (!pendingAutoCompare) return;
+    const ready =
+      left.connId === pendingAutoCompare.leftConnId &&
+      right.connId === pendingAutoCompare.rightConnId &&
+      left.tenant === pendingAutoCompare.namespace &&
+      right.tenant === pendingAutoCompare.namespace &&
+      left.group === pendingAutoCompare.group &&
+      right.group === pendingAutoCompare.group &&
+      left.dataId === pendingAutoCompare.dataId &&
+      right.dataId === pendingAutoCompare.dataId;
+    if (!ready) return;
+    setPendingAutoCompare(null);
+    void loadBothRef.current?.();
+  }, [left, pendingAutoCompare, right]);
 
   const loadBatch = async () => {
     if (!matchResults) return;
@@ -917,6 +934,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const diffFormat = mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
+
+  if (connections.length === 0) {
+    return <div className="pad-msg big">{t("diff.noConnection")}</div>;
+  }
 
   return (
     <div className="diff-view">

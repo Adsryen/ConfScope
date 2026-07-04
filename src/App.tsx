@@ -250,6 +250,7 @@ export default function App() {
       namespace: params.namespace,
       group: params.group,
       dataId: params.dataId,
+      autoCompare: true,
     });
     setMode("diff");
     toast(t("backup.comparePrepared"), "info");
