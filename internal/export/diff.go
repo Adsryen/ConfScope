@@ -29,7 +29,7 @@ type DiffExporter struct{}
 
 func (e *DiffExporter) Export(items []ConfigItem, opts ExportOptions, w io.Writer) error {
 	// 将 ConfigItem 转换为差异文本
-	for _, item := range items {
+	for _, item := range exportItems(items, opts) {
 		_, _ = fmt.Fprintf(w, "=== %s/%s/%s ===\n", item.Namespace, item.Group, item.DataID)
 		_, _ = fmt.Fprintln(w, item.Content)
 		_, _ = fmt.Fprintln(w)
@@ -46,7 +46,7 @@ func (e *DiffJSONExporter) Export(items []ConfigItem, opts ExportOptions, w io.W
 		Total:  len(items),
 	}
 
-	for _, item := range items {
+	for _, item := range exportItems(items, opts) {
 		result.Items = append(result.Items, DiffItem{
 			DataID:    item.DataID,
 			Group:     item.Group,

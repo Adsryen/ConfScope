@@ -46,6 +46,55 @@ func TestCSVExporter_Export(t *testing.T) {
 	}
 }
 
+func TestCSVExporterMasksSensitiveContentByDefault(t *testing.T) {
+	exp := &CSVExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "db.password=secret123\nserver.port=8080", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatCSV}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	reader := csv.NewReader(strings.NewReader(buf.String()))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("CSV parse failed: %v", err)
+	}
+
+	if got := records[1][3]; !strings.Contains(got, "db.password=***") {
+		t.Fatalf("content = %q, want masked password", got)
+	}
+	if strings.Contains(records[1][3], "secret123") {
+		t.Fatalf("content leaked sensitive value: %q", records[1][3])
+	}
+}
+
+func TestCSVExporterPreservesSensitiveContentWhenAllowed(t *testing.T) {
+	exp := &CSVExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "db.password=secret123", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatCSV, Sensitive: true}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	reader := csv.NewReader(strings.NewReader(buf.String()))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("CSV parse failed: %v", err)
+	}
+
+	if got := records[1][3]; got != "db.password=secret123" {
+		t.Fatalf("content = %q, want raw password", got)
+	}
+}
+
 func TestJSONExporter_Export(t *testing.T) {
 	exp := &JSONExporter{}
 	var buf bytes.Buffer
@@ -77,6 +126,53 @@ func TestJSONExporter_Export(t *testing.T) {
 	}
 }
 
+func TestJSONExporterMasksSensitiveContentByDefault(t *testing.T) {
+	exp := &JSONExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "token=tok123\nfeature=true", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatJSON}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	var result ExportResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("JSON parse failed: %v", err)
+	}
+
+	if got := result.Items[0].Content; !strings.Contains(got, "token=***") {
+		t.Fatalf("content = %q, want masked token", got)
+	}
+	if strings.Contains(result.Items[0].Content, "tok123") {
+		t.Fatalf("content leaked sensitive value: %q", result.Items[0].Content)
+	}
+}
+
+func TestJSONExporterPreservesSensitiveContentWhenAllowed(t *testing.T) {
+	exp := &JSONExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "token=tok123", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatJSON, Sensitive: true}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	var result ExportResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("JSON parse failed: %v", err)
+	}
+
+	if got := result.Items[0].Content; got != "token=tok123" {
+		t.Fatalf("content = %q, want raw token", got)
+	}
+}
+
 func TestDiffExporter_Export(t *testing.T) {
 	exp := &DiffExporter{}
 	var buf bytes.Buffer
@@ -99,6 +195,27 @@ func TestDiffExporter_Export(t *testing.T) {
 	}
 }
 
+func TestDiffExporterMasksSensitiveContentByDefault(t *testing.T) {
+	exp := &DiffExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "accessKey=ak123", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatDiff}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "accessKey=***") {
+		t.Fatalf("output = %q, want masked accessKey", output)
+	}
+	if strings.Contains(output, "ak123") {
+		t.Fatalf("output leaked sensitive value: %q", output)
+	}
+}
+
 func TestYAMLExporter_Export(t *testing.T) {
 	exp := &YAMLExporter{}
 	var buf bytes.Buffer
@@ -115,6 +232,27 @@ func TestYAMLExporter_Export(t *testing.T) {
 	output := buf.String()
 	if !strings.Contains(output, "# DataID: app.yaml") {
 		t.Errorf("output missing meta: %q", output)
+	}
+}
+
+func TestYAMLExporterMasksSensitiveContentByDefault(t *testing.T) {
+	exp := &YAMLExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.yaml", Group: "DEFAULT_GROUP", Content: "password: secret123", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatYAML}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "password: ***") {
+		t.Fatalf("output = %q, want masked password", output)
+	}
+	if strings.Contains(output, "secret123") {
+		t.Fatalf("output leaked sensitive value: %q", output)
 	}
 }
 
@@ -137,5 +275,26 @@ func TestPropertiesExporter_Export(t *testing.T) {
 	}
 	if !strings.Contains(output, "key=value") {
 		t.Errorf("output missing content: %q", output)
+	}
+}
+
+func TestPropertiesExporterMasksSensitiveContentByDefault(t *testing.T) {
+	exp := &PropertiesExporter{}
+	var buf bytes.Buffer
+
+	items := []ConfigItem{
+		{DataID: "secure.properties", Group: "DEFAULT_GROUP", Content: "secretKey=sk123", Namespace: "dev"},
+	}
+
+	if err := exp.Export(items, ExportOptions{Format: FormatProperties}, &buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "secretKey=***") {
+		t.Fatalf("output = %q, want masked secretKey", output)
+	}
+	if strings.Contains(output, "sk123") {
+		t.Fatalf("output leaked sensitive value: %q", output)
 	}
 }

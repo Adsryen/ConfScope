@@ -367,6 +367,35 @@ describe("ConfigBrowser", () => {
     });
   });
 
+  it("records current list export failures with copyable error detail", async () => {
+    vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
+      throw new Error("download denied");
+    });
+
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    fireEvent.click(screen.getByTitle("导出当前列表"));
+
+    await waitFor(() => {
+      expect(loadOperationHistory()[0]).toMatchObject({
+        type: "export",
+        result: "failure",
+        connectionId: "dev",
+        namespace: "public",
+        group: "*",
+        dataId: "*",
+        rollbackable: false,
+        error: "Error: download denied",
+      });
+      expect(latestError()).toMatchObject({
+        title: "导出当前列表",
+        message: "Error: download denied",
+        detail: "Error: download denied",
+      });
+    });
+  });
+
   it("shows list loading failures inline and records them in the message center", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);

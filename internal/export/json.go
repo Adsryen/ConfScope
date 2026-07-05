@@ -8,10 +8,10 @@ import (
 
 // ExportResult 导出结果。
 type ExportResult struct {
-	Items     []ConfigItem `json:"items"`
-	Format    Format       `json:"format"`
-	Total     int          `json:"total"`
-	ExportTime string      `json:"exportTime"`
+	Items      []ConfigItem `json:"items"`
+	Format     Format       `json:"format"`
+	Total      int          `json:"total"`
+	ExportTime string       `json:"exportTime"`
 }
 
 // JSONExporter JSON 格式导出器。
@@ -19,7 +19,7 @@ type JSONExporter struct{}
 
 func (e *JSONExporter) Export(items []ConfigItem, opts ExportOptions, w io.Writer) error {
 	result := ExportResult{
-		Items:  items,
+		Items:  exportItems(items, opts),
 		Format: FormatJSON,
 		Total:  len(items),
 	}

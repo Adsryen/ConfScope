@@ -156,7 +156,7 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
 
   // 导出
   const [exportFormat, setExportFormat] = useState<"csv" | "json">("csv");
-  const [sanitizeExport, setSanitizeExport] = useState(false);
+  const [sanitizeExport, setSanitizeExport] = useState(true);
 
   // 过滤与排序
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());

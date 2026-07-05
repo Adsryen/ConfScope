@@ -12,6 +12,7 @@ type CSVExporter struct{}
 func (e *CSVExporter) Export(items []ConfigItem, opts ExportOptions, w io.Writer) error {
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
+	exportedItems := exportItems(items, opts)
 
 	// 写入表头
 	header := []string{"namespace", "group", "dataId", "content", "updateTime"}
@@ -20,7 +21,7 @@ func (e *CSVExporter) Export(items []ConfigItem, opts ExportOptions, w io.Writer
 	}
 
 	// 写入数据
-	for _, item := range items {
+	for _, item := range exportedItems {
 		record := []string{
 			item.Namespace,
 			item.Group,
