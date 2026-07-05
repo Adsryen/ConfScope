@@ -10,7 +10,7 @@ import (
 type YAMLExporter struct{}
 
 func (e *YAMLExporter) Export(items []ConfigItem, opts ExportOptions, w io.Writer) error {
-	for i, item := range items {
+	for i, item := range exportItems(items, opts) {
 		if i > 0 {
 			_, _ = fmt.Fprintln(w, "---")
 		}

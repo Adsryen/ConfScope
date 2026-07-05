@@ -12,9 +12,27 @@ const apiMocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
 }));
 
+const exportMocks = vi.hoisted(() => ({
+  exportAuditCSV: vi.fn(),
+  exportAuditJSON: vi.fn(),
+  downloadFile: vi.fn(),
+}));
+
 vi.mock("../api/nacos", async () => {
   const actual = await vi.importActual<typeof import("../api/nacos")>("../api/nacos");
   return { ...actual, listConfigs: apiMocks.listConfigs, getConfig: apiMocks.getConfig };
+});
+
+vi.mock("../lib/export", async () => {
+  const actual = await vi.importActual<typeof import("../lib/export")>("../lib/export");
+  exportMocks.exportAuditCSV.mockImplementation(actual.exportAuditCSV);
+  exportMocks.exportAuditJSON.mockImplementation(actual.exportAuditJSON);
+  return {
+    ...actual,
+    exportAuditCSV: exportMocks.exportAuditCSV,
+    exportAuditJSON: exportMocks.exportAuditJSON,
+    downloadFile: exportMocks.downloadFile,
+  };
 });
 
 // mock i18n
@@ -103,6 +121,9 @@ describe("AuditView", () => {
   beforeEach(() => {
     apiMocks.listConfigs.mockReset();
     apiMocks.getConfig.mockReset();
+    exportMocks.exportAuditCSV.mockClear();
+    exportMocks.exportAuditJSON.mockClear();
+    exportMocks.downloadFile.mockClear();
   });
 
   it("显示空状态提示当没有连接时", () => {
@@ -222,5 +243,28 @@ describe("AuditView", () => {
 
     expect(await screen.findAllByText("Config Load Failed")).not.toHaveLength(0);
     expect(screen.queryByText("加载失败")).not.toBeInTheDocument();
+  });
+
+  it("默认以脱敏模式导出审计矩阵", async () => {
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.properties", group: "DEFAULT_GROUP" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig.mockResolvedValue("db.password=secret123\nserver.port=8080");
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const exportButton = await screen.findByRole("button", { name: "Export (CSV)" });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(exportMocks.exportAuditCSV).toHaveBeenCalledWith(expect.any(Array), expect.any(Array), { sanitize: true });
+    });
   });
 });

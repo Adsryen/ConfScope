@@ -58,12 +58,50 @@ export interface ExportMetadata {
 
 /** 敏感字段正则 */
 const SENSITIVE_RE = /(password|token|secretKey|accessKey|secret|privateKey|passphrase)/i;
+const SENSITIVE_LINE_RE = /^(\s*["']?[^"'=:]*?(?:password|token|secretKey|accessKey|secret|privateKey|passphrase)[^"'=:]*?["']?\s*[:=]\s*)(.*?)(\s*,?\s*)$/i;
 
 /** 脱敏替换 */
 function sanitizeValue(key: string, value: string | undefined): string | undefined {
   if (value === undefined) return value;
   if (SENSITIVE_RE.test(key)) return "***";
   return value;
+}
+
+/** 判断字段名是否命中敏感模式。 */
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_RE.test(key);
+}
+
+/** 对配置内容逐行脱敏，保留常见 key/value 结构。 */
+function sanitizeConfigContent(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      const match = line.match(SENSITIVE_LINE_RE);
+      if (!match) return line;
+      const [, prefix, value, suffix] = match;
+      const trimmedValue = value.trim();
+      const masked = prefix.includes(":") && /^["']/.test(trimmedValue) ? '"***"' : "***";
+      return `${prefix}${masked}${suffix}`;
+    })
+    .join("\n");
+}
+
+/** 生成脱敏后的配置项副本。 */
+function sanitizeConfigItems(items: ConfigItem[]): ConfigItem[] {
+  return items.map((item) => ({
+    ...item,
+    content: isSensitiveKey(`${item.namespace}.${item.group}.${item.dataId}`)
+      ? "***"
+      : sanitizeConfigContent(item.content),
+  }));
+}
+
+/** 脱敏 diff 左右值。 */
+function sanitizeDiffValue(item: DiffItem, value: string): string {
+  if (isSensitiveKey(`${item.namespace}.${item.group}.${item.dataId}`)) return "***";
+  return sanitizeConfigContent(value);
 }
 
 /** 转义 CSV 字段 */
@@ -177,13 +215,14 @@ function generateConfigCSV(items: ConfigItem[]): string {
 }
 
 /** 生成配置 JSON */
-function generateConfigJSON(items: ConfigItem[]): string {
+function generateConfigJSON(items: ConfigItem[], sanitized: boolean): string {
   return JSON.stringify(
     {
       metadata: {
         exportedAt: new Date().toISOString(),
         total: items.length,
         format: "json",
+        sanitized,
       },
       items,
     },
@@ -263,22 +302,24 @@ function getFileExt(format: ExportFormat): string {
 /** 通用配置导出到文件 */
 export function exportConfigs(items: ConfigItem[], opts: ConfigExportOptions): void {
   let content: string;
+  const sanitized = !opts.sensitive;
+  const exportItems = sanitized ? sanitizeConfigItems(items) : items;
 
   switch (opts.format) {
     case "csv":
-      content = generateConfigCSV(items);
+      content = generateConfigCSV(exportItems);
       break;
     case "json":
-      content = generateConfigJSON(items);
+      content = generateConfigJSON(exportItems, sanitized);
       break;
     case "yaml":
-      content = generateConfigYAML(items, opts.includeMeta);
+      content = generateConfigYAML(exportItems, opts.includeMeta);
       break;
     case "properties":
-      content = generateConfigProperties(items, opts.includeMeta);
+      content = generateConfigProperties(exportItems, opts.includeMeta);
       break;
     case "diff":
-      content = generateDiffText(items);
+      content = generateDiffText(exportItems);
       break;
     default:
       throw new Error(translate("export.unsupportedFormat", { format: opts.format }));
@@ -292,22 +333,28 @@ export function exportConfigs(items: ConfigItem[], opts: ConfigExportOptions): v
 export function exportDiff(items: DiffItem[], format: "text" | "json"): void {
   let content: string;
   let filename: string;
+  const sanitizedItems = items.map((item) => ({
+    ...item,
+    leftValue: sanitizeDiffValue(item, item.leftValue),
+    rightValue: sanitizeDiffValue(item, item.rightValue),
+  }));
 
   if (format === "json") {
     content = JSON.stringify(
       {
         metadata: {
           exportedAt: new Date().toISOString(),
-          total: items.length,
+          total: sanitizedItems.length,
+          sanitized: true,
         },
-        items,
+        items: sanitizedItems,
       },
       null,
       2
     );
     filename = `diff_${Date.now()}.json`;
   } else {
-    content = items
+    content = sanitizedItems
       .map((item) => {
         const label =
           item.diffType === "added"

@@ -90,6 +90,24 @@ describe("exportAuditCSV", () => {
     expect(csv).toContain("8080");
     expect(csv).toContain("9090");
   });
+
+  it("正确转义逗号、换行、引号并保留空值", () => {
+    const envSources = [env("c1", "dev", "开发"), env("c2", "prod", "生产")];
+    const r = row({
+      dataId: 'app,"quoted".yaml',
+      key: "message.text",
+      values: {
+        "c1:public": { exists: true, value: 'hello,"world"\nnext', updatedAt: '2026-01-01T00:00:00Z' },
+        "c2:public": { exists: false },
+      },
+    });
+
+    const csv = exportAuditCSV([r], envSources, { sanitize: true });
+
+    expect(csv).toContain('"app,""quoted"".yaml",message.text,consistent');
+    expect(csv).toContain('"hello,""world""\nnext"');
+    expect(csv).toContain("\nnext\",,2026-01-01T00:00:00Z,");
+  });
 });
 
 describe("exportAuditJSON", () => {
@@ -105,6 +123,8 @@ describe("exportAuditJSON", () => {
     expect(result.rows[0].dataId).toBe("app.yaml");
     expect(result.rows[0].key).toBe("server.port");
     expect(result.rows[0].status).toBe("consistent");
+    expect(result.rows[0].values["c1:public"].exists).toBe(true);
+    expect(result.rows[0].values["c1:public"].updatedAt).toBe("2025-01-01T00:00:00Z");
     expect(result.rows[0].values["c1:public"].value).toBe("8080");
     expect(result.rows[0].values["c2:public"].value).toBe("9090");
   });
@@ -150,16 +170,20 @@ globalThis.Blob = MockBlob as any;
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
 let lastBlobUrl = "";
+let lastBlob: MockBlob | null = null;
 
 beforeEach(() => {
   lastBlobUrl = "";
-  URL.createObjectURL = vi.fn(() => {
+  lastBlob = null;
+  URL.createObjectURL = vi.fn((blob: Blob | MediaSource) => {
+    lastBlob = blob as unknown as MockBlob;
     lastBlobUrl = "blob:mock-url";
     return lastBlobUrl;
   });
   URL.revokeObjectURL = vi.fn();
   vi.spyOn(document.body, "appendChild").mockImplementation(() => null as any);
   vi.spyOn(document.body, "removeChild").mockImplementation(() => null as any);
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -167,6 +191,15 @@ afterEach(() => {
   URL.revokeObjectURL = originalRevokeObjectURL;
   vi.restoreAllMocks();
 });
+
+function downloadedText(): string {
+  expect(lastBlob).not.toBeNull();
+  return lastBlob!.parts.map((part) => String(part)).join("");
+}
+
+function downloadedJSON<T>(): T {
+  return JSON.parse(downloadedText()) as T;
+}
 
 describe("exportConfigs", () => {
   const sampleConfigs: ConfigItem[] = [
@@ -190,16 +223,88 @@ describe("exportConfigs", () => {
     },
   ];
 
-  it("CSV 格式导出不抛错", () => {
+  it("CSV 格式导出包含元数据列并正确转义特殊字符", () => {
+    const configs: ConfigItem[] = [
+      {
+        dataId: 'app,"quoted".properties',
+        group: "DEFAULT_GROUP",
+        content: 'db.password=secret,with,comma\nquote="value"',
+        configType: "properties",
+        namespace: "public",
+        namespaceId: "public",
+        updateTime: "",
+      },
+    ];
     const opts: ConfigExportOptions = { format: "csv", sensitive: false, includeMeta: false };
-    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+
+    exportConfigs(configs, opts);
+
+    const csv = downloadedText();
     expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(csv).toContain("﻿namespace,group,dataId,configType,content,updateTime");
+    expect(csv).toContain('"app,""quoted"".properties"');
+    expect(csv).toContain('"db.password=***\nquote=""value"""');
+    expect(csv).toContain(",properties,");
   });
 
-  it("JSON 格式导出不抛错", () => {
+  it("JSON 格式导出稳定 metadata、items，并默认隐藏敏感原文", () => {
+    const configs: ConfigItem[] = [
+      {
+        dataId: "secure.properties",
+        group: "DEFAULT_GROUP",
+        content: "db.password=secret123\nserver.port=8080",
+        configType: "properties",
+        namespace: "public",
+        namespaceId: "public",
+        updateTime: "2024-01-01 10:00:00",
+      },
+    ];
     const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
-    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
-    expect(URL.createObjectURL).toHaveBeenCalled();
+
+    exportConfigs(configs, opts);
+
+    const result = downloadedJSON<{
+      metadata: { total: number; format: string; sanitized: boolean; exportedAt: string };
+      items: ConfigItem[];
+    }>();
+    expect(result.metadata.total).toBe(1);
+    expect(result.metadata.format).toBe("json");
+    expect(result.metadata.sanitized).toBe(true);
+    expect(new Date(result.metadata.exportedAt).toISOString()).toBe(result.metadata.exportedAt);
+    expect(result.items[0]).toMatchObject({
+      dataId: "secure.properties",
+      group: "DEFAULT_GROUP",
+      configType: "properties",
+      namespace: "public",
+      namespaceId: "public",
+      updateTime: "2024-01-01 10:00:00",
+    });
+    expect(result.items[0].content).toContain("db.password=***");
+    expect(result.items[0].content).toContain("server.port=8080");
+    expect(JSON.stringify(result)).not.toContain("secret123");
+  });
+
+  it("显式允许敏感字段时保留配置原文", () => {
+    const opts: ConfigExportOptions = { format: "json", sensitive: true, includeMeta: true };
+
+    exportConfigs(
+      [
+        {
+          dataId: "secure.properties",
+          group: "DEFAULT_GROUP",
+          content: "db.password=secret123",
+          configType: "properties",
+          namespace: "public",
+          namespaceId: "public",
+          updateTime: "",
+        },
+      ],
+      opts
+    );
+
+    const result = downloadedJSON<{ metadata: { sanitized: boolean }; items: ConfigItem[] }>();
+    expect(result.metadata.sanitized).toBe(false);
+    expect(result.items[0].content).toBe("db.password=secret123");
   });
 
   it("YAML 格式导出不抛错", () => {
@@ -212,9 +317,28 @@ describe("exportConfigs", () => {
     expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
   });
 
-  it("Diff 格式导出不抛错", () => {
+  it("Diff 格式导出默认隐藏敏感原文", () => {
     const opts: ConfigExportOptions = { format: "diff", sensitive: false, includeMeta: false };
-    expect(() => exportConfigs(sampleConfigs, opts)).not.toThrow();
+    exportConfigs(
+      [
+        {
+          dataId: "secure.properties",
+          group: "DEFAULT_GROUP",
+          content: "token=tok123\nfeature=true",
+          configType: "properties",
+          namespace: "public",
+          namespaceId: "public",
+          updateTime: "",
+        },
+      ],
+      opts
+    );
+
+    const text = downloadedText();
+    expect(text).toContain("=== public/DEFAULT_GROUP/secure.properties ===");
+    expect(text).toContain("token=***");
+    expect(text).toContain("feature=true");
+    expect(text).not.toContain("tok123");
   });
 
   it("不支持的格式抛出错误", () => {
@@ -237,33 +361,61 @@ describe("exportConfigs", () => {
 });
 
 describe("exportDiff", () => {
-  const sampleDiffs: DiffItem[] = [
-    {
-      dataId: "app.yaml",
-      group: "DEFAULT_GROUP",
-      namespace: "dev",
-      leftValue: "port: 8080",
-      rightValue: "port: 9090",
-      diffType: "modified",
-    },
-    {
-      dataId: "new.yaml",
-      group: "DEFAULT_GROUP",
-      namespace: "dev",
-      leftValue: "",
-      rightValue: "key: value",
-      diffType: "added",
-    },
-  ];
+  it("text 格式导出定位信息、左右值并默认隐藏敏感原文", () => {
+    exportDiff(
+      [
+        {
+          dataId: "secure.properties",
+          group: "DEFAULT_GROUP",
+          namespace: "public",
+          leftValue: "password=old-secret",
+          rightValue: "password=new-secret",
+          diffType: "modified",
+        },
+      ],
+      "text"
+    );
 
-  it("text 格式导出不抛错", () => {
-    expect(() => exportDiff(sampleDiffs, "text")).not.toThrow();
-    expect(URL.createObjectURL).toHaveBeenCalled();
+    const text = downloadedText();
+    expect(text).toContain("[~] public/DEFAULT_GROUP/secure.properties");
+    expect(text).toContain("← password=***");
+    expect(text).toContain("→ password=***");
+    expect(text).not.toContain("old-secret");
+    expect(text).not.toContain("new-secret");
   });
 
-  it("JSON 格式导出不抛错", () => {
-    expect(() => exportDiff(sampleDiffs, "json")).not.toThrow();
-    expect(URL.createObjectURL).toHaveBeenCalled();
+  it("JSON 格式导出稳定结构并默认隐藏敏感原文", () => {
+    exportDiff(
+      [
+        {
+          dataId: "secure.properties",
+          group: "DEFAULT_GROUP",
+          namespace: "public",
+          leftValue: "accessKey=ak-old",
+          rightValue: "accessKey=ak-new",
+          diffType: "modified",
+        },
+      ],
+      "json"
+    );
+
+    const result = downloadedJSON<{
+      metadata: { total: number; sanitized: boolean; exportedAt: string };
+      items: DiffItem[];
+    }>();
+    expect(result.metadata.total).toBe(1);
+    expect(result.metadata.sanitized).toBe(true);
+    expect(new Date(result.metadata.exportedAt).toISOString()).toBe(result.metadata.exportedAt);
+    expect(result.items[0]).toMatchObject({
+      dataId: "secure.properties",
+      group: "DEFAULT_GROUP",
+      namespace: "public",
+      leftValue: "accessKey=***",
+      rightValue: "accessKey=***",
+      diffType: "modified",
+    });
+    expect(JSON.stringify(result)).not.toContain("ak-old");
+    expect(JSON.stringify(result)).not.toContain("ak-new");
   });
 
   it("空差异列表也能正常导出", () => {
