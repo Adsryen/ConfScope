@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -533,6 +534,9 @@ type version struct {
 
 func parseVersion(raw string) version {
 	raw = strings.TrimSpace(raw)
+	if candidate := semverCandidate(raw); candidate != "" {
+		raw = candidate
+	}
 	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "v"), "V")
 	if plus := strings.Index(raw, "+"); plus >= 0 {
 		raw = raw[:plus]
@@ -553,6 +557,11 @@ func parseVersion(raw string) version {
 		out.parts[i] = n
 	}
 	return out
+}
+
+func semverCandidate(raw string) string {
+	pattern := regexp.MustCompile(`[vV]?[0-9]+(?:\.[0-9]+){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
+	return pattern.FindString(strings.TrimSpace(raw))
 }
 
 func comparePrerelease(a string, b string) int {

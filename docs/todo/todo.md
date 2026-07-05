@@ -680,7 +680,7 @@
 
 #### 不建议照搬
 
-- 不直接复制 GPL-3.0 代码，ConfScope 是 MIT，只借鉴产品思路并重写实现。
+- 不直接复制 GPL-3.0 代码；ConfScope 采用 AGPL-3.0，只借鉴产品思路并重写实现。
 - 不优先走数据库直连，ConfScope 应优先走配置中心 OpenAPI，保留权限、历史、发布语义。
 - 不固定 4 个环境，ConfScope 应支持任意数量环境，并允许用户指定基准环境。
 - 不只支持 YAML，应支持 YAML、JSON、Properties、TOML，XML/TEXT 可降级处理。

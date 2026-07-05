@@ -55,6 +55,37 @@ func TestCheckReportsNoUpdateWhenLatestIsCurrent(t *testing.T) {
 	}
 }
 
+func TestCheckReportsNoUpdateWhenManifestVersionUsesReleaseTagPrefix(t *testing.T) {
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"version":"refs/tags/v1.3.0",
+			"notes":"current release",
+			"downloadUrl":"https://example.com/ConfScope.exe",
+			"publishedAt":"2026-07-05T00:00:00Z",
+			"sha256":"abc",
+			"mandatory":false
+		}`))
+	}))
+
+	result := Check(context.Background(), Request{
+		CurrentVersion: "1.3.0",
+		Sources: []Source{
+			{Name: "GitHub", URL: server.URL + "/update.json"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("Error = %q", result.Error)
+	}
+	if result.HasUpdate {
+		t.Fatal("HasUpdate = true, want false")
+	}
+	if result.LatestVersion != "refs/tags/v1.3.0" {
+		t.Fatalf("LatestVersion = %q, want manifest version preserved", result.LatestVersion)
+	}
+}
+
 func TestCheckReportsUpdateAndRequiresHTTPSDownloadURL(t *testing.T) {
 	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -256,6 +287,8 @@ func TestCompareVersionsHandlesVPrefixAndPrerelease(t *testing.T) {
 	}{
 		{a: "v1.2.0", b: "1.1.9", want: 1},
 		{a: "1.2.0", b: "1.2.0", want: 0},
+		{a: "refs/tags/v1.3.0", b: "1.3.0", want: 0},
+		{a: "ConfScope-v1.3.0", b: "1.3.0", want: 0},
 		{a: "1.2.0-beta.1", b: "1.2.0", want: -1},
 		{a: "1.10.0", b: "1.2.9", want: 1},
 	}

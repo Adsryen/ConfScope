@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   checkForUpdates,
   downloadUpdate,
   getAppInfo,
   getDownloadProgress,
-  installAndRestart,
   type AppInfo,
   type DownloadProgress,
   type UpdateCheckResult,
@@ -19,14 +18,14 @@ interface AboutProps {
   embedded?: boolean;
 }
 
-type UpdatePhase =
-  | "idle"
-  | "checking"
-  | "upToDate"
-  | "updateAvailable"
-  | "downloading"
-  | "downloaded"
-  | "error";
+type UpdatePhase = "idle" | "checking" | "upToDate" | "updateAvailable" | "downloading" | "downloaded" | "error";
+
+interface WailsRuntime {
+  EventsOn?: (eventName: string, callback: (progress: DownloadProgress) => void) => void;
+  EventsOff?: (eventName: string) => void;
+}
+
+type WindowWithRuntime = Window & { runtime?: WailsRuntime };
 
 export default function About({ onClose = () => {}, embedded = false }: AboutProps) {
   const { t } = useTranslation();
@@ -35,11 +34,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     version: "1.0.0",
     updateSources: [],
   });
+  const [appInfoLoaded, setAppInfoLoaded] = useState(false);
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const downloadedFile = useRef("");
 
   useEffect(() => {
     if (embedded) return;
@@ -54,11 +53,15 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     let alive = true;
     getAppInfo()
       .then((info) => {
-        if (alive) setAppInfo(info);
+        if (alive) {
+          setAppInfo(info);
+          setAppInfoLoaded(true);
+        }
       })
       .catch(() => {
         if (alive) {
           setAppInfo({ name: "ConfScope", version: "1.0.0", updateSources: [] });
+          setAppInfoLoaded(true);
         }
       });
     return () => {
@@ -73,7 +76,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     let cleanup: (() => void) | undefined;
 
     // 尝试使用 Wails 事件系统
-    const runtime = (window as any).runtime;
+    const runtime = (window as WindowWithRuntime).runtime;
     if (runtime?.EventsOn) {
       const handler = (p: DownloadProgress) => {
         setDownloadProgress(p);
@@ -171,14 +174,14 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
   // 进入 About 页自动检查（如果距上次检查 > 6 小时或未检查过）
   useEffect(() => {
-    if (updatePhase !== "idle") return;
+    if (!appInfoLoaded || updatePhase !== "idle") return;
     const settings = loadSettings();
     const lastCheck = settings.update.lastCheckAt ? new Date(settings.update.lastCheckAt).getTime() : 0;
     const hoursSinceCheck = (Date.now() - lastCheck) / 3600000;
     if (hoursSinceCheck > 6 || !settings.update.lastCheckAt) {
       runUpdateCheck();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [appInfoLoaded, runUpdateCheck, updatePhase]);
 
   const startDownload = useCallback(async () => {
     if (!updateResult?.downloadUrl) return;
@@ -186,8 +189,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     setDownloadProgress(null);
     setErrorMessage("");
     try {
-      const filePath = await downloadUpdate(updateResult.downloadUrl, updateResult.sha256);
-      downloadedFile.current = filePath;
+      await downloadUpdate(updateResult.downloadUrl, updateResult.sha256);
       setUpdatePhase("downloaded");
     } catch (e) {
       const msg = String(e);
@@ -202,15 +204,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     }
   }, [updateResult, t]);
 
-  const runInstall = useCallback(async () => {
-    if (!downloadedFile.current) return;
-    try {
-      await installAndRestart(downloadedFile.current);
-    } catch (e) {
-      setErrorMessage(String(e));
-      setUpdatePhase("error");
-    }
-  }, []);
+  const openDownloadPage = useCallback(() => {
+    const url = updateResult?.downloadUrl || updateResult?.sourceUrl;
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [updateResult]);
 
   const renderUpdateSection = () => {
     switch (updatePhase) {
@@ -246,12 +244,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
             <div className="test-msg ok">
               <div className="test-msg-text">
                 <div>{t("about.updateAvailable", { version: updateResult!.latestVersion })}</div>
-                {updateResult!.sourceName && (
-                  <div>{t("about.updateSourceHit", { source: updateResult!.sourceName })}</div>
-                )}
-                {updateResult!.releaseNotes && (
-                  <div className="update-release-notes">{updateResult!.releaseNotes}</div>
-                )}
+                {updateResult!.sourceName && <div>{t("about.updateSourceHit", { source: updateResult!.sourceName })}</div>}
+                {updateResult!.releaseNotes && <div className="update-release-notes">{updateResult!.releaseNotes}</div>}
               </div>
             </div>
             <div className="update-actions">
@@ -274,10 +268,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         return (
           <div className="update-downloading">
             <div className="update-progress-bar">
-              <div
-                className="update-progress-fill"
-                style={{ width: `${downloadProgress?.percent ?? 0}%` }}
-              />
+              <div className="update-progress-fill" style={{ width: `${downloadProgress?.percent ?? 0}%` }} />
             </div>
             <div className="update-progress-text">
               {(downloadProgress?.total ?? 0) > 0
@@ -294,9 +285,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
             <div className="test-msg ok">
               <span className="test-msg-text">{t("about.downloadComplete")}</span>
             </div>
-            <button className="btn btn-primary btn-sm" onClick={runInstall}>
-              {t("about.restartToInstall")}
-            </button>
+            {(updateResult?.downloadUrl || updateResult?.sourceUrl) && (
+              <button className="btn btn-primary btn-sm" onClick={openDownloadPage}>
+                {t("about.openDownload")}
+              </button>
+            )}
           </>
         );
 
@@ -310,10 +303,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               <button className="btn btn-primary btn-sm" onClick={runUpdateCheck}>
                 {t("common.retry")}
               </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => copyText(errorMessage)}
-              >
+              <button className="btn btn-ghost btn-sm" onClick={() => copyText(errorMessage)}>
                 {t("common.copy")}
               </button>
             </div>
@@ -387,20 +377,10 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         </div>
 
         <div className="about-section about-full about-links">
-          <a
-            href="https://github.com/Adsryen/ConfScope"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-ghost btn-sm"
-          >
+          <a href="https://github.com/Adsryen/ConfScope" target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
             ⭐ GitHub
           </a>
-          <a
-            href="https://github.com/Adsryen/ConfScope/issues"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-ghost btn-sm"
-          >
+          <a href="https://github.com/Adsryen/ConfScope/issues" target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
             {t("about.feedback")}
           </a>
         </div>
