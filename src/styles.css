@@ -724,6 +724,8 @@ button,
 }
 
 .settings-workbench {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 18px;
@@ -733,7 +735,10 @@ button,
 
 .settings-rail {
   position: sticky;
-  top: 18px;
+  top: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
   align-self: start;
   display: flex;
   flex-direction: column;
@@ -761,10 +766,14 @@ button,
 }
 
 .settings-panels {
+  min-height: 0;
+  overflow-y: auto;
+  scroll-padding-top: 2px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  padding-right: 4px;
 }
 
 .settings-panel {
@@ -1146,6 +1155,8 @@ button,
 
   .settings-rail {
     position: static;
+    max-height: none;
+    overflow: visible;
     flex-direction: row;
     flex-wrap: wrap;
     border-left: none;
