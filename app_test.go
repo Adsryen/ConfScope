@@ -210,6 +210,9 @@ func TestValidateLocalSnapshotDirectoryAcceptsManifestAndConfigFiles(t *testing.
 	if !result.Valid {
 		t.Fatalf("Valid = false, message = %q", result.Message)
 	}
+	if result.Code != "legacy_valid" || !result.Legacy {
+		t.Fatalf("legacy marker result = %+v, want legacy_valid", result)
+	}
 	if result.ConfigCount != 1 {
 		t.Fatalf("ConfigCount = %d, want 1", result.ConfigCount)
 	}

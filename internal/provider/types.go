@@ -133,31 +133,51 @@ type ConfigProvider interface {
 
 // SnapshotSource 快照来源。
 type SnapshotSource struct {
-	ConnectionID   string `json:"connectionId"`
-	ConnectionName string `json:"connectionName"`
-	Namespace      string `json:"namespace"`
-	NamespaceID    string `json:"namespaceId"`
+	Provider       ProviderType `json:"provider"`
+	ConnectionID   string       `json:"connectionId"`
+	ConnectionName string       `json:"connectionName"`
+	Namespace      string       `json:"namespace"`
+	NamespaceID    string       `json:"namespaceId"`
 }
 
 // ConfigSnapshot 配置快照。
 type ConfigSnapshot struct {
-	DataID     string `json:"dataId"`
-	Group      string `json:"group"`
-	Content    string `json:"content"`
-	ConfigType string `json:"configType"`
-	UpdateTime string `json:"updateTime"`
+	Namespace   string `json:"namespace"`
+	DataID      string `json:"dataId"`
+	Group       string `json:"group"`
+	ContentType string `json:"contentType"`
+	Content     string `json:"content"`
+	ConfigType  string `json:"configType"`
+	UpdateTime  string `json:"updateTime"`
 }
 
 // Snapshot 快照。
 type Snapshot struct {
-	ID          string           `json:"id"`
-	Path        string           `json:"path"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	CreatedAt   string           `json:"createdAt"`
-	UpdatedAt   string           `json:"updatedAt"`
-	Source      SnapshotSource   `json:"source"`
-	Configs     []ConfigSnapshot `json:"configs"`
+	SchemaVersion int              `json:"schemaVersion"`
+	ToolVersion   string           `json:"toolVersion"`
+	ID            string           `json:"id"`
+	Path          string           `json:"path"`
+	Name          string           `json:"name"`
+	Description   string           `json:"description"`
+	CreatedAt     string           `json:"createdAt"`
+	UpdatedAt     string           `json:"updatedAt"`
+	Source        SnapshotSource   `json:"source"`
+	Configs       []ConfigSnapshot `json:"configs"`
+}
+
+// LocalSnapshotValidation 是本地快照目录校验结果。
+type LocalSnapshotValidation struct {
+	Valid          bool     `json:"valid"`
+	Path           string   `json:"path"`
+	Code           string   `json:"code"`
+	Message        string   `json:"message"`
+	ConfigCount    int      `json:"configCount"`
+	HasManifest    bool     `json:"hasManifest"`
+	MatchedMarkers []string `json:"matchedMarkers"`
+	SchemaVersion  int      `json:"schemaVersion"`
+	Layout         string   `json:"layout"`
+	Legacy         bool     `json:"legacy"`
+	CheckedAt      string   `json:"checkedAt"`
 }
 
 // SnapshotManager 快照管理器接口。

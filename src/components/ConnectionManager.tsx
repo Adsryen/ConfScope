@@ -107,16 +107,21 @@ function localSnapshotValidationMessage(
   result: Pick<LocalSnapshotValidation, "valid" | "code" | "message" | "configCount">,
   t: Translate
 ): string {
-  if (result.valid) return t("connection.localValidationOk").replace("{count}", String(result.configCount));
   const keyByCode: Record<string, string> = {
     empty_path: "connection.localValidationEmptyPath",
     not_found: "connection.localValidationNotFound",
     not_directory: "connection.localValidationNotDirectory",
     missing_structure: "connection.localValidationMissingStructure",
     missing_configs: "connection.localValidationMissingConfigs",
+    invalid_metadata: "connection.localValidationInvalidMetadata",
+    unsupported_schema_version: "connection.localValidationUnsupportedSchema",
+    missing_schema_fields: "connection.localValidationMissingSchemaFields",
+    legacy_valid: "connection.localValidationLegacyOk",
   };
   const key = result.code ? keyByCode[result.code] : undefined;
-  return key ? t(key) : result.message;
+  if (key) return t(key);
+  if (result.valid) return t("connection.localValidationOk").replace("{count}", String(result.configCount));
+  return result.message;
 }
 
 function elapsedMs(startedAt: number): number {
@@ -631,6 +636,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       code: c.localValidation.code ?? "",
       message: c.localValidation.message,
       configCount: c.localValidation.configCount,
+      schemaVersion: c.localValidation.schemaVersion ?? 0,
+      layout: c.localValidation.layout ?? "",
+      legacy: c.localValidation.legacy ?? false,
       hasManifest: false,
       matchedMarkers: [],
       checkedAt: c.localValidation.checkedAt,
@@ -665,6 +673,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       code: c.localValidation.code ?? "",
       message: c.localValidation.message,
       configCount: c.localValidation.configCount,
+      schemaVersion: c.localValidation.schemaVersion ?? 0,
+      layout: c.localValidation.layout ?? "",
+      legacy: c.localValidation.legacy ?? false,
       hasManifest: false,
       matchedMarkers: [],
       checkedAt: c.localValidation.checkedAt,
@@ -747,6 +758,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         code: localValidation.code,
         message: localValidation.message,
         configCount: localValidation.configCount,
+        schemaVersion: localValidation.schemaVersion,
+        layout: localValidation.layout,
+        legacy: localValidation.legacy,
         checkedAt: localValidation.checkedAt,
       } : undefined,
       baseUrl: toSave.sourceType === "local-snapshot" ? toSave.localPath?.trim() || "" : toSave.baseUrl.trim(),

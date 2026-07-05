@@ -47,6 +47,9 @@ export interface Connection {
     code?: string;
     message: string;
     configCount: number;
+    schemaVersion?: number;
+    layout?: string;
+    legacy?: boolean;
     checkedAt: string;
   };
   readonly?: boolean;
