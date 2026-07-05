@@ -7,6 +7,7 @@ import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } fr
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
+import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload } from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
 import Select from "./Select";
 
@@ -22,6 +23,7 @@ export interface DiffJumpParams {
 interface Props {
   connections: Connection[];
   onNavigateToDiff?: (params: DiffJumpParams) => void;
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
 
 type AuditStatus = "consistent" | "partial" | "inconsistent" | "missing" | "parse_error" | "ignored";
@@ -71,6 +73,16 @@ function envShortLabel(s: EnvSource): string {
   return `${connectionEnvironmentName(s.conn)} / ${s.namespace || "public"}`;
 }
 
+function applyEntryEndpoint(env: EnvSource): ApplyEntryEndpoint {
+  return {
+    provider: env.conn.provider ?? "nacos",
+    connectionId: env.conn.id,
+    connectionName: env.conn.name || env.conn.sourceName || env.conn.id,
+    namespace: env.namespace || "public",
+    label: envLabel(env),
+  };
+}
+
 function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, string | number>) => string) {
   const total = rows.length;
   const counts = new Map<AuditStatus, number>();
@@ -101,7 +113,7 @@ function environmentToneShort(name: string): string {
   return "other";
 }
 
-export default function AuditView({ connections, onNavigateToDiff }: Props) {
+export default function AuditView({ connections, onNavigateToDiff, onStartApply }: Props) {
   const { t } = useTranslation();
   const firstProject = connections[0] ? connectionProjectName(connections[0]) : "";
   const projectNames = useMemo(() => {
@@ -218,6 +230,42 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
       dataId: selectedRow.dataId,
     });
   }, [selectedRow, baseline, envIds, onNavigateToDiff]);
+
+  const handleStartApply = useCallback(() => {
+    if (!selectedRow || !baseline || !onStartApply) return;
+    const baselineEnv = envSources.find((env) => envKey(env) === baseline);
+    const baselineCell = selectedRow.values[baseline];
+    const targetEnvId =
+      envIds.find((envId) => {
+        if (envId === baseline) return false;
+        const cell = selectedRow.values[envId];
+        return !cell?.exists || cell.value !== baselineCell?.value;
+      }) ?? envIds.find((envId) => envId !== baseline);
+    const targetEnv = targetEnvId ? envSources.find((env) => envKey(env) === targetEnvId) : undefined;
+    if (!baselineEnv || !targetEnv || !targetEnvId) return;
+
+    const item = {
+      provider: targetEnv.conn.provider ?? "nacos",
+      connectionId: targetEnv.conn.id,
+      namespace: targetEnv.namespace || selectedRow.namespace || "public",
+      group: selectedRow.group,
+      dataId: selectedRow.originalDataIds[targetEnvId] ?? selectedRow.dataId,
+      key: selectedRow.key,
+    };
+
+    onStartApply({
+      sourceType: "audit",
+      scope: "key",
+      source: applyEntryEndpoint(baselineEnv),
+      target: applyEntryEndpoint(targetEnv),
+      items: [item],
+      rangeSummary: applyEntryRiskSummary([item], selectedRow.status === "ignored" ? 1 : 0),
+      origin: {
+        mode: "audit",
+        returnMode: "audit",
+      },
+    });
+  }, [selectedRow, baseline, envSources, envIds, onStartApply]);
 
   const applyNormalize = useCallback(
     (name: string): string => {
@@ -718,6 +766,11 @@ export default function AuditView({ connections, onNavigateToDiff }: Props) {
               {baseline && onNavigateToDiff && (
                 <button className="btn btn-primary btn-sm" onClick={handleJumpToDiff}>
                   {t("audit.jumpToDiff")}
+                </button>
+              )}
+              {baseline && onStartApply && (
+                <button className="btn btn-primary btn-sm" onClick={handleStartApply}>
+                  {t("audit.startApply")}
                 </button>
               )}
               <button className="btn btn-ghost btn-sm" onClick={() => setSelectedRow(null)}>

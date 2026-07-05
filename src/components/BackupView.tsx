@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../i18n";
 import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
 import { getSnapshotStats, formatSnapshotName, formatTime } from "../lib/snapshot";
-import { snapshotNamespaceForDiff } from "../lib/snapshotConnection";
+import { snapshotConnectionId, snapshotNamespaceForDiff } from "../lib/snapshotConnection";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { recordOperation } from "../store/operationHistory";
+import { applyEntryRiskSummary, type ApplyEntryPayload } from "../lib/applyEntry";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 
@@ -22,7 +23,10 @@ export interface BackupDiffJumpParams {
 
 interface Props {
   onNavigateToDiff?: (params: BackupDiffJumpParams) => void;
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
+
+const DOCUMENT_KEY = "__document";
 
 function snapshotSourceNamespace(snapshot: Pick<Snapshot, "source">): string {
   return snapshot.source.namespace || snapshot.source.namespaceId || "public";
@@ -33,7 +37,45 @@ function snapshotSourceLabel(snapshot: Pick<Snapshot, "source">): string {
 }
 
 /** 备份管理视图：展示本地快照列表，支持查看、删除、对比。 */
-export default function BackupView({ onNavigateToDiff }: Props) {
+function buildBackupApplyPayload(snapshot: Snapshot, config: ConfigSnapshot): ApplyEntryPayload {
+  const namespace = snapshotNamespaceForDiff(snapshot);
+  const displayNamespace = snapshotSourceNamespace(snapshot);
+  const item = {
+    provider: "nacos" as const,
+    connectionId: snapshot.source.connectionId,
+    namespace,
+    group: config.group || "DEFAULT_GROUP",
+    dataId: config.dataId,
+    key: DOCUMENT_KEY,
+  };
+
+  return {
+    sourceType: "backup",
+    scope: "config",
+    source: {
+      provider: "local",
+      connectionId: snapshotConnectionId(snapshot.id),
+      connectionName: snapshot.name || snapshot.id,
+      namespace,
+      label: `${snapshot.name || snapshot.id} / ${displayNamespace}`,
+    },
+    target: {
+      provider: "nacos",
+      connectionId: snapshot.source.connectionId,
+      connectionName: snapshot.source.connectionName,
+      namespace,
+      label: `${snapshot.source.connectionName} / ${displayNamespace}`,
+    },
+    items: [item],
+    rangeSummary: applyEntryRiskSummary([item]),
+    origin: {
+      mode: "backup",
+      returnMode: "backup",
+    },
+  };
+}
+
+export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
   const { t } = useTranslation();
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,6 +166,9 @@ export default function BackupView({ onNavigateToDiff }: Props) {
       group: config.group || "DEFAULT_GROUP",
       dataId: config.dataId,
     });
+  };
+  const startApply = (snapshot: Snapshot, config: ConfigSnapshot) => {
+    onStartApply?.(buildBackupApplyPayload(snapshot, config));
   };
 
   return (
@@ -252,6 +297,11 @@ export default function BackupView({ onNavigateToDiff }: Props) {
                           title={selectedSnapshot.path ? t("backup.compareWithCloud") : t("backup.snapshotPathMissing")}
                         >
                           {t("backup.compareWithCloud")}
+                        </button>
+                      )}
+                      {onStartApply && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => startApply(selectedSnapshot, cfg)}>
+                          {t("backup.startApply")}
                         </button>
                       )}
                     </div>

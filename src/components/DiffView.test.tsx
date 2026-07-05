@@ -71,6 +71,26 @@ const otherProjectConn: Connection = {
   baseUrl: "http://pay.example.com/nacos",
 };
 
+const leftApplyConn: Connection = {
+  ...nacosConn,
+  id: "left-nacos",
+  name: "dev",
+  projectName: "Order",
+  environmentName: "Development",
+  sourceName: "LAN",
+  defaultNamespace: "shared",
+};
+
+const rightApplyConn: Connection = {
+  ...prodConn,
+  id: "right-nacos",
+  name: "prod",
+  projectName: "Order",
+  environmentName: "Production",
+  sourceName: "Cloud",
+  defaultNamespace: "shared",
+};
+
 function renderDiff(connections: Connection[], onConnectionsChange?: (connections: Connection[]) => void) {
   localStorage.setItem("locale", "zh-CN");
   return render(
@@ -447,6 +467,163 @@ describe("DiffView", () => {
     expect(screen.getByText(/gateway\.yaml/)).toBeInTheDocument();
     expect(screen.getByText("connect timeout")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+  });
+
+  it("starts a single-config apply plan after compare succeeds", async () => {
+    const onStartApply = vi.fn();
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByText("8080")).toBeInTheDocument();
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledWith({
+      sourceType: "diff",
+      scope: "config",
+      source: {
+        provider: "nacos",
+        connectionId: "left-nacos",
+        connectionName: "dev",
+        namespace: "shared",
+        label: "Order / Development / LAN / shared",
+      },
+      target: {
+        provider: "nacos",
+        connectionId: "right-nacos",
+        connectionName: "prod",
+        namespace: "shared",
+        label: "Order / Production / Cloud / shared",
+      },
+      items: [
+        {
+          provider: "nacos",
+          connectionId: "right-nacos",
+          namespace: "shared",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          key: "__document",
+        },
+      ],
+      rangeSummary: {
+        count: 1,
+        skippedCount: 0,
+        riskLevel: "low",
+        riskReasons: [],
+      },
+      origin: {
+        mode: "diff",
+        returnMode: "diff",
+      },
+    });
+  });
+
+  it("starts a batch apply plan for selected smart-match results", async () => {
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection, _tenant: string, dataId: string) => `${conn.id}:${dataId}`);
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (2)" }));
+
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
+    expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Batch Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: "diff",
+        scope: "batch",
+        source: expect.objectContaining({ connectionId: "left-nacos", namespace: "shared" }),
+        target: expect.objectContaining({ connectionId: "right-nacos", namespace: "shared" }),
+        items: [
+          {
+            provider: "nacos",
+            connectionId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            key: "__document",
+          },
+          {
+            provider: "nacos",
+            connectionId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "gateway.yaml",
+            key: "__document",
+          },
+        ],
+        rangeSummary: {
+          count: 2,
+          skippedCount: 0,
+          riskLevel: "medium",
+          riskReasons: ["batch_apply"],
+        },
+        origin: {
+          mode: "diff",
+          returnMode: "diff",
+        },
+      })
+    );
+  });
+
+  it("does not show apply entry points before compare output exists", () => {
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView connections={[leftApplyConn, rightApplyConn]} onStartApply={vi.fn()} />
+      </I18nProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: "Generate Apply Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Batch Apply Plan" })).toBeNull();
   });
 
   it("shows inline error when all batch diff configs fail to load", async () => {

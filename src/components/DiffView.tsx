@@ -14,6 +14,7 @@ import {
 import { loadSettings } from "../store/settings";
 import { useTranslation } from "../i18n";
 import { exportDiff, type DiffItem } from "../lib/export";
+import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryItem, type ApplyEntryPayload } from "../lib/applyEntry";
 import Combobox from "./Combobox";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -35,6 +36,7 @@ interface Props {
   onConnectionsChange?: (connections: Connection[]) => void;
   initialParams?: DiffJumpParams | null;
   onInitialParamsConsumed?: () => void;
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
 
 interface Source {
@@ -64,6 +66,8 @@ interface BatchResult {
   rightText: string;
   format: Format;
 }
+
+const DOCUMENT_KEY = "__document";
 
 function sortedLinesDoc(content: string): string {
   return content
@@ -176,6 +180,32 @@ function sourceSummary(source: Source, connections: Connection[], autoMatch: str
   const group = source.group.trim() || "DEFAULT_GROUP";
   const dataId = source.dataId.trim() || autoMatch;
   return `${label} / ${namespace} / ${group} / ${dataId}`;
+}
+
+function applyEntryEndpointFromSource(source: Source, connections: Connection[]): ApplyEntryEndpoint | null {
+  const conn = connections.find((item) => item.id === source.connId);
+  if (!conn) return null;
+  const namespace = source.tenant || "public";
+  return {
+    provider: conn.provider ?? "nacos",
+    connectionId: conn.id,
+    connectionName: conn.name || conn.sourceName || conn.id,
+    namespace,
+    label: `${connectionDisplayLabel(conn)} / ${namespace}`,
+  };
+}
+
+function applyEntryItemFromSource(source: Source, connections: Connection[], dataId: string, group: string): ApplyEntryItem | null {
+  const conn = connections.find((item) => item.id === source.connId);
+  if (!conn) return null;
+  return {
+    provider: conn.provider ?? "nacos",
+    connectionId: conn.id,
+    namespace: source.tenant || "public",
+    group: group.trim() || "DEFAULT_GROUP",
+    dataId,
+    key: DOCUMENT_KEY,
+  };
 }
 
 function sourceOptionLabel(conn: Connection): string {
@@ -445,7 +475,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed }: Props) {
+export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const firstId = connections[0]?.id ?? "";
@@ -935,6 +965,53 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
 
+  const startSingleApply = () => {
+    if (!ready || !onStartApply) return;
+    const source = applyEntryEndpointFromSource(left, connections);
+    const target = applyEntryEndpointFromSource(right, connections);
+    const item = applyEntryItemFromSource(right, connections, right.dataId.trim(), right.group);
+    if (!source || !target || !item) return;
+
+    onStartApply({
+      sourceType: "diff",
+      scope: "config",
+      source,
+      target,
+      items: [item],
+      rangeSummary: applyEntryRiskSummary([item]),
+      origin: {
+        mode: "diff",
+        returnMode: "diff",
+      },
+    });
+  };
+
+  const startBatchApply = () => {
+    if (!onStartApply || batchResults.length === 0) return;
+    const source = applyEntryEndpointFromSource(left, connections);
+    const target = applyEntryEndpointFromSource(right, connections);
+    if (!source || !target) return;
+
+    const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));
+    const items = batchResults
+      .map((item) => applyEntryItemFromSource(right, connections, item.dataId, matchByDataId.get(item.dataId)?.rightGroup ?? right.group))
+      .filter((item): item is ApplyEntryItem => item !== null);
+    if (items.length === 0) return;
+
+    onStartApply({
+      sourceType: "diff",
+      scope: "batch",
+      source,
+      target,
+      items,
+      rangeSummary: applyEntryRiskSummary(items, failedItems.length),
+      origin: {
+        mode: "diff",
+        returnMode: "diff",
+      },
+    });
+  };
+
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
@@ -1025,6 +1102,11 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         ) : (
           <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
             {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
+          </button>
+        )}
+        {!matchResults && ready && onStartApply && (
+          <button className="btn btn-ghost" onClick={startSingleApply}>
+            {t("diff.startApply")}
           </button>
         )}
         {notice && (
@@ -1147,6 +1229,11 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               >
                 {t("diff.exportDiff")}
               </button>
+              {onStartApply && (
+                <button className="btn btn-ghost btn-sm" onClick={startBatchApply}>
+                  {t("diff.startBatchApply")}
+                </button>
+              )}
             </div>
             {batchResults.map((item) => (
               <div className="batch-diff-item" key={item.dataId}>

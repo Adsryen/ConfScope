@@ -182,6 +182,56 @@ describe("BackupView", () => {
     });
   });
 
+  it("starts an apply plan from a snapshot config", async () => {
+    const onStartApply = vi.fn();
+    localStorage.setItem("locale", "en-US");
+
+    renderWithI18n(<BackupView onStartApply={onStartApply} />);
+
+    const configList = await screen.findByText("Config list");
+    const detail = configList.closest(".backup-detail") as HTMLElement;
+    fireEvent.click(within(detail).getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledWith({
+      sourceType: "backup",
+      scope: "config",
+      source: {
+        provider: "local",
+        connectionId: "snapshot:snap-1",
+        connectionName: "dev-nacos_public_20240101",
+        namespace: "",
+        label: "dev-nacos_public_20240101 / public",
+      },
+      target: {
+        provider: "nacos",
+        connectionId: "conn-1",
+        connectionName: "dev-nacos",
+        namespace: "",
+        label: "dev-nacos / public",
+      },
+      items: [
+        {
+          provider: "nacos",
+          connectionId: "conn-1",
+          namespace: "",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          key: "__document",
+        },
+      ],
+      rangeSummary: {
+        count: 1,
+        skippedCount: 0,
+        riskLevel: "low",
+        riskReasons: [],
+      },
+      origin: {
+        mode: "backup",
+        returnMode: "backup",
+      },
+    });
+  });
+
   it("records snapshot delete as not rollbackable", async () => {
     const { deleteSnapshot } = await import("../api/snapshot");
     vi.mocked(deleteSnapshot).mockResolvedValue(undefined);

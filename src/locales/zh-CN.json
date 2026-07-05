@@ -88,6 +88,31 @@
     "navGroupData": "数据管理",
     "navGroupSystem": "系统设置"
   },
+  "apply": {
+    "title": "应用计划",
+    "subtitle": "在完整 dry-run 计划页可用前，先确认本次选择范围。",
+    "source": "来源",
+    "target": "目标",
+    "scope": "范围",
+    "selected": "已选",
+    "selectedCount": "已选配置: {count}",
+    "skipped": "跳过",
+    "risk": "风险",
+    "scopes": {
+      "key": "单 key",
+      "config": "单配置",
+      "batch": "批量"
+    },
+    "risks": {
+      "low": "低",
+      "medium": "中",
+      "high": "高"
+    },
+    "placeholderTitle": "计划预览占位",
+    "placeholderBody": "完整 dry-run 生成、确认和执行控件由后续应用计划视图任务实现。",
+    "missingEntry": "尚未选择应用入口。",
+    "backToSource": "返回{source}"
+  },
   "settings": {
     "groupBasic": "基础信息",
     "groupAuth": "认证",
@@ -505,6 +530,8 @@
     "batchGenerated": "已生成 {count} 个文件对比",
     "batchOnlyChanges": "全部仅显示变更",
     "exportDiff": "导出差异",
+    "startApply": "生成应用计划",
+    "startBatchApply": "生成批量应用计划",
     "dataIdPlaceholder": "留空则匹配所有同名 dataId",
     "unifiedNoDiff": "与上一版无差异",
     "sideBySideIdentical": "✓ 两侧内容完全一致",
@@ -584,6 +611,7 @@
     "caseSensitive": "区分大小写",
     "addNormalizeRule": "添加规则",
     "jumpToDiff": "跳转 Diff 对比",
+    "startApply": "生成应用计划",
     "normalizeDeleteHint": "（删除）",
     "setBaseline": "设基准",
     "close": "关闭",
@@ -668,7 +696,8 @@
     "comparePrepared": "已带入快照来源",
     "compareUnavailable": "无法打开快照对比",
     "sourceConnectionMissing": "快照来源连接不存在，请先恢复或重新创建对应连接。",
-    "snapshotPathMissing": "快照缺少本地路径，无法作为本地来源对比。"
+    "snapshotPathMissing": "快照缺少本地路径，无法作为本地来源对比。",
+    "startApply": "生成应用计划"
   },
   "tasks": {
     "pageSubtitle": "查看和管理后台任务",
