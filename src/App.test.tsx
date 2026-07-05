@@ -7,6 +7,7 @@ import { I18nProvider } from "./i18n";
 import type { Connection } from "./store/connections";
 import type { BackupDiffJumpParams } from "./components/BackupView";
 import type { DiffJumpParams } from "./components/AuditView";
+import type { ApplyEntryPayload } from "./lib/applyEntry";
 import App from "./App";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { toast } from "./lib/toast";
@@ -24,6 +25,44 @@ const viewMocks = vi.hoisted(() => ({
     connections: Connection[];
     initialParams: DiffJumpParams | null;
   }>,
+  makeApplyPayload: (mode: "audit" | "diff" | "backup"): ApplyEntryPayload => ({
+    sourceType: mode,
+    scope: mode === "audit" ? "key" : "config",
+    source: {
+      provider: mode === "backup" ? "local" : "nacos",
+      connectionId: `${mode}-source`,
+      connectionName: `${mode}-source`,
+      namespace: "",
+      label: "entry-source / public",
+    },
+    target: {
+      provider: "nacos",
+      connectionId: `${mode}-target`,
+      connectionName: `${mode}-target`,
+      namespace: "",
+      label: "entry-target / public",
+    },
+    items: [
+      {
+        provider: "nacos",
+        connectionId: `${mode}-target`,
+        namespace: "",
+        group: "DEFAULT_GROUP",
+        dataId: `${mode}.yaml`,
+        key: mode === "audit" ? "server.port" : "__document",
+      },
+    ],
+    rangeSummary: {
+      count: 1,
+      skippedCount: 0,
+      riskLevel: "low",
+      riskReasons: [],
+    },
+    origin: {
+      mode,
+      returnMode: mode,
+    },
+  }),
 }));
 
 vi.mock("./api/nacos", async () => {
@@ -57,11 +96,25 @@ vi.mock("./components/SSHManagerView", () => ({ default: () => <div data-testid=
 vi.mock("./components/ErrorDialog", () => ({ default: () => <div data-testid="error-dialog" /> }));
 vi.mock("./components/MessageCenter", () => ({ default: () => <div data-testid="message-center" /> }));
 vi.mock("./components/TaskCenter", () => ({ default: () => <div data-testid="tasks" /> }));
-vi.mock("./components/AuditView", () => ({ default: () => <div data-testid="audit" /> }));
+vi.mock("./components/AuditView", () => ({
+  default: ({ onStartApply }: { onStartApply?: (payload: ApplyEntryPayload) => void }) => (
+    <div data-testid="audit">
+      <button type="button" onClick={() => onStartApply?.(viewMocks.makeApplyPayload("audit"))}>
+        Mock audit apply
+      </button>
+    </div>
+  ),
+}));
 vi.mock("./components/OperationHistoryView", () => ({ default: () => <div data-testid="history" /> }));
 
 vi.mock("./components/BackupView", () => ({
-  default: ({ onNavigateToDiff }: { onNavigateToDiff?: (params: BackupDiffJumpParams) => void }) => {
+  default: ({
+    onNavigateToDiff,
+    onStartApply,
+  }: {
+    onNavigateToDiff?: (params: BackupDiffJumpParams) => void;
+    onStartApply?: (payload: ApplyEntryPayload) => void;
+  }) => {
     const config = {
       dataId: "app.yaml",
       group: "DEFAULT_GROUP",
@@ -142,15 +195,33 @@ vi.mock("./components/BackupView", () => ({
         >
           Mock compare missing path
         </button>
+        <button type="button" onClick={() => onStartApply?.(viewMocks.makeApplyPayload("backup"))}>
+          Mock backup apply
+        </button>
       </div>
     );
   },
 }));
 
 vi.mock("./components/DiffView", () => ({
-  default: ({ connections, initialParams }: { connections: Connection[]; initialParams: DiffJumpParams | null }) => {
+  default: ({
+    connections,
+    initialParams,
+    onStartApply,
+  }: {
+    connections: Connection[];
+    initialParams: DiffJumpParams | null;
+    onStartApply?: (payload: ApplyEntryPayload) => void;
+  }) => {
     viewMocks.diffProps.push({ connections, initialParams });
-    return <div data-testid="diff-view">Diff View</div>;
+    return (
+      <div data-testid="diff-view">
+        Diff View
+        <button type="button" onClick={() => onStartApply?.(viewMocks.makeApplyPayload("diff"))}>
+          Mock diff apply
+        </button>
+      </div>
+    );
   },
 }));
 
@@ -382,6 +453,42 @@ describe("App", () => {
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackSnapshotOnly",
     });
+  });
+
+  it.each([
+    { mode: "backup", buttonName: "Mock backup apply", returnName: "Back to Backups" },
+    { mode: "audit", buttonName: "Mock audit apply", returnName: "Back to Config Matrix" },
+    { mode: "diff", buttonName: "Mock diff apply", returnName: "Back to Config Compare" },
+  ] as const)("enters the apply placeholder flow from $mode", async ({ mode, buttonName, returnName }) => {
+    localStorage.setItem("cs.ui", JSON.stringify({ mode, connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: buttonName }));
+
+    expect(screen.getByRole("heading", { name: "Apply Plan" })).toBeInTheDocument();
+    expect(screen.getByText("entry-source / public")).toBeInTheDocument();
+    expect(screen.getByText("entry-target / public")).toBeInTheDocument();
+    expect(screen.getByText("Selected configs: 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: returnName })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Execute|Publish|Delete|Apply Now/i })).not.toBeInTheDocument();
+  });
+
+  it("returns from the apply placeholder flow to the originating entry", async () => {
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mock backup apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to Backups" }));
+
+    expect(screen.getByRole("button", { name: "Mock backup apply" })).toBeInTheDocument();
   });
 
   it("records a failed snapshot compare when the source connection is missing", async () => {

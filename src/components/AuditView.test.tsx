@@ -74,6 +74,7 @@ vi.mock("../i18n", () => ({
         "audit.caseSensitive": "Case sensitive",
         "audit.addNormalizeRule": "Add Rule",
         "audit.jumpToDiff": "Jump to Diff",
+        "audit.startApply": "Generate Apply Plan",
         "audit.setBaseline": "Set as baseline",
         "audit.close": "Close",
         "audit.detailMissing": "(Missing)",
@@ -213,7 +214,7 @@ describe("AuditView", () => {
 
     // mock API 返回配置
     apiMocks.listConfigs.mockResolvedValue({
-      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }],
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
       totalCount: 1,
     });
     apiMocks.getConfig.mockResolvedValue("server:\n  port: 8080");
@@ -223,6 +224,99 @@ describe("AuditView", () => {
 
     await waitFor(() => {
       expect(screen.getByText("app.yaml")).toBeTruthy();
+    });
+  });
+
+  it("starts an apply plan from a selected differing key", async () => {
+    const onStartApply = vi.fn();
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development", sourceName: "lan" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production", sourceName: "cloud" }),
+    ];
+
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig
+      .mockResolvedValueOnce("server:\n  port: 8080")
+      .mockResolvedValueOnce("server:\n  port: 9090");
+
+    render(<AuditView connections={conns} onStartApply={onStartApply} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    fireEvent.click(await screen.findByText("server.port"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(onStartApply).toHaveBeenCalledWith({
+      sourceType: "audit",
+      scope: "key",
+      source: {
+        provider: "nacos",
+        connectionId: "c1",
+        connectionName: "dev",
+        namespace: "public",
+        label: "Development / dev / public",
+      },
+      target: {
+        provider: "nacos",
+        connectionId: "c2",
+        connectionName: "prod",
+        namespace: "public",
+        label: "Production / prod / public",
+      },
+      items: [
+        {
+          provider: "nacos",
+          connectionId: "c2",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          key: "server.port",
+        },
+      ],
+      rangeSummary: {
+        count: 1,
+        skippedCount: 0,
+        riskLevel: "low",
+        riskReasons: [],
+      },
+      origin: {
+        mode: "audit",
+        returnMode: "audit",
+      },
+    });
+  });
+
+  it("keeps the apply entry hidden without onStartApply and preserves Jump to Diff", async () => {
+    const onNavigate = vi.fn();
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig
+      .mockResolvedValueOnce("server:\n  port: 8080")
+      .mockResolvedValueOnce("server:\n  port: 9090");
+
+    render(<AuditView connections={conns} onNavigateToDiff={onNavigate} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    fireEvent.click(await screen.findByText("server.port"));
+    expect(screen.queryByRole("button", { name: "Generate Apply Plan" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to Diff" }));
+    expect(onNavigate).toHaveBeenCalledWith({
+      leftConnId: "c1",
+      rightConnId: "c2",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
     });
   });
 

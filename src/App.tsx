@@ -26,10 +26,12 @@ import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/s
 import { toast } from "./lib/toast";
 import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
 import { recordOperation } from "./store/operationHistory";
+import { applyEntryTargetCount, type ApplyEntryPayload } from "./lib/applyEntry";
 
-type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
+type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
+type Mode = NavigableMode | "apply";
 
-const navIconPath: Record<Mode, string[]> = {
+const navIconPath: Record<NavigableMode, string[]> = {
   browse: ["M4 5h16", "M4 10h16", "M4 15h10", "M4 20h8"],
   diff: ["M6 4v5c0 2 1 3 3 3h6", "M6 20v-5c0-2 1-3 3-3h6", "M15 8l4 4-4 4"],
   connections: ["M5 5h9v6H5z", "M10 11v4", "M10 18h4", "M17 15h2a2 2 0 012 2v1a2 2 0 01-2 2h-2a2 2 0 01-2-2v-1a2 2 0 012-2z", "M7 8h5"],
@@ -48,7 +50,7 @@ const navIconPath: Record<Mode, string[]> = {
   about: ["M12 11v6", "M12 7h.01", "M12 22a10 10 0 100-20 10 10 0 000 20z"],
 };
 
-function NavIcon({ mode }: { mode: Mode }) {
+function NavIcon({ mode }: { mode: NavigableMode }) {
   return (
     <svg className="side-icon" viewBox="0 0 24 24" aria-hidden="true">
       {navIconPath[mode].map((d) => (
@@ -59,12 +61,48 @@ function NavIcon({ mode }: { mode: Mode }) {
 }
 
 const UI_KEY = "cs.ui";
-function loadUI(): { connId?: string; mode?: Mode; sidebarCollapsed?: boolean } {
+function loadUI(): { connId?: string; mode?: string; sidebarCollapsed?: boolean } {
   try {
     return JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   } catch {
     return {};
   }
+}
+
+function isNavigableMode(mode: string | undefined): mode is NavigableMode {
+  switch (mode) {
+    case "browse":
+    case "diff":
+    case "connections":
+    case "ssh":
+    case "audit":
+    case "history":
+    case "backup":
+    case "tasks":
+    case "settings":
+    case "about":
+      return true;
+    default:
+      return false;
+  }
+}
+
+const modeLabelKey: Record<NavigableMode, string> = {
+  browse: "app.title",
+  diff: "app.diff",
+  connections: "app.connectionManage",
+  ssh: "app.sshTunnels",
+  audit: "app.audit",
+  history: "app.history",
+  backup: "app.backup",
+  tasks: "app.tasks",
+  settings: "app.settings",
+  about: "app.about",
+};
+
+function applyReturnMode(payload: ApplyEntryPayload): NavigableMode {
+  const mode = payload.origin.returnMode ?? payload.origin.mode;
+  return isNavigableMode(mode) ? mode : "browse";
 }
 
 function snapshotCompareNamespace(params: BackupDiffJumpParams): string {
@@ -87,17 +125,14 @@ export default function App() {
   const [nsError, setNsError] = useState<string | null>(null);
   const [tenant, setTenant] = useState<string>("");
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
-  const knownMode = ["browse", "diff", "connections", "ssh", "audit", "history", "backup", "tasks", "settings", "about"].includes(
-    ui0.mode ?? ""
-  )
-    ? ui0.mode!
-    : "browse";
+  const knownMode = isNavigableMode(ui0.mode) ? ui0.mode : "browse";
   const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
   const [mode, setMode] = useState<Mode>(initialMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
   const [appVersion, setAppVersion] = useState("");
   const [startupDialog, setStartupDialog] = useState<StartupDialogKind | null>(null);
+  const [pendingApplyEntry, setPendingApplyEntry] = useState<ApplyEntryPayload | null>(null);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（AuditView → DiffView）
@@ -227,7 +262,7 @@ export default function App() {
     setTenant(activeConn.defaultNamespace || "");
   }, [activeConn, activeConnId, tenantFollowsDefault]);
 
-  const navGroups: { group: string; label: string; items: { mode: Mode; label: string; unavailable?: boolean }[] }[] = [
+  const navGroups: { group: string; label: string; items: { mode: NavigableMode; label: string; unavailable?: boolean }[] }[] = [
     {
       group: "config",
       label: t("app.navGroupConfig"),
@@ -315,6 +350,74 @@ export default function App() {
     toast(t("backup.comparePrepared"), "info");
     recordSnapshotCompare("success");
   };
+
+  const startApply = (payload: ApplyEntryPayload) => {
+    setPendingApplyEntry(payload);
+    setMode("apply");
+  };
+
+  const applyReturnTarget = pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse";
+  const applyPage = pendingApplyEntry ? (
+    <div className="page-surface data-page apply-view">
+      <div className="page-header">
+        <div>
+          <h3>{t("apply.title")}</h3>
+          <div className="page-subtitle">{t("apply.subtitle")}</div>
+        </div>
+        <div className="page-actions">
+          <button className="btn btn-ghost" onClick={() => setMode(applyReturnTarget)}>
+            {t("apply.backToSource", { source: t(modeLabelKey[applyReturnTarget]) })}
+          </button>
+        </div>
+      </div>
+
+      <div className="data-info-grid">
+        <div className="info-row">
+          <span className="info-label">{t("apply.source")}:</span>
+          <span className="info-value">{pendingApplyEntry.source.label}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">{t("apply.target")}:</span>
+          <span className="info-value">{pendingApplyEntry.target.label}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">{t("apply.scope")}:</span>
+          <span className="info-value">{t(`apply.scopes.${pendingApplyEntry.scope}`)}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">{t("apply.selected")}:</span>
+          <span className="info-value">{t("apply.selectedCount", { count: applyEntryTargetCount(pendingApplyEntry) })}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">{t("apply.skipped")}:</span>
+          <span className="info-value">{pendingApplyEntry.rangeSummary.skippedCount}</span>
+        </div>
+        <div className="info-row">
+          <span className="info-label">{t("apply.risk")}:</span>
+          <span className="info-value">{t(`apply.risks.${pendingApplyEntry.rangeSummary.riskLevel}`)}</span>
+        </div>
+      </div>
+
+      <div className="data-empty-state page-empty">
+        <div>{t("apply.placeholderTitle")}</div>
+        <span>{t("apply.placeholderBody")}</span>
+      </div>
+    </div>
+  ) : (
+    <div className="page-surface data-page apply-view">
+      <div className="page-header">
+        <div>
+          <h3>{t("apply.title")}</h3>
+          <div className="page-subtitle">{t("apply.missingEntry")}</div>
+        </div>
+        <div className="page-actions">
+          <button className="btn btn-ghost" onClick={() => setMode("browse")}>
+            {t("apply.backToSource", { source: t("app.title") })}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const closeStartupDialog = () => {
     if (!startupDialog || !appVersion) return;
@@ -432,11 +535,12 @@ export default function App() {
                 setDiffInitialParams(params);
                 setMode("diff");
               }}
+              onStartApply={startApply}
             />
           ) : mode === "history" ? (
             <OperationHistoryView connections={connections} />
           ) : mode === "backup" ? (
-            <BackupView onNavigateToDiff={navigateBackupToDiff} />
+            <BackupView onNavigateToDiff={navigateBackupToDiff} onStartApply={startApply} />
           ) : mode === "tasks" ? (
             <TaskCenter />
           ) : mode === "ssh" ? (
@@ -445,6 +549,8 @@ export default function App() {
             <SettingsView />
           ) : mode === "about" ? (
             <About embedded />
+          ) : mode === "apply" ? (
+            applyPage
           ) : connections.length === 0 ? (
             <div className="pad-msg big">
               {t("app.noConnection")}
@@ -460,6 +566,7 @@ export default function App() {
               onConnectionsChange={setConnections}
               initialParams={diffInitialParams}
               onInitialParamsConsumed={() => setDiffInitialParams(null)}
+              onStartApply={startApply}
             />
           ) : null}
         </main>

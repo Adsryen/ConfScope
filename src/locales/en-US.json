@@ -88,6 +88,31 @@
     "navGroupData": "Data",
     "navGroupSystem": "System"
   },
+  "apply": {
+    "title": "Apply Plan",
+    "subtitle": "Review the selected range before the full dry-run plan view is available.",
+    "source": "Source",
+    "target": "Target",
+    "scope": "Scope",
+    "selected": "Selected",
+    "selectedCount": "Selected configs: {count}",
+    "skipped": "Skipped",
+    "risk": "Risk",
+    "scopes": {
+      "key": "Single key",
+      "config": "Single config",
+      "batch": "Batch"
+    },
+    "risks": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "placeholderTitle": "Plan preview placeholder",
+    "placeholderBody": "Full dry-run generation, confirmation, and execution controls are handled by the Apply Plan view task.",
+    "missingEntry": "No apply entry is selected.",
+    "backToSource": "Back to {source}"
+  },
   "settings": {
     "groupBasic": "General",
     "groupAuth": "Authentication",
@@ -505,6 +530,8 @@
     "batchGenerated": "Generated {count} file comparisons",
     "batchOnlyChanges": "Only show changes for all",
     "exportDiff": "Export Diff",
+    "startApply": "Generate Apply Plan",
+    "startBatchApply": "Generate Batch Apply Plan",
     "dataIdPlaceholder": "Leave empty to match all same-name dataIds",
     "unifiedNoDiff": "No differences with previous version",
     "sideBySideIdentical": "Both sides are identical",
@@ -584,6 +611,7 @@
     "caseSensitive": "Case sensitive",
     "addNormalizeRule": "Add Rule",
     "jumpToDiff": "Jump to Diff",
+    "startApply": "Generate Apply Plan",
     "normalizeDeleteHint": "(delete)",
     "setBaseline": "Set as baseline",
     "close": "Close",
@@ -668,7 +696,8 @@
     "comparePrepared": "Snapshot source loaded for compare",
     "compareUnavailable": "Cannot open snapshot compare",
     "sourceConnectionMissing": "The source connection for this snapshot no longer exists. Restore or recreate it first.",
-    "snapshotPathMissing": "Snapshot local path is missing, so it cannot be used as a local compare source."
+    "snapshotPathMissing": "Snapshot local path is missing, so it cannot be used as a local compare source.",
+    "startApply": "Generate Apply Plan"
   },
   "tasks": {
     "pageSubtitle": "View and manage background tasks",
