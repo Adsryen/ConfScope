@@ -1,12 +1,38 @@
 // 操作历史本地存储：记录用户在 ConfScope 中执行的配置操作。
+import type { ApplyPlan } from "../lib/applyPlan";
+
 const STORAGE_KEY = "cs.operationHistory";
 const MAX_RECORDS = 1000;
 
 /** 操作类型 */
-export type OperationType = "publish" | "delete" | "rollback" | "snapshot" | "snapshot_delete" | "snapshot_compare" | "export";
+export type OperationType =
+  | "publish"
+  | "delete"
+  | "rollback"
+  | "snapshot"
+  | "snapshot_delete"
+  | "snapshot_compare"
+  | "export"
+  | "apply"
+  | "promote"
+  | "restore";
 
 /** 操作结果 */
 export type OperationResult = "success" | "failure";
+
+/** 应用计划摘要：只保存操作历史列表和详情展示需要的字段。 */
+export interface OperationPlanSummary {
+  scope: ApplyPlan["scope"];
+  total: number;
+  create: number;
+  overwrite: number;
+  delete: number;
+  skip: number;
+  parseError: number;
+  blocked: number;
+  sourceLabel: string;
+  targetLabel: string;
+}
 
 /** 操作记录 */
 export interface OperationRecord {
@@ -30,9 +56,31 @@ export interface OperationRecord {
   resourceName?: string; // 快照、导出文件等关联资源名称
   error?: string; // 失败时的错误信息
   operator?: string; // 操作人（如果有）
+  planId?: string; // ApplyPlan 快照 ID
+  planSummary?: OperationPlanSummary; // ApplyPlan 展示摘要
+  backupSnapshotId?: string; // 写入前备份快照 ID
+  backupSnapshotName?: string; // 写入前备份快照名称
+  taskId?: string; // 任务中心 ID
+  sourceConnectionId?: string; // 应用源连接 ID
+  sourceConnectionName?: string; // 应用源连接名称
+  sourceNamespace?: string; // 应用源 namespace
+  targetConnectionId?: string; // 应用目标连接 ID
+  targetConnectionName?: string; // 应用目标连接名称
+  targetNamespace?: string; // 应用目标 namespace
 }
 
-const OPERATION_TYPES: readonly OperationType[] = ["publish", "delete", "rollback", "snapshot", "snapshot_delete", "snapshot_compare", "export"];
+const OPERATION_TYPES: readonly OperationType[] = [
+  "publish",
+  "delete",
+  "rollback",
+  "snapshot",
+  "snapshot_delete",
+  "snapshot_compare",
+  "export",
+  "apply",
+  "promote",
+  "restore",
+];
 const OPERATION_RESULTS: readonly OperationResult[] = ["success", "failure"];
 
 /** 生成唯一 ID */
@@ -48,12 +96,50 @@ function booleanValue(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeOperationType(value: unknown): OperationType | null {
   return typeof value === "string" && OPERATION_TYPES.includes(value as OperationType) ? (value as OperationType) : null;
 }
 
 function normalizeOperationResult(value: unknown): OperationResult | null {
   return typeof value === "string" && OPERATION_RESULTS.includes(value as OperationResult) ? (value as OperationResult) : null;
+}
+
+function normalizeOperationPlanScope(value: unknown): OperationPlanSummary["scope"] | null {
+  return value === "key" || value === "config" || value === "batch" ? value : null;
+}
+
+function normalizeOperationPlanSummary(value: unknown): OperationPlanSummary | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<OperationPlanSummary>;
+  const scope = normalizeOperationPlanScope(raw.scope);
+  const total = numberValue(raw.total);
+  const create = numberValue(raw.create);
+  const overwrite = numberValue(raw.overwrite);
+  const deleted = numberValue(raw.delete);
+  const skip = numberValue(raw.skip);
+  const parseError = numberValue(raw.parseError);
+  const blocked = numberValue(raw.blocked);
+  const sourceLabel = stringValue(raw.sourceLabel);
+  const targetLabel = stringValue(raw.targetLabel);
+  if (
+    !scope ||
+    total === undefined ||
+    create === undefined ||
+    overwrite === undefined ||
+    deleted === undefined ||
+    skip === undefined ||
+    parseError === undefined ||
+    blocked === undefined ||
+    sourceLabel === undefined ||
+    targetLabel === undefined
+  ) {
+    return undefined;
+  }
+  return { scope, total, create, overwrite, delete: deleted, skip, parseError, blocked, sourceLabel, targetLabel };
 }
 
 function normalizeOperationRecord(value: unknown): OperationRecord | null {
@@ -90,6 +176,17 @@ function normalizeOperationRecord(value: unknown): OperationRecord | null {
     resourceName: stringValue(raw.resourceName),
     error: stringValue(raw.error),
     operator: stringValue(raw.operator),
+    planId: stringValue(raw.planId),
+    planSummary: normalizeOperationPlanSummary(raw.planSummary),
+    backupSnapshotId: stringValue(raw.backupSnapshotId),
+    backupSnapshotName: stringValue(raw.backupSnapshotName),
+    taskId: stringValue(raw.taskId),
+    sourceConnectionId: stringValue(raw.sourceConnectionId),
+    sourceConnectionName: stringValue(raw.sourceConnectionName),
+    sourceNamespace: stringValue(raw.sourceNamespace),
+    targetConnectionId: stringValue(raw.targetConnectionId),
+    targetConnectionName: stringValue(raw.targetConnectionName),
+    targetNamespace: stringValue(raw.targetNamespace),
   };
 }
 
@@ -139,6 +236,7 @@ export function rollbackUnavailableReason(record: OperationRecord): string {
   if (isRollbackableOperation(record)) return "";
   if (record.result !== "success") return "operationHistory.rollbackOnlySuccess";
   if (record.rollbackable === false) return record.rollbackReason || "operationHistory.rollbackDisabled";
+  if (record.type === "apply") return "operationHistory.rollbackApplyRequiresPlan";
   if (!["publish", "delete", "rollback"].includes(record.type)) return record.rollbackReason || "operationHistory.rollbackUnsupportedType";
   if (typeof record.beforeContent !== "string") return "operationHistory.rollbackMissingContent";
   return "operationHistory.rollbackDisabled";

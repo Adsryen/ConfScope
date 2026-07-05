@@ -51,6 +51,43 @@ const rollbackablePublishRecord = {
   rollbackable: true,
 };
 
+const applyRecord = {
+  id: "apply-1",
+  type: "apply",
+  result: "success",
+  timestamp: "2026-07-06T12:00:00Z",
+  connectionId: "conn-1",
+  connectionName: "prod",
+  namespace: "public",
+  group: "DEFAULT_GROUP",
+  dataId: "app.yaml",
+  planId: "plan-1",
+  planSummary: {
+    scope: "batch",
+    total: 2,
+    create: 1,
+    overwrite: 1,
+    delete: 0,
+    skip: 0,
+    parseError: 0,
+    blocked: 0,
+    sourceLabel: "Dev",
+    targetLabel: "Prod",
+  },
+  backupSnapshotId: "snap-before-1",
+  backupSnapshotName: "prod_before_apply",
+  taskId: "task-apply-1",
+  sourceConnectionId: "conn-dev",
+  sourceConnectionName: "Dev",
+  sourceNamespace: "public",
+  targetConnectionId: "conn-1",
+  targetConnectionName: "Prod",
+  targetNamespace: "public",
+  beforeContent: "old: true",
+  rollbackable: false,
+  rollbackReason: "operationHistory.rollbackApplyRequiresPlan",
+};
+
 describe("OperationHistoryView", () => {
   afterEach(() => {
     cleanup();
@@ -159,6 +196,76 @@ describe("OperationHistoryView", () => {
     expect(screen.getByText("可回滚")).toBeDefined();
     expect(screen.getByRole("button", { name: "复制记录" })).toBeDefined();
     expect(screen.getByRole("button", { name: "回滚此操作" })).toBeDefined();
+  });
+
+  it("shows and filters apply operation records", async () => {
+    localStorage.setItem("cs.operationHistory", JSON.stringify([applyRecord]));
+
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+
+    expect((await screen.findAllByText("应用计划")).length).toBeGreaterThan(0);
+    expect(screen.getByText("app.yaml")).toBeDefined();
+
+    const typeSelect = screen.getAllByRole("combobox")[1];
+    expect(within(typeSelect).getByRole("option", { name: "应用计划" })).toBeDefined();
+
+    fireEvent.change(typeSelect, { target: { value: "apply" } });
+
+    if (!(typeSelect instanceof HTMLSelectElement)) throw new Error("type filter is not a select element");
+    expect(typeSelect.value).toBe("apply");
+    expect(screen.getByText("app.yaml")).toBeDefined();
+  });
+
+  it("shows apply plan, backup and source target details", async () => {
+    localStorage.setItem("cs.operationHistory", JSON.stringify([applyRecord]));
+
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    expect(screen.getByText("计划 ID:")).toBeDefined();
+    expect(screen.getByText("plan-1")).toBeDefined();
+    expect(screen.getByText("计划摘要:")).toBeDefined();
+    expect(screen.getByText("总计 2 · 新增 1 · 覆盖 1 · 删除 0 · 跳过 0 · 阻塞 0")).toBeDefined();
+    expect(screen.getByText("备份快照:")).toBeDefined();
+    expect(screen.getByText("prod_before_apply (snap-before-1)")).toBeDefined();
+    expect(screen.getByText("应用方向:")).toBeDefined();
+    expect(screen.getByText("Dev -> Prod")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "回滚此操作" })).toBeNull();
+  });
+
+  it("shows copyable failed apply error detail without direct rollback action", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          ...applyRecord,
+          id: "apply-failed-1",
+          result: "failure",
+          error: "backup failed: disk full",
+        },
+      ])
+    );
+
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    expect(screen.getByText("backup failed: disk full")).toBeDefined();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "回滚此操作" })).toBeNull();
   });
 
   it("publishes the previous content and records a new rollback entry", async () => {

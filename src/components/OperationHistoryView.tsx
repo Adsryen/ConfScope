@@ -29,6 +29,9 @@ const OPERATION_LABELS: Record<OperationType, string> = {
   snapshot_delete: "operationHistory.opSnapshotDelete",
   snapshot_compare: "operationHistory.opSnapshotCompare",
   export: "operationHistory.opExport",
+  apply: "operationHistory.opApply",
+  promote: "operationHistory.opPromote",
+  restore: "operationHistory.opRestore",
 };
 
 const RESULT_LABELS: Record<string, string> = {
@@ -181,6 +184,30 @@ export default function OperationHistoryView({ connections }: Props) {
     }
   };
 
+  const formatPlanSummary = (record: OperationRecord) => {
+    const summary = record.planSummary;
+    if (!summary) return "";
+    return t("operationHistory.planSummaryText", {
+      total: summary.total,
+      create: summary.create,
+      overwrite: summary.overwrite,
+      delete: summary.delete,
+      skip: summary.skip,
+      blocked: summary.blocked,
+    });
+  };
+
+  const formatBackupSnapshot = (record: OperationRecord) => {
+    if (record.backupSnapshotName && record.backupSnapshotId) return `${record.backupSnapshotName} (${record.backupSnapshotId})`;
+    return record.backupSnapshotName || record.backupSnapshotId || "";
+  };
+
+  const formatApplyDirection = (record: OperationRecord) => {
+    const source = record.sourceConnectionName || record.planSummary?.sourceLabel || record.sourceConnectionId || "";
+    const target = record.targetConnectionName || record.planSummary?.targetLabel || record.targetConnectionId || "";
+    return source && target ? `${source} -> ${target}` : "";
+  };
+
   return (
     <div className="page-surface data-page history-page">
       <div className="page-header">
@@ -225,6 +252,9 @@ export default function OperationHistoryView({ connections }: Props) {
           <option value="snapshot_delete">{t("operationHistory.opSnapshotDelete")}</option>
           <option value="snapshot_compare">{t("operationHistory.opSnapshotCompare")}</option>
           <option value="export">{t("operationHistory.opExport")}</option>
+          <option value="apply">{t("operationHistory.opApply")}</option>
+          <option value="promote">{t("operationHistory.opPromote")}</option>
+          <option value="restore">{t("operationHistory.opRestore")}</option>
         </select>
         <input
           className="history-filter-input"
@@ -313,6 +343,36 @@ export default function OperationHistoryView({ connections }: Props) {
                   <span className="info-label">{t("operationHistory.time")}:</span>
                   <span className="info-value">{formatTime(selectedVisibleRecord.timestamp)}</span>
                 </div>
+                {selectedVisibleRecord.planId && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.planId")}:</span>
+                    <span className="info-value">{selectedVisibleRecord.planId}</span>
+                  </div>
+                )}
+                {selectedVisibleRecord.planSummary && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.planSummary")}:</span>
+                    <span className="info-value">{formatPlanSummary(selectedVisibleRecord)}</span>
+                  </div>
+                )}
+                {formatBackupSnapshot(selectedVisibleRecord) && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.backupSnapshot")}:</span>
+                    <span className="info-value">{formatBackupSnapshot(selectedVisibleRecord)}</span>
+                  </div>
+                )}
+                {selectedVisibleRecord.taskId && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.taskId")}:</span>
+                    <span className="info-value">{selectedVisibleRecord.taskId}</span>
+                  </div>
+                )}
+                {formatApplyDirection(selectedVisibleRecord) && (
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.applyDirection")}:</span>
+                    <span className="info-value">{formatApplyDirection(selectedVisibleRecord)}</span>
+                  </div>
+                )}
                 <div className="info-row">
                   <span className="info-label">{t("operationHistory.rollbackState")}:</span>
                   <span className={`info-value history-rollback-state ${rollbackable ? "available" : "unavailable"}`}>

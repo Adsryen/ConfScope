@@ -116,6 +116,141 @@ describe("loadOperationHistory", () => {
     expect(record.afterContent).toBe("new");
     expect(isRollbackableOperation(record)).toBe(true);
   });
+
+  it("加载 apply 记录并保留计划、备份和源目标摘要", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "apply-1",
+          type: "apply",
+          result: "success",
+          timestamp: "2026-07-06T12:00:00Z",
+          connectionId: "conn-prod",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          planId: "plan-1",
+          planSummary: {
+            scope: "batch",
+            total: 3,
+            create: 1,
+            overwrite: 1,
+            delete: 1,
+            skip: 0,
+            parseError: 0,
+            blocked: 0,
+            sourceLabel: "dev",
+            targetLabel: "prod",
+          },
+          backupSnapshotId: "snap-before-1",
+          backupSnapshotName: "prod_before_apply",
+          taskId: "task-apply-1",
+          sourceConnectionId: "conn-dev",
+          sourceConnectionName: "dev",
+          sourceNamespace: "public",
+          targetConnectionId: "conn-prod",
+          targetConnectionName: "prod",
+          targetNamespace: "public",
+          beforeContent: "old: true",
+          afterContent: "new: true",
+        },
+      ])
+    );
+
+    const [record] = loadOperationHistory();
+
+    expect(record).toMatchObject({
+      type: "apply",
+      result: "success",
+      connectionId: "conn-prod",
+      connectionName: "prod",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      planId: "plan-1",
+      planSummary: {
+        scope: "batch",
+        total: 3,
+        create: 1,
+        overwrite: 1,
+        delete: 1,
+        skip: 0,
+        parseError: 0,
+        blocked: 0,
+        sourceLabel: "dev",
+        targetLabel: "prod",
+      },
+      backupSnapshotId: "snap-before-1",
+      backupSnapshotName: "prod_before_apply",
+      taskId: "task-apply-1",
+      sourceConnectionId: "conn-dev",
+      sourceConnectionName: "dev",
+      sourceNamespace: "public",
+      targetConnectionId: "conn-prod",
+      targetConnectionName: "prod",
+      targetNamespace: "public",
+      beforeContent: "old: true",
+      afterContent: "new: true",
+    });
+  });
+
+  it("忽略损坏的 apply 摘要字段但保留记录和旧 publish 记录", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "apply-1",
+          type: "apply",
+          result: "success",
+          timestamp: "2026-07-06T12:00:00Z",
+          connectionId: "conn-prod",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          planId: "plan-1",
+          planSummary: {
+            scope: "batch",
+            total: "bad",
+            create: 1,
+            overwrite: 1,
+            delete: 0,
+            skip: 0,
+            parseError: 0,
+            blocked: 0,
+            sourceLabel: "dev",
+            targetLabel: "prod",
+          },
+          backupSnapshotId: 123,
+        },
+        {
+          id: "publish-1",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-05T12:00:00Z",
+          connectionId: "conn-prod",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "legacy.yaml",
+        },
+      ])
+    );
+
+    const records = loadOperationHistory();
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      id: "apply-1",
+      type: "apply",
+      planId: "plan-1",
+    });
+    expect(records[0].planSummary).toBeUndefined();
+    expect(records[0].backupSnapshotId).toBeUndefined();
+    expect(records[1].type).toBe("publish");
+  });
 });
 
 describe("recordOperation", () => {
@@ -256,6 +391,79 @@ describe("recordOperation", () => {
     expect(isRollbackableOperation(record)).toBe(true);
     expect(rollbackUnavailableReason(record)).toBe("");
   });
+
+  it("记录 apply 操作并保存计划、备份和源目标字段", () => {
+    recordOperation({
+      type: "apply",
+      result: "success",
+      connectionId: "conn-prod",
+      connectionName: "prod",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      planId: "plan-1",
+      planSummary: {
+        scope: "batch",
+        total: 2,
+        create: 1,
+        overwrite: 1,
+        delete: 0,
+        skip: 0,
+        parseError: 0,
+        blocked: 0,
+        sourceLabel: "dev",
+        targetLabel: "prod",
+      },
+      backupSnapshotId: "snap-before-1",
+      backupSnapshotName: "prod_before_apply",
+      taskId: "task-apply-1",
+      sourceConnectionId: "conn-dev",
+      sourceConnectionName: "dev",
+      sourceNamespace: "public",
+      targetConnectionId: "conn-prod",
+      targetConnectionName: "prod",
+      targetNamespace: "public",
+    });
+
+    const [record] = loadOperationHistory();
+
+    expect(record).toMatchObject({
+      type: "apply",
+      planId: "plan-1",
+      backupSnapshotId: "snap-before-1",
+      backupSnapshotName: "prod_before_apply",
+      taskId: "task-apply-1",
+      sourceConnectionId: "conn-dev",
+      targetConnectionId: "conn-prod",
+      planSummary: {
+        total: 2,
+        create: 1,
+        overwrite: 1,
+        sourceLabel: "dev",
+        targetLabel: "prod",
+      },
+    });
+  });
+
+  it("apply 记录不可通过直接发布旧内容回滚", () => {
+    const record: OperationRecord = {
+      id: "apply-1",
+      type: "apply",
+      result: "success",
+      timestamp: "2026-07-06T12:00:00Z",
+      connectionId: "conn-prod",
+      connectionName: "prod",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      beforeContent: "old: true",
+      planId: "plan-1",
+      backupSnapshotId: "snap-before-1",
+    };
+
+    expect(isRollbackableOperation(record)).toBe(false);
+    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackApplyRequiresPlan");
+  });
 });
 
 describe("clearOperationHistory", () => {
@@ -311,6 +519,18 @@ describe("filterOperationHistory", () => {
       group: "DEFAULT_GROUP",
       dataId: "app.yaml",
     },
+    {
+      id: "4",
+      type: "apply",
+      result: "success",
+      timestamp: "2025-01-04T00:00:00Z",
+      connectionId: "c2",
+      connectionName: "prod",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "deploy-target.yaml",
+      planId: "plan-1",
+    },
   ];
 
   it("按 connectionId 筛选", () => {
@@ -334,6 +554,12 @@ describe("filterOperationHistory", () => {
     const filtered = filterOperationHistory(records, { type: "delete" });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].type).toBe("delete");
+  });
+
+  it("按 apply type 筛选", () => {
+    const filtered = filterOperationHistory(records, { type: "apply" });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe("4");
   });
 
   it("按时间范围筛选", () => {
