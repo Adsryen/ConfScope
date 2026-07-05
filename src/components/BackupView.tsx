@@ -24,6 +24,14 @@ interface Props {
   onNavigateToDiff?: (params: BackupDiffJumpParams) => void;
 }
 
+function snapshotSourceNamespace(snapshot: Pick<Snapshot, "source">): string {
+  return snapshot.source.namespace || snapshot.source.namespaceId || "public";
+}
+
+function snapshotSourceLabel(snapshot: Pick<Snapshot, "source">): string {
+  return `${snapshot.source.connectionName} · ${snapshotSourceNamespace(snapshot)}`;
+}
+
 /** 备份管理视图：展示本地快照列表，支持查看、删除、对比。 */
 export default function BackupView({ onNavigateToDiff }: Props) {
   const { t } = useTranslation();
@@ -64,7 +72,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
             result: "success",
             connectionId: deletingSnapshot.source.connectionId,
             connectionName: deletingSnapshot.source.connectionName,
-            namespace: deletingSnapshot.source.namespace || deletingSnapshot.source.namespaceId || "public",
+            namespace: snapshotSourceNamespace(deletingSnapshot),
             group: "*",
             dataId: "*",
             rollbackable: false,
@@ -86,7 +94,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
             result: "failure",
             connectionId: deletingSnapshot.source.connectionId,
             connectionName: deletingSnapshot.source.connectionName,
-            namespace: deletingSnapshot.source.namespace || deletingSnapshot.source.namespaceId || "public",
+            namespace: snapshotSourceNamespace(deletingSnapshot),
             group: "*",
             dataId: "*",
             rollbackable: false,
@@ -175,7 +183,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
                     <span className="backup-item-time">{formatTime(snap.createdAt)}</span>
                   </div>
                   <div className="backup-item-source">
-                    {snap.source.connectionName} · {snap.source.namespace || "public"}
+                    {snapshotSourceLabel(snap)}
                   </div>
                   <button
                     className="btn btn-ghost btn-sm backup-item-delete"
@@ -198,7 +206,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
                 <div>
                   <h3 className="data-detail-title backup-detail-title">{formatSnapshotName(selectedSnapshot)}</h3>
                   <div className="data-detail-subtitle">
-                    {selectedSnapshot.source.connectionName} · {selectedSnapshot.source.namespace || "public"}
+                    {snapshotSourceLabel(selectedSnapshot)}
                   </div>
                 </div>
                 <CopyButton text={JSON.stringify(selectedSnapshot, null, 2)} label={t("backup.copySnapshot")} />
@@ -211,7 +219,7 @@ export default function BackupView({ onNavigateToDiff }: Props) {
                 </div>
                 <div className="info-row">
                   <span className="info-label">{t("backup.namespace")}:</span>
-                  <span className="info-value">{selectedSnapshot.source.namespace || "public"}</span>
+                  <span className="info-value">{snapshotSourceNamespace(selectedSnapshot)}</span>
                 </div>
                 <div className="info-row">
                   <span className="info-label">{t("backup.createdAt")}:</span>

@@ -354,8 +354,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const createSnapshot = async () => {
     if (isLocalSnapshot || items.length === 0 || snapshotSaving) return;
     const namespace = tenant || "public";
-    const taskName = t("config.snapshotTaskName", { name: conn.name || connectionDisplayLabel(conn), namespace });
-    const task = taskManager.createTask(taskName, "backup");
+    const taskName = t("config.snapshotTaskName", { name: connectionName, namespace });
+    const taskScope = t("config.taskScope", { name: connectionName, namespace, count: items.length });
+    const task = taskManager.createTask(taskName, "backup", { scope: taskScope, cancellable: false });
     taskManager.startTask(task.id);
     setSnapshotSaving(true);
 
@@ -438,6 +439,66 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  const exportCurrentList = () => {
+    const taskName = t("config.exportTaskName", { name: connectionName, namespace: namespaceLabel });
+    const taskScope = t("config.taskScope", { name: connectionName, namespace: namespaceLabel, count: items.length });
+    const task = taskManager.createTask(taskName, "export", { scope: taskScope, cancellable: false });
+    taskManager.startTask(task.id);
+    const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
+    try {
+      exportConfigs(
+        items.map((it) => ({
+          dataId: it.dataId,
+          group: it.group,
+          content: it.content,
+          configType: it.configType,
+          namespace: tenant,
+          namespaceId: tenant,
+          updateTime: it.updateTime ?? "",
+        })),
+        opts
+      );
+      taskManager.updateProgress(task.id, items.length, 0, items.length);
+      taskManager.completeTask(task.id, true);
+      recordOperation({
+        type: "export",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: "*",
+        dataId: "*",
+        resourceName: t("config.exportCurrentList"),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackExportOnly",
+      });
+      toast(t("config.exportedCurrentList"), "success");
+    } catch (e) {
+      const message = String(e);
+      taskManager.updateProgress(task.id, 0, 1, items.length || 1);
+      taskManager.completeTask(task.id, false, message);
+      recordOperation({
+        type: "export",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: "*",
+        dataId: "*",
+        resourceName: t("config.exportCurrentList"),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
+      reportError({
+        title: t("config.exportCurrentList"),
+        source: sourceLabel,
+        message,
+        detail: message,
+      });
+    }
+  };
+
   return (
     <div className="browser">
       <div className="browser-list">
@@ -475,61 +536,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             </button>
           )}
           {items.length > 0 && (
-            <button
-              className="btn btn-ghost btn-sm"
-              title={t("config.exportCurrentList")}
-              onClick={() => {
-                const opts: ConfigExportOptions = { format: "json", sensitive: false, includeMeta: true };
-                try {
-                  exportConfigs(
-                    items.map((it) => ({
-                      dataId: it.dataId,
-                      group: it.group,
-                      content: it.content,
-                      configType: it.configType,
-                      namespace: tenant,
-                      namespaceId: tenant,
-                      updateTime: it.updateTime ?? "",
-                    })),
-                    opts
-                  );
-                  recordOperation({
-                    type: "export",
-                    result: "success",
-                    connectionId: conn.id,
-                    connectionName,
-                    namespace: namespaceLabel,
-                    group: "*",
-                    dataId: "*",
-                    resourceName: t("config.exportCurrentList"),
-                    rollbackable: false,
-                    rollbackReason: "operationHistory.rollbackExportOnly",
-                  });
-                  toast(t("config.exportedCurrentList"), "success");
-                } catch (e) {
-                  const message = String(e);
-                  recordOperation({
-                    type: "export",
-                    result: "failure",
-                    connectionId: conn.id,
-                    connectionName,
-                    namespace: namespaceLabel,
-                    group: "*",
-                    dataId: "*",
-                    resourceName: t("config.exportCurrentList"),
-                    rollbackable: false,
-                    rollbackReason: "operationHistory.rollbackOnlySuccess",
-                    error: message,
-                  });
-                  reportError({
-                    title: t("config.exportCurrentList"),
-                    source: sourceLabel,
-                    message,
-                    detail: message,
-                  });
-                }
-              }}
-            >
+            <button className="btn btn-ghost btn-sm" title={t("config.exportCurrentList")} onClick={exportCurrentList}>
               ↓
             </button>
           )}

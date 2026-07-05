@@ -11,6 +11,7 @@ import App from "./App";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { toast } from "./lib/toast";
 import { loadSettings } from "./store/settings";
+import { loadOperationHistory } from "./store/operationHistory";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
@@ -60,53 +61,90 @@ vi.mock("./components/AuditView", () => ({ default: () => <div data-testid="audi
 vi.mock("./components/OperationHistoryView", () => ({ default: () => <div data-testid="history" /> }));
 
 vi.mock("./components/BackupView", () => ({
-  default: ({ onNavigateToDiff }: { onNavigateToDiff?: (params: BackupDiffJumpParams) => void }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onNavigateToDiff?.({
-          snapshot: {
-            id: "snap-1",
-            path: "C:\\backups\\snap-1",
-            name: "dev_snapshot",
-            description: "",
-            createdAt: "2026-07-04T00:00:00Z",
-            updatedAt: "2026-07-04T00:00:00Z",
-            source: {
-              connectionId: "conn-1",
-              connectionName: "dev",
-              namespace: "public",
-              namespaceId: "public",
-            },
-            configs: [
-              {
-                dataId: "app.yaml",
-                group: "DEFAULT_GROUP",
-                content: "server:\n  port: 8080",
-                configType: "yaml",
-                updateTime: "2026-07-04T00:00:00Z",
-              },
-            ],
-          },
-          config: {
-            dataId: "app.yaml",
-            group: "DEFAULT_GROUP",
-            content: "server:\n  port: 8080",
-            configType: "yaml",
-            updateTime: "2026-07-04T00:00:00Z",
-          },
-          sourceConnectionId: "conn-1",
-          sourceConnectionName: "dev",
-          snapshotPath: "C:\\backups\\snap-1",
-          namespace: "",
-          group: "DEFAULT_GROUP",
-          dataId: "app.yaml",
-        })
-      }
-    >
-      Mock compare snapshot
-    </button>
-  ),
+  default: ({ onNavigateToDiff }: { onNavigateToDiff?: (params: BackupDiffJumpParams) => void }) => {
+    const config = {
+      dataId: "app.yaml",
+      group: "DEFAULT_GROUP",
+      content: "server:\n  port: 8080",
+      configType: "yaml",
+      updateTime: "2026-07-04T00:00:00Z",
+    };
+    const snapshot = {
+      id: "snap-1",
+      path: "C:\\backups\\snap-1",
+      name: "dev_snapshot",
+      description: "",
+      createdAt: "2026-07-04T00:00:00Z",
+      updatedAt: "2026-07-04T00:00:00Z",
+      source: {
+        connectionId: "conn-1",
+        connectionName: "dev",
+        namespace: "public",
+        namespaceId: "public",
+      },
+      configs: [config],
+    };
+    const makeParams = (overrides: Partial<BackupDiffJumpParams> = {}): BackupDiffJumpParams => ({
+      snapshot,
+      config,
+      sourceConnectionId: "conn-1",
+      sourceConnectionName: "dev",
+      snapshotPath: "C:\\backups\\snap-1",
+      namespace: "",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      ...overrides,
+    });
+
+    return (
+      <div>
+        <button type="button" onClick={() => onNavigateToDiff?.(makeParams())}>
+          Mock compare snapshot
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onNavigateToDiff?.(
+              makeParams({
+                snapshot: {
+                  ...snapshot,
+                  id: "snap-missing-source",
+                  name: "missing_source_snapshot",
+                  source: {
+                    ...snapshot.source,
+                    connectionId: "missing-conn",
+                    connectionName: "missing-dev",
+                  },
+                },
+                sourceConnectionId: "missing-conn",
+                sourceConnectionName: "missing-dev",
+              })
+            )
+          }
+        >
+          Mock compare missing source
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onNavigateToDiff?.(
+              makeParams({
+                snapshot: {
+                  ...snapshot,
+                  id: "snap-missing-path",
+                  path: "",
+                  name: "missing_path_snapshot",
+                },
+                snapshotPath: "",
+              })
+            )
+          }
+        >
+          Mock compare missing path
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("./components/DiffView", () => ({
@@ -169,6 +207,7 @@ describe("App", () => {
     } as unknown as CanvasRenderingContext2D);
     vi.mocked(reportError).mockClear();
     vi.mocked(reportMessage).mockClear();
+    vi.mocked(toast).mockClear();
   });
 
   it("shows the fresh-install welcome dialog once and records dismissal", async () => {
@@ -329,6 +368,88 @@ describe("App", () => {
       ])
     );
     expect(toast).toHaveBeenCalledWith("Snapshot source loaded for compare", "info");
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "snapshot_compare",
+      result: "success",
+      connectionId: "conn-1",
+      connectionName: "dev",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      resourceId: "snap-1",
+      resourceName: "dev_snapshot",
+      content: "C:\\backups\\snap-1",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
+    });
+  });
+
+  it("records a failed snapshot compare when the source connection is missing", async () => {
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock compare missing source" }));
+
+    expect(screen.queryByTestId("diff-view")).not.toBeInTheDocument();
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Cannot open snapshot compare",
+        source: "missing-dev",
+        message: "The source connection for this snapshot no longer exists. Restore or recreate it first.",
+      })
+    );
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "snapshot_compare",
+      result: "failure",
+      connectionId: "missing-conn",
+      connectionName: "missing-dev",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      resourceId: "snap-missing-source",
+      resourceName: "missing_source_snapshot",
+      content: "C:\\backups\\snap-1",
+      error: "The source connection for this snapshot no longer exists. Restore or recreate it first.",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
+    });
+  });
+
+  it("records a failed snapshot compare when the snapshot path is missing", async () => {
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock compare missing path" }));
+
+    expect(screen.queryByTestId("diff-view")).not.toBeInTheDocument();
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Cannot open snapshot compare",
+        source: "missing_path_snapshot",
+        message: "Snapshot local path is missing, so it cannot be used as a local compare source.",
+      })
+    );
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "snapshot_compare",
+      result: "failure",
+      connectionId: "conn-1",
+      connectionName: "dev",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      resourceId: "snap-missing-path",
+      resourceName: "missing_path_snapshot",
+      content: "",
+      error: "Snapshot local path is missing, so it cannot be used as a local compare source.",
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackSnapshotOnly",
+    });
   });
 
   it("reports namespace loading errors with localized message-center actions", async () => {

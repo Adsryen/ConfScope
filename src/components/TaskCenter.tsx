@@ -126,6 +126,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                   <span className="task-type">{getTypeLabel(task.type)}</span>
                 </div>
                 <div className="task-item-name">{task.name}</div>
+                {task.scope && <div className="task-item-scope">{task.scope}</div>}
                 {task.status === "running" && (
                   <div className="task-item-progress">
                     <div className="progress-bar">
@@ -143,7 +144,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                   {task.failed > 0 && <span className="task-failed">{t("tasks.failedItems", { count: task.failed })}</span>}
                 </div>
                 <div className="task-item-actions">
-                  {(task.status === "running" || task.status === "pending") && (
+                  {task.cancellable && (task.status === "running" || task.status === "pending") && (
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={(e) => {
@@ -203,6 +204,12 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 <span className="info-label">{t("tasks.status")}:</span>
                 <span className={`info-value ${getStatusClass(selectedTask.status)}`}>{getStatusLabel(selectedTask.status)}</span>
               </div>
+              {selectedTask.scope && (
+                <div className="info-row">
+                  <span className="info-label">{t("tasks.scope")}:</span>
+                  <span className="info-value">{selectedTask.scope}</span>
+                </div>
+              )}
               <div className="info-row">
                 <span className="info-label">{t("tasks.progress")}:</span>
                 <span className="info-value">{selectedTask.progress}%</span>
@@ -224,9 +231,12 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 </div>
               )}
               {selectedTask.error && (
-                <div className="info-row">
-                  <span className="info-label">{t("common.error")}:</span>
-                  <span className="info-value error">{selectedTask.error}</span>
+                <div className="task-detail-error">
+                  <div className="data-section-head">
+                    <span className="info-label">{t("tasks.errorDetail")}</span>
+                    <CopyButton text={selectedTask.error} label={t("common.copyError")} />
+                  </div>
+                  <pre className="history-detail-error">{selectedTask.error}</pre>
                 </div>
               )}
             </div>

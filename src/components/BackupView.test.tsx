@@ -112,6 +112,45 @@ describe("BackupView", () => {
     expect(screen.getByText("app.yaml")).toBeDefined();
   });
 
+  it("falls back source namespace display to namespaceId and then public", async () => {
+    const { listSnapshots } = await import("../api/snapshot");
+    vi.mocked(listSnapshots).mockResolvedValue([
+      {
+        ...mockSnapshots[0],
+        id: "snap-namespace-id",
+        name: "namespace-id-snapshot",
+        source: {
+          ...mockSnapshots[0].source,
+          connectionName: "namespace-id-source",
+          namespace: "",
+          namespaceId: "tenant-a",
+        },
+      },
+      {
+        ...mockSnapshots[0],
+        id: "snap-public",
+        name: "public-fallback-snapshot",
+        source: {
+          ...mockSnapshots[0].source,
+          connectionName: "public-source",
+          namespace: "",
+          namespaceId: "",
+        },
+      },
+    ]);
+
+    renderWithI18n(<BackupView />);
+
+    expect((await screen.findAllByText("namespace-id-snapshot")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((content) => content.includes("namespace-id-source") && content.includes("tenant-a")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText("public-fallback-snapshot"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText((content) => content.includes("public-source") && content.includes("public")).length).toBeGreaterThan(0);
+    });
+  });
+
   it("shows error state on load failure", async () => {
     const { listSnapshots } = await import("../api/snapshot");
     vi.mocked(listSnapshots).mockRejectedValue(new Error("网络错误"));

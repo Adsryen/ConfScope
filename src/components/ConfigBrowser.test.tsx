@@ -355,6 +355,19 @@ describe("ConfigBrowser", () => {
 
     fireEvent.click(screen.getByTitle("导出当前列表"));
 
+    const tasks = getTaskManager().listTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      name: "导出当前列表：dev / public",
+      type: "export",
+      status: "success",
+      completed: 1,
+      failed: 0,
+      progress: 100,
+      total: 1,
+      scope: "dev / public / 1 项配置",
+      cancellable: false,
+    });
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "export",
       result: "success",
@@ -393,6 +406,19 @@ describe("ConfigBrowser", () => {
         message: "Error: download denied",
         detail: "Error: download denied",
       });
+    });
+
+    const tasks = getTaskManager().listTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      name: "导出当前列表：dev / public",
+      type: "export",
+      status: "failed",
+      failed: 1,
+      total: 1,
+      scope: "dev / public / 1 项配置",
+      cancellable: false,
+      error: "Error: download denied",
     });
   });
 
@@ -526,6 +552,8 @@ describe("ConfigBrowser", () => {
       failed: 0,
       progress: 100,
       total: 2,
+      scope: "dev / public / 2 项配置",
+      cancellable: false,
     });
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "snapshot",
