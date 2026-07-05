@@ -61,6 +61,7 @@ export interface ConfigSummary {
   ref: ConfigRef;
   content: string;
   format: string;
+  updateTime: string;
 }
 
 export interface ConfigPage {
@@ -76,6 +77,7 @@ export interface ConfigDocument {
   format: string;
   version: string;
   source: string;
+  updateTime: string;
 }
 
 export interface PublishConfigRequest {

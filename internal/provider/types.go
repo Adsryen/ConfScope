@@ -69,9 +69,10 @@ type ListConfigsRequest struct {
 }
 
 type ConfigSummary struct {
-	Ref     ConfigRef `json:"ref"`
-	Content string    `json:"content"`
-	Format  string    `json:"format"`
+	Ref        ConfigRef `json:"ref"`
+	Content    string    `json:"content"`
+	Format     string    `json:"format"`
+	UpdateTime string    `json:"updateTime"`
 }
 
 type ConfigPage struct {
@@ -82,11 +83,12 @@ type ConfigPage struct {
 }
 
 type ConfigDocument struct {
-	Ref     ConfigRef `json:"ref"`
-	Content string    `json:"content"`
-	Format  string    `json:"format"`
-	Version string    `json:"version"`
-	Source  string    `json:"source"`
+	Ref        ConfigRef `json:"ref"`
+	Content    string    `json:"content"`
+	Format     string    `json:"format"`
+	Version    string    `json:"version"`
+	Source     string    `json:"source"`
+	UpdateTime string    `json:"updateTime"`
 }
 
 type PublishConfigRequest struct {
