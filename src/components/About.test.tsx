@@ -87,15 +87,18 @@ describe("About", () => {
   });
 
   it("checks updates with built-in sources and global proxy settings", async () => {
-    localStorage.setItem("cs.settings", JSON.stringify({
-      proxy: {
-        httpProxy: "http://127.0.0.1:7890",
-        httpsProxy: "http://127.0.0.1:7890",
-        noProxy: "localhost,127.0.0.1",
-      },
-      update: { skipVersion: "", lastCheckAt: "" },
-      compare: { sortConnections: true, sortNamespaces: true },
-    }));
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        proxy: {
+          httpProxy: "http://127.0.0.1:7890",
+          httpsProxy: "http://127.0.0.1:7890",
+          noProxy: "localhost,127.0.0.1",
+        },
+        update: { skipVersion: "", lastCheckAt: "" },
+        compare: { sortConnections: true, sortNamespaces: true },
+      })
+    );
 
     renderAbout();
 
@@ -126,10 +129,7 @@ describe("About", () => {
     fireEvent.click(screen.getByRole("button", { name: "下载更新" }));
 
     await waitFor(() => {
-      expect(apiMocks.downloadUpdate).toHaveBeenCalledWith(
-        "https://download.example/ConfScope.exe",
-        "abc"
-      );
+      expect(apiMocks.downloadUpdate).toHaveBeenCalledWith("https://download.example/ConfScope.exe", "abc");
     });
   });
 
@@ -154,6 +154,64 @@ describe("About", () => {
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
 
     expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
+  });
+
+  it("uses loaded app version for automatic update checks", async () => {
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
+        update: { skipVersion: "", lastCheckAt: "" },
+        compare: { sortConnections: true, sortNamespaces: true },
+      })
+    );
+    apiMocks.getAppInfo.mockResolvedValue({
+      name: "ConfScope",
+      version: "1.3.0",
+      updateSources: [{ name: "GitHub 官方", url: "https://github.example/update.json" }],
+    });
+    apiMocks.checkForUpdates.mockResolvedValue({
+      currentVersion: "1.3.0",
+      latestVersion: "1.3.0",
+      hasUpdate: false,
+      sourceName: "GitHub 官方",
+      sourceUrl: "https://github.example/update.json",
+      downloadUrl: "",
+      releaseNotes: "",
+      publishedAt: "",
+      sha256: "",
+      mandatory: false,
+      checkedAt: "2026-06-28T00:00:00Z",
+      error: "",
+    });
+
+    renderAbout();
+
+    expect(await screen.findByText("v1.3.0")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiMocks.checkForUpdates).toHaveBeenCalledWith(expect.objectContaining({ currentVersion: "1.3.0" }));
+    });
+    expect(apiMocks.checkForUpdates).not.toHaveBeenCalledWith(expect.objectContaining({ currentVersion: "1.0.0" }));
+    expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
+  });
+
+  it("opens the download link after downloading instead of invoking restart installation", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.downloadUpdate.mockResolvedValueOnce("C:\\Temp\\ConfScope.exe");
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+
+    renderAbout("en-US");
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+    expect(await screen.findByText("New version v1.1.0 available")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download Update" }));
+
+    expect(await screen.findByText("Download complete, verification passed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restart to Install" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Download Page" }));
+
+    expect(apiMocks.installAndRestart).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith("https://download.example/ConfScope.exe", "_blank", "noopener,noreferrer");
   });
 
   it("reports update result errors with localized message-center titles", async () => {
