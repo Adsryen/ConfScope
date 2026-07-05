@@ -3,7 +3,7 @@ const STORAGE_KEY = "cs.operationHistory";
 const MAX_RECORDS = 1000;
 
 /** 操作类型 */
-export type OperationType = "publish" | "delete" | "rollback" | "snapshot" | "snapshot_delete" | "export";
+export type OperationType = "publish" | "delete" | "rollback" | "snapshot" | "snapshot_delete" | "snapshot_compare" | "export";
 
 /** 操作结果 */
 export type OperationResult = "success" | "failure";
@@ -32,7 +32,7 @@ export interface OperationRecord {
   operator?: string; // 操作人（如果有）
 }
 
-const OPERATION_TYPES: readonly OperationType[] = ["publish", "delete", "rollback", "snapshot", "snapshot_delete", "export"];
+const OPERATION_TYPES: readonly OperationType[] = ["publish", "delete", "rollback", "snapshot", "snapshot_delete", "snapshot_compare", "export"];
 const OPERATION_RESULTS: readonly OperationResult[] = ["success", "failure"];
 
 /** 生成唯一 ID */

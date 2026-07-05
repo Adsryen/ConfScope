@@ -4203,7 +4203,8 @@ button,
   color: #ffb74d;
 }
 .history-type.snapshot,
-.history-type.snapshot_delete {
+.history-type.snapshot_delete,
+.history-type.snapshot_compare {
   background: rgba(0, 188, 212, 0.15);
   color: #4dd0e1;
 }
@@ -4852,6 +4853,7 @@ button,
 .data-item-accent.pending,
 .data-item-accent.snapshot,
 .data-item-accent.snapshot_delete,
+.data-item-accent.snapshot_compare,
 .data-item-accent.export {
   background: #4dd0e1;
 }

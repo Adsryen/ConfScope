@@ -25,6 +25,7 @@ import type { DiffJumpParams } from "./components/AuditView";
 import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/snapshotConnection";
 import { toast } from "./lib/toast";
 import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
+import { recordOperation } from "./store/operationHistory";
 
 type Mode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 
@@ -64,6 +65,14 @@ function loadUI(): { connId?: string; mode?: Mode; sidebarCollapsed?: boolean } 
   } catch {
     return {};
   }
+}
+
+function snapshotCompareNamespace(params: BackupDiffJumpParams): string {
+  return params.snapshot.source.namespace || params.snapshot.source.namespaceId || "public";
+}
+
+function snapshotCompareResourceName(params: BackupDiffJumpParams): string {
+  return params.snapshot.name || params.snapshot.id;
 }
 
 export default function App() {
@@ -250,21 +259,43 @@ export default function App() {
   ];
 
   const navigateBackupToDiff = (params: BackupDiffJumpParams) => {
+    const recordSnapshotCompare = (result: "success" | "failure", error?: string) => {
+      recordOperation({
+        type: "snapshot_compare",
+        result,
+        connectionId: params.sourceConnectionId,
+        connectionName: params.sourceConnectionName,
+        namespace: snapshotCompareNamespace(params),
+        group: params.group,
+        dataId: params.dataId,
+        content: params.snapshotPath || params.snapshot.path || "",
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackSnapshotOnly",
+        resourceId: params.snapshot.id,
+        resourceName: snapshotCompareResourceName(params),
+        ...(error ? { error } : {}),
+      });
+    };
+
     const sourceConnection = connections.find((conn) => conn.id === params.sourceConnectionId);
     if (!sourceConnection) {
+      const message = t("backup.sourceConnectionMissing");
+      recordSnapshotCompare("failure", message);
       reportError({
         title: t("backup.compareUnavailable"),
         source: params.sourceConnectionName,
-        message: t("backup.sourceConnectionMissing"),
+        message,
         detail: JSON.stringify(params.snapshot, null, 2),
       });
       return;
     }
     if (!params.snapshot.path) {
+      const message = t("backup.snapshotPathMissing");
+      recordSnapshotCompare("failure", message);
       reportError({
         title: t("backup.compareUnavailable"),
         source: params.snapshot.name || params.snapshot.id,
-        message: t("backup.snapshotPathMissing"),
+        message,
         detail: JSON.stringify(params.snapshot, null, 2),
       });
       return;
@@ -282,6 +313,7 @@ export default function App() {
     });
     setMode("diff");
     toast(t("backup.comparePrepared"), "info");
+    recordSnapshotCompare("success");
   };
 
   const closeStartupDialog = () => {

@@ -50,6 +50,43 @@ describe("loadOperationHistory", () => {
     expect(loadOperationHistory()).toEqual(records);
   });
 
+  it("loads persisted snapshot compare records", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "compare-1",
+          type: "snapshot_compare",
+          result: "success",
+          timestamp: "2026-07-06T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "dev",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          resourceId: "snap-1",
+          resourceName: "dev_snapshot",
+          content: "C:\\backups\\snap-1",
+          rollbackable: false,
+          rollbackReason: "operationHistory.rollbackSnapshotOnly",
+        },
+      ])
+    );
+
+    const [record] = loadOperationHistory();
+
+    expect(record).toMatchObject({
+      type: "snapshot_compare",
+      result: "success",
+      connectionId: "conn-1",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      resourceId: "snap-1",
+      content: "C:\\backups\\snap-1",
+    });
+  });
+
   it("返回空数组当存储数据格式错误时", () => {
     localStorageMock.setItem("cs.operationHistory", "invalid json");
     expect(loadOperationHistory()).toEqual([]);
@@ -173,6 +210,33 @@ describe("recordOperation", () => {
     expect(isRollbackableOperation(exportRecord)).toBe(false);
     expect(rollbackUnavailableReason(snapshotRecord)).toBe("operationHistory.rollbackSnapshotOnly");
     expect(rollbackUnavailableReason(exportRecord)).toBe("operationHistory.rollbackExportOnly");
+  });
+
+  it("treats snapshot compare records as snapshot-only and not rollbackable", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "compare-1",
+          type: "snapshot_compare",
+          result: "success",
+          timestamp: "2026-07-06T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "dev",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          rollbackable: false,
+          rollbackReason: "operationHistory.rollbackSnapshotOnly",
+        },
+      ])
+    );
+
+    const [record] = loadOperationHistory();
+
+    if (!record) throw new Error("snapshot_compare record was not loaded");
+    expect(isRollbackableOperation(record)).toBe(false);
+    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackSnapshotOnly");
   });
 
   it("只有成功且带操作前内容的配置变更可回滚", () => {

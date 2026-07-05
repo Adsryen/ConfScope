@@ -12,6 +12,8 @@ export interface Task {
   id: string;
   name: string;
   type: TaskType;
+  scope: string;
+  cancellable: boolean;
   status: TaskStatus;
   progress: number; // 0-100
   total: number;
@@ -23,13 +25,19 @@ export interface Task {
   elapsedTime: number; // 毫秒
 }
 
+/** 任务创建选项 */
+export interface TaskOptions {
+  scope?: string;
+  cancellable?: boolean;
+}
+
 /** 任务更新回调 */
 export type TaskUpdateCallback = (task: Task) => void;
 
 /** 任务管理器 */
 export interface TaskManager {
   /** 创建任务 */
-  createTask: (name: string, type: TaskType) => Task;
+  createTask: (name: string, type: TaskType, options?: TaskOptions) => Task;
   /** 获取任务 */
   getTask: (id: string) => Task | undefined;
   /** 列出所有任务 */
@@ -64,11 +72,13 @@ export function createTaskManager(): TaskManager {
   };
 
   return {
-    createTask: (name, type) => {
+    createTask: (name, type, options = {}) => {
       const task: Task = {
         id: generateId(),
         name,
         type,
+        scope: options.scope ?? "",
+        cancellable: options.cancellable ?? false,
         status: "pending",
         progress: 0,
         total: 0,

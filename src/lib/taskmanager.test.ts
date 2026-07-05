@@ -27,6 +27,32 @@ describe("createTaskManager", () => {
     expect(task.progress).toBe(0);
   });
 
+  it("creates tasks as non-cancellable with empty scope by default", () => {
+    const manager = createTaskManager();
+    const task = manager.createTask("Export", "export");
+
+    expect(task).toMatchObject({
+      scope: "",
+      cancellable: false,
+    });
+  });
+
+  it("preserves task scope and cancellable options", () => {
+    const manager = createTaskManager();
+    const task = Reflect.apply(manager.createTask, manager, [
+      "Backup",
+      "backup",
+      { scope: "dev / public / 2 configs", cancellable: true },
+    ]);
+
+    expect(task).toMatchObject({
+      name: "Backup",
+      type: "backup",
+      scope: "dev / public / 2 configs",
+      cancellable: true,
+    });
+  });
+
   it("lists tasks", () => {
     const manager = createTaskManager();
     manager.createTask("任务1", "export");

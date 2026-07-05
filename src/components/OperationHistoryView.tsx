@@ -27,6 +27,7 @@ const OPERATION_LABELS: Record<OperationType, string> = {
   rollback: "operationHistory.opRollback",
   snapshot: "operationHistory.opSnapshot",
   snapshot_delete: "operationHistory.opSnapshotDelete",
+  snapshot_compare: "operationHistory.opSnapshotCompare",
   export: "operationHistory.opExport",
 };
 
@@ -222,6 +223,7 @@ export default function OperationHistoryView({ connections }: Props) {
           <option value="rollback">{t("operationHistory.opRollback")}</option>
           <option value="snapshot">{t("operationHistory.opSnapshot")}</option>
           <option value="snapshot_delete">{t("operationHistory.opSnapshotDelete")}</option>
+          <option value="snapshot_compare">{t("operationHistory.opSnapshotCompare")}</option>
           <option value="export">{t("operationHistory.opExport")}</option>
         </select>
         <input

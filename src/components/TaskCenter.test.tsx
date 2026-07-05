@@ -80,4 +80,48 @@ describe("TaskCenter", () => {
     expect(await screen.findByRole("button", { name: "查看详情" })).toBeDefined();
     expect(screen.getByRole("button", { name: "复制任务信息" })).toBeDefined();
   });
+
+  it("shows task scope in the list and detail", async () => {
+    renderWithI18n(<TaskCenter />);
+
+    await act(async () => {
+      const manager = getTaskManager();
+      Reflect.apply(manager.createTask, manager, [
+        "备份当前列表",
+        "backup",
+        { scope: "dev / public / 2 configs", cancellable: false },
+      ]);
+    });
+
+    expect(await screen.findAllByText("dev / public / 2 configs")).toHaveLength(2);
+  });
+
+  it("only shows cancel for tasks that are explicitly cancellable", async () => {
+    renderWithI18n(<TaskCenter />);
+
+    await act(async () => {
+      const manager = getTaskManager();
+      const fixedTask = manager.createTask("不可取消备份", "backup");
+      manager.startTask(fixedTask.id);
+      const cancellableTask = Reflect.apply(manager.createTask, manager, ["可取消应用", "apply", { cancellable: true }]);
+      manager.startTask(cancellableTask.id);
+    });
+
+    expect((await screen.findAllByText("不可取消备份")).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "取消" })).toHaveLength(1);
+  });
+
+  it("shows a copy action next to failed task errors", async () => {
+    renderWithI18n(<TaskCenter />);
+
+    await act(async () => {
+      const manager = getTaskManager();
+      const task = manager.createTask("失败导出", "export");
+      manager.startTask(task.id);
+      manager.completeTask(task.id, false, "download denied");
+    });
+
+    expect(await screen.findByText("download denied")).toBeDefined();
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeDefined();
+  });
 });

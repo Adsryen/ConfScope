@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
@@ -100,6 +100,48 @@ describe("OperationHistoryView", () => {
 
     expect(screen.getByText("permission denied")).toBeDefined();
     expect(screen.getByRole("button", { name: "复制错误" })).toBeDefined();
+  });
+
+  it("shows and filters snapshot compare records", async () => {
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "compare-1",
+          type: "snapshot_compare",
+          result: "success",
+          timestamp: "2026-07-06T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          resourceId: "snap-1",
+          resourceName: "prod_snapshot",
+          rollbackable: false,
+          rollbackReason: "operationHistory.rollbackSnapshotOnly",
+        },
+      ])
+    );
+
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+
+    expect((await screen.findAllByText("Snapshot compare")).length).toBeGreaterThan(0);
+    expect(screen.getByText("app.yaml")).toBeDefined();
+
+    const typeSelect = screen.getAllByRole("combobox")[1];
+    expect(within(typeSelect).getByRole("option", { name: "Snapshot compare" })).toBeDefined();
+
+    fireEvent.change(typeSelect, { target: { value: "snapshot_compare" } });
+
+    if (!(typeSelect instanceof HTMLSelectElement)) throw new Error("type filter is not a select element");
+    expect(typeSelect.value).toBe("snapshot_compare");
+    expect(screen.getByText("app.yaml")).toBeDefined();
   });
 
   it("shows rollback action for a rollbackable operation record", async () => {
