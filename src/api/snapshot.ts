@@ -3,6 +3,7 @@ import { CreateSnapshot, GetSnapshot, ListSnapshots, DeleteSnapshot, ValidateSna
 
 /** 快照来源。 */
 export interface SnapshotSource {
+  provider?: "nacos" | "local";
   connectionId: string;
   connectionName: string;
   namespace: string;
@@ -11,8 +12,10 @@ export interface SnapshotSource {
 
 /** 快照中的单个配置。 */
 export interface ConfigSnapshot {
+  namespace?: string;
   dataId: string;
   group: string;
+  contentType?: string;
   content: string;
   configType: string;
   updateTime: string;
@@ -20,6 +23,8 @@ export interface ConfigSnapshot {
 
 /** 本地快照。 */
 export interface Snapshot {
+  schemaVersion?: number;
+  toolVersion?: string;
   id: string;
   path: string;
   name: string;
@@ -75,6 +80,7 @@ export async function createSnapshotFromConfigs(
   }>
 ): Promise<Snapshot> {
   const source: SnapshotSource = {
+    provider: "nacos",
     connectionId,
     connectionName,
     namespace,
@@ -82,8 +88,10 @@ export async function createSnapshotFromConfigs(
   };
 
   const snapshotConfigs: ConfigSnapshot[] = configs.map((cfg) => ({
+    namespace,
     dataId: cfg.dataId,
     group: cfg.group,
+    contentType: cfg.configType,
     content: cfg.content,
     configType: cfg.configType,
     updateTime: cfg.updateTime,

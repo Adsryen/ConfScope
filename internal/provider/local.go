@@ -173,8 +173,12 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 	if !info.IsDir() {
 		return nil, errors.New("local snapshot path is not a directory")
 	}
-	if !hasLocalSnapshotMarker(root) {
-		return nil, errors.New("local snapshot marker not found")
+	validation := ValidateLocalSnapshotDirectory(root)
+	if !validation.Valid {
+		if validation.Code == "missing_structure" {
+			return nil, errors.New("local snapshot marker not found")
+		}
+		return nil, errors.New(validation.Message)
 	}
 	manifestLayout := hasLocalSnapshotManifest(root)
 
@@ -283,7 +287,7 @@ func hasLocalSnapshotMarker(root string) bool {
 	for _, entry := range entries {
 		name := strings.ToLower(entry.Name())
 		if entry.IsDir() {
-			if name == "configs" || name == "namespaces" {
+			if isLocalStructureDir(name) {
 				return true
 			}
 			continue

@@ -21,13 +21,16 @@ func NewSnapshotManager(baseDir string) SnapshotManager {
 // CreateSnapshot 创建新快照。
 func (m *snapshotManager) CreateSnapshot(source SnapshotSource, configs []ConfigSnapshot) (*Snapshot, error) {
 	now := time.Now()
+	normalizeSnapshotInput(&source, configs)
 	snapshot := &Snapshot{
-		ID:        fmt.Sprintf("snap_%d", now.UnixMilli()),
-		Name:      fmt.Sprintf("%s_%s_%s", source.ConnectionName, source.Namespace, now.Format("20060102_150405")),
-		CreatedAt: now.Format(time.RFC3339),
-		UpdatedAt: now.Format(time.RFC3339),
-		Source:    source,
-		Configs:   configs,
+		SchemaVersion: SnapshotSchemaVersion,
+		ToolVersion:   SnapshotToolVersion,
+		ID:            fmt.Sprintf("snap_%d", now.UnixMilli()),
+		Name:          fmt.Sprintf("%s_%s_%s", source.ConnectionName, source.Namespace, now.Format("20060102_150405")),
+		CreatedAt:     now.Format(time.RFC3339),
+		UpdatedAt:     now.Format(time.RFC3339),
+		Source:        source,
+		Configs:       configs,
 	}
 
 	// 创建目录
@@ -68,7 +71,11 @@ func (m *snapshotManager) GetSnapshot(id string) (*Snapshot, error) {
 
 	// 读取配置内容
 	for i, cfg := range snapshot.Configs {
-		contentPath := filepath.Join(snapshotDir, "configs", snapshotNamespaceDir(snapshot.Source), cfg.Group, cfg.DataID)
+		namespace := cfg.Namespace
+		if namespace == "" {
+			namespace = snapshotNamespaceDir(snapshot.Source)
+		}
+		contentPath := filepath.Join(snapshotDir, "configs", namespaceDirName(namespace), cfg.Group, filepath.FromSlash(cfg.DataID))
 		content, err := os.ReadFile(contentPath)
 		if err != nil {
 			continue
@@ -128,17 +135,41 @@ func (m *snapshotManager) saveConfigs(snapshot *Snapshot) error {
 	}
 
 	for _, cfg := range snapshot.Configs {
-		groupDir := filepath.Join(configsDir, snapshotNamespaceDir(snapshot.Source), cfg.Group)
+		namespace := cfg.Namespace
+		if namespace == "" {
+			namespace = snapshotNamespaceDir(snapshot.Source)
+		}
+		groupDir := filepath.Join(configsDir, namespaceDirName(namespace), cfg.Group)
 		if err := os.MkdirAll(groupDir, 0755); err != nil {
 			return err
 		}
-		contentPath := filepath.Join(groupDir, cfg.DataID)
+		contentPath := filepath.Join(groupDir, filepath.FromSlash(cfg.DataID))
+		if err := os.MkdirAll(filepath.Dir(contentPath), 0755); err != nil {
+			return err
+		}
 		if err := os.WriteFile(contentPath, []byte(cfg.Content), 0644); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func normalizeSnapshotInput(source *SnapshotSource, configs []ConfigSnapshot) {
+	if source.Provider == "" {
+		source.Provider = ProviderNacos
+	}
+	for i := range configs {
+		if configs[i].Namespace == "" {
+			configs[i].Namespace = snapshotNamespaceDir(*source)
+		}
+		if configs[i].ContentType == "" {
+			configs[i].ContentType = configs[i].ConfigType
+		}
+		if configs[i].ContentType == "" {
+			configs[i].ContentType = localFormatFromExt(filepath.Ext(configs[i].DataID))
+		}
+	}
 }
 
 func snapshotNamespaceDir(source SnapshotSource) string {
@@ -154,17 +185,9 @@ func snapshotNamespaceDir(source SnapshotSource) string {
 
 // ValidateSnapshot 校验快照目录结构。
 func (m *snapshotManager) ValidateSnapshot(path string) error {
-	// 检查 metadata.json
-	metaPath := filepath.Join(path, "metadata.json")
-	if _, err := os.Stat(metaPath); err != nil {
-		return fmt.Errorf("缺少 metadata.json")
+	result := ValidateLocalSnapshotDirectory(path)
+	if !result.Valid {
+		return fmt.Errorf("%s", result.Message)
 	}
-
-	// 检查 configs 目录
-	configsDir := filepath.Join(path, "configs")
-	if _, err := os.Stat(configsDir); err != nil {
-		return fmt.Errorf("缺少 configs 目录")
-	}
-
 	return nil
 }

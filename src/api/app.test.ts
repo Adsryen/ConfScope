@@ -81,6 +81,9 @@ describe("app api", () => {
       path: "C:\\backup\\prod",
       code: "valid",
       configCount: 3,
+      schemaVersion: 1,
+      layout: "confscope-v1",
+      legacy: false,
     });
 
     await expect(selectLocalSnapshotDirectory()).resolves.toBe("C:\\backup\\prod");
@@ -88,6 +91,9 @@ describe("app api", () => {
       valid: true,
       code: "valid",
       configCount: 3,
+      schemaVersion: 1,
+      layout: "confscope-v1",
+      legacy: false,
     });
 
     expect(goApp.SelectLocalSnapshotDirectory).toHaveBeenCalledTimes(1);

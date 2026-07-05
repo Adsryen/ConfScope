@@ -769,6 +769,36 @@ describe("ConnectionManager", () => {
     expect(screen.queryByText("未找到快照清单或标准目录结构")).not.toBeInTheDocument();
   });
 
+  it("localizes strict snapshot schema validation failures by backend code", async () => {
+    appApiMocks.validateLocalSnapshotDirectory.mockResolvedValueOnce({
+      valid: false,
+      path: "C:\\backup\\broken",
+      code: "missing_schema_fields",
+      message: "metadata.json 缺少必要字段",
+      configCount: 0,
+      hasManifest: true,
+      matchedMarkers: ["metadata.json"],
+      schemaVersion: 1,
+      layout: "confscope-v1",
+      legacy: false,
+      checkedAt: "2026-07-06T00:00:00Z",
+    });
+    renderManager(vi.fn(), vi.fn(), "en-US");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Config Center" }), {
+      target: { value: "local" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Enter or choose a local folder path"), {
+      target: { value: "C:\\backup\\broken" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("metadata.json is missing required snapshot schema fields").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("metadata.json 缺少必要字段")).not.toBeInTheDocument();
+  });
+
   it("validates automatically after choosing a local snapshot folder", async () => {
     appApiMocks.selectLocalSnapshotDirectory.mockResolvedValueOnce("C:\\backup\\picked-prod");
     appApiMocks.validateLocalSnapshotDirectory.mockResolvedValueOnce({

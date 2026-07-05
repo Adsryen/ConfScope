@@ -58,6 +58,9 @@ export interface LocalSnapshotValidation {
   configCount: number;
   hasManifest: boolean;
   matchedMarkers: string[];
+  schemaVersion: number;
+  layout: string;
+  legacy: boolean;
   checkedAt: string;
 }
 
