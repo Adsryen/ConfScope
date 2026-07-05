@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+const snapshotTempSuffix = ".tmp"
 
 // snapshotManager 实现 SnapshotManager 接口。
 type snapshotManager struct {
@@ -33,21 +36,30 @@ func (m *snapshotManager) CreateSnapshot(source SnapshotSource, configs []Config
 		Configs:       configs,
 	}
 
-	// 创建目录
+	// 先写入临时目录，全部成功后再落到最终目录，避免失败时留下可被误读的半成品快照。
 	snapshotDir := filepath.Join(m.baseDir, snapshot.ID)
 	snapshot.Path = snapshotDir
-	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+	tempDir := snapshotDir + snapshotTempSuffix
+	_ = os.RemoveAll(tempDir)
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return nil, fmt.Errorf("创建快照目录失败: %w", err)
 	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
 
 	// 保存元信息
-	if err := m.saveMetadata(snapshot); err != nil {
+	if err := saveSnapshotMetadata(tempDir, snapshot); err != nil {
 		return nil, fmt.Errorf("保存元信息失败: %w", err)
 	}
 
 	// 保存配置内容
-	if err := m.saveConfigs(snapshot); err != nil {
+	if err := saveSnapshotConfigs(tempDir, snapshot); err != nil {
 		return nil, fmt.Errorf("保存配置内容失败: %w", err)
+	}
+	_ = os.RemoveAll(snapshotDir)
+	if err := os.Rename(tempDir, snapshotDir); err != nil {
+		return nil, fmt.Errorf("完成快照写入失败: %w", err)
 	}
 
 	return snapshot, nil
@@ -101,6 +113,9 @@ func (m *snapshotManager) ListSnapshots() ([]Snapshot, error) {
 		if !entry.IsDir() {
 			continue
 		}
+		if strings.HasSuffix(entry.Name(), snapshotTempSuffix) {
+			continue
+		}
 		snapshot, err := m.GetSnapshot(entry.Name())
 		if err != nil {
 			continue
@@ -119,7 +134,11 @@ func (m *snapshotManager) DeleteSnapshot(id string) error {
 
 // saveMetadata 保存元信息。
 func (m *snapshotManager) saveMetadata(snapshot *Snapshot) error {
-	metaPath := filepath.Join(m.baseDir, snapshot.ID, "metadata.json")
+	return saveSnapshotMetadata(filepath.Join(m.baseDir, snapshot.ID), snapshot)
+}
+
+func saveSnapshotMetadata(snapshotDir string, snapshot *Snapshot) error {
+	metaPath := filepath.Join(snapshotDir, "metadata.json")
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
@@ -129,7 +148,11 @@ func (m *snapshotManager) saveMetadata(snapshot *Snapshot) error {
 
 // saveConfigs 保存配置内容。
 func (m *snapshotManager) saveConfigs(snapshot *Snapshot) error {
-	configsDir := filepath.Join(m.baseDir, snapshot.ID, "configs")
+	return saveSnapshotConfigs(filepath.Join(m.baseDir, snapshot.ID), snapshot)
+}
+
+func saveSnapshotConfigs(snapshotDir string, snapshot *Snapshot) error {
+	configsDir := filepath.Join(snapshotDir, "configs")
 	if err := os.MkdirAll(configsDir, 0755); err != nil {
 		return err
 	}
