@@ -61,4 +61,22 @@ describe("SettingsView", () => {
       })
     );
   });
+
+  it("scrolls the settings panel container from rail navigation", () => {
+    renderSettings("en-US");
+    const panels = document.querySelector(".settings-panels") as HTMLDivElement;
+    const localDataPanel = document.getElementById("settings-local-data") as HTMLElement;
+    const scrollTo = vi.fn();
+    const scrollIntoView = vi.fn();
+    panels.scrollTo = scrollTo;
+    localDataPanel.scrollIntoView = scrollIntoView;
+    Object.defineProperty(panels, "scrollTop", { value: 120, configurable: true });
+    panels.getBoundingClientRect = vi.fn(() => new DOMRect(0, 20, 0, 0));
+    localDataPanel.getBoundingClientRect = vi.fn(() => new DOMRect(0, 420, 0, 0));
+
+    fireEvent.click(screen.getByRole("button", { name: "Local Data" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 520, behavior: "smooth" });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
 });

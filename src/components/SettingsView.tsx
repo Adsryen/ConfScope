@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
@@ -8,6 +8,7 @@ export default function SettingsView() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [saved, setSaved] = useState(false);
+  const panelsRef = useRef<HTMLDivElement | null>(null);
 
   const sectionLinks = [
     { id: "settings-general", label: t("settings.groupBasic") },
@@ -30,6 +31,18 @@ export default function SettingsView() {
     window.setTimeout(() => setSaved(false), 1200);
   };
 
+  const scrollToSection = (id: string) => {
+    const container = panelsRef.current;
+    const target = document.getElementById(id);
+    if (!container || !target) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const targetTop = target.getBoundingClientRect().top;
+    container.scrollTo({
+      top: container.scrollTop + targetTop - containerTop,
+      behavior: "smooth",
+    });
+  };
+
   return (
     <div className="page-surface settings-page">
       <div className="page-header">
@@ -46,14 +59,14 @@ export default function SettingsView() {
               key={item.id}
               type="button"
               className="settings-rail-item"
-              onClick={() => document.getElementById(item.id)?.scrollIntoView()}
+              onClick={() => scrollToSection(item.id)}
             >
               {item.label}
             </button>
           ))}
         </aside>
 
-        <div className="settings-panels">
+        <div ref={panelsRef} className="settings-panels">
           <section id="settings-general" className="settings-panel">
             <div className="settings-panel-head">
               <h4>{t("settings.groupBasic")}</h4>
