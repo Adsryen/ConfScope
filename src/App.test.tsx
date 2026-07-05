@@ -200,6 +200,7 @@ describe("App", () => {
     localStorage.clear();
     localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.connections", JSON.stringify([sourceConnection]));
+    apiMocks.getAppInfo.mockResolvedValueOnce({ name: "ConfScope", version: "1.3.1", updateSources: [] });
 
     render(
       <I18nProvider>
@@ -207,18 +208,18 @@ describe("App", () => {
       </I18nProvider>
     );
 
-    expect(await screen.findByRole("dialog", { name: "Updated to v1.3.0" })).toBeInTheDocument();
-    expect(screen.getByText("Added local snapshots and backup management")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Updated to v1.3.1" })).toBeInTheDocument();
+    expect(screen.getByText("Fixed update checks and release metadata")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Updated to v1.3.0" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Updated to v1.3.1" })).not.toBeInTheDocument();
     });
     expect(loadSettings().startup).toEqual({
-      lastOpenedVersion: "1.3.0",
+      lastOpenedVersion: "1.3.1",
       lastShownWelcomeVersion: "",
-      lastShownChangelogVersion: "1.3.0",
+      lastShownChangelogVersion: "1.3.1",
     });
   });
 

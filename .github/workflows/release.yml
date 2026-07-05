@@ -144,7 +144,7 @@ jobs:
           Release:        1%{?dist}
           Summary:        配置中心管理工具
 
-          License:        MIT
+          License:        AGPL-3.0-only
           URL:            https://github.com/${{ github.repository }}
 
           Requires:       gtk3

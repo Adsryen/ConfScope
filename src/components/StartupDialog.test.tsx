@@ -81,7 +81,7 @@ function renderDialog(kind: "welcome" | "updated", options: { reducedMotion?: bo
     onClose,
     ...render(
       <I18nProvider>
-        <StartupDialog kind={kind} version="1.3.0" onClose={onClose} />
+        <StartupDialog kind={kind} version="1.3.1" onClose={onClose} />
       </I18nProvider>
     ),
   };
@@ -104,8 +104,8 @@ describe("StartupDialog", () => {
   it("shows update notes with fireworks", () => {
     renderDialog("updated");
 
-    expect(screen.getByRole("dialog", { name: "Updated to v1.3.0" })).toBeInTheDocument();
-    expect(screen.getByText("Added local snapshots and backup management")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Updated to v1.3.1" })).toBeInTheDocument();
+    expect(screen.getByText("Fixed update checks and release metadata")).toBeInTheDocument();
     expect(screen.getByTestId("startup-fireworks")).toBeInTheDocument();
   });
 
