@@ -129,6 +129,9 @@ func TestSnapshotManagerWritesVersionedMetadataSchema(t *testing.T) {
 	if metadata.ToolVersion == "" {
 		t.Fatal("ToolVersion is empty")
 	}
+	if metadata.Path != created.Path {
+		t.Fatalf("metadata path = %q, want final path %q", metadata.Path, created.Path)
+	}
 	if metadata.Source.Provider != ProviderNacos {
 		t.Fatalf("Source.Provider = %q, want nacos", metadata.Source.Provider)
 	}
@@ -176,5 +179,91 @@ func TestValidateLocalSnapshotDirectoryUsesStrictSchemaAndLegacyFallback(t *test
 	writeLocalConfig(t, legacy, "DEFAULT_GROUP/app.yaml", "a: 1")
 	if result := ValidateLocalSnapshotDirectory(legacy); !result.Valid || result.Code != "legacy_valid" || !result.Legacy {
 		t.Fatalf("legacy result = %+v, want legacy_valid", result)
+	}
+}
+
+func TestSnapshotManagerCleansPartialDirectoryWhenConfigWriteFails(t *testing.T) {
+	baseDir := t.TempDir()
+	manager := NewSnapshotManager(baseDir)
+
+	_, err := manager.CreateSnapshot(SnapshotSource{
+		ConnectionID:   "conn-1",
+		ConnectionName: "dev",
+		Namespace:      "public",
+		NamespaceID:    "public",
+	}, []ConfigSnapshot{
+		{
+			DataID:     "bad\x00name.yaml",
+			Group:      "DEFAULT_GROUP",
+			Content:    "a: 1",
+			ConfigType: "yaml",
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateSnapshot returned nil error")
+	}
+
+	entries, readErr := os.ReadDir(baseDir)
+	if readErr != nil {
+		t.Fatalf("ReadDir returned error: %v", readErr)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("baseDir entries = %v, want no partial snapshot directories", names)
+	}
+
+	list, listErr := manager.ListSnapshots()
+	if listErr != nil {
+		t.Fatalf("ListSnapshots returned error: %v", listErr)
+	}
+	if len(list) != 0 {
+		t.Fatalf("ListSnapshots length = %d, want 0", len(list))
+	}
+}
+
+func TestSnapshotManagerListSnapshotsSkipsTemporaryDirectories(t *testing.T) {
+	baseDir := t.TempDir()
+	tempID := "snap_123.tmp"
+	tempDir := filepath.Join(baseDir, tempID)
+	snapshot := Snapshot{
+		SchemaVersion: SnapshotSchemaVersion,
+		ToolVersion:   SnapshotToolVersion,
+		ID:            "snap_123",
+		Path:          filepath.Join(baseDir, "snap_123"),
+		Name:          "dev_public_20260706_120000",
+		CreatedAt:     "2026-07-06T12:00:00Z",
+		UpdatedAt:     "2026-07-06T12:00:00Z",
+		Source: SnapshotSource{
+			Provider:       ProviderNacos,
+			ConnectionID:   "conn-1",
+			ConnectionName: "dev",
+			Namespace:      "public",
+			NamespaceID:    "public",
+		},
+		Configs: []ConfigSnapshot{
+			{
+				Namespace:   "public",
+				Group:       "DEFAULT_GROUP",
+				DataID:      "app.yaml",
+				ContentType: "yaml",
+			},
+		},
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("Marshal snapshot returned error: %v", err)
+	}
+	writeLocalConfig(t, tempDir, "metadata.json", string(data))
+	writeLocalConfig(t, tempDir, "configs/public/DEFAULT_GROUP/app.yaml", "a: 1")
+
+	list, err := NewSnapshotManager(baseDir).ListSnapshots()
+	if err != nil {
+		t.Fatalf("ListSnapshots returned error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("ListSnapshots length = %d, want temporary directory skipped", len(list))
 	}
 }
