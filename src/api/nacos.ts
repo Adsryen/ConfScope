@@ -13,6 +13,7 @@ import {
   listHistory as configCenterListHistory,
   listNamespaces as configCenterListNamespaces,
   testConnection as configCenterTestConnection,
+  type ConfigDocument as ConfigCenterConfigDocument,
   type ConfigPage as ConfigCenterConfigPage,
   type ConfigRef,
   type ConnectionProfile,
@@ -94,6 +95,7 @@ export interface ConfigItem {
   group: string;
   content: string;
   configType: string;
+  updateTime?: string;
 }
 
 export interface ConfigPage {
@@ -101,6 +103,14 @@ export interface ConfigPage {
   pageNumber: number;
   pagesAvailable: number;
   pageItems: ConfigItem[];
+}
+
+export interface ConfigDocument {
+  content: string;
+  format: string;
+  version: string;
+  source: string;
+  updateTime: string;
 }
 
 export interface HistoryItem {
@@ -180,10 +190,7 @@ export function clearToken(connId: string, baseUrl?: string) {
 }
 
 /** 包一层「403 自动重登重试」+ 自动注入 apiVersion。 */
-async function withAuth<T>(
-  conn: Connection,
-  call: (token: string, apiVersion: ApiVersion) => Promise<T>
-): Promise<T> {
+async function withAuth<T>(conn: Connection, call: (token: string, apiVersion: ApiVersion) => Promise<T>): Promise<T> {
   const apiVersion = await getVersion(conn);
   const token = await getToken(conn);
   try {
@@ -198,10 +205,7 @@ async function withAuth<T>(
   }
 }
 
-async function withProfile<T>(
-  conn: Connection,
-  call: (profile: ConnectionProfile) => Promise<T>
-): Promise<T> {
+async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfile) => Promise<T>): Promise<T> {
   if (conn.sourceType === "local-snapshot") {
     const baseUrl = await resolveBaseUrl(conn);
     return call(toConnectionProfile(conn, baseUrl, "", "v1"));
@@ -221,19 +225,14 @@ async function withProfile<T>(
   }
 }
 
-function toConnectionProfile(
-  conn: Connection,
-  baseUrl: string,
-  accessToken: string,
-  apiVersion: ApiVersion
-): ConnectionProfile {
+function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: string, apiVersion: ApiVersion): ConnectionProfile {
   const optional = conn as Connection & { environment?: string; safetyLevel?: string };
   return {
     id: conn.id,
     name: conn.name,
     provider: conn.sourceType === "local-snapshot" ? "local" : "nacos",
     distribution: conn.distribution ?? "opensource",
-    authType: conn.sourceType === "local-snapshot" ? "none" : conn.authType ?? (conn.username ? "nacos-password" : "none"),
+    authType: conn.sourceType === "local-snapshot" ? "none" : (conn.authType ?? (conn.username ? "nacos-password" : "none")),
     baseUrl,
     accessToken,
     apiVersion,
@@ -276,7 +275,18 @@ function fromConfigCenterConfigPage(page: ConfigCenterConfigPage): ConfigPage {
       group: item.ref.group,
       content: item.content,
       configType: item.format,
+      updateTime: item.updateTime ?? "",
     })),
+  };
+}
+
+function fromConfigCenterDocument(document: ConfigCenterConfigDocument): ConfigDocument {
+  return {
+    content: document.content,
+    format: document.format,
+    version: document.version ?? "",
+    source: document.source ?? "",
+    updateTime: document.updateTime ?? "",
   };
 }
 
@@ -341,23 +351,21 @@ export async function listConfigs(
   pageSize: number
 ): Promise<ConfigPage> {
   return withProfile(conn, async (profile) => {
-    const normalizedGroup = conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group
-      ? "DEFAULT_GROUP"
-      : group;
+    const normalizedGroup = conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group ? "DEFAULT_GROUP" : group;
     const page = await configCenterListConfigs(profile, { namespace, dataId, group: normalizedGroup, pageNo, pageSize });
     return fromConfigCenterConfigPage(page);
   });
 }
 
-export async function getConfig(
-  conn: Connection,
-  namespace: string,
-  dataId: string,
-  group: string
-): Promise<string> {
+export async function getConfig(conn: Connection, namespace: string, dataId: string, group: string): Promise<string> {
+  const document = await getConfigDocument(conn, namespace, dataId, group);
+  return document.content;
+}
+
+export async function getConfigDocument(conn: Connection, namespace: string, dataId: string, group: string): Promise<ConfigDocument> {
   return withProfile(conn, async (profile) => {
     const document = await configCenterGetConfig(profile, toConfigRef(conn, namespace, dataId, group));
-    return document.content;
+    return fromConfigCenterDocument(document);
   });
 }
 
@@ -370,11 +378,7 @@ export async function listHistory(
   pageSize: number
 ): Promise<HistoryPage> {
   return withProfile(conn, async (profile) => {
-    const page = await configCenterListHistory(
-      profile,
-      toConfigRef(conn, namespace, dataId, group),
-      { pageNo, pageSize }
-    );
+    const page = await configCenterListHistory(profile, toConfigRef(conn, namespace, dataId, group), { pageNo, pageSize });
     return fromConfigCenterHistoryPage(page);
   });
 }
@@ -396,19 +400,12 @@ export async function publishConfig(
   );
 }
 
-export async function deleteConfig(
-  conn: Connection,
-  namespace: string,
-  dataId: string,
-  group: string
-): Promise<void> {
+export async function deleteConfig(conn: Connection, namespace: string, dataId: string, group: string): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotDeleteReadonly"));
   }
   const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
-  );
+  return withAuth(conn, (accessToken, apiVersion) => NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group));
 }
 
 export async function getHistoryDetail(
@@ -432,9 +429,7 @@ export function formatTime(raw: string): string {
     const d = new Date(ms);
     if (!isNaN(d.getTime())) {
       const p = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
-        d.getHours()
-      )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     }
   }
   return raw;

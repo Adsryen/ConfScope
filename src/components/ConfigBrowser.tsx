@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
-import { ConfigItem, deleteConfig, getConfig, listConfigs, publishConfig } from "../api/nacos";
+import { ConfigItem, deleteConfig, getConfig, getConfigDocument, listConfigs, publishConfig, type ConfigDocument } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
@@ -28,6 +28,7 @@ interface Props {
 
 const PAGE_SIZE = 50;
 type Tab = "content" | "history";
+type ConfigMetadata = Pick<ConfigDocument, "version" | "source" | "updateTime">;
 type InlineErrorProps = {
   title: string;
   message: string;
@@ -70,6 +71,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
   const [selected, setSelected] = useState<ConfigItem | null>(null);
   const [content, setContent] = useState("");
+  const [metadata, setMetadata] = useState<ConfigMetadata | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("content");
@@ -87,6 +89,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
   const dirty = editing && draft !== content;
+  const isLocalSnapshot = conn.sourceType === "local-snapshot";
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
@@ -95,6 +98,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     retryLabel: t("common.retry"),
     copyLabel: t("common.copyError"),
   };
+  const metadataItems =
+    isLocalSnapshot && metadata
+      ? [
+          { label: t("config.updateTime"), value: metadata.updateTime },
+          { label: t("config.version"), value: metadata.version },
+          { label: t("config.source"), value: metadata.source },
+        ].filter((item) => item.value)
+      : [];
   const guardNav = (action: () => void) => {
     if (dirty) setPending(() => action);
     else action();
@@ -169,6 +180,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setSearch("");
     setSelected(null);
     setContent("");
+    setMetadata(null);
+    setTab("content");
+    setShowNew(false);
     fetchList("", 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
@@ -182,16 +196,19 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setContentLoading(true);
     setContentError(null);
     setContent("");
+    setMetadata(null);
     try {
-      const text = await getConfig(conn, tenant, item.dataId, item.group);
+      const document = await getConfigDocument(conn, tenant, item.dataId, item.group);
       if (my !== reqId.current) return; // 已有更晚的点击，丢弃本次结果
-      setContent(text);
-      setFmt(detectFormat(item.dataId, item.configType, text));
+      setContent(document.content);
+      setMetadata({ version: document.version, source: document.source, updateTime: document.updateTime });
+      setFmt(detectFormat(item.dataId, document.format || item.configType, document.content));
     } catch (e) {
       if (my !== reqId.current) return;
       const message = String(e);
       setContentError(message);
       setContent("");
+      setMetadata(null);
       reportError({
         title: t("config.contentLoadFailed"),
         source: `${sourceLabel} / ${item.group} / ${item.dataId}`,
@@ -335,7 +352,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   };
 
   const createSnapshot = async () => {
-    if (items.length === 0 || snapshotSaving) return;
+    if (isLocalSnapshot || items.length === 0 || snapshotSaving) return;
     const namespace = tenant || "public";
     const taskName = t("config.snapshotTaskName", { name: conn.name || connectionDisplayLabel(conn), namespace });
     const task = taskManager.createTask(taskName, "backup");
@@ -362,7 +379,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             group: item.group,
             content: itemContent,
             configType: item.configType,
-            updateTime: "",
+            updateTime: item.updateTime ?? "",
           });
           completed += 1;
         } catch (e) {
@@ -452,9 +469,11 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           >
             ⟳
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)} title={t("config.newConfig")}>
-            ＋
-          </button>
+          {!isLocalSnapshot && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)} title={t("config.newConfig")}>
+              ＋
+            </button>
+          )}
           {items.length > 0 && (
             <button
               className="btn btn-ghost btn-sm"
@@ -470,7 +489,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       configType: it.configType,
                       namespace: tenant,
                       namespaceId: tenant,
-                      updateTime: "",
+                      updateTime: it.updateTime ?? "",
                     })),
                     opts
                   );
@@ -514,7 +533,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               ↓
             </button>
           )}
-          {items.length > 0 && (
+          {!isLocalSnapshot && items.length > 0 && (
             <button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading}>
               {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
             </button>
@@ -564,16 +583,20 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 <button className={`tab-btn${tab === "content" ? " active" : ""}`} onClick={() => setTab("content")}>
                   {t("config.content")}
                 </button>
-                <button className={`tab-btn${tab === "history" ? " active" : ""}`} onClick={() => setTab("history")}>
-                  {t("config.history")}
-                </button>
+                {!isLocalSnapshot && (
+                  <button className={`tab-btn${tab === "history" ? " active" : ""}`} onClick={() => setTab("history")}>
+                    {t("config.history")}
+                  </button>
+                )}
               </div>
             </div>
 
             {tab === "content" ? (
               <div className="content-box">
                 {contentLoading && <div className="pad-msg">{t("config.loading")}</div>}
-                {contentError && selected && <InlineError {...inlineErrorLabels} message={contentError} onRetry={() => openConfig(selected)} />}
+                {contentError && selected && (
+                  <InlineError {...inlineErrorLabels} message={contentError} onRetry={() => openConfig(selected)} />
+                )}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
@@ -624,13 +647,29 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                       </button>
                       <CopyButton text={content} />
                       <span className="fmt-spacer" />
-                      <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
-                        {t("common.edit")}
-                      </button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setShowDelete(true)} disabled={contentLoading}>
-                        {t("common.delete")}
-                      </button>
+                      {!isLocalSnapshot && (
+                        <>
+                          <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
+                            {t("common.edit")}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setShowDelete(true)} disabled={contentLoading}>
+                            {t("common.delete")}
+                          </button>
+                        </>
+                      )}
                     </div>
+                    {metadataItems.length > 0 && (
+                      <div className="config-meta-row">
+                        {metadataItems.map((item) => (
+                          <div className="config-meta-item" key={item.label}>
+                            <span className="config-meta-label">{item.label}</span>
+                            <span className="config-meta-value" title={item.value}>
+                              {item.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <CodeView code={content} format={fmt} />
                   </>
                 )}

@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getConfig,
+  getConfigDocument,
   getHistoryDetail,
   deleteConfig,
   listConfigs,
@@ -126,13 +127,9 @@ describe("nacos api compatibility bridge", () => {
 
   it("routes namespace reads through configCenter and keeps the old Nacos namespace shape", async () => {
     const conn = makeConnection("conn-namespaces");
-    goApp.ConfigCenterListNamespaces.mockResolvedValue([
-      { id: "public", name: "Public", configCount: 3, kind: 2 },
-    ]);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([{ id: "public", name: "Public", configCount: 3, kind: 2 }]);
 
-    await expect(listNamespaces(conn)).resolves.toEqual([
-      { namespace: "public", namespaceShowName: "Public", configCount: 3, kind: 2 },
-    ]);
+    await expect(listNamespaces(conn)).resolves.toEqual([{ namespace: "public", namespaceShowName: "Public", configCount: 3, kind: 2 }]);
 
     expect(goApp.NacosDetectVersion).toHaveBeenCalledWith(conn.baseUrl);
     expect(goApp.NacosLogin).toHaveBeenCalledWith(conn.baseUrl, "nacos", "secret", "v3");
@@ -147,7 +144,7 @@ describe("nacos api compatibility bridge", () => {
       totalCount: 1,
       pageNumber: 1,
       pagesAvailable: 1,
-      pageItems: [{ ref, content: "server:\n  port: 8080", format: "yaml" }],
+      pageItems: [{ ref, content: "server:\n  port: 8080", format: "yaml", updateTime: "2026-07-06T10:00:00Z" }],
     });
     goApp.ConfigCenterGetConfig.mockResolvedValue({
       ref,
@@ -155,6 +152,7 @@ describe("nacos api compatibility bridge", () => {
       format: "yaml",
       version: "42",
       source: "nacos",
+      updateTime: "2026-07-06T10:00:00Z",
     });
     goApp.ConfigCenterListHistory.mockResolvedValue({
       totalCount: 1,
@@ -176,10 +174,23 @@ describe("nacos api compatibility bridge", () => {
       pageNumber: 1,
       pagesAvailable: 1,
       pageItems: [
-        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "server:\n  port: 8080", configType: "yaml" },
+        {
+          dataId: "app.yaml",
+          group: "DEFAULT_GROUP",
+          content: "server:\n  port: 8080",
+          configType: "yaml",
+          updateTime: "2026-07-06T10:00:00Z",
+        },
       ],
     });
     await expect(getConfig(conn, "public", "app.yaml", "DEFAULT_GROUP")).resolves.toBe("server:\n  port: 8080");
+    await expect(getConfigDocument(conn, "public", "app.yaml", "DEFAULT_GROUP")).resolves.toEqual({
+      content: "server:\n  port: 8080",
+      format: "yaml",
+      version: "42",
+      source: "nacos",
+      updateTime: "2026-07-06T10:00:00Z",
+    });
     await expect(listHistory(conn, "public", "app.yaml", "DEFAULT_GROUP", 1, 20)).resolves.toEqual({
       totalCount: 1,
       pageNumber: 1,
@@ -203,6 +214,7 @@ describe("nacos api compatibility bridge", () => {
       pageNo: 1,
       pageSize: 20,
     });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledTimes(2);
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(expectedProfile(conn), ref);
     expect(goApp.ConfigCenterListHistory).toHaveBeenCalledWith(expectedProfile(conn), ref, { pageNo: 1, pageSize: 20 });
     expect(goApp.ConfigCenterGetHistoryDetail).toHaveBeenCalledWith(expectedProfile(conn), ref, "h-1");
@@ -245,12 +257,18 @@ describe("nacos api compatibility bridge", () => {
   it("refreshes token and retries configCenter reads on 403", async () => {
     const conn = makeConnection("conn-retry");
     const ref = expectedRef(conn);
-    goApp.NacosLogin
-      .mockResolvedValueOnce({ accessToken: "expired-token", tokenTtl: 18000, globalAdmin: true })
-      .mockResolvedValueOnce({ accessToken: "fresh-token", tokenTtl: 18000, globalAdmin: true });
-    goApp.ConfigCenterGetConfig
-      .mockRejectedValueOnce(new Error("code=403"))
-      .mockResolvedValueOnce({ ref, content: "ok", format: "text", version: "", source: "nacos" });
+    goApp.NacosLogin.mockResolvedValueOnce({ accessToken: "expired-token", tokenTtl: 18000, globalAdmin: true }).mockResolvedValueOnce({
+      accessToken: "fresh-token",
+      tokenTtl: 18000,
+      globalAdmin: true,
+    });
+    goApp.ConfigCenterGetConfig.mockRejectedValueOnce(new Error("code=403")).mockResolvedValueOnce({
+      ref,
+      content: "ok",
+      format: "text",
+      version: "",
+      source: "nacos",
+    });
 
     await expect(getConfig(conn, "public", "app.yaml", "DEFAULT_GROUP")).resolves.toBe("ok");
 
@@ -306,34 +324,38 @@ describe("nacos api compatibility bridge", () => {
       ...expectedRef(conn, "", "app.yaml", "DEFAULT_GROUP"),
       provider: "local",
     };
-    goApp.ConfigCenterListNamespaces.mockResolvedValue([
-      { id: "", name: "public", configCount: 1, kind: 0 },
-    ]);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([{ id: "", name: "public", configCount: 1, kind: 0 }]);
     goApp.ConfigCenterListConfigs.mockResolvedValue({
       totalCount: 1,
       pageNumber: 1,
       pagesAvailable: 1,
-      pageItems: [{ ref, content: "a: 1", format: "yaml" }],
+      pageItems: [{ ref, content: "a: 1", format: "yaml", updateTime: "2026-07-06T10:00:00Z" }],
     });
     goApp.ConfigCenterGetConfig.mockResolvedValue({
       ref,
       content: "a: 1",
       format: "yaml",
-      version: "",
+      version: "snap-1",
       source: "C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml",
+      updateTime: "2026-07-06T10:00:00Z",
     });
     goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
 
-    await expect(listNamespaces(conn)).resolves.toEqual([
-      { namespace: "", namespaceShowName: "public", configCount: 1, kind: 0 },
-    ]);
+    await expect(listNamespaces(conn)).resolves.toEqual([{ namespace: "", namespaceShowName: "public", configCount: 1, kind: 0 }]);
     await expect(listConfigs(conn, "", "", "DEFAULT_GROUP", 1, 20)).resolves.toEqual({
       totalCount: 1,
       pageNumber: 1,
       pagesAvailable: 1,
-      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "a: 1", configType: "yaml" }],
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "a: 1", configType: "yaml", updateTime: "2026-07-06T10:00:00Z" }],
     });
     await expect(getConfig(conn, "", "app.yaml", "DEFAULT_GROUP")).resolves.toBe("a: 1");
+    await expect(getConfigDocument(conn, "", "app.yaml", "DEFAULT_GROUP")).resolves.toEqual({
+      content: "a: 1",
+      format: "yaml",
+      version: "snap-1",
+      source: "C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml",
+      updateTime: "2026-07-06T10:00:00Z",
+    });
     await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
 
     expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
@@ -347,6 +369,7 @@ describe("nacos api compatibility bridge", () => {
       pageNo: 1,
       pageSize: 20,
     });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledTimes(2);
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(localProfile, ref);
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(localProfile);
   });
@@ -398,27 +421,28 @@ describe("nacos api compatibility bridge", () => {
         remotePort: 8845,
       })
     );
-    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(
-      expect.objectContaining({ baseUrl: "http://localhost:12875/nacos" })
-    );
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://localhost:12875/nacos" }));
   });
 
   it("uses reusable SSH profiles when resolving tunnels", async () => {
-    localStorage.setItem("cs.sshProfiles", JSON.stringify([
-      {
-        id: "ssh-prod",
-        name: "生产跳板机",
-        config: {
-          host: "prod-jump.example.com",
-          port: 2222,
-          username: "deploy",
-          authType: "password",
-          password: "profile-secret",
+    localStorage.setItem(
+      "cs.sshProfiles",
+      JSON.stringify([
+        {
+          id: "ssh-prod",
+          name: "生产跳板机",
+          config: {
+            host: "prod-jump.example.com",
+            port: 2222,
+            username: "deploy",
+            authType: "password",
+            password: "profile-secret",
+          },
+          createdAt: "2026-06-29T00:00:00Z",
+          updatedAt: "2026-06-29T00:00:00Z",
         },
-        createdAt: "2026-06-29T00:00:00Z",
-        updatedAt: "2026-06-29T00:00:00Z",
-      },
-    ]));
+      ])
+    );
     const conn: Connection = {
       ...makeConnection("conn-ssh-profile"),
       baseUrl: "http://nacos.internal:8848/nacos",
@@ -479,8 +503,6 @@ describe("nacos api compatibility bridge", () => {
         remotePort: 8848,
       })
     );
-    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(
-      expect.objectContaining({ baseUrl: "http://localhost:13380/nacos" })
-    );
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://localhost:13380/nacos" }));
   });
 });

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,10 +16,23 @@ var errLocalReadOnly = errors.New("local snapshot provider is read-only")
 type LocalProvider struct{}
 
 type localConfigFile struct {
-	ref     ConfigRef
-	path    string
-	format  string
-	content string
+	ref        ConfigRef
+	path       string
+	format     string
+	content    string
+	version    string
+	updateTime string
+}
+
+type localConfigKey struct {
+	namespace string
+	group     string
+	dataID    string
+}
+
+type strictSnapshotMetadata struct {
+	version string
+	configs map[localConfigKey]ConfigSnapshot
 }
 
 func NewLocalProvider() *LocalProvider {
@@ -103,9 +117,10 @@ func (p *LocalProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRe
 	items := make([]ConfigSummary, 0, end-start)
 	for _, file := range filtered[start:end] {
 		items = append(items, ConfigSummary{
-			Ref:     normalizeLocalRef(profile, file.ref),
-			Content: file.content,
-			Format:  file.format,
+			Ref:        normalizeLocalRef(profile, file.ref),
+			Content:    file.content,
+			Format:     file.format,
+			UpdateTime: file.updateTime,
 		})
 	}
 	pages := int64(0)
@@ -130,10 +145,12 @@ func (p *LocalProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (Con
 		fileRef := normalizeLocalRef(profile, file.ref)
 		if fileRef.Namespace == ref.Namespace && fileRef.Group == ref.Group && fileRef.DataID == ref.DataID {
 			return ConfigDocument{
-				Ref:     fileRef,
-				Content: file.content,
-				Format:  file.format,
-				Source:  file.path,
+				Ref:        fileRef,
+				Content:    file.content,
+				Format:     file.format,
+				Version:    file.version,
+				Source:     file.path,
+				UpdateTime: file.updateTime,
 			}, nil
 		}
 	}
@@ -181,6 +198,7 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 		return nil, errors.New(validation.Message)
 	}
 	manifestLayout := hasLocalSnapshotManifest(root)
+	strictMetadata := loadStrictSnapshotMetadata(root)
 
 	files := []localConfigFile{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -199,11 +217,27 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 		if !ok {
 			return nil
 		}
+		format := localFormatFromExt(filepath.Ext(path))
+		version := ""
+		updateTime := ""
+		if strictMetadata != nil {
+			if cfg, ok := strictMetadata.configs[localKeyFromRef(ref)]; ok {
+				if cfg.ContentType != "" {
+					format = cfg.ContentType
+				} else if cfg.ConfigType != "" {
+					format = cfg.ConfigType
+				}
+				updateTime = cfg.UpdateTime
+			}
+			version = strictMetadata.version
+		}
 		files = append(files, localConfigFile{
-			ref:     normalizeLocalRef(profile, ref),
-			path:    path,
-			format:  localFormatFromExt(filepath.Ext(path)),
-			content: string(content),
+			ref:        normalizeLocalRef(profile, ref),
+			path:       path,
+			format:     format,
+			content:    string(content),
+			version:    version,
+			updateTime: updateTime,
 		})
 		return nil
 	})
@@ -214,6 +248,41 @@ func scanLocalSnapshot(profile ConnectionProfile) ([]localConfigFile, error) {
 		return nil, errors.New("no comparable config files found in local snapshot")
 	}
 	return files, nil
+}
+
+func loadStrictSnapshotMetadata(root string) *strictSnapshotMetadata {
+	data, err := os.ReadFile(filepath.Join(root, "metadata.json"))
+	if err != nil {
+		return nil
+	}
+	var snapshot Snapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil || snapshot.SchemaVersion != SnapshotSchemaVersion {
+		return nil
+	}
+	metadata := &strictSnapshotMetadata{
+		version: snapshot.ID,
+		configs: make(map[localConfigKey]ConfigSnapshot, len(snapshot.Configs)),
+	}
+	for _, cfg := range snapshot.Configs {
+		namespace := cfg.Namespace
+		if namespace == "" {
+			namespace = snapshotNamespaceDir(snapshot.Source)
+		}
+		metadata.configs[localConfigKey{
+			namespace: normalizeLocalNamespace(namespace),
+			group:     cfg.Group,
+			dataID:    cfg.DataID,
+		}] = cfg
+	}
+	return metadata
+}
+
+func localKeyFromRef(ref ConfigRef) localConfigKey {
+	return localConfigKey{
+		namespace: normalizeLocalNamespace(ref.Namespace),
+		group:     ref.Group,
+		dataID:    ref.DataID,
+	}
 }
 
 func inferLocalConfigRef(root string, path string, manifestLayout bool) (ConfigRef, bool) {

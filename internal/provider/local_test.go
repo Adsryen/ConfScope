@@ -78,6 +78,54 @@ func TestLocalProviderReadsConfigsDirectorySnapshot(t *testing.T) {
 	}
 }
 
+func TestLocalProviderUsesStrictSnapshotMetadata(t *testing.T) {
+	baseDir := t.TempDir()
+	manager := NewSnapshotManager(baseDir)
+	updateTime := "2026-07-06T10:00:00Z"
+	created, err := manager.CreateSnapshot(SnapshotSource{
+		ConnectionID:   "conn-1",
+		ConnectionName: "dev",
+		Namespace:      "public",
+		NamespaceID:    "public",
+	}, []ConfigSnapshot{
+		{
+			DataID:      "app.yaml",
+			Group:       "DEFAULT_GROUP",
+			Content:     "server:\n  port: 8080",
+			ContentType: "yaml",
+			UpdateTime:  updateTime,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSnapshot returned error: %v", err)
+	}
+
+	provider := NewLocalProvider()
+	profile := ConnectionProfile{ID: "local-strict", Provider: ProviderLocal, BaseURL: created.Path}
+	page, err := provider.ListConfigs(profile, ListConfigsRequest{Namespace: "", Group: "DEFAULT_GROUP", PageNo: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
+	}
+	if len(page.PageItems) != 1 {
+		t.Fatalf("PageItems length = %d, want 1", len(page.PageItems))
+	}
+	item := page.PageItems[0]
+	if item.Format != "yaml" || item.UpdateTime != updateTime {
+		t.Fatalf("item metadata = %+v, want yaml and updateTime %q", item, updateTime)
+	}
+
+	doc, err := provider.GetConfig(profile, ConfigRef{Namespace: "", Group: "DEFAULT_GROUP", DataID: "app.yaml"})
+	if err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if doc.Version != created.ID || doc.UpdateTime != updateTime {
+		t.Fatalf("document metadata = %+v, want version %q and updateTime %q", doc, created.ID, updateTime)
+	}
+	if doc.Source != filepath.Join(created.Path, "configs", "public", "DEFAULT_GROUP", "app.yaml") {
+		t.Fatalf("document source = %q, want snapshot content path", doc.Source)
+	}
+}
+
 func TestLocalProviderReadsFallbackLayout(t *testing.T) {
 	root := t.TempDir()
 	writeLocalConfig(t, root, ".metadata.yml", "version: 1")

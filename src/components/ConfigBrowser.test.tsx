@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
+import type { ConfigItem } from "../api/nacos";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
 import ConfigBrowser from "./ConfigBrowser";
@@ -15,6 +16,7 @@ import { getTaskManager } from "../lib/taskmanager";
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
   getConfig: vi.fn(),
+  getConfigDocument: vi.fn(),
   publishConfig: vi.fn(),
   deleteConfig: vi.fn(),
 }));
@@ -29,6 +31,7 @@ vi.mock("../api/nacos", async () => {
     ...actual,
     listConfigs: apiMocks.listConfigs,
     getConfig: apiMocks.getConfig,
+    getConfigDocument: apiMocks.getConfigDocument,
     publishConfig: apiMocks.publishConfig,
     deleteConfig: apiMocks.deleteConfig,
   };
@@ -55,7 +58,20 @@ const conn: Connection = {
   defaultNamespace: "",
 };
 
-function configPage(items = [{ dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" }]) {
+const localConn: Connection = {
+  ...conn,
+  id: "local-prod",
+  name: "local-prod",
+  sourceName: "本地快照",
+  sourceType: "local-snapshot",
+  provider: "local",
+  localPath: "C:\\backup\\prod",
+  baseUrl: "C:\\backup\\prod",
+  username: "",
+  password: "",
+};
+
+function configPage(items: ConfigItem[] = [{ dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" }]) {
   return {
     totalCount: items.length,
     pageNumber: 1,
@@ -64,11 +80,11 @@ function configPage(items = [{ dataId: "app.json", group: "DEFAULT_GROUP", conte
   };
 }
 
-function renderBrowser(locale = "zh-CN") {
+function renderBrowser(locale = "zh-CN", browserConn: Connection = conn, tenant = "public") {
   localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
-      <ConfigBrowser conn={conn} tenant="public" />
+      <ConfigBrowser conn={browserConn} tenant={tenant} />
       <MessageCenter />
       <ErrorDialog />
     </I18nProvider>
@@ -111,6 +127,7 @@ describe("ConfigBrowser", () => {
     clearErrors();
     apiMocks.listConfigs.mockReset();
     apiMocks.getConfig.mockReset();
+    apiMocks.getConfigDocument.mockReset();
     apiMocks.publishConfig.mockReset();
     apiMocks.deleteConfig.mockReset();
     snapshotMocks.createSnapshotFromConfigs.mockReset();
@@ -120,6 +137,13 @@ describe("ConfigBrowser", () => {
     clearTasks();
     apiMocks.listConfigs.mockResolvedValue(configPage());
     apiMocks.getConfig.mockResolvedValue('{"server":{"port":8080}}');
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8080}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
     apiMocks.publishConfig.mockResolvedValue(undefined);
     apiMocks.deleteConfig.mockResolvedValue(undefined);
     snapshotMocks.createSnapshotFromConfigs.mockResolvedValue({
@@ -139,6 +163,49 @@ describe("ConfigBrowser", () => {
     });
   });
 
+  it("browses local snapshot configs as read-only and shows metadata", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        {
+          dataId: "app.yaml",
+          group: "DEFAULT_GROUP",
+          content: "",
+          configType: "yaml",
+          updateTime: "2026-07-06T10:00:00Z",
+        },
+      ])
+    );
+    apiMocks.getConfigDocument.mockResolvedValueOnce({
+      content: "server:\n  port: 8080",
+      format: "yaml",
+      version: "snap_123",
+      source: "C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml",
+      updateTime: "2026-07-06T10:00:00Z",
+    });
+
+    renderBrowser("zh-CN", localConn, "");
+
+    fireEvent.click(await screen.findByText("app.yaml"));
+
+    await expectCodeContains("server", "port", "8080");
+    expect(apiMocks.listConfigs).toHaveBeenCalledWith(localConn, "", "", "", 1, 50);
+    expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(localConn, "", "app.yaml", "DEFAULT_GROUP");
+
+    expect(screen.queryByTitle("新建配置")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "历史变更" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "创建当前列表快照" })).not.toBeInTheDocument();
+    expect(screen.getByTitle("导出当前列表")).toBeInTheDocument();
+
+    expect(screen.getByText("更新时间")).toBeInTheDocument();
+    expect(screen.getByText("2026-07-06T10:00:00Z")).toBeInTheDocument();
+    expect(screen.getByText("版本")).toBeInTheDocument();
+    expect(screen.getByText("snap_123")).toBeInTheDocument();
+    expect(screen.getByText("来源")).toBeInTheDocument();
+    expect(screen.getByText("C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml")).toBeInTheDocument();
+  });
+
   it("loads the config list and opens a selected config", async () => {
     renderBrowser();
 
@@ -149,7 +216,7 @@ describe("ConfigBrowser", () => {
     fireEvent.click(screen.getByText("app.json"));
 
     await expectCodeContains('"server"', '"port"', "8080");
-    expect(apiMocks.getConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
+    expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
   });
 
   it("debounces search input and uses wildcard dataId query", async () => {
@@ -180,7 +247,21 @@ describe("ConfigBrowser", () => {
   });
 
   it("publishes edited content and reloads the selected config", async () => {
-    apiMocks.getConfig.mockResolvedValueOnce('{"server":{"port":8080}}').mockResolvedValueOnce('{"server":{"port":9090}}');
+    apiMocks.getConfigDocument
+      .mockResolvedValueOnce({
+        content: '{"server":{"port":8080}}',
+        format: "json",
+        version: "",
+        source: "nacos",
+        updateTime: "",
+      })
+      .mockResolvedValueOnce({
+        content: '{"server":{"port":9090}}',
+        format: "json",
+        version: "",
+        source: "nacos",
+        updateTime: "",
+      });
     renderBrowser();
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
@@ -326,7 +407,7 @@ describe("ConfigBrowser", () => {
   it("shows config content loading failures inline with copy action", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);
-    apiMocks.getConfig.mockRejectedValueOnce(new Error("read config failed: EOF"));
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("read config failed: EOF"));
 
     renderBrowser();
     fireEvent.click(await screen.findByText("app.json"));
@@ -341,7 +422,7 @@ describe("ConfigBrowser", () => {
   });
 
   it("reports content loading errors with localized message-center actions", async () => {
-    apiMocks.getConfig.mockRejectedValueOnce(new Error("content denied"));
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("content denied"));
 
     renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
