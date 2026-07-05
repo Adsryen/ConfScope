@@ -49,7 +49,7 @@ ConfScope 在原项目的基础上进行了以下改进：
 
 原项目 Configuration-Center-Browser 采用 MIT 协议开源。
 
-本项目 ConfScope 同样采用 [MIT 协议](./LICENSE) 开源，尊重并延续原项目的开源精神。
+本项目 ConfScope 采用 [AGPL-3.0 协议](./LICENSE) 开源，尊重并延续原项目的开源精神。
 
 ## 贡献者
 
