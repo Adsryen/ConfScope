@@ -58,6 +58,32 @@ describe("apply entry payload helpers", () => {
     expect(applyEntryTargetCount(batchPayload)).toBe(2);
   });
 
+  it("uses targetRef for stable ids when explicit source and target refs are present", () => {
+    const payloadWithRefs = payload("config", [
+      {
+        ...item("legacy-item.yaml"),
+        sourceRef: {
+          provider: "nacos",
+          connectionId: "conn-dev",
+          namespace: "source-ns",
+          group: "SOURCE_GROUP",
+          dataId: "source.yaml",
+          key: "__document",
+        },
+        targetRef: {
+          provider: "nacos",
+          connectionId: "conn-prod",
+          namespace: "target-ns",
+          group: "TARGET_GROUP",
+          dataId: "target.yaml",
+          key: "__document",
+        },
+      },
+    ]);
+
+    expect(applyEntryId(payloadWithRefs)).toBe("diff|config|conn-dev|conn-prod|target-ns|TARGET_GROUP|target.yaml|__document");
+  });
+
   it("summarizes batch count, skipped items and risk level", () => {
     expect(applyEntryRiskSummary([item("app.yaml")])).toEqual({
       count: 1,

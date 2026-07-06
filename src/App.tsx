@@ -16,6 +16,7 @@ import MessageCenter from "./components/MessageCenter";
 import BackupView, { type BackupDiffJumpParams } from "./components/BackupView";
 import TaskCenter from "./components/TaskCenter";
 import StartupDialog from "./components/StartupDialog";
+import ApplyPlanView from "./components/ApplyPlanView";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
@@ -26,7 +27,7 @@ import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/s
 import { toast } from "./lib/toast";
 import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
 import { recordOperation } from "./store/operationHistory";
-import { applyEntryTargetCount, type ApplyEntryPayload } from "./lib/applyEntry";
+import type { ApplyEntryPayload } from "./lib/applyEntry";
 
 type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
 type Mode = NavigableMode | "apply";
@@ -86,19 +87,6 @@ function isNavigableMode(mode: string | undefined): mode is NavigableMode {
       return false;
   }
 }
-
-const modeLabelKey: Record<NavigableMode, string> = {
-  browse: "app.title",
-  diff: "app.diff",
-  connections: "app.connectionManage",
-  ssh: "app.sshTunnels",
-  audit: "app.audit",
-  history: "app.history",
-  backup: "app.backup",
-  tasks: "app.tasks",
-  settings: "app.settings",
-  about: "app.about",
-};
 
 function applyReturnMode(payload: ApplyEntryPayload): NavigableMode {
   const mode = payload.origin.returnMode ?? payload.origin.mode;
@@ -357,67 +345,6 @@ export default function App() {
   };
 
   const applyReturnTarget = pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse";
-  const applyPage = pendingApplyEntry ? (
-    <div className="page-surface data-page apply-view">
-      <div className="page-header">
-        <div>
-          <h3>{t("apply.title")}</h3>
-          <div className="page-subtitle">{t("apply.subtitle")}</div>
-        </div>
-        <div className="page-actions">
-          <button className="btn btn-ghost" onClick={() => setMode(applyReturnTarget)}>
-            {t("apply.backToSource", { source: t(modeLabelKey[applyReturnTarget]) })}
-          </button>
-        </div>
-      </div>
-
-      <div className="data-info-grid">
-        <div className="info-row">
-          <span className="info-label">{t("apply.source")}:</span>
-          <span className="info-value">{pendingApplyEntry.source.label}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-label">{t("apply.target")}:</span>
-          <span className="info-value">{pendingApplyEntry.target.label}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-label">{t("apply.scope")}:</span>
-          <span className="info-value">{t(`apply.scopes.${pendingApplyEntry.scope}`)}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-label">{t("apply.selected")}:</span>
-          <span className="info-value">{t("apply.selectedCount", { count: applyEntryTargetCount(pendingApplyEntry) })}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-label">{t("apply.skipped")}:</span>
-          <span className="info-value">{pendingApplyEntry.rangeSummary.skippedCount}</span>
-        </div>
-        <div className="info-row">
-          <span className="info-label">{t("apply.risk")}:</span>
-          <span className="info-value">{t(`apply.risks.${pendingApplyEntry.rangeSummary.riskLevel}`)}</span>
-        </div>
-      </div>
-
-      <div className="data-empty-state page-empty">
-        <div>{t("apply.placeholderTitle")}</div>
-        <span>{t("apply.placeholderBody")}</span>
-      </div>
-    </div>
-  ) : (
-    <div className="page-surface data-page apply-view">
-      <div className="page-header">
-        <div>
-          <h3>{t("apply.title")}</h3>
-          <div className="page-subtitle">{t("apply.missingEntry")}</div>
-        </div>
-        <div className="page-actions">
-          <button className="btn btn-ghost" onClick={() => setMode("browse")}>
-            {t("apply.backToSource", { source: t("app.title") })}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   const closeStartupDialog = () => {
     if (!startupDialog || !appVersion) return;
@@ -550,7 +477,7 @@ export default function App() {
           ) : mode === "about" ? (
             <About embedded />
           ) : mode === "apply" ? (
-            applyPage
+            <ApplyPlanView entry={pendingApplyEntry} connections={diffConnections} onBack={() => setMode(applyReturnTarget)} />
           ) : connections.length === 0 ? (
             <div className="pad-msg big">
               {t("app.noConnection")}

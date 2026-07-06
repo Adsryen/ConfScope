@@ -14,13 +14,18 @@ export interface ApplyEntryEndpoint {
   label: string;
 }
 
-export interface ApplyEntryItem {
+export interface ApplyEntryRef {
   provider: ProviderType;
   connectionId: string;
   namespace: string;
   group: string;
   dataId: string;
   key: string;
+}
+
+export interface ApplyEntryItem extends ApplyEntryRef {
+  sourceRef?: ApplyEntryRef;
+  targetRef?: ApplyEntryRef;
 }
 
 export interface ApplyEntryRangeSummary {
@@ -64,14 +69,15 @@ export function applyEntryRiskSummary(items: ApplyEntryItem[], skippedCount = 0)
 
 export function applyEntryId(payload: ApplyEntryPayload): string {
   const first = payload.items[0];
+  const targetRef = first?.targetRef ?? first;
   return [
     payload.sourceType,
     payload.scope,
     payload.source.connectionId,
     payload.target.connectionId,
-    first?.namespace ?? payload.target.namespace,
-    first?.group ?? "",
-    first?.dataId ?? "",
-    first?.key ?? "",
+    targetRef?.namespace ?? payload.target.namespace,
+    targetRef?.group ?? "",
+    targetRef?.dataId ?? "",
+    targetRef?.key ?? "",
   ].join("|");
 }

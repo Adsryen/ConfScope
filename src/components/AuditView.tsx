@@ -7,7 +7,7 @@ import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } fr
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
-import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload } from "../lib/applyEntry";
+import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
 import Select from "./Select";
 
@@ -244,13 +244,26 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     const targetEnv = targetEnvId ? envSources.find((env) => envKey(env) === targetEnvId) : undefined;
     if (!baselineEnv || !targetEnv || !targetEnvId) return;
 
-    const item = {
+    const sourceRef: ApplyEntryRef = {
+      provider: baselineEnv.conn.provider ?? "nacos",
+      connectionId: baselineEnv.conn.id,
+      namespace: baselineEnv.namespace || selectedRow.namespace || "public",
+      group: selectedRow.group,
+      dataId: selectedRow.originalDataIds[baseline] ?? selectedRow.dataId,
+      key: selectedRow.key,
+    };
+    const targetRef: ApplyEntryRef = {
       provider: targetEnv.conn.provider ?? "nacos",
       connectionId: targetEnv.conn.id,
       namespace: targetEnv.namespace || selectedRow.namespace || "public",
       group: selectedRow.group,
       dataId: selectedRow.originalDataIds[targetEnvId] ?? selectedRow.dataId,
       key: selectedRow.key,
+    };
+    const item = {
+      ...targetRef,
+      sourceRef,
+      targetRef,
     };
 
     onStartApply({

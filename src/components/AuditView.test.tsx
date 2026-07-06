@@ -69,6 +69,7 @@ vi.mock("../i18n", () => ({
         "audit.normalizePrefix": "Prefix Trim",
         "audit.normalizeSuffix": "Suffix Trim",
         "audit.normalizeReplace": "Exact Replace",
+        "audit.normalizeDeleteHint": "delete",
         "audit.matchPattern": "Match pattern",
         "audit.replaceTo": "Replace with (leave empty to delete)",
         "audit.caseSensitive": "Case sensitive",
@@ -274,6 +275,22 @@ describe("AuditView", () => {
           group: "DEFAULT_GROUP",
           dataId: "app.yaml",
           key: "server.port",
+          sourceRef: {
+            provider: "nacos",
+            connectionId: "c1",
+            namespace: "public",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            key: "server.port",
+          },
+          targetRef: {
+            provider: "nacos",
+            connectionId: "c2",
+            namespace: "public",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            key: "server.port",
+          },
         },
       ],
       rangeSummary: {
@@ -285,6 +302,64 @@ describe("AuditView", () => {
       origin: {
         mode: "audit",
         returnMode: "audit",
+      },
+    });
+  });
+
+  it("preserves original source and target refs when normalized dataIds differ", async () => {
+    const onStartApply = vi.fn();
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development", sourceName: "lan" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production", sourceName: "cloud" }),
+    ];
+
+    apiMocks.listConfigs
+      .mockResolvedValueOnce({
+        pageItems: [{ dataId: "dev-app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+        totalCount: 1,
+      })
+      .mockResolvedValueOnce({
+        pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+        totalCount: 1,
+      });
+    apiMocks.getConfig
+      .mockResolvedValueOnce("server:\n  port: 8080")
+      .mockResolvedValueOnce("server:\n  port: 9090");
+
+    render(<AuditView connections={conns} onStartApply={onStartApply} />);
+    fireEvent.click(screen.getByRole("button", { name: /Ignore Rules/i }));
+    fireEvent.click(screen.getByLabelText("Enable name normalization"));
+    fireEvent.change(screen.getByPlaceholderText("Match pattern"), { target: { value: "dev-" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Rule" }));
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    fireEvent.click(await screen.findByText("server.port"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    const payload = onStartApply.mock.calls[0][0];
+    expect(payload.items[0]).toMatchObject({
+      provider: "nacos",
+      connectionId: "c2",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.yaml",
+      key: "server.port",
+      sourceRef: {
+        provider: "nacos",
+        connectionId: "c1",
+        namespace: "public",
+        group: "DEFAULT_GROUP",
+        dataId: "dev-app.yaml",
+        key: "server.port",
+      },
+      targetRef: {
+        provider: "nacos",
+        connectionId: "c2",
+        namespace: "public",
+        group: "DEFAULT_GROUP",
+        dataId: "app.yaml",
+        key: "server.port",
       },
     });
   });
