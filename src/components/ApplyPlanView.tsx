@@ -19,10 +19,20 @@ interface Props {
 }
 
 type DraftState =
-  { status: "idle" | "loading" } | { status: "ready"; plan: ApplyPlan; targetConnection: Connection } | { status: "error"; detail: string };
+  | { status: "idle" | "loading" }
+  | { status: "ready"; plan: ApplyPlan; sourceConnection: Connection; targetConnection: Connection }
+  | { status: "error"; detail: string };
 
 function firstSelectableItem(plan: ApplyPlan): string {
   return plan.items[0]?.id ?? "";
+}
+
+function appendConnection(connections: Connection[], connection: Connection): Connection[] {
+  return connections.some((item) => item.id === connection.id) ? connections : [...connections, connection];
+}
+
+function applyExecutionConnections(connections: Connection[], sourceConnection: Connection, targetConnection: Connection): Connection[] {
+  return appendConnection(appendConnection(connections, sourceConnection), targetConnection);
 }
 
 function valueText(value: ApplyPlanValueSnapshot, missingLabel: string): string {
@@ -236,7 +246,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           return;
         }
         const savedPlan = saveApplyPlan(result.plan);
-        setDraftState({ status: "ready", plan: savedPlan, targetConnection: result.targetConnection });
+        setDraftState({ status: "ready", plan: savedPlan, sourceConnection: result.sourceConnection, targetConnection: result.targetConnection });
         setSelectedId(firstSelectableItem(savedPlan));
       })
       .catch((error) => {
@@ -250,6 +260,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   }, [connections, entry]);
 
   const plan = draftState.status === "ready" ? draftState.plan : null;
+  const sourceConnection = draftState.status === "ready" ? draftState.sourceConnection : null;
   const targetConnection = draftState.status === "ready" ? draftState.targetConnection : null;
   const selectedItem = plan?.items.find((item) => item.id === selectedId) ?? plan?.items[0] ?? null;
   const protectedTarget = plan ? isProtectedApplyTarget(targetConnection, plan.target) : false;
@@ -260,7 +271,10 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     setExecuteError(null);
     try {
       const result = await executeApplyPlan(plan, {
-        connections,
+        connections:
+          sourceConnection && targetConnection
+            ? applyExecutionConnections(connections, sourceConnection, targetConnection)
+            : connections,
         getConfigDocument,
         publishConfig: publishConfigFromApplyPlan,
         deleteConfig: deleteConfigFromApplyPlan,
