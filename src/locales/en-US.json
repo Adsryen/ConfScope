@@ -24,7 +24,8 @@
   },
   "api": {
     "localSnapshotPublishReadonly": "Local snapshot sources are read-only and cannot publish configs",
-    "localSnapshotDeleteReadonly": "Local snapshot sources are read-only and cannot delete configs"
+    "localSnapshotDeleteReadonly": "Local snapshot sources are read-only and cannot delete configs",
+    "directWriteRequiresApplyPlan": "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
   },
   "validation": {
     "duplicateKey": "Duplicate key:{key}",
@@ -726,6 +727,7 @@
     "rollbackDisabled": "This operation is marked as not rollbackable",
     "rollbackExportOnly": "Export only generates a local file and cannot be rolled back",
     "rollbackSnapshotOnly": "Snapshot operations only create or delete local backups and cannot be rolled back",
+    "rollbackRequiresApplyPlan": "Rollback requires an ApplyPlan dry-run and cannot publish previous content directly.",
     "rollbackApplyRequiresPlan": "Apply records require a rollback dry-run and cannot be rolled back directly",
     "generateRollbackPlan": "Generate rollback plan",
     "markSandboxVerified": "Mark sandbox verified",

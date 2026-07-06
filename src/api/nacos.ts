@@ -1,8 +1,8 @@
 import {
-  NacosDeleteConfig,
+  NacosDeleteConfigFromApplyPlan,
   NacosDetectVersion,
   NacosLogin,
-  NacosPublishConfig,
+  NacosPublishConfigFromApplyPlan,
   CreateSSHTunnel,
   StopSSHTunnel,
 } from "../../wailsjs/go/main/App";
@@ -384,6 +384,17 @@ export async function listHistory(
 }
 
 export async function publishConfig(
+  _conn: Connection,
+  _namespace: string,
+  _dataId: string,
+  _group: string,
+  _content: string,
+  _configType: string
+): Promise<void> {
+  throw new Error(translate("api.directWriteRequiresApplyPlan"));
+}
+
+export async function publishConfigFromApplyPlan(
   conn: Connection,
   namespace: string,
   dataId: string,
@@ -396,16 +407,22 @@ export async function publishConfig(
   }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
-    NacosPublishConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
+    NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
   );
 }
 
-export async function deleteConfig(conn: Connection, namespace: string, dataId: string, group: string): Promise<void> {
+export async function deleteConfig(_conn: Connection, _namespace: string, _dataId: string, _group: string): Promise<void> {
+  throw new Error(translate("api.directWriteRequiresApplyPlan"));
+}
+
+export async function deleteConfigFromApplyPlan(conn: Connection, namespace: string, dataId: string, group: string): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotDeleteReadonly"));
   }
   const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) => NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group));
+  return withAuth(conn, (accessToken, apiVersion) =>
+    NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group)
+  );
 }
 
 export async function getHistoryDetail(

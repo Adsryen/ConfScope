@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteConfig, getConfigDocument, publishConfig } from "../api/nacos";
+import { deleteConfigFromApplyPlan, getConfigDocument, publishConfigFromApplyPlan } from "../api/nacos";
 import { createSnapshot, getSnapshot } from "../api/snapshot";
 import { useTranslation } from "../i18n";
 import type { ApplyPlan, ApplyPlanAction, ApplyPlanItem, ApplyPlanSummary, ApplyPlanValueSnapshot } from "../lib/applyPlan";
@@ -19,9 +19,7 @@ interface Props {
 }
 
 type DraftState =
-  | { status: "idle" | "loading" }
-  | { status: "ready"; plan: ApplyPlan; targetConnection: Connection }
-  | { status: "error"; detail: string };
+  { status: "idle" | "loading" } | { status: "ready"; plan: ApplyPlan; targetConnection: Connection } | { status: "error"; detail: string };
 
 function firstSelectableItem(plan: ApplyPlan): string {
   return plan.items[0]?.id ?? "";
@@ -32,7 +30,11 @@ function valueText(value: ApplyPlanValueSnapshot, missingLabel: string): string 
   return value.value ?? value.content ?? "";
 }
 
-function countLabel(t: (key: string, params?: Record<string, string | number>) => string, key: keyof ApplyPlanSummary, count: number): string {
+function countLabel(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: keyof ApplyPlanSummary,
+  count: number
+): string {
   return t(`apply.summary.${key}`, { count });
 }
 
@@ -69,15 +71,7 @@ function PlanLedger({ plan }: { plan: ApplyPlan }) {
   );
 }
 
-function PlanItemList({
-  plan,
-  selectedId,
-  onSelect,
-}: {
-  plan: ApplyPlan;
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
+function PlanItemList({ plan, selectedId, onSelect }: { plan: ApplyPlan; selectedId: string; onSelect: (id: string) => void }) {
   const { t } = useTranslation();
   return (
     <div className="apply-item-list">
@@ -268,8 +262,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       const result = await executeApplyPlan(plan, {
         connections,
         getConfigDocument,
-        publishConfig,
-        deleteConfig,
+        publishConfig: publishConfigFromApplyPlan,
+        deleteConfig: deleteConfigFromApplyPlan,
         createBackupSnapshot: async (configs) => {
           const snapshot = await createSnapshot(
             {

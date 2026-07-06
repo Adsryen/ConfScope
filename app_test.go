@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"confscope/internal/provider"
@@ -144,11 +147,11 @@ func TestConfigCenterMethodsDispatchToRegisteredProvider(t *testing.T) {
 	if doc, err := app.ConfigCenterGetConfig(profile, ref); err != nil || doc.Content != "a: 1" {
 		t.Fatalf("ConfigCenterGetConfig = %+v, %v", doc, err)
 	}
-	if err := app.ConfigCenterPublishConfig(profile, provider.PublishConfigRequest{Ref: ref}); err != nil {
-		t.Fatalf("ConfigCenterPublishConfig returned error: %v", err)
+	if err := app.ConfigCenterPublishConfigFromApplyPlan(profile, provider.PublishConfigRequest{Ref: ref}); err != nil {
+		t.Fatalf("ConfigCenterPublishConfigFromApplyPlan returned error: %v", err)
 	}
-	if err := app.ConfigCenterDeleteConfig(profile, ref); err != nil {
-		t.Fatalf("ConfigCenterDeleteConfig returned error: %v", err)
+	if err := app.ConfigCenterDeleteConfigFromApplyPlan(profile, ref); err != nil {
+		t.Fatalf("ConfigCenterDeleteConfigFromApplyPlan returned error: %v", err)
 	}
 	if history, err := app.ConfigCenterListHistory(profile, ref, provider.PageRequest{PageNo: 1, PageSize: 20}); err != nil || history.TotalCount != 1 {
 		t.Fatalf("ConfigCenterListHistory = %+v, %v", history, err)
@@ -176,6 +179,78 @@ func TestConfigCenterMethodsDispatchToRegisteredProvider(t *testing.T) {
 	for i := range want {
 		if fake.calls[i] != want[i] {
 			t.Fatalf("calls[%d] = %q, want %q; all calls: %#v", i, fake.calls[i], want[i], fake.calls)
+		}
+	}
+}
+
+func TestConfigCenterDirectWriteBindingsRequireApplyPlan(t *testing.T) {
+	app := NewApp()
+	fake := &fakeConfigProvider{}
+	app.providers[provider.ProviderLocal] = fake
+	profile := provider.ConnectionProfile{ID: "local-1", Provider: provider.ProviderLocal}
+	ref := provider.ConfigRef{Provider: provider.ProviderLocal, ConnectionID: "local-1", DataID: "app.yaml"}
+
+	err := app.ConfigCenterPublishConfig(profile, provider.PublishConfigRequest{Ref: ref})
+	if err == nil || !strings.Contains(err.Error(), "ApplyPlan") {
+		t.Fatalf("ConfigCenterPublishConfig error = %v, want ApplyPlan guard", err)
+	}
+	err = app.ConfigCenterDeleteConfig(profile, ref)
+	if err == nil || !strings.Contains(err.Error(), "ApplyPlan") {
+		t.Fatalf("ConfigCenterDeleteConfig error = %v, want ApplyPlan guard", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Fatalf("direct write bindings called provider: %#v", fake.calls)
+	}
+}
+
+func TestNacosDirectWriteBindingsRequireApplyPlan(t *testing.T) {
+	var calls int32
+	server := newAppIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte("true"))
+	}))
+	app := NewApp()
+
+	err := app.NacosPublishConfig(server.URL, "", "v1", "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")
+	if err == nil || !strings.Contains(err.Error(), "ApplyPlan") {
+		t.Fatalf("NacosPublishConfig error = %v, want ApplyPlan guard", err)
+	}
+	err = app.NacosDeleteConfig(server.URL, "", "v1", "public", "app.yaml", "DEFAULT_GROUP")
+	if err == nil || !strings.Contains(err.Error(), "ApplyPlan") {
+		t.Fatalf("NacosDeleteConfig error = %v, want ApplyPlan guard", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("direct write bindings made %d HTTP request(s), want 0", got)
+	}
+}
+
+func TestNacosApplyPlanWriteBindingsReachNacos(t *testing.T) {
+	var mu sync.Mutex
+	methods := []string{}
+	server := newAppIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		methods = append(methods, r.Method)
+		mu.Unlock()
+		_, _ = w.Write([]byte("true"))
+	}))
+	app := NewApp()
+
+	if err := app.NacosPublishConfigFromApplyPlan(server.URL, "", "v1", "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml"); err != nil {
+		t.Fatalf("NacosPublishConfigFromApplyPlan returned error: %v", err)
+	}
+	if err := app.NacosDeleteConfigFromApplyPlan(server.URL, "", "v1", "public", "app.yaml", "DEFAULT_GROUP"); err != nil {
+		t.Fatalf("NacosDeleteConfigFromApplyPlan returned error: %v", err)
+	}
+
+	want := []string{http.MethodPost, http.MethodDelete}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(methods) != len(want) {
+		t.Fatalf("methods = %#v, want %#v", methods, want)
+	}
+	for i := range want {
+		if methods[i] != want[i] {
+			t.Fatalf("methods[%d] = %q, want %q; all methods: %#v", i, methods[i], want[i], methods)
 		}
 	}
 }

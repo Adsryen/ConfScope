@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
 import { Connection } from "../store/connections";
-import { detectFormat, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
@@ -11,7 +10,6 @@ import {
   loadOperationHistory,
   filterOperationHistory,
   isRollbackableOperation,
-  recordOperation,
   rollbackUnavailableReason,
   type OperationRecord,
   type OperationType,
@@ -22,7 +20,7 @@ import {
   saveApplyVerification,
   type ApplyVerification,
 } from "../store/applyVerifications";
-import { getConfig, getConfigDocument, listHistory, publishConfig } from "../api/nacos";
+import { getConfigDocument, listHistory } from "../api/nacos";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
 
@@ -78,8 +76,6 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const [filterType, setFilterType] = useState<OperationType | "">("");
   const [filterDataId, setFilterDataId] = useState("");
   const [selectedRecord, setSelectedRecord] = useState<OperationRecord | null>(null);
-  const [rollbackConfirmId, setRollbackConfirmId] = useState<string | null>(null);
-  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
   const [verifications, setVerifications] = useState<ApplyVerification[]>(() => loadApplyVerifications());
   const [followupBusy, setFollowupBusy] = useState<string | null>(null);
   const [followupError, setFollowupError] = useState<FollowupError | null>(null);
@@ -145,63 +141,6 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const selectedVisibleRecord = selectedRecord && allRecords.some((record) => record.id === selectedRecord.id) ? selectedRecord : null;
   const failedCount = allRecords.filter((record) => record.result === "failure").length;
   const sourceCount = new Set(allRecords.map((record) => record.connectionId)).size;
-
-  const rollbackRecord = async (record: OperationRecord) => {
-    const conn = connections.find((item) => item.id === record.connectionId);
-    const restoreContent = record.beforeContent;
-    if (!conn || typeof restoreContent !== "string") return;
-    if (rollbackConfirmId !== record.id) {
-      setRollbackConfirmId(record.id);
-      return;
-    }
-
-    setRollingBackId(record.id);
-    setError(null);
-    try {
-      const current = await getConfig(conn, record.namespace, record.dataId, record.group).catch(() => record.afterContent ?? "");
-      const configType = record.configType || nacosType(detectFormat(record.dataId, "", restoreContent));
-      await publishConfig(conn, record.namespace, record.dataId, record.group, restoreContent, configType);
-      recordOperation({
-        type: "rollback",
-        result: "success",
-        connectionId: conn.id,
-        connectionName: conn.name,
-        namespace: record.namespace,
-        group: record.group,
-        dataId: record.dataId,
-        beforeContent: current,
-        afterContent: restoreContent,
-        content: restoreContent,
-        previousContent: current,
-        configType,
-        rollbackable: true,
-        resourceId: record.id,
-      });
-      setLocalRecords(loadOperationHistory());
-      setRollbackConfirmId(null);
-      toast(t("operationHistory.rollbackSuccess"), "success");
-    } catch (e) {
-      const message = String(e);
-      recordOperation({
-        type: "rollback",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName: conn.name,
-        namespace: record.namespace,
-        group: record.group,
-        dataId: record.dataId,
-        beforeContent: restoreContent,
-        error: message,
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-      });
-      setLocalRecords(loadOperationHistory());
-      setError(message);
-      reportError({ title: t("operationHistory.rollbackFailed"), source: record.dataId, message, detail: message });
-    } finally {
-      setRollingBackId(null);
-    }
-  };
 
   // 格式化时间
   const setRecordFollowupError = (record: OperationRecord, detail: string) => {
@@ -464,8 +403,6 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
               {(() => {
                 const rollbackable = isRollbackableOperation(selectedVisibleRecord);
                 const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
-                const isRollingBack = rollingBackId === selectedVisibleRecord.id;
-                const isConfirmingRollback = rollbackConfirmId === selectedVisibleRecord.id;
                 const followupRecord = isApplyFollowupRecord(selectedVisibleRecord);
                 const verification = findVerification(verifications, selectedVisibleRecord);
                 const productionTargets = productionTargetsFor(selectedVisibleRecord, verification);
@@ -544,17 +481,6 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                   </div>
                 )}
               </div>
-              {rollbackable && (
-                <div className="history-detail-actions">
-                  <button className="btn btn-primary btn-sm" onClick={() => rollbackRecord(selectedVisibleRecord)} disabled={isRollingBack}>
-                    {isRollingBack
-                      ? t("operationHistory.rollingBack")
-                      : isConfirmingRollback
-                        ? t("operationHistory.confirmRollback")
-                        : t("operationHistory.rollbackThis")}
-                  </button>
-                </div>
-              )}
               {followupRecord && onStartApply && (
                 <div className="history-followup-panel">
                   <div className="history-detail-actions">

@@ -24,7 +24,8 @@
   },
   "api": {
     "localSnapshotPublishReadonly": "本地快照来源只读，不能发布配置",
-    "localSnapshotDeleteReadonly": "本地快照来源只读，不能删除配置"
+    "localSnapshotDeleteReadonly": "本地快照来源只读，不能删除配置",
+    "directWriteRequiresApplyPlan": "直接配置写入已禁用，请先生成并执行 ApplyPlan。"
   },
   "validation": {
     "duplicateKey": "重复的键:{key}",
@@ -726,6 +727,7 @@
     "rollbackDisabled": "此操作已标记为不可回滚",
     "rollbackExportOnly": "导出只生成本地文件，不能回滚",
     "rollbackSnapshotOnly": "快照操作只生成或删除本地备份，不能回滚",
+    "rollbackRequiresApplyPlan": "回滚必须先生成 ApplyPlan dry-run，不能直接发布历史内容。",
     "rollbackApplyRequiresPlan": "应用计划需要生成回退 dry-run，不能直接回滚",
     "generateRollbackPlan": "生成回退计划",
     "markSandboxVerified": "标记沙箱验证通过",

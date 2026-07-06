@@ -4,12 +4,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteConfig,
+  deleteConfigFromApplyPlan,
   getConfig,
   getHistoryDetail,
   listConfigs,
   listHistory,
   listNamespaces,
   publishConfig,
+  publishConfigFromApplyPlan,
   testConnection,
   type ConfigRef,
   type ConnectionProfile,
@@ -21,6 +23,8 @@ const goApp = {
   ConfigCenterGetConfig: vi.fn(),
   ConfigCenterPublishConfig: vi.fn(),
   ConfigCenterDeleteConfig: vi.fn(),
+  ConfigCenterPublishConfigFromApplyPlan: vi.fn(),
+  ConfigCenterDeleteConfigFromApplyPlan: vi.fn(),
   ConfigCenterListHistory: vi.fn(),
   ConfigCenterGetHistoryDetail: vi.fn(),
   ConfigCenterTestConnection: vi.fn(),
@@ -54,6 +58,7 @@ describe("config center api", () => {
 
   beforeEach(() => {
     for (const fn of Object.values(goApp)) fn.mockReset();
+    localStorage.clear();
     vi.stubGlobal("go", {
       main: {
         App: goApp,
@@ -75,13 +80,9 @@ describe("config center api", () => {
   it("passes typed config requests to Wails bindings", async () => {
     goApp.ConfigCenterListConfigs.mockResolvedValue({ totalCount: 1, pageItems: [] });
     goApp.ConfigCenterGetConfig.mockResolvedValue({ ref, content: "a: 1" });
-    goApp.ConfigCenterPublishConfig.mockResolvedValue(undefined);
-    goApp.ConfigCenterDeleteConfig.mockResolvedValue(undefined);
 
     await listConfigs(profile, { namespace: "public", group: "DEFAULT_GROUP", dataId: "app", pageNo: 1, pageSize: 20 });
     await getConfig(profile, ref);
-    await publishConfig(profile, { ref, content: "a: 1", format: "yaml" });
-    await deleteConfig(profile, ref);
 
     expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(profile, {
       namespace: "public",
@@ -91,8 +92,35 @@ describe("config center api", () => {
       pageSize: 20,
     });
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
-    expect(goApp.ConfigCenterPublishConfig).toHaveBeenCalledWith(profile, { ref, content: "a: 1", format: "yaml" });
-    expect(goApp.ConfigCenterDeleteConfig).toHaveBeenCalledWith(profile, ref);
+  });
+
+  it("blocks default direct writes before they can reach Wails bindings", async () => {
+    localStorage.setItem("locale", "en-US");
+
+    await expect(publishConfig(profile, { ref, content: "a: 1", format: "yaml" })).rejects.toThrow(
+      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+    );
+    await expect(deleteConfig(profile, ref)).rejects.toThrow(
+      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+    );
+
+    expect(goApp.ConfigCenterPublishConfig).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterDeleteConfig).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterPublishConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).not.toHaveBeenCalled();
+  });
+
+  it("passes apply-plan config writes to dedicated Wails bindings", async () => {
+    goApp.ConfigCenterPublishConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.ConfigCenterDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
+
+    await publishConfigFromApplyPlan(profile, { ref, content: "a: 1", format: "yaml" });
+    await deleteConfigFromApplyPlan(profile, ref);
+
+    expect(goApp.ConfigCenterPublishConfig).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterDeleteConfig).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterPublishConfigFromApplyPlan).toHaveBeenCalledWith(profile, { ref, content: "a: 1", format: "yaml" });
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(profile, ref);
   });
 
   it("passes typed history requests to Wails bindings", async () => {

@@ -7,10 +7,12 @@ import {
   getConfigDocument,
   getHistoryDetail,
   deleteConfig,
+  deleteConfigFromApplyPlan,
   listConfigs,
   listHistory,
   listNamespaces,
   publishConfig,
+  publishConfigFromApplyPlan,
   testConnection,
 } from "./nacos";
 import type { Connection } from "../store/connections";
@@ -33,6 +35,8 @@ const goApp = {
   NacosHistoryDetail: vi.fn(),
   NacosPublishConfig: vi.fn(),
   NacosDeleteConfig: vi.fn(),
+  NacosPublishConfigFromApplyPlan: vi.fn(),
+  NacosDeleteConfigFromApplyPlan: vi.fn(),
   CreateSSHTunnel: vi.fn(),
   StopSSHTunnel: vi.fn(),
 };
@@ -374,7 +378,49 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(localProfile);
   });
 
-  it("rejects writes to local snapshot sources with localized readonly errors", async () => {
+  it("blocks default direct writes before they can reach Wails bindings", async () => {
+    localStorage.setItem("locale", "en-US");
+    const conn = makeConnection("conn-direct-write");
+
+    await expect(publishConfig(conn, "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).rejects.toThrow(
+      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+    );
+    await expect(deleteConfig(conn, "public", "app.yaml", "DEFAULT_GROUP")).rejects.toThrow(
+      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+    );
+
+    expect(goApp.NacosPublishConfig).not.toHaveBeenCalled();
+    expect(goApp.NacosDeleteConfig).not.toHaveBeenCalled();
+    expect(goApp.NacosPublishConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.NacosDeleteConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterPublishConfig).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterDeleteConfig).not.toHaveBeenCalled();
+  });
+
+  it("keeps apply-plan writes explicit and routed through dedicated Wails bindings", async () => {
+    const conn = makeConnection("conn-apply-write");
+    goApp.NacosPublishConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.NacosDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
+
+    await expect(publishConfigFromApplyPlan(conn, "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).resolves.toBeUndefined();
+    await expect(deleteConfigFromApplyPlan(conn, "public", "app.yaml", "DEFAULT_GROUP")).resolves.toBeUndefined();
+
+    expect(goApp.NacosPublishConfig).not.toHaveBeenCalled();
+    expect(goApp.NacosDeleteConfig).not.toHaveBeenCalled();
+    expect(goApp.NacosPublishConfigFromApplyPlan).toHaveBeenCalledWith(
+      conn.baseUrl,
+      "token-1",
+      "v3",
+      "public",
+      "app.yaml",
+      "DEFAULT_GROUP",
+      "a: 1",
+      "yaml"
+    );
+    expect(goApp.NacosDeleteConfigFromApplyPlan).toHaveBeenCalledWith(conn.baseUrl, "token-1", "v3", "public", "app.yaml", "DEFAULT_GROUP");
+  });
+
+  it("rejects apply-plan writes to local snapshot sources with localized readonly errors", async () => {
     localStorage.setItem("locale", "en-US");
     const conn: Connection = {
       ...makeConnection("conn-local-readonly"),
@@ -385,10 +431,10 @@ describe("nacos api compatibility bridge", () => {
       password: "",
     };
 
-    await expect(publishConfig(conn, "", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).rejects.toThrow(
+    await expect(publishConfigFromApplyPlan(conn, "", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).rejects.toThrow(
       "Local snapshot sources are read-only and cannot publish configs"
     );
-    await expect(deleteConfig(conn, "", "app.yaml", "DEFAULT_GROUP")).rejects.toThrow(
+    await expect(deleteConfigFromApplyPlan(conn, "", "app.yaml", "DEFAULT_GROUP")).rejects.toThrow(
       "Local snapshot sources are read-only and cannot delete configs"
     );
   });

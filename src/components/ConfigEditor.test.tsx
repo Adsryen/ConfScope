@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
@@ -98,68 +98,63 @@ describe("ConfigEditor", () => {
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
-  it("publishes trimmed dataId and default group", async () => {
-    const { onSaved } = renderEditor();
+  it("blocks direct publish before it can reach the API", async () => {
+    const { onSaved } = renderEditor({}, "en-US");
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: " app.yaml " } });
     fireEvent.change(fieldByLabel("Group"), { target: { value: " " } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    await waitFor(() => {
-      expect(apiMocks.publishConfig).toHaveBeenCalledWith(
-        conn,
-        "public",
-        "app.yaml",
-        "DEFAULT_GROUP",
-        "server:\n  port: 8080",
-        "yaml"
-      );
-    });
-    expect(onSaved).toHaveBeenCalledWith("app.yaml", "DEFAULT_GROUP");
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "success",
-      dataId: "app.yaml",
-      afterContent: "server:\n  port: 8080",
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackMissingContent",
-    });
-  });
-
-  it("shows publish errors without closing the editor", async () => {
-    apiMocks.publishConfig.mockRejectedValue(new Error("publish failed"));
-    const { onSaved } = renderEditor();
-
-    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
-    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
-
-    expect(await screen.findByText("Error: publish failed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
-    expect(screen.getByText("新建配置")).toBeInTheDocument();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "publish",
       result: "failure",
       dataId: "app.yaml",
       afterContent: "server:\n  port: 8080",
       rollbackable: false,
-      error: "Error: publish failed",
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
     });
   });
 
-  it("reports publish errors with localized message-center actions", async () => {
-    apiMocks.publishConfig.mockRejectedValue(new Error("publish failed"));
+  it("shows the direct publish block without closing the editor", async () => {
+    const { onSaved } = renderEditor({}, "en-US");
+
+    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.getByText("New Configuration")).toBeInTheDocument();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "failure",
+      dataId: "app.yaml",
+      afterContent: "server:\n  port: 8080",
+      rollbackable: false,
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+    });
+  });
+
+  it("reports direct publish blocks with localized message-center actions", async () => {
     renderEditor({}, "en-US");
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByText("Error: publish failed")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to create config",
+      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
       actionLabel: "Retry Publish",
     });
   });

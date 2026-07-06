@@ -5,11 +5,9 @@ import {
   getHistoryDetail,
   HistoryItem,
   listHistory,
-  publishConfig,
 } from "../api/nacos";
 import { Format, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
-import { toast } from "../lib/toast";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
 import CodeView from "./CodeView";
@@ -47,7 +45,6 @@ export default function HistoryView({
   group,
   currentContent,
   format,
-  onRolledBack,
 }: Props) {
   const { t } = useTranslation();
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -166,10 +163,10 @@ export default function HistoryView({
       const text = await ensureContent(targetVersion);
       targetContent = text;
       const configType = nacosType(format);
-      await publishConfig(conn, tenant, dataId, group, text, configType);
+      const message = t("api.directWriteRequiresApplyPlan");
       recordOperation({
         type: "rollback",
-        result: "success",
+        result: "failure",
         connectionId: conn.id,
         connectionName: conn.name || connectionDisplayLabel(conn),
         namespace: tenant || "public",
@@ -180,14 +177,21 @@ export default function HistoryView({
         beforeContent: currentContent,
         afterContent: text,
         configType,
-        rollbackable: true,
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
         resourceId: targetVersion,
+        error: message,
       });
+      setError(message);
       setRbConfirm(false);
-      setViewing(null);
-      toast(t('history.rollbackSuccess', { n: targetVersion }));
-      onRolledBack();
-      loadHistory(1);
+      reportError({
+        title: t("history.rollbackConfigFailed"),
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: t("history.retryRollback"),
+        onAction: () => rollback(),
+      });
     } catch (e) {
       const message = String(e);
       recordOperation({

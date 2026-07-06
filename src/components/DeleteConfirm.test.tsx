@@ -77,7 +77,7 @@ describe("DeleteConfirm", () => {
     fireEvent.change(screen.getByPlaceholderText("app.json"), { target: { value: "app.json" } });
     fireEvent.keyDown(screen.getByPlaceholderText("app.json"), { key: "Enter" });
 
-    expect(await screen.findByText("Error: delete denied")).toBeInTheDocument();
+    expect(await screen.findByText("delete denied")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
   });
@@ -90,9 +90,10 @@ describe("DeleteConfirm", () => {
     fireEvent.change(screen.getByPlaceholderText("app.json"), { target: { value: "app.json" } });
     fireEvent.keyDown(screen.getByPlaceholderText("app.json"), { key: "Enter" });
 
-    expect(await screen.findByText("Error: delete denied")).toBeInTheDocument();
+    expect(await screen.findByText("delete denied")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Failed to delete config",
+      message: "delete denied",
       actionLabel: "Retry Delete",
     });
   });

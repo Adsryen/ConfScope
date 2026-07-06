@@ -20,6 +20,7 @@ import (
 var appVersion = "dev"
 
 var errUnsupportedProvider = errors.New("unsupported config center provider")
+var errDirectWriteRequiresApplyPlan = errors.New("直接配置写入已禁用，请先生成并执行 ApplyPlan")
 
 type AppInfo struct {
 	Name          string               `json:"name"`
@@ -89,6 +90,10 @@ func (a *App) ConfigCenterGetConfig(profile provider.ConnectionProfile, ref prov
 }
 
 func (a *App) ConfigCenterPublishConfig(profile provider.ConnectionProfile, req provider.PublishConfigRequest) error {
+	return errDirectWriteRequiresApplyPlan
+}
+
+func (a *App) ConfigCenterPublishConfigFromApplyPlan(profile provider.ConnectionProfile, req provider.PublishConfigRequest) error {
 	p, err := a.providerFor(profile.Provider)
 	if err != nil {
 		return err
@@ -97,6 +102,10 @@ func (a *App) ConfigCenterPublishConfig(profile provider.ConnectionProfile, req 
 }
 
 func (a *App) ConfigCenterDeleteConfig(profile provider.ConnectionProfile, ref provider.ConfigRef) error {
+	return errDirectWriteRequiresApplyPlan
+}
+
+func (a *App) ConfigCenterDeleteConfigFromApplyPlan(profile provider.ConnectionProfile, ref provider.ConfigRef) error {
 	p, err := a.providerFor(profile.Provider)
 	if err != nil {
 		return err
@@ -307,11 +316,37 @@ func (a *App) NacosPublishConfig(
 	content string,
 	configType string,
 ) error {
+	return errDirectWriteRequiresApplyPlan
+}
+
+// NacosPublishConfigFromApplyPlan 从 ApplyPlan 执行链路发布或更新指定配置。
+func (a *App) NacosPublishConfigFromApplyPlan(
+	baseUrl string,
+	accessToken string,
+	apiVersion string,
+	namespace string,
+	dataId string,
+	group string,
+	content string,
+	configType string,
+) error {
 	return a.nacos.PublishConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
 }
 
 // NacosDeleteConfig 删除指定配置。
 func (a *App) NacosDeleteConfig(
+	baseUrl string,
+	accessToken string,
+	apiVersion string,
+	namespace string,
+	dataId string,
+	group string,
+) error {
+	return errDirectWriteRequiresApplyPlan
+}
+
+// NacosDeleteConfigFromApplyPlan 从 ApplyPlan 执行链路删除指定配置。
+func (a *App) NacosDeleteConfigFromApplyPlan(
 	baseUrl string,
 	accessToken string,
 	apiVersion string,
