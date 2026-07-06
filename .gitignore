@@ -53,6 +53,7 @@ playwright-report/
 .history/
 
 # Temp files
+.tmp/
 *.tmp
 *.temp
 
