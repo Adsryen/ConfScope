@@ -14,7 +14,7 @@ import {
 import { loadSettings } from "../store/settings";
 import { useTranslation } from "../i18n";
 import { exportDiff, type DiffItem } from "../lib/export";
-import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryItem, type ApplyEntryPayload } from "../lib/applyEntry";
+import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryItem, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import Combobox from "./Combobox";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
@@ -195,7 +195,7 @@ function applyEntryEndpointFromSource(source: Source, connections: Connection[])
   };
 }
 
-function applyEntryItemFromSource(source: Source, connections: Connection[], dataId: string, group: string): ApplyEntryItem | null {
+function applyEntryItemFromSource(source: Source, connections: Connection[], dataId: string, group: string): ApplyEntryRef | null {
   const conn = connections.find((item) => item.id === source.connId);
   if (!conn) return null;
   return {
@@ -969,8 +969,14 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     if (!ready || !onStartApply) return;
     const source = applyEntryEndpointFromSource(left, connections);
     const target = applyEntryEndpointFromSource(right, connections);
-    const item = applyEntryItemFromSource(right, connections, right.dataId.trim(), right.group);
-    if (!source || !target || !item) return;
+    const sourceRef = applyEntryItemFromSource(left, connections, left.dataId.trim(), left.group);
+    const targetRef = applyEntryItemFromSource(right, connections, right.dataId.trim(), right.group);
+    if (!source || !target || !sourceRef || !targetRef) return;
+    const item: ApplyEntryItem = {
+      ...targetRef,
+      sourceRef,
+      targetRef,
+    };
 
     onStartApply({
       sourceType: "diff",
@@ -994,7 +1000,17 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
 
     const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));
     const items = batchResults
-      .map((item) => applyEntryItemFromSource(right, connections, item.dataId, matchByDataId.get(item.dataId)?.rightGroup ?? right.group))
+      .map((item): ApplyEntryItem | null => {
+        const match = matchByDataId.get(item.dataId);
+        const sourceRef = applyEntryItemFromSource(left, connections, item.dataId, match?.leftGroup ?? left.group);
+        const targetRef = applyEntryItemFromSource(right, connections, item.dataId, match?.rightGroup ?? right.group);
+        if (!sourceRef || !targetRef) return null;
+        return {
+          ...targetRef,
+          sourceRef,
+          targetRef,
+        };
+      })
       .filter((item): item is ApplyEntryItem => item !== null);
     if (items.length === 0) return;
 

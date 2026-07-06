@@ -6,7 +6,7 @@ import { snapshotConnectionId, snapshotNamespaceForDiff } from "../lib/snapshotC
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { recordOperation } from "../store/operationHistory";
-import { applyEntryRiskSummary, type ApplyEntryPayload } from "../lib/applyEntry";
+import { applyEntryRiskSummary, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 
@@ -40,13 +40,26 @@ function snapshotSourceLabel(snapshot: Pick<Snapshot, "source">): string {
 function buildBackupApplyPayload(snapshot: Snapshot, config: ConfigSnapshot): ApplyEntryPayload {
   const namespace = snapshotNamespaceForDiff(snapshot);
   const displayNamespace = snapshotSourceNamespace(snapshot);
-  const item = {
-    provider: "nacos" as const,
+  const sourceRef: ApplyEntryRef = {
+    provider: "local",
+    connectionId: snapshotConnectionId(snapshot.id),
+    namespace,
+    group: config.group || "DEFAULT_GROUP",
+    dataId: config.dataId,
+    key: DOCUMENT_KEY,
+  };
+  const targetRef: ApplyEntryRef = {
+    provider: "nacos",
     connectionId: snapshot.source.connectionId,
     namespace,
     group: config.group || "DEFAULT_GROUP",
     dataId: config.dataId,
     key: DOCUMENT_KEY,
+  };
+  const item = {
+    ...targetRef,
+    sourceRef,
+    targetRef,
   };
 
   return {

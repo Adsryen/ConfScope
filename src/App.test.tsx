@@ -25,6 +25,10 @@ const viewMocks = vi.hoisted(() => ({
     connections: Connection[];
     initialParams: DiffJumpParams | null;
   }>,
+  applyProps: [] as Array<{
+    entry: ApplyEntryPayload | null;
+    connections: Connection[];
+  }>,
   makeApplyPayload: (mode: "audit" | "diff" | "backup"): ApplyEntryPayload => ({
     sourceType: mode,
     scope: mode === "audit" ? "key" : "config",
@@ -106,6 +110,29 @@ vi.mock("./components/AuditView", () => ({
   ),
 }));
 vi.mock("./components/OperationHistoryView", () => ({ default: () => <div data-testid="history" /> }));
+vi.mock("./components/ApplyPlanView", () => ({
+  default: ({
+    entry,
+    connections,
+    onBack,
+  }: {
+    entry: ApplyEntryPayload | null;
+    connections: Connection[];
+    onBack: () => void;
+  }) => {
+    viewMocks.applyProps.push({ entry, connections });
+    return (
+      <section aria-label="apply-plan-workbench">
+        <h3>Apply Plan Workbench</h3>
+        <div>{entry?.source.label}</div>
+        <div>{entry?.target.label}</div>
+        <button type="button" onClick={onBack}>
+          Mock ApplyPlanView back
+        </button>
+      </section>
+    );
+  },
+}));
 
 vi.mock("./components/BackupView", () => ({
   default: ({
@@ -255,6 +282,7 @@ describe("App", () => {
       })
     );
     viewMocks.diffProps.length = 0;
+    viewMocks.applyProps.length = 0;
     apiMocks.listNamespaces.mockResolvedValue([]);
     apiMocks.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.3.0", updateSources: [] });
     apiMocks.checkForUpdates.mockResolvedValue({ hasUpdate: false, latestVersion: "", releaseNotes: "" });
@@ -456,10 +484,10 @@ describe("App", () => {
   });
 
   it.each([
-    { mode: "backup", buttonName: "Mock backup apply", returnName: "Back to Backups" },
-    { mode: "audit", buttonName: "Mock audit apply", returnName: "Back to Config Matrix" },
-    { mode: "diff", buttonName: "Mock diff apply", returnName: "Back to Config Compare" },
-  ] as const)("enters the apply placeholder flow from $mode", async ({ mode, buttonName, returnName }) => {
+    { mode: "backup", buttonName: "Mock backup apply" },
+    { mode: "audit", buttonName: "Mock audit apply" },
+    { mode: "diff", buttonName: "Mock diff apply" },
+  ] as const)("enters ApplyPlanView from $mode", async ({ mode, buttonName }) => {
     localStorage.setItem("cs.ui", JSON.stringify({ mode, connId: "conn-1" }));
 
     render(
@@ -470,15 +498,18 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: buttonName }));
 
-    expect(screen.getByRole("heading", { name: "Apply Plan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Apply Plan Workbench" })).toBeInTheDocument();
     expect(screen.getByText("entry-source / public")).toBeInTheDocument();
     expect(screen.getByText("entry-target / public")).toBeInTheDocument();
-    expect(screen.getByText("Selected configs: 1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: returnName })).toBeInTheDocument();
+    expect(screen.queryByText("Plan preview placeholder")).not.toBeInTheDocument();
+    expect(viewMocks.applyProps[viewMocks.applyProps.length - 1]).toMatchObject({
+      entry: expect.objectContaining({ sourceType: mode }),
+      connections: expect.arrayContaining([expect.objectContaining({ id: "conn-1" })]),
+    });
     expect(screen.queryByRole("button", { name: /Execute|Publish|Delete|Apply Now/i })).not.toBeInTheDocument();
   });
 
-  it("returns from the apply placeholder flow to the originating entry", async () => {
+  it("returns from ApplyPlanView to the originating entry", async () => {
     render(
       <I18nProvider>
         <App />
@@ -486,7 +517,7 @@ describe("App", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Mock backup apply" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back to Backups" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mock ApplyPlanView back" }));
 
     expect(screen.getByRole("button", { name: "Mock backup apply" })).toBeInTheDocument();
   });

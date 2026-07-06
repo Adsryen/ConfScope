@@ -217,6 +217,22 @@ describe("BackupView", () => {
           group: "DEFAULT_GROUP",
           dataId: "app.yaml",
           key: "__document",
+          sourceRef: {
+            provider: "local",
+            connectionId: "snapshot:snap-1",
+            namespace: "",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            key: "__document",
+          },
+          targetRef: {
+            provider: "nacos",
+            connectionId: "conn-1",
+            namespace: "",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            key: "__document",
+          },
         },
       ],
       rangeSummary: {

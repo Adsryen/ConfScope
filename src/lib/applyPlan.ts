@@ -46,6 +46,8 @@ export type ApplyPlanValueInput = Omit<ApplyPlanValueSnapshot, "fingerprint"> & 
 export interface ApplyPlanItem {
   id: string;
   ref: ApplyPlanRef;
+  sourceRef?: ApplyPlanRef;
+  targetRef?: ApplyPlanRef;
   sourceValue: ApplyPlanValueSnapshot;
   targetValue: ApplyPlanValueSnapshot;
   afterValue: ApplyPlanValueSnapshot;
@@ -89,6 +91,8 @@ export interface ApplyPlan {
 
 export interface BuildApplyPlanItemInput {
   ref: ApplyPlanRef;
+  sourceRef?: ApplyPlanRef;
+  targetRef?: ApplyPlanRef;
   sourceValue: ApplyPlanValueInput;
   targetValue: ApplyPlanValueInput;
   intent?: ApplyPlanIntent;
@@ -154,6 +158,10 @@ function valueForFingerprint(value: ApplyPlanValueInput): Record<string, string 
   };
 }
 
+function comparableValueFingerprint(value: ApplyPlanValueSnapshot): string {
+  return JSON.stringify(valueForFingerprint(value));
+}
+
 export function fingerprintApplyPlanValue(ref: ApplyPlanRef, value: Omit<ApplyPlanValueSnapshot, "fingerprint">): string {
   return JSON.stringify({
     provider: ref.provider,
@@ -197,7 +205,9 @@ function classify(source: ApplyPlanValueSnapshot, target: ApplyPlanValueSnapshot
   if (intent === "delete") return { action: target.exists ? "delete" : "skip", blocked: false };
   if (source.exists && !target.exists) return { action: "create", blocked: false };
   if (!source.exists && target.exists) return { action: "delete", blocked: false };
-  if (source.exists && target.exists && source.fingerprint !== target.fingerprint) return { action: "overwrite", blocked: false };
+  if (source.exists && target.exists && comparableValueFingerprint(source) !== comparableValueFingerprint(target)) {
+    return { action: "overwrite", blocked: false };
+  }
   return { action: "skip", blocked: false };
 }
 
@@ -243,13 +253,17 @@ function summarize(items: ApplyPlanItem[]): ApplyPlanSummary {
 
 export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
   const items = input.items.map((item) => {
-    const sourceValue = snapshotValue(item.ref, item.sourceValue);
-    const targetValue = snapshotValue(item.ref, item.targetValue);
+    const sourceRef = item.sourceRef ?? item.ref;
+    const targetRef = item.targetRef ?? item.ref;
+    const sourceValue = snapshotValue(sourceRef, item.sourceValue);
+    const targetValue = snapshotValue(targetRef, item.targetValue);
     const classified = classify(sourceValue, targetValue, item.intent ?? "sync");
-    const afterValue = afterValueFor(item.ref, classified.action, sourceValue, targetValue);
+    const afterValue = afterValueFor(targetRef, classified.action, sourceValue, targetValue);
     return {
-      id: itemId(item.ref),
-      ref: item.ref,
+      id: itemId(targetRef),
+      ref: targetRef,
+      ...(item.sourceRef ? { sourceRef } : {}),
+      ...(item.targetRef ? { targetRef } : {}),
       sourceValue,
       targetValue,
       afterValue,
@@ -437,6 +451,8 @@ function parseItem(value: unknown): ApplyPlanItem | null {
   if (!isRecord(value)) return null;
   const id = stringValue(value.id);
   const ref = parseRef(value.ref);
+  const sourceRef = value.sourceRef === undefined ? undefined : parseRef(value.sourceRef);
+  const targetRef = value.targetRef === undefined ? undefined : parseRef(value.targetRef);
   const sourceValue = parseValueSnapshot(value.sourceValue);
   const targetValue = parseValueSnapshot(value.targetValue);
   const afterValue = parseValueSnapshot(value.afterValue);
@@ -447,6 +463,8 @@ function parseItem(value: unknown): ApplyPlanItem | null {
   if (
     !id ||
     !ref ||
+    (value.sourceRef !== undefined && !sourceRef) ||
+    (value.targetRef !== undefined && !targetRef) ||
     !sourceValue ||
     !targetValue ||
     !afterValue ||
@@ -460,6 +478,8 @@ function parseItem(value: unknown): ApplyPlanItem | null {
   return {
     id,
     ref,
+    ...(sourceRef ? { sourceRef } : {}),
+    ...(targetRef ? { targetRef } : {}),
     sourceValue,
     targetValue,
     afterValue,
