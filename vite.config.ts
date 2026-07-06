@@ -13,6 +13,6 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, "e2e/**", "tests/smoke/specs/**"],
+    exclude: [...configDefaults.exclude, "e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", ".tmp/**"],
   },
 });

@@ -42,6 +42,8 @@ type App struct {
 	downloadProgress updatecheck.DownloadProgress
 	downloadErr      string
 	downloadedFile   string
+
+	nativeSmokeControl *nativeSmokeControl
 }
 
 // NewApp 创建应用服务实例。
@@ -230,10 +232,12 @@ func (a *App) ValidateLocalSnapshotDirectory(path string) provider.LocalSnapshot
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startNativeSmokeControl(ctx)
 }
 
 // shutdown 停止所有 SSH 隧道。
 func (a *App) shutdown(ctx context.Context) {
+	a.stopNativeSmokeControl()
 	a.sshMgr.StopAll()
 }
 
