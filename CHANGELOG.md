@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-06
+
+### Fixed
+- 修复默认 Nacos 命名空间在 ApplyPlan 入口中被内部改写为 `public`，导致真实 Nacos 写入后读回不一致的问题。
+- 修复 Nacos v1/v3 默认命名空间请求发送空 `tenant` / `namespaceId` 参数的风险。
+
+### Engineering
+- 新增 Docker Nacos 真实集成测试，覆盖直写拦截、沙箱应用、生产晋级、回退、历史读取和删除。
+- 补齐 Diff/Audit ApplyEntry 与 Nacos 请求参数的默认命名空间回归测试。
+
 ## [1.4.0] - 2026-07-06
 
 ### Added

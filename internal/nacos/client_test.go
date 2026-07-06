@@ -326,6 +326,125 @@ func TestPublishConfigUsesV1FormAndRequiresTrueResponse(t *testing.T) {
 	}
 }
 
+func TestV1DefaultNamespaceOmitsTenantParameter(t *testing.T) {
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.URL.Query()["tenant"]; ok {
+			t.Fatalf("%s query includes tenant for default namespace: %s", r.Method, r.URL.RawQuery)
+		}
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/v1/cs/configs":
+				if r.URL.Query().Get("search") == "blur" {
+					_, _ = w.Write([]byte(`{"totalCount":1,"pageNumber":1,"pagesAvailable":1,"pageItems":[{"dataId":"app.yaml","group":"DEFAULT_GROUP","content":"a: 1","type":"yaml"}]}`))
+					return
+				}
+				_, _ = w.Write([]byte("plain: true"))
+			case "/v1/cs/history":
+				if r.URL.Query().Get("nid") != "" {
+					_, _ = w.Write([]byte(`{"id":"42","dataId":"app.yaml","group":"DEFAULT_GROUP","content":"a: 1","opType":"I","createdTime":"2024-01-01","lastModifiedTime":"2024-01-02"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"totalCount":1,"pageNumber":1,"pagesAvailable":1,"pageItems":[{"id":"42","dataId":"app.yaml","group":"DEFAULT_GROUP","opType":"I","lastModifiedTime":"2024-01-02"}]}`))
+			default:
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if _, ok := r.PostForm["tenant"]; ok {
+				t.Fatalf("POST form includes tenant for default namespace: %v", r.PostForm)
+			}
+			_, _ = w.Write([]byte("true"))
+		case http.MethodDelete:
+			if _, ok := r.URL.Query()["tenant"]; ok {
+				t.Fatalf("DELETE query includes tenant for default namespace: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte("true"))
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+
+	client := NewClient()
+	if _, err := client.ListConfigs(server.URL, "", "v1", "", "app", "DEFAULT_GROUP", 1, 20); err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
+	}
+	if err := client.PublishConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml"); err != nil {
+		t.Fatalf("PublishConfig returned error: %v", err)
+	}
+	if _, err := client.GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP"); err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if _, err := client.HistoryList(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP", 1, 20); err != nil {
+		t.Fatalf("HistoryList returned error: %v", err)
+	}
+	if _, err := client.HistoryDetail(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP", "42"); err != nil {
+		t.Fatalf("HistoryDetail returned error: %v", err)
+	}
+	if err := client.DeleteConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP"); err != nil {
+		t.Fatalf("DeleteConfig returned error: %v", err)
+	}
+}
+
+func TestV3DefaultNamespaceOmitsNamespaceIDParameter(t *testing.T) {
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.URL.Query()["namespaceId"]; ok {
+			t.Fatalf("%s query includes namespaceId for default namespace: %s", r.Method, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			switch r.URL.Path {
+			case "/v3/console/cs/config/list":
+				_, _ = w.Write([]byte(`{"code":0,"data":{"totalCount":1,"pageNumber":1,"pagesAvailable":1,"pageItems":[{"dataId":"app.yaml","groupName":"DEFAULT_GROUP","content":"a: 1","type":"yaml"}]}}`))
+			case "/v3/console/cs/config":
+				_, _ = w.Write([]byte(`{"code":0,"data":{"content":"plain: true"}}`))
+			case "/v3/console/cs/history/list":
+				_, _ = w.Write([]byte(`{"code":0,"data":{"totalCount":1,"pageNumber":1,"pagesAvailable":1,"pageItems":[{"id":"42","dataId":"app.yaml","groupName":"DEFAULT_GROUP","opType":"I","modifyTime":"2024-01-02"}]}}`))
+			case "/v3/console/cs/history":
+				_, _ = w.Write([]byte(`{"code":0,"data":{"id":"42","dataId":"app.yaml","groupName":"DEFAULT_GROUP","content":"a: 1","opType":"I","createTime":"2024-01-01","modifyTime":"2024-01-02"}}`))
+			default:
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if _, ok := r.PostForm["namespaceId"]; ok {
+				t.Fatalf("POST form includes namespaceId for default namespace: %v", r.PostForm)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":true}`))
+		case http.MethodDelete:
+			_, _ = w.Write([]byte(`{"code":0,"data":true}`))
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+
+	client := NewClient()
+	if _, err := client.ListConfigs(server.URL, "", "v3", "", "app", "DEFAULT_GROUP", 1, 20); err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
+	}
+	if err := client.PublishConfig(server.URL, "", "v3", "", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml"); err != nil {
+		t.Fatalf("PublishConfig returned error: %v", err)
+	}
+	if _, err := client.GetConfig(server.URL, "", "v3", "", "app.yaml", "DEFAULT_GROUP"); err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if _, err := client.HistoryList(server.URL, "", "v3", "", "app.yaml", "DEFAULT_GROUP", 1, 20); err != nil {
+		t.Fatalf("HistoryList returned error: %v", err)
+	}
+	if _, err := client.HistoryDetail(server.URL, "", "v3", "", "app.yaml", "DEFAULT_GROUP", "42"); err != nil {
+		t.Fatalf("HistoryDetail returned error: %v", err)
+	}
+	if err := client.DeleteConfig(server.URL, "", "v3", "", "app.yaml", "DEFAULT_GROUP"); err != nil {
+		t.Fatalf("DeleteConfig returned error: %v", err)
+	}
+}
+
 func TestPublishConfigReturnsV3BusinessError(t *testing.T) {
 	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v3/console/cs/config" {
