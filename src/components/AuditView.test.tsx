@@ -306,6 +306,48 @@ describe("AuditView", () => {
     });
   });
 
+  it("keeps default Nacos namespace empty inside audit apply entries while labeling it as public", async () => {
+    const onStartApply = vi.fn();
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development", sourceName: "lan", defaultNamespace: "" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production", sourceName: "cloud", defaultNamespace: "" }),
+    ];
+
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig
+      .mockResolvedValueOnce("server:\n  port: 8080")
+      .mockResolvedValueOnce("server:\n  port: 9090");
+
+    render(<AuditView connections={conns} onStartApply={onStartApply} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    fireEvent.click(await screen.findByText("server.port"));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({
+          namespace: "",
+          label: "Development / dev / public",
+        }),
+        target: expect.objectContaining({
+          namespace: "",
+          label: "Production / prod / public",
+        }),
+        items: [
+          expect.objectContaining({
+            namespace: "",
+            sourceRef: expect.objectContaining({ namespace: "" }),
+            targetRef: expect.objectContaining({ namespace: "" }),
+          }),
+        ],
+      })
+    );
+  });
+
   it("preserves original source and target refs when normalized dataIds differ", async () => {
     const onStartApply = vi.fn();
     const conns = [

@@ -35,6 +35,12 @@ func requestURL(baseURL, path string, query url.Values) string {
 	return reqURL
 }
 
+func setNonEmpty(values url.Values, key string, value string) {
+	if value != "" {
+		values.Set(key, value)
+	}
+}
+
 func shouldRetryWithNacosContext(baseURL, path string, statusCode int) bool {
 	if statusCode != http.StatusNotFound || strings.HasPrefix(path, "/nacos/") {
 		return false

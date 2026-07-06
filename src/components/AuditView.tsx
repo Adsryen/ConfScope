@@ -78,7 +78,7 @@ function applyEntryEndpoint(env: EnvSource): ApplyEntryEndpoint {
     provider: env.conn.provider ?? "nacos",
     connectionId: env.conn.id,
     connectionName: env.conn.name || env.conn.sourceName || env.conn.id,
-    namespace: env.namespace || "public",
+    namespace: env.namespace,
     label: envLabel(env),
   };
 }
@@ -247,7 +247,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     const sourceRef: ApplyEntryRef = {
       provider: baselineEnv.conn.provider ?? "nacos",
       connectionId: baselineEnv.conn.id,
-      namespace: baselineEnv.namespace || selectedRow.namespace || "public",
+      namespace: baselineEnv.namespace || selectedRow.namespace,
       group: selectedRow.group,
       dataId: selectedRow.originalDataIds[baseline] ?? selectedRow.dataId,
       key: selectedRow.key,
@@ -255,7 +255,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     const targetRef: ApplyEntryRef = {
       provider: targetEnv.conn.provider ?? "nacos",
       connectionId: targetEnv.conn.id,
-      namespace: targetEnv.namespace || selectedRow.namespace || "public",
+      namespace: targetEnv.namespace || selectedRow.namespace,
       group: selectedRow.group,
       dataId: selectedRow.originalDataIds[targetEnvId] ?? selectedRow.dataId,
       key: selectedRow.key,
@@ -365,7 +365,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               envId: envKey(env),
               label: envLabel(env),
               providerType: env.conn.provider ?? "nacos",
-              namespace: env.namespace || "public",
+              namespace: env.namespace,
               group: env.group || "DEFAULT_GROUP",
               dataId: item.dataId,
               entries: item.entries,

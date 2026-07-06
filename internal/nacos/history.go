@@ -17,11 +17,11 @@ func (c *Client) HistoryList(baseURL, accessToken, apiVersion, namespace, dataID
 	if version == apiV3 {
 		path = "/v3/console/cs/history/list"
 		query.Set("groupName", group)
-		query.Set("namespaceId", namespace)
+		setNonEmpty(query, "namespaceId", namespace)
 	} else {
 		query.Set("search", "accurate")
 		query.Set("group", group)
-		query.Set("tenant", namespace)
+		setNonEmpty(query, "tenant", namespace)
 	}
 
 	data, err := c.getJSON(baseURL, path, query, accessToken, version)
@@ -58,10 +58,10 @@ func (c *Client) HistoryDetail(baseURL, accessToken, apiVersion, namespace, data
 	if version == apiV3 {
 		path = "/v3/console/cs/history"
 		query.Set("groupName", group)
-		query.Set("namespaceId", namespace)
+		setNonEmpty(query, "namespaceId", namespace)
 	} else {
 		query.Set("group", group)
-		query.Set("tenant", namespace)
+		setNonEmpty(query, "tenant", namespace)
 	}
 
 	data, err := c.getJSON(baseURL, path, query, accessToken, version)

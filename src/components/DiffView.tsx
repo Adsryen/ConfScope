@@ -185,13 +185,14 @@ function sourceSummary(source: Source, connections: Connection[], autoMatch: str
 function applyEntryEndpointFromSource(source: Source, connections: Connection[]): ApplyEntryEndpoint | null {
   const conn = connections.find((item) => item.id === source.connId);
   if (!conn) return null;
-  const namespace = source.tenant || "public";
+  const namespace = source.tenant;
+  const namespaceLabel = namespace || "public";
   return {
     provider: conn.provider ?? "nacos",
     connectionId: conn.id,
     connectionName: conn.name || conn.sourceName || conn.id,
     namespace,
-    label: `${connectionDisplayLabel(conn)} / ${namespace}`,
+    label: `${connectionDisplayLabel(conn)} / ${namespaceLabel}`,
   };
 }
 
@@ -201,7 +202,7 @@ function applyEntryItemFromSource(source: Source, connections: Connection[], dat
   return {
     provider: conn.provider ?? "nacos",
     connectionId: conn.id,
-    namespace: source.tenant || "public",
+    namespace: source.tenant,
     group: group.trim() || "DEFAULT_GROUP",
     dataId,
     key: DOCUMENT_KEY,

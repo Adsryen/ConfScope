@@ -554,6 +554,58 @@ describe("DiffView", () => {
     });
   });
 
+  it("keeps default Nacos namespace empty inside apply entries while labeling it as public", async () => {
+    const onStartApply = vi.fn();
+    const leftDefaultConn = { ...leftApplyConn, defaultNamespace: "" };
+    const rightDefaultConn = { ...rightApplyConn, defaultNamespace: "" };
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftDefaultConn, rightDefaultConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "",
+            group: "DEFAULT_GROUP",
+            dataId: "app.yaml",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByText("8080")).toBeInTheDocument();
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+
+    expect(onStartApply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({
+          namespace: "",
+          label: "Order / Development / LAN / public",
+        }),
+        target: expect.objectContaining({
+          namespace: "",
+          label: "Order / Production / Cloud / public",
+        }),
+        items: [
+          expect.objectContaining({
+            namespace: "",
+            sourceRef: expect.objectContaining({ namespace: "" }),
+            targetRef: expect.objectContaining({ namespace: "" }),
+          }),
+        ],
+      })
+    );
+  });
+
   it("starts a batch apply plan for selected smart-match results", async () => {
     const onStartApply = vi.fn();
     apiMocks.listConfigs.mockResolvedValue({

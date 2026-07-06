@@ -23,10 +23,10 @@ func (c *Client) ListConfigs(baseURL, accessToken, apiVersion, namespace, dataID
 	if version == apiV3 {
 		path = "/v3/console/cs/config/list"
 		query.Set("groupName", group)
-		query.Set("namespaceId", namespace)
+		setNonEmpty(query, "namespaceId", namespace)
 	} else {
 		query.Set("group", group)
-		query.Set("tenant", namespace)
+		setNonEmpty(query, "tenant", namespace)
 	}
 
 	data, err := c.getJSON(baseURL, path, query, accessToken, version)
@@ -60,7 +60,7 @@ func (c *Client) GetConfig(baseURL, accessToken, apiVersion, namespace, dataID, 
 	query.Set("dataId", dataID)
 	if version == apiV3 {
 		query.Set("groupName", group)
-		query.Set("namespaceId", namespace)
+		setNonEmpty(query, "namespaceId", namespace)
 		data, err := c.getJSON(baseURL, "/v3/console/cs/config", query, accessToken, version)
 		if err != nil {
 			return "", err
@@ -68,7 +68,7 @@ func (c *Client) GetConfig(baseURL, accessToken, apiVersion, namespace, dataID, 
 		return s(asObject(data), "content"), nil
 	}
 	query.Set("group", group)
-	query.Set("tenant", namespace)
+	setNonEmpty(query, "tenant", namespace)
 	return c.getText(baseURL, "/v1/cs/configs", query, accessToken, version)
 }
 
@@ -86,10 +86,10 @@ func (c *Client) PublishConfig(baseURL, accessToken, apiVersion, namespace, data
 	if version == apiV3 {
 		path = "/v3/console/cs/config"
 		form.Set("groupName", group)
-		form.Set("namespaceId", namespace)
+		setNonEmpty(form, "namespaceId", namespace)
 	} else {
 		form.Set("group", group)
-		form.Set("tenant", namespace)
+		setNonEmpty(form, "tenant", namespace)
 	}
 
 	text, err := c.sendForm(http.MethodPost, baseURL, path, url.Values{}, form, accessToken, version)
@@ -124,10 +124,10 @@ func (c *Client) DeleteConfig(baseURL, accessToken, apiVersion, namespace, dataI
 	if version == apiV3 {
 		path = "/v3/console/cs/config"
 		query.Set("groupName", group)
-		query.Set("namespaceId", namespace)
+		setNonEmpty(query, "namespaceId", namespace)
 	} else {
 		query.Set("group", group)
-		query.Set("tenant", namespace)
+		setNonEmpty(query, "tenant", namespace)
 	}
 
 	text, err := c.sendForm(http.MethodDelete, baseURL, path, query, nil, accessToken, version)
