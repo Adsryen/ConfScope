@@ -122,6 +122,19 @@ const safeTargetConn: Connection = {
   baseUrl: "http://stage.example.com/nacos",
 };
 
+const snapshotSourceConn: Connection = {
+  ...sourceConn,
+  id: "snapshot:snap-before-1",
+  name: "before apply",
+  sourceName: "before apply",
+  sourceType: "local-snapshot",
+  provider: "local",
+  authType: "none",
+  baseUrl: "C:\\snapshots\\snap-before-1",
+  localPath: "C:\\snapshots\\snap-before-1",
+  readonly: true,
+};
+
 const entryPayload: ApplyEntryPayload = {
   sourceType: "diff",
   scope: "config",
@@ -452,6 +465,70 @@ describe("ApplyPlanView", () => {
         namespaceId: "public",
       }),
       backupConfigs
+    );
+  });
+
+  it("includes resolved runtime source connections when executing rollback plans", async () => {
+    const targetRef = {
+      provider: "nacos" as const,
+      connectionId: safeTargetConn.id,
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "app.properties",
+      key: "__document",
+    };
+    const sourceRef = {
+      ...targetRef,
+      provider: "local" as const,
+      connectionId: snapshotSourceConn.id,
+    };
+    const plan = buildApplyPlan({
+      id: "plan-rollback-1",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "config",
+      source: {
+        envId: snapshotSourceConn.id,
+        label: "before apply / public",
+        provider: "local",
+        connectionId: snapshotSourceConn.id,
+        connectionName: snapshotSourceConn.name,
+        namespace: "public",
+      },
+      target: endpoint(safeTargetConn.id, "Staging / public"),
+      inputSummary: {
+        sourceType: "rollback",
+        scope: "config",
+        sourceLabel: "before apply / public",
+        targetLabel: "Staging / public",
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: targetRef,
+          sourceRef,
+          targetRef,
+          sourceValue: value("server.port=9090"),
+          targetValue: value("server.port=8080"),
+        },
+      ],
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: snapshotSourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(entryPayload, [safeTargetConn]);
+
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(screen.getByRole("button", { name: "Execute apply" }));
+
+    expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
+      plan,
+      expect.objectContaining({
+        connections: [safeTargetConn, snapshotSourceConn],
+      })
     );
   });
 });
