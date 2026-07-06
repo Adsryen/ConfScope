@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-07
+
+### Engineering
+- Added reusable Windows native Wails WebView smoke automation.
+- Native smoke now builds the real Wails exe, starts Docker Nacos, creates a Nacos connection through the UI form, reads seeded config, and archives PASS/NOT_RUN report rows.
+- Added a smoke-only loopback control server enabled by `CONFSCOPE_NATIVE_SMOKE_CONTROL_PORT` after WebView2 CDP proved unavailable in the real Wails build.
+
 ## [1.4.1] - 2026-07-06
 
 ### Fixed
