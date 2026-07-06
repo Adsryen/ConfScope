@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
-import { ConfigItem, deleteConfig, getConfig, getConfigDocument, listConfigs, publishConfig, type ConfigDocument } from "../api/nacos";
+import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
@@ -244,57 +244,35 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
     setSaving(true);
     setSaveError(null);
-    try {
-      await publishConfig(conn, tenant, selected.dataId, selected.group, draft, nacosType(fmt));
-      recordOperation({
-        type: "publish",
-        result: "success",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: selected.group,
-        dataId: selected.dataId,
-        content: draft,
-        previousContent: content,
-        beforeContent: content,
-        afterContent: draft,
-        configType: nacosType(fmt),
-        rollbackable: true,
-      });
-      setEditing(false);
-      toast(t("config.published"));
-      await openConfig(selected); // 重新拉取最新内容
-    } catch (e) {
-      const message = String(e);
-      recordOperation({
-        type: "publish",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: selected.group,
-        dataId: selected.dataId,
-        content: draft,
-        previousContent: content,
-        beforeContent: content,
-        afterContent: draft,
-        configType: nacosType(fmt),
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-        error: message,
-      });
-      setSaveError(message);
-      reportError({
-        title: t("config.publishConfigFailed"),
-        source: `${sourceLabel} / ${selected.group} / ${selected.dataId}`,
-        message,
-        detail: message,
-        actionLabel: t("config.retryPublish"),
-        onAction: () => saveEdit(),
-      });
-    } finally {
-      setSaving(false);
-    }
+    const configType = nacosType(fmt);
+    const message = t("api.directWriteRequiresApplyPlan");
+    recordOperation({
+      type: "publish",
+      result: "failure",
+      connectionId: conn.id,
+      connectionName,
+      namespace: namespaceLabel,
+      group: selected.group,
+      dataId: selected.dataId,
+      content: draft,
+      previousContent: content,
+      beforeContent: content,
+      afterContent: draft,
+      configType,
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: message,
+    });
+    setSaveError(message);
+    reportError({
+      title: t("config.publishConfigFailed"),
+      source: `${sourceLabel} / ${selected.group} / ${selected.dataId}`,
+      message,
+      detail: message,
+      actionLabel: t("config.retryPublish"),
+      onAction: () => saveEdit(),
+    });
+    setSaving(false);
   };
 
   // 编辑态按 Esc 取消编辑(无弹框时)
@@ -310,45 +288,23 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
   const doDelete = async () => {
     if (!selected) return;
-    try {
-      await deleteConfig(conn, tenant, selected.dataId, selected.group);
-      recordOperation({
-        type: "delete",
-        result: "success",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: selected.group,
-        dataId: selected.dataId,
-        previousContent: content,
-        beforeContent: content,
-        configType: selected.configType || nacosType(fmt),
-        rollbackable: true,
-      });
-      setShowDelete(false);
-      setSelected(null);
-      setContent("");
-      toast(t("config.deleted"));
-      fetchList(appliedTerm, pageNo);
-    } catch (e) {
-      const message = String(e);
-      recordOperation({
-        type: "delete",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: selected.group,
-        dataId: selected.dataId,
-        previousContent: content,
-        beforeContent: content,
-        configType: selected.configType || nacosType(fmt),
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-        error: message,
-      });
-      throw e;
-    }
+    const message = t("api.directWriteRequiresApplyPlan");
+    recordOperation({
+      type: "delete",
+      result: "failure",
+      connectionId: conn.id,
+      connectionName,
+      namespace: namespaceLabel,
+      group: selected.group,
+      dataId: selected.dataId,
+      previousContent: content,
+      beforeContent: content,
+      configType: selected.configType || nacosType(fmt),
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: message,
+    });
+    throw new Error(message);
   };
 
   const createSnapshot = async () => {

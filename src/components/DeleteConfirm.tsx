@@ -34,7 +34,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
     try {
       await onConfirm();
     } catch (e) {
-      const message = String(e);
+      const message = e instanceof Error ? e.message : String(e);
       setError(message);
       reportError({
         title: t("config.deleteConfigFailed"),

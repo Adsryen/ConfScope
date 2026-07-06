@@ -227,14 +227,14 @@ export function recordOperation(record: Omit<OperationRecord, "id" | "timestamp"
 export function isRollbackableOperation(record: OperationRecord): boolean {
   if (record.result !== "success") return false;
   if (record.rollbackable === false) return false;
-  if (!["publish", "delete", "rollback"].includes(record.type)) return false;
-  return typeof record.beforeContent === "string";
+  return false;
 }
 
 /** 返回不可回滚原因的 i18n key；可回滚时返回空字符串。 */
 export function rollbackUnavailableReason(record: OperationRecord): string {
   if (isRollbackableOperation(record)) return "";
   if (record.result !== "success") return "operationHistory.rollbackOnlySuccess";
+  if (["publish", "delete", "rollback"].includes(record.type)) return "operationHistory.rollbackRequiresApplyPlan";
   if (record.rollbackable === false) return record.rollbackReason || "operationHistory.rollbackDisabled";
   if (record.type === "apply") return "operationHistory.rollbackApplyRequiresPlan";
   if (!["publish", "delete", "rollback"].includes(record.type)) return record.rollbackReason || "operationHistory.rollbackUnsupportedType";

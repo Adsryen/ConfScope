@@ -114,7 +114,8 @@ describe("loadOperationHistory", () => {
 
     expect(record.beforeContent).toBe("old");
     expect(record.afterContent).toBe("new");
-    expect(isRollbackableOperation(record)).toBe(true);
+    expect(isRollbackableOperation(record)).toBe(false);
+    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackRequiresApplyPlan");
   });
 
   it("加载 apply 记录并保留计划、备份和源目标摘要", () => {
@@ -388,8 +389,8 @@ describe("recordOperation", () => {
       rollbackable: true,
     });
 
-    expect(isRollbackableOperation(record)).toBe(true);
-    expect(rollbackUnavailableReason(record)).toBe("");
+    expect(isRollbackableOperation(record)).toBe(false);
+    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackRequiresApplyPlan");
   });
 
   it("记录 apply 操作并保存计划、备份和源目标字段", () => {

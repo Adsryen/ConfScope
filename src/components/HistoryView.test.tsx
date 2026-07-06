@@ -207,49 +207,20 @@ describe("HistoryView", () => {
     expect(document.querySelector(".diff-panel")).toHaveTextContent("9090");
   });
 
-  it("publishes the selected version again after rollback confirmation", async () => {
-    const { onRolledBack } = renderHistory({ currentContent: "server:\n  port: 1000" });
+  it("blocks direct history rollback before it can reach the API", async () => {
+    const { onRolledBack } = renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
 
     fireEvent.click(await screen.findByText("nid 2"));
-    await screen.findByText(/相对上一版 nid 1 的变更/);
-    fireEvent.click(screen.getByRole("button", { name: "回滚" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认回滚?" }));
+    await screen.findByText(/Changes vs previous nid 1/);
+    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
 
-    await waitFor(() => {
-      expect(apiMocks.publishConfig).toHaveBeenCalledWith(
-        conn,
-        "public",
-        "app.yaml",
-        "DEFAULT_GROUP",
-        "server:\n  port: 9090",
-        "yaml"
-      );
-    });
-    expect(onRolledBack).toHaveBeenCalledTimes(1);
-    expect(toast).toHaveBeenCalledWith("已回滚到版本 2");
-    expect(apiMocks.listHistory).toHaveBeenCalledTimes(2);
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "rollback",
-      result: "success",
-      dataId: "app.yaml",
-      beforeContent: "server:\n  port: 1000",
-      afterContent: "server:\n  port: 9090",
-      rollbackable: true,
-      resourceId: "2",
-    });
-  });
-
-  it("records rollback failures", async () => {
-    apiMocks.publishConfig.mockRejectedValueOnce(new Error("rollback denied"));
-    renderHistory({ currentContent: "server:\n  port: 1000" });
-
-    fireEvent.click(await screen.findByText("nid 2"));
-    await screen.findByText(/相对上一版 nid 1 的变更/);
-    fireEvent.click(screen.getByRole("button", { name: "回滚" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认回滚?" }));
-
-    expect(await screen.findByText("Error: rollback denied")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(onRolledBack).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalledWith("Rolled back to version 2");
+    expect(apiMocks.listHistory).toHaveBeenCalledTimes(1);
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "rollback",
       result: "failure",
@@ -257,7 +228,30 @@ describe("HistoryView", () => {
       beforeContent: "server:\n  port: 1000",
       afterContent: "server:\n  port: 9090",
       rollbackable: false,
-      error: "Error: rollback denied",
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      resourceId: "2",
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+    });
+  });
+
+  it("records direct history rollback blocks", async () => {
+    renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
+
+    fireEvent.click(await screen.findByText("nid 2"));
+    await screen.findByText(/Changes vs previous nid 1/);
+    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
+
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "rollback",
+      result: "failure",
+      dataId: "app.yaml",
+      beforeContent: "server:\n  port: 1000",
+      afterContent: "server:\n  port: 9090",
+      rollbackable: false,
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
     });
   });
 
@@ -284,8 +278,7 @@ describe("HistoryView", () => {
     });
   });
 
-  it("reports rollback errors with localized message-center actions", async () => {
-    apiMocks.publishConfig.mockRejectedValueOnce(new Error("rollback denied"));
+  it("reports direct rollback blocks with localized message-center actions", async () => {
     renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
 
     fireEvent.click(await screen.findByText("nid 2"));
@@ -293,9 +286,11 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
 
-    expect(await screen.findByText("Error: rollback denied")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to rollback config",
+      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
       actionLabel: "Retry Rollback",
     });
   });

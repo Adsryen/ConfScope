@@ -341,7 +341,8 @@ describe("OperationHistoryView", () => {
     expect(screen.getByText("app.yaml")).toBeDefined();
   });
 
-  it("shows rollback action for a rollbackable operation record", async () => {
+  it("hides direct rollback for legacy rollbackable operation records", async () => {
+    localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.operationHistory", JSON.stringify([rollbackablePublishRecord]));
 
     render(
@@ -352,10 +353,11 @@ describe("OperationHistoryView", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
 
-    expect(screen.getByText("共 1 条记录")).toBeDefined();
-    expect(screen.getByText("可回滚")).toBeDefined();
-    expect(screen.getByRole("button", { name: "复制记录" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "回滚此操作" })).toBeDefined();
+    expect(screen.getByText("1 records")).toBeDefined();
+    expect(screen.getByText("Not rollbackable")).toBeDefined();
+    expect(screen.getByText("Rollback requires an ApplyPlan dry-run and cannot publish previous content directly.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Copy Record" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Rollback this operation" })).toBeNull();
   });
 
   it("shows and filters apply operation records", async () => {
@@ -513,7 +515,8 @@ describe("OperationHistoryView", () => {
     });
   });
 
-  it("publishes the previous content and records a new rollback entry", async () => {
+  it("does not call direct publish for legacy operation rollback records", async () => {
+    localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.operationHistory", JSON.stringify([rollbackablePublishRecord]));
 
     render(
@@ -523,25 +526,9 @@ describe("OperationHistoryView", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
-    fireEvent.click(screen.getByRole("button", { name: "回滚此操作" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认回滚" }));
 
-    await waitFor(() => {
-      expect(nacosMocks.publishConfig).toHaveBeenCalledWith(conn, "public", "app.yaml", "DEFAULT_GROUP", "old: true", "yaml");
-    });
-
-    const rollbackRecord = loadOperationHistory().find((record) => record.type === "rollback");
-    expect(rollbackRecord).toMatchObject({
-      type: "rollback",
-      result: "success",
-      connectionId: "conn-1",
-      namespace: "public",
-      group: "DEFAULT_GROUP",
-      dataId: "app.yaml",
-      beforeContent: "current: true",
-      afterContent: "old: true",
-      rollbackable: true,
-      resourceId: "record-rollbackable",
-    });
+    expect(screen.queryByRole("button", { name: "Rollback this operation" })).toBeNull();
+    expect(nacosMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory().filter((record) => record.type === "rollback")).toHaveLength(0);
   });
 });

@@ -24,8 +24,8 @@ const executionMocks = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   getConfigDocument: vi.fn(),
-  publishConfig: vi.fn(),
-  deleteConfig: vi.fn(),
+  publishConfigFromApplyPlan: vi.fn(),
+  deleteConfigFromApplyPlan: vi.fn(),
 }));
 
 const snapshotMocks = vi.hoisted(() => ({
@@ -71,8 +71,8 @@ vi.mock("../lib/applyPlanExecution", async () => {
 
 vi.mock("../api/nacos", () => ({
   getConfigDocument: apiMocks.getConfigDocument,
-  publishConfig: apiMocks.publishConfig,
-  deleteConfig: apiMocks.deleteConfig,
+  publishConfigFromApplyPlan: apiMocks.publishConfigFromApplyPlan,
+  deleteConfigFromApplyPlan: apiMocks.deleteConfigFromApplyPlan,
 }));
 
 vi.mock("../api/snapshot", () => ({
@@ -195,10 +195,7 @@ function value(valueText: string, exists = true): BuildApplyPlanInput["items"][n
   };
 }
 
-function makePlan(
-  items: BuildApplyPlanInput["items"],
-  options: { targetId?: string; targetLabel?: string } = {}
-): ApplyPlan {
+function makePlan(items: BuildApplyPlanInput["items"], options: { targetId?: string; targetLabel?: string } = {}): ApplyPlan {
   return buildApplyPlan({
     id: "plan-preview-1",
     createdAt: "2026-07-06T00:00:00.000Z",
@@ -254,8 +251,8 @@ describe("ApplyPlanView", () => {
     executionMocks.executeApplyPlan.mockReset();
     executionMocks.executeApplyPlan.mockResolvedValue({ ok: true, taskId: "task-1", historyId: "history-1" });
     apiMocks.getConfigDocument.mockReset();
-    apiMocks.publishConfig.mockReset();
-    apiMocks.deleteConfig.mockReset();
+    apiMocks.publishConfigFromApplyPlan.mockReset();
+    apiMocks.deleteConfigFromApplyPlan.mockReset();
     snapshotMocks.getSnapshot.mockReset();
     snapshotMocks.createSnapshot.mockReset();
     snapshotMocks.createSnapshot.mockResolvedValue({ id: "snap-before-1", name: "before_apply" });
@@ -276,7 +273,10 @@ describe("ApplyPlanView", () => {
     renderView();
 
     expect(await screen.findAllByText("plan-preview-1")).toHaveLength(2);
-    expect(draftMocks.buildApplyPlanFromEntry).toHaveBeenCalledWith(entryPayload, expect.objectContaining({ connections: [sourceConn, targetConn] }));
+    expect(draftMocks.buildApplyPlanFromEntry).toHaveBeenCalledWith(
+      entryPayload,
+      expect.objectContaining({ connections: [sourceConn, targetConn] })
+    );
     expect(storeMocks.saveApplyPlan).toHaveBeenCalledWith(plan);
     expect(screen.getByText("Total 1")).toBeInTheDocument();
     expect(screen.getByText("Overwrite 1")).toBeInTheDocument();
@@ -426,8 +426,8 @@ describe("ApplyPlanView", () => {
     expect(executionDeps).toMatchObject({
       connections: [sourceConn, safeTargetConn],
       getConfigDocument: apiMocks.getConfigDocument,
-      publishConfig: apiMocks.publishConfig,
-      deleteConfig: apiMocks.deleteConfig,
+      publishConfig: apiMocks.publishConfigFromApplyPlan,
+      deleteConfig: apiMocks.deleteConfigFromApplyPlan,
       recordOperation: historyMocks.recordOperation,
       taskManager: taskManagerMocks.manager,
     });

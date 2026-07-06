@@ -1,13 +1,14 @@
 import {
-  ConfigCenterDeleteConfig,
+  ConfigCenterDeleteConfigFromApplyPlan,
   ConfigCenterGetConfig,
   ConfigCenterGetHistoryDetail,
   ConfigCenterListConfigs,
   ConfigCenterListHistory,
   ConfigCenterListNamespaces,
-  ConfigCenterPublishConfig,
+  ConfigCenterPublishConfigFromApplyPlan,
   ConfigCenterTestConnection,
 } from "../../wailsjs/go/main/App";
+import { translate } from "../locales";
 
 export type ProviderType = "nacos" | "apollo" | "consul" | "local";
 export type Distribution = "opensource" | "aliyun-mse";
@@ -121,12 +122,20 @@ export function getConfig(profile: ConnectionProfile, ref: ConfigRef): Promise<C
   return ConfigCenterGetConfig(profile, ref);
 }
 
-export function publishConfig(profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
-  return ConfigCenterPublishConfig(profile, request);
+export async function publishConfig(_profile: ConnectionProfile, _request: PublishConfigRequest): Promise<void> {
+  throw new Error(translate("api.directWriteRequiresApplyPlan"));
 }
 
-export function deleteConfig(profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
-  return ConfigCenterDeleteConfig(profile, ref);
+export async function deleteConfig(_profile: ConnectionProfile, _ref: ConfigRef): Promise<void> {
+  throw new Error(translate("api.directWriteRequiresApplyPlan"));
+}
+
+export function publishConfigFromApplyPlan(profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
+  return ConfigCenterPublishConfigFromApplyPlan(profile, request);
+}
+
+export function deleteConfigFromApplyPlan(profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
+  return ConfigCenterDeleteConfigFromApplyPlan(profile, ref);
 }
 
 export function listHistory(profile: ConnectionProfile, ref: ConfigRef, page: PageRequest): Promise<HistoryPage> {

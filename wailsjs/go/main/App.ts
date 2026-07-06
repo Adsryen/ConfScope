@@ -12,6 +12,8 @@ type GoApp = {
   ConfigCenterGetConfig(profile: any, ref: any): Promise<any>;
   ConfigCenterPublishConfig(profile: any, request: any): Promise<void>;
   ConfigCenterDeleteConfig(profile: any, ref: any): Promise<void>;
+  ConfigCenterPublishConfigFromApplyPlan(profile: any, request: any): Promise<void>;
+  ConfigCenterDeleteConfigFromApplyPlan(profile: any, ref: any): Promise<void>;
   ConfigCenterListHistory(profile: any, ref: any, page: any): Promise<any>;
   ConfigCenterGetHistoryDetail(profile: any, ref: any, id: string): Promise<any>;
   ConfigCenterTestConnection(profile: any): Promise<void>;
@@ -73,6 +75,24 @@ type GoApp = {
     dataId: string,
     group: string
   ): Promise<void>;
+  NacosPublishConfigFromApplyPlan(
+    baseUrl: string,
+    accessToken: string,
+    apiVersion: string,
+    namespace: string,
+    dataId: string,
+    group: string,
+    content: string,
+    configType: string
+  ): Promise<void>;
+  NacosDeleteConfigFromApplyPlan(
+    baseUrl: string,
+    accessToken: string,
+    apiVersion: string,
+    namespace: string,
+    dataId: string,
+    group: string
+  ): Promise<void>;
   CreateSSHTunnel(connectionId: string, config: any): Promise<number>;
   TestSSHConnection(config: any): Promise<any>;
   StopSSHTunnel(connectionId: string): Promise<void>;
@@ -102,44 +122,38 @@ export const GetAppInfo = () => app().GetAppInfo();
 
 export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
 
-export const DownloadUpdate = (downloadURL: string, sha256: string) =>
-  app().DownloadUpdate(downloadURL, sha256);
+export const DownloadUpdate = (downloadURL: string, sha256: string) => app().DownloadUpdate(downloadURL, sha256);
 
 export const GetDownloadProgress = () => app().GetDownloadProgress();
 
-export const InstallAndRestart = (downloadedFile: string) =>
-  app().InstallAndRestart(downloadedFile);
+export const InstallAndRestart = (downloadedFile: string) => app().InstallAndRestart(downloadedFile);
 
 export const GetCurrentPlatform = () => app().GetCurrentPlatform();
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 
-export const ValidateLocalSnapshotDirectory = (path: string) =>
-  app().ValidateLocalSnapshotDirectory(path);
+export const ValidateLocalSnapshotDirectory = (path: string) => app().ValidateLocalSnapshotDirectory(path);
 
-export const ConfigCenterListNamespaces = (profile: any) =>
-  app().ConfigCenterListNamespaces(profile);
+export const ConfigCenterListNamespaces = (profile: any) => app().ConfigCenterListNamespaces(profile);
 
-export const ConfigCenterListConfigs = (profile: any, request: any) =>
-  app().ConfigCenterListConfigs(profile, request);
+export const ConfigCenterListConfigs = (profile: any, request: any) => app().ConfigCenterListConfigs(profile, request);
 
-export const ConfigCenterGetConfig = (profile: any, ref: any) =>
-  app().ConfigCenterGetConfig(profile, ref);
+export const ConfigCenterGetConfig = (profile: any, ref: any) => app().ConfigCenterGetConfig(profile, ref);
 
-export const ConfigCenterPublishConfig = (profile: any, request: any) =>
-  app().ConfigCenterPublishConfig(profile, request);
+export const ConfigCenterPublishConfig = (profile: any, request: any) => app().ConfigCenterPublishConfig(profile, request);
 
-export const ConfigCenterDeleteConfig = (profile: any, ref: any) =>
-  app().ConfigCenterDeleteConfig(profile, ref);
+export const ConfigCenterDeleteConfig = (profile: any, ref: any) => app().ConfigCenterDeleteConfig(profile, ref);
 
-export const ConfigCenterListHistory = (profile: any, ref: any, page: any) =>
-  app().ConfigCenterListHistory(profile, ref, page);
+export const ConfigCenterPublishConfigFromApplyPlan = (profile: any, request: any) =>
+  app().ConfigCenterPublishConfigFromApplyPlan(profile, request);
 
-export const ConfigCenterGetHistoryDetail = (profile: any, ref: any, id: string) =>
-  app().ConfigCenterGetHistoryDetail(profile, ref, id);
+export const ConfigCenterDeleteConfigFromApplyPlan = (profile: any, ref: any) => app().ConfigCenterDeleteConfigFromApplyPlan(profile, ref);
 
-export const ConfigCenterTestConnection = (profile: any) =>
-  app().ConfigCenterTestConnection(profile);
+export const ConfigCenterListHistory = (profile: any, ref: any, page: any) => app().ConfigCenterListHistory(profile, ref, page);
+
+export const ConfigCenterGetHistoryDetail = (profile: any, ref: any, id: string) => app().ConfigCenterGetHistoryDetail(profile, ref, id);
+
+export const ConfigCenterTestConnection = (profile: any) => app().ConfigCenterTestConnection(profile);
 
 export const NacosDetectVersion = (baseUrl: string) => app().NacosDetectVersion(baseUrl);
 
@@ -210,35 +224,45 @@ export const NacosDeleteConfig = (
   group: string
 ) => app().NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group);
 
-export const CreateSSHTunnel = (connectionId: string, config: any) =>
-  app().CreateSSHTunnel(connectionId, config);
+export const NacosPublishConfigFromApplyPlan = (
+  baseUrl: string,
+  accessToken: string,
+  apiVersion: string,
+  namespace: string,
+  dataId: string,
+  group: string,
+  content: string,
+  configType: string
+) => app().NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
 
-export const TestSSHConnection = (config: any) =>
-  app().TestSSHConnection(config);
+export const NacosDeleteConfigFromApplyPlan = (
+  baseUrl: string,
+  accessToken: string,
+  apiVersion: string,
+  namespace: string,
+  dataId: string,
+  group: string
+) => app().NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group);
 
-export const StopSSHTunnel = (connectionId: string) =>
-  app().StopSSHTunnel(connectionId);
+export const CreateSSHTunnel = (connectionId: string, config: any) => app().CreateSSHTunnel(connectionId, config);
 
-export const StopAllSSHTunnels = () =>
-  app().StopAllSSHTunnels();
+export const TestSSHConnection = (config: any) => app().TestSSHConnection(config);
 
-export const GetSSHTunnelLocalPort = (connectionId: string) =>
-  app().GetSSHTunnelLocalPort(connectionId);
+export const StopSSHTunnel = (connectionId: string) => app().StopSSHTunnel(connectionId);
+
+export const StopAllSSHTunnels = () => app().StopAllSSHTunnels();
+
+export const GetSSHTunnelLocalPort = (connectionId: string) => app().GetSSHTunnelLocalPort(connectionId);
 
 // 快照管理
-export const CreateSnapshot = (source: any, configs: any[]) =>
-  app().CreateSnapshot(source, configs);
+export const CreateSnapshot = (source: any, configs: any[]) => app().CreateSnapshot(source, configs);
 
-export const GetSnapshot = (id: string) =>
-  app().GetSnapshot(id);
+export const GetSnapshot = (id: string) => app().GetSnapshot(id);
 
-export const ListSnapshots = () =>
-  app().ListSnapshots();
+export const ListSnapshots = () => app().ListSnapshots();
 
-export const DeleteSnapshot = (id: string) =>
-  app().DeleteSnapshot(id);
+export const DeleteSnapshot = (id: string) => app().DeleteSnapshot(id);
 
-export const ValidateSnapshot = (path: string) =>
-  app().ValidateSnapshot(path);
+export const ValidateSnapshot = (path: string) => app().ValidateSnapshot(path);
 
 export {};

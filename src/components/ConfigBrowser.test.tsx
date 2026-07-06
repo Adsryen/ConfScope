@@ -246,7 +246,7 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
-  it("publishes edited content and reloads the selected config", async () => {
+  it("blocks edited content direct publish before it can reach the API", async () => {
     apiMocks.getConfigDocument
       .mockResolvedValueOnce({
         content: '{"server":{"port":8080}}',
@@ -262,44 +262,21 @@ describe("ConfigBrowser", () => {
         source: "nacos",
         updateTime: "",
       });
-    renderBrowser();
+    renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
-    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(document.querySelector("textarea")!, {
       target: { value: '{"server":{"port":9090}}' },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    await waitFor(() => {
-      expect(apiMocks.publishConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP", '{"server":{"port":9090}}', "json");
-    });
-    await expectCodeContains('"server"', '"port"', "9090");
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(apiMocks.getConfigDocument).toHaveBeenCalledTimes(1);
 
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "success",
-      dataId: "app.json",
-      beforeContent: '{"server":{"port":8080}}',
-      afterContent: '{"server":{"port":9090}}',
-      rollbackable: true,
-    });
-  });
-
-  it("records publish failures with the attempted content", async () => {
-    apiMocks.publishConfig.mockRejectedValueOnce(new Error("publish denied"));
-    renderBrowser();
-    fireEvent.click(await screen.findByText("app.json"));
-    await expectCodeContains('"server"', '"port"', "8080");
-
-    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
-    fireEvent.change(document.querySelector("textarea")!, {
-      target: { value: '{"server":{"port":9090}}' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
-
-    expect(await screen.findByText("Error: publish denied")).toBeInTheDocument();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "publish",
       result: "failure",
@@ -307,7 +284,32 @@ describe("ConfigBrowser", () => {
       beforeContent: '{"server":{"port":8080}}',
       afterContent: '{"server":{"port":9090}}',
       rollbackable: false,
-      error: "Error: publish denied",
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+    });
+  });
+
+  it("records direct publish blocks with the attempted content", async () => {
+    renderBrowser("en-US");
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(document.querySelector("textarea")!, {
+      target: { value: '{"server":{"port":9090}}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
+
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "publish",
+      result: "failure",
+      dataId: "app.json",
+      beforeContent: '{"server":{"port":8080}}',
+      afterContent: '{"server":{"port":9090}}',
+      rollbackable: false,
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
     });
   });
 
@@ -327,25 +329,26 @@ describe("ConfigBrowser", () => {
     expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
   });
 
-  it("records delete success as rollbackable restore operation", async () => {
-    renderBrowser();
+  it("blocks direct delete before it can reach the API", async () => {
+    renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    const dialog = screen.getByText("删除配置").closest(".modal") as HTMLElement;
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = screen.getByText("Delete Configuration").closest(".modal") as HTMLElement;
     fireEvent.change(within(dialog).getByPlaceholderText("app.json"), { target: { value: "app.json" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    await waitFor(() => {
-      expect(apiMocks.deleteConfig).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
-    });
+    expect(await within(dialog).findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "delete",
-      result: "success",
+      result: "failure",
       dataId: "app.json",
       beforeContent: '{"server":{"port":8080}}',
-      rollbackable: true,
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
     });
   });
 
@@ -489,8 +492,7 @@ describe("ConfigBrowser", () => {
     });
   });
 
-  it("reports publish errors with localized message-center actions", async () => {
-    apiMocks.publishConfig.mockRejectedValueOnce(new Error("publish denied"));
+  it("reports direct publish blocks with localized message-center actions", async () => {
     renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
@@ -501,9 +503,11 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Error: publish denied")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to publish config",
+      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
       actionLabel: "Retry Publish",
     });
   });

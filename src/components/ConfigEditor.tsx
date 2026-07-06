@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
-import { publishConfig } from "../api/nacos";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
-import { toast } from "../lib/toast";
 import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
@@ -20,7 +18,7 @@ interface Props {
 }
 
 /** 新建配置：填写 dataId / group / 格式 / 内容并发布到 Nacos。 */
-export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Props) {
+export default function ConfigEditor({ conn, namespace, onClose }: Props) {
   const { t } = useTranslation();
   const [dataId, setDataId] = useState("");
   const [group, setGroup] = useState("DEFAULT_GROUP");
@@ -38,7 +36,7 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const save = async () => {
+  const save = () => {
     if (!dataId.trim()) {
       setError(t('config.dataIdRequired'));
       return;
@@ -53,53 +51,32 @@ export default function ConfigEditor({ conn, namespace, onClose, onSaved }: Prop
     const targetDataId = dataId.trim();
     const targetGroup = group.trim() || "DEFAULT_GROUP";
     const configType = nacosType(fmt);
-    try {
-      await publishConfig(conn, namespace, targetDataId, targetGroup, content, configType);
-      recordOperation({
-        type: "publish",
-        result: "success",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: targetGroup,
-        dataId: targetDataId,
-        content,
-        afterContent: content,
-        configType,
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackMissingContent",
-      });
-      toast(t('config.configCreated'));
-      onSaved(targetDataId, targetGroup);
-    } catch (e) {
-      const message = String(e);
-      recordOperation({
-        type: "publish",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName,
-        namespace: namespaceLabel,
-        group: targetGroup,
-        dataId: targetDataId,
-        content,
-        afterContent: content,
-        configType,
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-        error: message,
-      });
-      setError(message);
-      reportError({
-        title: t("config.createConfigFailed"),
-        source: `${connectionName} / ${namespaceLabel} / ${targetGroup} / ${targetDataId}`,
-        message,
-        detail: message,
-        actionLabel: t("config.retryPublish"),
-        onAction: () => save(),
-      });
-    } finally {
-      setSaving(false);
-    }
+    const message = t("api.directWriteRequiresApplyPlan");
+    recordOperation({
+      type: "publish",
+      result: "failure",
+      connectionId: conn.id,
+      connectionName,
+      namespace: namespaceLabel,
+      group: targetGroup,
+      dataId: targetDataId,
+      content,
+      afterContent: content,
+      configType,
+      rollbackable: false,
+      rollbackReason: "operationHistory.rollbackOnlySuccess",
+      error: message,
+    });
+    setError(message);
+    reportError({
+      title: t("config.createConfigFailed"),
+      source: `${connectionName} / ${namespaceLabel} / ${targetGroup} / ${targetDataId}`,
+      message,
+      detail: message,
+      actionLabel: t("config.retryPublish"),
+      onAction: () => save(),
+    });
+    setSaving(false);
   };
 
   return (
