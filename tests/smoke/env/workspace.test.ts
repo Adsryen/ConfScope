@@ -1,0 +1,22 @@
+/**
+ * @vitest-environment node
+ */
+import { describe, expect, it } from "vitest";
+import { createSmokeWorkspace } from "./workspace";
+
+describe("createSmokeWorkspace", () => {
+  it("creates a deterministic workspace under .tmp for a provided run id", () => {
+    const workspace = createSmokeWorkspace({ projectRoot: "C:/repo/ConfScope", runId: "20260707-120000" });
+
+    expect(workspace.runId).toBe("20260707-120000");
+    expect(workspace.rootDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000");
+    expect(workspace.homeDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/home");
+    expect(workspace.localSnapshotsDir.replaceAll("\\", "/")).toBe(
+      "C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/local-snapshots"
+    );
+    expect(workspace.reportsDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/reports");
+    expect(workspace.nacos.dev.baseUrl).toBe("http://127.0.0.1:18858/nacos");
+    expect(workspace.nacos.sandbox.baseUrl).toBe("http://127.0.0.1:18859/nacos");
+    expect(workspace.nacos.prod.baseUrl).toBe("http://127.0.0.1:18860/nacos");
+  });
+});
