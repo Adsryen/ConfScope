@@ -1,7 +1,7 @@
 // 应用入口上下文：只描述从差异页面进入 dry-run 计划流程的范围与定位。
 import type { ProviderType } from "../api/configCenter";
 
-export type ApplyEntrySourceType = "audit" | "diff" | "backup";
+export type ApplyEntrySourceType = "audit" | "diff" | "backup" | "promote" | "rollback";
 export type ApplyEntryScope = "key" | "config" | "batch";
 export type ApplyEntryRiskLevel = "low" | "medium" | "high";
 export type ApplyEntryRiskReason = "batch_apply" | "has_skipped_items";

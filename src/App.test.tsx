@@ -109,7 +109,24 @@ vi.mock("./components/AuditView", () => ({
     </div>
   ),
 }));
-vi.mock("./components/OperationHistoryView", () => ({ default: () => <div data-testid="history" /> }));
+vi.mock("./components/OperationHistoryView", () => ({
+  default: ({ onStartApply }: { onStartApply?: (payload: ApplyEntryPayload) => void }) => (
+    <div data-testid="history">
+      <button
+        type="button"
+        onClick={() =>
+          onStartApply?.({
+            ...viewMocks.makeApplyPayload("backup"),
+            sourceType: "rollback",
+            origin: { mode: "rollback", returnMode: "history" },
+          })
+        }
+      >
+        Mock history apply
+      </button>
+    </div>
+  ),
+}));
 vi.mock("./components/ApplyPlanView", () => ({
   default: ({
     entry,
@@ -520,6 +537,28 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mock ApplyPlanView back" }));
 
     expect(screen.getByRole("button", { name: "Mock backup apply" })).toBeInTheDocument();
+  });
+
+  it("routes history follow-up entries to ApplyPlanView and returns to history without persisting apply mode", async () => {
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "history", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mock history apply" }));
+
+    expect(screen.getByRole("heading", { name: "Apply Plan Workbench" })).toBeInTheDocument();
+    expect(viewMocks.applyProps[viewMocks.applyProps.length - 1]).toMatchObject({
+      entry: expect.objectContaining({ sourceType: "rollback", origin: { mode: "rollback", returnMode: "history" } }),
+    });
+    expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).not.toBe("apply");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock ApplyPlanView back" }));
+
+    expect(screen.getByRole("button", { name: "Mock history apply" })).toBeInTheDocument();
   });
 
   it("records a failed snapshot compare when the source connection is missing", async () => {

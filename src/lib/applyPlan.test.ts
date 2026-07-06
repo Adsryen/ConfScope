@@ -137,6 +137,21 @@ describe("buildApplyPlan", () => {
     expect(parseApplyPlanSnapshot({ ...plan, items: [{ ...plan.items[0], action: "unknown" }] })).toBeNull();
   });
 
+  it("round-trips promote source type snapshots", () => {
+    const rawInput = input([{ ref, sourceValue: value(true, "8080"), targetValue: value(true, "9090") }]);
+    const plan = buildApplyPlan({
+      ...rawInput,
+      inputSummary: {
+        ...rawInput.inputSummary,
+        sourceType: "promote",
+      },
+    });
+
+    const parsed = parseApplyPlanSnapshot(JSON.parse(serializeApplyPlan(plan)));
+
+    expect(parsed?.inputSummary.sourceType).toBe("promote");
+  });
+
   it("blocks execution when the source fingerprint changes after planning", () => {
     const plan = buildApplyPlan(input([{ ref, sourceValue: value(true, "8080"), targetValue: value(true, "9090") }]));
     const snapshots = freshnessSnapshots(plan);

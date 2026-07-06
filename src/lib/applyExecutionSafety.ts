@@ -61,6 +61,12 @@ interface BuildHistoryInputParams {
   beforeContent?: string;
 }
 
+export function operationTypeForApplyPlan(plan: Pick<ApplyPlan, "inputSummary">): "apply" | "promote" | "restore" {
+  if (plan.inputSummary.sourceType === "promote") return "promote";
+  if (plan.inputSummary.sourceType === "rollback") return "restore";
+  return "apply";
+}
+
 function executableItems(plan: ApplyPlan): ApplyPlanItem[] {
   return plan.items.filter((item) => !item.blocked && item.action !== "skip" && item.action !== "parse_error");
 }
@@ -148,7 +154,7 @@ export function buildApplyOperationHistoryInput(
 ): Omit<OperationRecord, "id" | "timestamp"> {
   const location = firstExecutableLocation(plan);
   return {
-    type: "apply",
+    type: operationTypeForApplyPlan(plan),
     result: params.result,
     connectionId: plan.target.connectionId,
     connectionName: plan.target.connectionName,

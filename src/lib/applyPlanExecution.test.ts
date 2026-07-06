@@ -149,7 +149,10 @@ function absentValue() {
   return { exists: false };
 }
 
-function applyPlan(items: BuildApplyPlanInput["items"]): ApplyPlan {
+function applyPlan(
+  items: BuildApplyPlanInput["items"],
+  sourceType: BuildApplyPlanInput["inputSummary"]["sourceType"] | "promote" = "diff"
+): ApplyPlan {
   return buildApplyPlan({
     id: "plan-1",
     createdAt: "2026-07-06T00:00:00.000Z",
@@ -157,7 +160,7 @@ function applyPlan(items: BuildApplyPlanInput["items"]): ApplyPlan {
     source: planEndpoint(sourceConnection, "Dev / public"),
     target: planEndpoint(targetConnection, "Prod / public"),
     inputSummary: {
-      sourceType: "diff",
+      sourceType,
       scope: "batch",
       sourceLabel: "Dev / public",
       targetLabel: "Prod / public",
@@ -313,6 +316,34 @@ describe("executeApplyPlan", () => {
       })
     );
     expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", true);
+  });
+
+  it("creates restore tasks for rollback plans and backs up before writing", async () => {
+    const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("old"), targetValue: documentValue("new") }], "rollback");
+    const runDeps = deps({
+      "conn-dev:changed.yaml": doc("old"),
+      "conn-prod:changed.yaml": doc("new"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.taskManager.createTask).toHaveBeenCalledWith("Apply plan plan-1", "restore", {
+      scope: "Prod / public",
+      cancellable: false,
+    });
+    expect(runDeps.createBackupSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      runDeps.publishConfig.mock.invocationCallOrder[0]
+    );
+    expect(runDeps.recordOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "restore",
+        result: "success",
+        planId: "plan-1",
+        backupSnapshotId: "snap-before-1",
+        taskId: "task-apply-1",
+      })
+    );
   });
 
   it("re-reads source freshness from sourceRef when source and target locations differ", async () => {
