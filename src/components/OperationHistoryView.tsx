@@ -5,6 +5,8 @@ import { Connection } from "../store/connections";
 import { detectFormat, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
+import { buildPromotionEntryFromVerification, buildRollbackEntryFromApplyRecord, fingerprintsForCurrentPlanTargets } from "../lib/applyFollowup";
 import {
   loadOperationHistory,
   filterOperationHistory,
@@ -14,11 +16,19 @@ import {
   type OperationRecord,
   type OperationType,
 } from "../store/operationHistory";
-import { getConfig, listHistory, publishConfig } from "../api/nacos";
+import { getApplyPlan } from "../store/applyPlans";
+import {
+  loadApplyVerifications,
+  saveApplyVerification,
+  type ApplyVerification,
+} from "../store/applyVerifications";
+import { getConfig, getConfigDocument, listHistory, publishConfig } from "../api/nacos";
+import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
 
 interface Props {
   connections: Connection[];
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
 
 const OPERATION_LABELS: Record<OperationType, string> = {
@@ -39,7 +49,21 @@ const RESULT_LABELS: Record<string, string> = {
   failure: "operationHistory.resultFailure",
 };
 
-export default function OperationHistoryView({ connections }: Props) {
+interface FollowupError {
+  recordId: string;
+  detail: string;
+}
+
+function isApplyFollowupRecord(record: OperationRecord): boolean {
+  return record.result === "success" && (record.type === "apply" || record.type === "promote" || record.type === "restore");
+}
+
+function findVerification(verifications: ApplyVerification[], record: OperationRecord): ApplyVerification | null {
+  if (!record.planId) return null;
+  return verifications.find((verification) => verification.planId === record.planId && verification.applyHistoryId === record.id) ?? null;
+}
+
+export default function OperationHistoryView({ connections, onStartApply }: Props) {
   const { t } = useTranslation();
 
   // 本地操作记录
@@ -56,6 +80,10 @@ export default function OperationHistoryView({ connections }: Props) {
   const [selectedRecord, setSelectedRecord] = useState<OperationRecord | null>(null);
   const [rollbackConfirmId, setRollbackConfirmId] = useState<string | null>(null);
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
+  const [verifications, setVerifications] = useState<ApplyVerification[]>(() => loadApplyVerifications());
+  const [followupBusy, setFollowupBusy] = useState<string | null>(null);
+  const [followupError, setFollowupError] = useState<FollowupError | null>(null);
+  const [promotionTargets, setPromotionTargets] = useState<Record<string, string>>({});
 
   // 加载本地记录
   useEffect(() => {
@@ -176,6 +204,128 @@ export default function OperationHistoryView({ connections }: Props) {
   };
 
   // 格式化时间
+  const setRecordFollowupError = (record: OperationRecord, detail: string) => {
+    setFollowupError({ recordId: record.id, detail });
+  };
+
+  const startRollbackDryRun = async (record: OperationRecord) => {
+    if (!onStartApply) return;
+    const busyKey = `rollback:${record.id}`;
+    setFollowupBusy(busyKey);
+    setFollowupError(null);
+    try {
+      const result = await buildRollbackEntryFromApplyRecord(record, {
+        connections,
+        getApplyPlan,
+        getSnapshot,
+        getConfigDocument,
+      });
+      if (!result.ok) {
+        setRecordFollowupError(record, result.detail);
+        return;
+      }
+      onStartApply(result.entry);
+    } catch (e) {
+      const message = String(e);
+      setRecordFollowupError(record, message);
+      reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
+    } finally {
+      setFollowupBusy(null);
+    }
+  };
+
+  const markSandboxVerified = async (record: OperationRecord) => {
+    const busyKey = `verify:${record.id}`;
+    setFollowupBusy(busyKey);
+    setFollowupError(null);
+    try {
+      if (!record.planId) {
+        setRecordFollowupError(record, `Apply record ${record.id} is missing planId.`);
+        return;
+      }
+      const plan = getApplyPlan(record.planId);
+      if (!plan) {
+        setRecordFollowupError(record, `Apply plan ${record.planId} is missing.`);
+        return;
+      }
+      const sandboxConnectionId = record.targetConnectionId || plan.target.connectionId || record.connectionId;
+      const sandboxConnection = connections.find((conn) => conn.id === sandboxConnectionId);
+      if (!sandboxConnection) {
+        setRecordFollowupError(record, `Sandbox connection ${sandboxConnectionId} is missing.`);
+        return;
+      }
+      const verification = saveApplyVerification({
+        planId: plan.id,
+        applyHistoryId: record.id,
+        sandboxConnectionId: sandboxConnection.id,
+        sandboxConnectionName: sandboxConnection.name,
+        sandboxNamespace: record.targetNamespace ?? plan.target.namespace ?? record.namespace,
+        verifiedTargetFingerprints: await fingerprintsForCurrentPlanTargets(plan, sandboxConnection, { getConfigDocument }),
+      });
+      setVerifications(loadApplyVerifications());
+      toast(t("operationHistory.sandboxVerified"), "success");
+      setPromotionTargets((current) => {
+        const candidates = connections.filter((conn) => conn.id !== verification.sandboxConnectionId);
+        return current[record.id] || candidates.length === 0 ? current : { ...current, [record.id]: candidates[0].id };
+      });
+    } catch (e) {
+      const message = String(e);
+      setRecordFollowupError(record, message);
+      reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
+    } finally {
+      setFollowupBusy(null);
+    }
+  };
+
+  const productionTargetsFor = (record: OperationRecord, verification: ApplyVerification | null): Connection[] => {
+    const sandboxConnectionId = verification?.sandboxConnectionId || record.targetConnectionId || record.connectionId;
+    return connections.filter((conn) => conn.id !== sandboxConnectionId);
+  };
+
+  const selectedPromotionTargetId = (record: OperationRecord, verification: ApplyVerification | null): string => {
+    const candidates = productionTargetsFor(record, verification);
+    const selected = promotionTargets[record.id];
+    return selected && candidates.some((conn) => conn.id === selected) ? selected : candidates[0]?.id ?? "";
+  };
+
+  const startPromotionDryRun = async (record: OperationRecord) => {
+    if (!onStartApply) return;
+    const verification = findVerification(verifications, record);
+    if (!verification) {
+      setRecordFollowupError(record, `Apply record ${record.id} has no sandbox verification.`);
+      return;
+    }
+    const targetId = selectedPromotionTargetId(record, verification);
+    const productionTarget = connections.find((conn) => conn.id === targetId);
+    if (!productionTarget) {
+      setRecordFollowupError(record, t("operationHistory.noProductionTarget"));
+      return;
+    }
+
+    const busyKey = `promote:${record.id}`;
+    setFollowupBusy(busyKey);
+    setFollowupError(null);
+    try {
+      const result = await buildPromotionEntryFromVerification(record, verification, productionTarget, {
+        connections,
+        getApplyPlan,
+        getSnapshot,
+        getConfigDocument,
+      });
+      if (!result.ok) {
+        setRecordFollowupError(record, result.detail);
+        return;
+      }
+      onStartApply(result.entry);
+    } catch (e) {
+      const message = String(e);
+      setRecordFollowupError(record, message);
+      reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
+    } finally {
+      setFollowupBusy(null);
+    }
+  };
+
   const formatTime = (timestamp: string) => {
     try {
       return new Date(timestamp).toLocaleString();
@@ -316,6 +466,14 @@ export default function OperationHistoryView({ connections }: Props) {
                 const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
                 const isRollingBack = rollingBackId === selectedVisibleRecord.id;
                 const isConfirmingRollback = rollbackConfirmId === selectedVisibleRecord.id;
+                const followupRecord = isApplyFollowupRecord(selectedVisibleRecord);
+                const verification = findVerification(verifications, selectedVisibleRecord);
+                const productionTargets = productionTargetsFor(selectedVisibleRecord, verification);
+                const promotionTargetId = selectedPromotionTargetId(selectedVisibleRecord, verification);
+                const rollbackBusy = followupBusy === `rollback:${selectedVisibleRecord.id}`;
+                const verifyBusy = followupBusy === `verify:${selectedVisibleRecord.id}`;
+                const promoteBusy = followupBusy === `promote:${selectedVisibleRecord.id}`;
+                const visibleFollowupError = followupError?.recordId === selectedVisibleRecord.id ? followupError.detail : "";
 
                 return (
                   <>
@@ -395,6 +553,77 @@ export default function OperationHistoryView({ connections }: Props) {
                         ? t("operationHistory.confirmRollback")
                         : t("operationHistory.rollbackThis")}
                   </button>
+                </div>
+              )}
+              {followupRecord && onStartApply && (
+                <div className="history-followup-panel">
+                  <div className="history-detail-actions">
+                    <button
+                      className="btn btn-primary btn-sm"
+                      type="button"
+                      onClick={() => startRollbackDryRun(selectedVisibleRecord)}
+                      disabled={rollbackBusy}
+                    >
+                      {rollbackBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.generateRollbackPlan")}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      type="button"
+                      onClick={() => void markSandboxVerified(selectedVisibleRecord)}
+                      disabled={verifyBusy}
+                    >
+                      {verifyBusy
+                        ? t("operationHistory.generatingFollowup")
+                        : verification
+                          ? t("operationHistory.sandboxVerifiedState")
+                          : t("operationHistory.markSandboxVerified")}
+                    </button>
+                  </div>
+                  <div className="history-promote-row">
+                    <label className="field-label" htmlFor={`promotion-target-${selectedVisibleRecord.id}`}>
+                      {t("operationHistory.productionTarget")}
+                    </label>
+                    <select
+                      id={`promotion-target-${selectedVisibleRecord.id}`}
+                      className="history-filter-select"
+                      value={promotionTargetId}
+                      onChange={(event) =>
+                        setPromotionTargets((current) => ({ ...current, [selectedVisibleRecord.id]: event.target.value }))
+                      }
+                    >
+                      {productionTargets.length === 0 ? (
+                        <option value="">{t("operationHistory.noProductionTarget")}</option>
+                      ) : (
+                        productionTargets.map((conn) => (
+                          <option key={conn.id} value={conn.id}>
+                            {conn.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      type="button"
+                      onClick={() => startPromotionDryRun(selectedVisibleRecord)}
+                      disabled={!verification || !promotionTargetId || promoteBusy}
+                    >
+                      {promoteBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.promoteToTarget")}
+                    </button>
+                  </div>
+                  {!verification && (
+                    <div className="field-hint">{t("operationHistory.promoteRequiresVerification")}</div>
+                  )}
+                  {visibleFollowupError && (
+                    <div className="inline-error" role="alert">
+                      <div className="inline-error-head">
+                        <span className="inline-error-title">{t("operationHistory.followupFailed")}</span>
+                        <div className="inline-error-actions">
+                          <CopyButton text={visibleFollowupError} label={t("common.copyError")} />
+                        </div>
+                      </div>
+                      <pre className="inline-error-body">{visibleFollowupError}</pre>
+                    </div>
+                  )}
                 </div>
               )}
               {selectedVisibleRecord.content && (

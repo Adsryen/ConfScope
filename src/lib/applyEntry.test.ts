@@ -34,15 +34,19 @@ function item(dataId: string, key = "__document"): ApplyEntryItem {
   };
 }
 
-function payload(scope: ApplyEntryPayload["scope"], items: ApplyEntryItem[]): ApplyEntryPayload {
+function payload(
+  scope: ApplyEntryPayload["scope"],
+  items: ApplyEntryItem[],
+  sourceType: ApplyEntryPayload["sourceType"] = scope === "key" ? "audit" : "diff"
+): ApplyEntryPayload {
   return {
-    sourceType: scope === "key" ? "audit" : "diff",
+    sourceType,
     scope,
     source,
     target,
     items,
     rangeSummary: applyEntryRiskSummary(items),
-    origin: { mode: scope === "key" ? "audit" : "diff" },
+    origin: { mode: sourceType },
   };
 }
 
@@ -82,6 +86,14 @@ describe("apply entry payload helpers", () => {
     ]);
 
     expect(applyEntryId(payloadWithRefs)).toBe("diff|config|conn-dev|conn-prod|target-ns|TARGET_GROUP|target.yaml|__document");
+  });
+
+  it("supports promote and rollback entry sources while keeping ids target-ref based", () => {
+    const rollbackPayload = payload("config", [item("app.yaml")], "rollback");
+    const promotePayload = payload("config", [item("app.yaml")], "promote");
+
+    expect(applyEntryId(rollbackPayload)).toBe("rollback|config|conn-dev|conn-prod|public|DEFAULT_GROUP|app.yaml|__document");
+    expect(applyEntryId(promotePayload)).toBe("promote|config|conn-dev|conn-prod|public|DEFAULT_GROUP|app.yaml|__document");
   });
 
   it("summarizes batch count, skipped items and risk level", () => {

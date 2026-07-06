@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildApplyPlan, type BuildApplyPlanInput } from "./applyPlan";
 import {
+  buildApplyOperationHistoryInput,
   collectApplyBackupConfigs,
   prepareApplyExecutionSafety,
   type ApplyTargetBeforeSnapshot,
@@ -45,7 +46,7 @@ function value(exists: boolean, content: string): BuildApplyPlanInput["items"][n
   };
 }
 
-function plan(items: BuildApplyPlanInput["items"]) {
+function plan(items: BuildApplyPlanInput["items"], sourceType: BuildApplyPlanInput["inputSummary"]["sourceType"] | "promote" = "diff") {
   return buildApplyPlan({
     id: "plan-1",
     createdAt: "2026-07-06T12:00:00.000Z",
@@ -53,7 +54,7 @@ function plan(items: BuildApplyPlanInput["items"]) {
     source: sourceEndpoint,
     target: targetEndpoint,
     inputSummary: {
-      sourceType: "diff",
+      sourceType,
       scope: "batch",
       sourceLabel: "Dev",
       targetLabel: "Prod",
@@ -75,6 +76,50 @@ function beforeSnapshot(input: Partial<ApplyTargetBeforeSnapshot> & Pick<ApplyTa
     updateTime: input.updateTime ?? "2026-07-06T11:59:00.000Z",
   };
 }
+
+describe("buildApplyOperationHistoryInput", () => {
+  it("maps promote plans to promote operation history", () => {
+    const applyPlan = plan(
+      [{ ref: { ...baseRef, key: "__document" }, sourceValue: value(true, "new"), targetValue: value(true, "old") }],
+      "promote"
+    );
+
+    const result = buildApplyOperationHistoryInput(applyPlan, {
+      result: "success",
+      backup: { snapshotId: "snap-before-1", snapshotName: "before promote", backedUpCount: 1, missingBeforeCount: 0 },
+      taskId: "task-1",
+    });
+
+    expect(result).toMatchObject({
+      type: "promote",
+      result: "success",
+      planId: "plan-1",
+      taskId: "task-1",
+      backupSnapshotId: "snap-before-1",
+    });
+  });
+
+  it("maps rollback plans to restore operation history", () => {
+    const applyPlan = plan(
+      [{ ref: { ...baseRef, key: "__document" }, sourceValue: value(true, "old"), targetValue: value(true, "new") }],
+      "rollback"
+    );
+
+    const result = buildApplyOperationHistoryInput(applyPlan, {
+      result: "success",
+      backup: { snapshotId: "snap-before-2", snapshotName: "before restore", backedUpCount: 1, missingBeforeCount: 0 },
+      taskId: "task-restore-1",
+    });
+
+    expect(result).toMatchObject({
+      type: "restore",
+      result: "success",
+      planId: "plan-1",
+      taskId: "task-restore-1",
+      backupSnapshotId: "snap-before-2",
+    });
+  });
+});
 
 describe("collectApplyBackupConfigs", () => {
   it("收集 overwrite/delete 的 before content，跳过 skip，并统计 create 的缺失 before 内容", () => {

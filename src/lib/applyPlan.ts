@@ -8,7 +8,7 @@ export const APPLY_PLAN_SCHEMA_VERSION = 1;
 export type ApplyPlanScope = "key" | "config" | "batch";
 export type ApplyPlanAction = "create" | "overwrite" | "delete" | "skip" | "parse_error";
 export type ApplyPlanIntent = "sync" | "delete" | "skip";
-export type ApplyPlanSourceType = "audit" | "diff" | "backup" | "rollback" | "manual";
+export type ApplyPlanSourceType = "audit" | "diff" | "backup" | "promote" | "rollback" | "manual";
 
 export interface ApplyPlanEndpoint {
   envId: string;
@@ -321,7 +321,7 @@ function isAction(value: unknown): value is ApplyPlanAction {
 }
 
 function isSourceType(value: unknown): value is ApplyPlanSourceType {
-  return value === "audit" || value === "diff" || value === "backup" || value === "rollback" || value === "manual";
+  return value === "audit" || value === "diff" || value === "backup" || value === "promote" || value === "rollback" || value === "manual";
 }
 
 function isFormat(value: unknown): value is Format {

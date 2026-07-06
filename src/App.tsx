@@ -157,8 +157,9 @@ export default function App() {
 
   // 记住上次的连接与模式
   useEffect(() => {
-    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode, sidebarCollapsed }));
-  }, [activeConnId, mode, sidebarCollapsed]);
+    const persistedMode = mode === "apply" ? (pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse") : mode;
+    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode: persistedMode, sidebarCollapsed }));
+  }, [activeConnId, mode, pendingApplyEntry, sidebarCollapsed]);
 
   // 启动后低频后台检查更新（延迟 5 分钟，仅一次）
   useEffect(() => {
@@ -465,7 +466,7 @@ export default function App() {
               onStartApply={startApply}
             />
           ) : mode === "history" ? (
-            <OperationHistoryView connections={connections} />
+            <OperationHistoryView connections={connections} onStartApply={startApply} />
           ) : mode === "backup" ? (
             <BackupView onNavigateToDiff={navigateBackupToDiff} onStartApply={startApply} />
           ) : mode === "tasks" ? (

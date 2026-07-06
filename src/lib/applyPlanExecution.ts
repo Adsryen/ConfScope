@@ -13,6 +13,7 @@ import {
 } from "./applyPlan";
 import {
   buildApplyOperationHistoryInput,
+  operationTypeForApplyPlan,
   prepareApplyExecutionSafety,
   type ApplyBackupConfig,
   type ApplyBackupSummary,
@@ -278,7 +279,8 @@ function emptyBackup(): ApplyBackupSummary {
 }
 
 function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps): string {
-  const task = deps.taskManager.createTask(`Apply plan ${plan.id}`, "apply", { scope: plan.target.label, cancellable: false });
+  const taskType = operationTypeForApplyPlan(plan) === "restore" ? "restore" : "apply";
+  const task = deps.taskManager.createTask(`Apply plan ${plan.id}`, taskType, { scope: plan.target.label, cancellable: false });
   deps.taskManager.startTask(task.id);
   return task.id;
 }

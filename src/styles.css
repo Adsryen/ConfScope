@@ -4281,6 +4281,22 @@ button,
   margin: 12px 0;
 }
 
+.history-followup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.history-promote-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .history-rollback-state.available {
   color: #81c784;
 }
