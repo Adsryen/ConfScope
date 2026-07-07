@@ -450,124 +450,158 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       )}
       {error && <InlineError title={t("appDataBackup.operationFailed")} message={error} />}
 
-      <div className="app-data-backup-grid">
-        <section className="app-data-backup-block">
-          <div className="app-data-backup-block-head">
-            <h6>{t("appDataBackup.localBackup")}</h6>
-            <span>{t("appDataBackup.localBackupHint")}</span>
+      <section className="app-data-backup-work-area app-data-backup-local" aria-labelledby="app-data-backup-local-title">
+        <div className="app-data-backup-area-head">
+          <div>
+            <h6 id="app-data-backup-local-title">{t("appDataBackup.localSectionTitle")}</h6>
+            <span>{t("appDataBackup.localSectionHint")}</span>
           </div>
-          <div className="app-data-backup-fields">
+        </div>
+        <div className="app-data-backup-split">
+          <div className="app-data-backup-step">
+            <div className="app-data-backup-block-head">
+              <strong>{t("appDataBackup.localBackup")}</strong>
+              <span>{t("appDataBackup.localBackupHint")}</span>
+            </div>
+            <div className="app-data-backup-fields">
+              <label className="field">
+                <span>{t("appDataBackup.localBackupPassword")}</span>
+                <input className="search-input" type="password" value={exportPassword} onChange={(e) => setExportPassword(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>{t("appDataBackup.confirmLocalBackupPassword")}</span>
+                <input className="search-input" type="password" value={exportConfirm} onChange={(e) => setExportConfirm(e.target.value)} />
+              </label>
+            </div>
+            <div className="app-data-backup-action-row">
+              <button type="button" className="btn btn-primary btn-sm" onClick={exportLocalBackup} disabled={busy === "local-export"}>
+                {busy === "local-export" ? t("appDataBackup.exporting") : t("appDataBackup.exportEncryptedFile")}
+              </button>
+            </div>
+          </div>
+
+          <div className="app-data-backup-step">
+            <div className="app-data-backup-block-head">
+              <strong>{t("appDataBackup.localRestore")}</strong>
+              <span>{t("appDataBackup.localRestoreHint")}</span>
+            </div>
+            <div className="app-data-backup-file-row">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={chooseLocalBackup} disabled={busy === "local-choose"}>
+                {t("appDataBackup.chooseLocalBackup")}
+              </button>
+              {restorePath && <span className="app-data-backup-path">{restorePath}</span>}
+            </div>
             <label className="field">
-              <span>{t("appDataBackup.localBackupPassword")}</span>
-              <input className="search-input" type="password" value={exportPassword} onChange={(e) => setExportPassword(e.target.value)} />
+              <span>{t("appDataBackup.restorePassword")}</span>
+              <input className="search-input" type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} />
             </label>
-            <label className="field">
-              <span>{t("appDataBackup.confirmLocalBackupPassword")}</span>
-              <input className="search-input" type="password" value={exportConfirm} onChange={(e) => setExportConfirm(e.target.value)} />
+            <div className="app-data-backup-action-row">
+              <button type="button" className="btn btn-primary btn-sm" onClick={previewLocalBackup} disabled={busy === "local-preview"}>
+                {busy === "local-preview" ? t("appDataBackup.previewing") : t("appDataBackup.previewLocalBackup")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="app-data-backup-work-area app-data-backup-cloud" aria-labelledby="app-data-backup-cloud-title">
+        <div className="app-data-backup-area-head">
+          <div>
+            <h6 id="app-data-backup-cloud-title">{t("appDataBackup.cloudSectionTitle")}</h6>
+            <span>{t("appDataBackup.cloudSectionHint")}</span>
+          </div>
+        </div>
+        <div className="app-data-backup-cloud-grid">
+          <div className="app-data-backup-step">
+            <div className="app-data-backup-block-head">
+              <strong>{t("appDataBackup.webdavBackup")}</strong>
+              <span>{t("appDataBackup.webdavHint")}</span>
+            </div>
+            <div className="app-data-backup-webdav-grid">
+              <label className="field">
+                <span>{t("appDataBackup.webdavUrl")}</span>
+                <input className="search-input" value={webdavDraft.url} onChange={(e) => setWebdavDraft({ ...webdavDraft, url: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>{t("appDataBackup.webdavUsername")}</span>
+                <input className="search-input" value={webdavDraft.username} onChange={(e) => setWebdavDraft({ ...webdavDraft, username: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>{t("appDataBackup.webdavPassword")}</span>
+                <input className="search-input" type="password" value={webdavDraft.password} onChange={(e) => setWebdavDraft({ ...webdavDraft, password: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>{t("appDataBackup.remoteFolder")}</span>
+                <input className="search-input" value={webdavDraft.rootPath} onChange={(e) => setWebdavDraft({ ...webdavDraft, rootPath: e.target.value })} />
+              </label>
+            </div>
+            <div className="app-data-backup-actions">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={saveWebDAVTarget}>
+                {t("appDataBackup.saveWebdavTarget")}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={testWebDAVTarget} disabled={busy === "webdav-test"}>
+                {busy === "webdav-test" ? t("appDataBackup.testingWebdav") : t("appDataBackup.testWebdav")}
+              </button>
+            </div>
+          </div>
+
+          <div className="app-data-backup-step">
+            <div className="app-data-backup-block-head">
+              <strong>{t("appDataBackup.cloudBackupActions")}</strong>
+              <span>{t("appDataBackup.cloudBackupActionsHint")}</span>
+            </div>
+            <div className="app-data-backup-remote-tools">
+              <label className="field">
+                <span>{t("appDataBackup.webdavBackupPassword")}</span>
+                <input className="search-input" type="password" value={webdavBackupPassword} onChange={(e) => setWebdavBackupPassword(e.target.value)} />
+              </label>
+              <button type="button" className="btn btn-primary btn-sm" onClick={uploadWebDAVBackup} disabled={busy === "webdav-upload"}>
+                {busy === "webdav-upload" ? t("appDataBackup.uploading") : t("appDataBackup.uploadCurrentData")}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={refreshRemoteBackups} disabled={busy === "webdav-list"}>
+                {busy === "webdav-list" ? t("appDataBackup.refreshing") : t("appDataBackup.refreshRemoteList")}
+              </button>
+            </div>
+
+            <label className="field app-data-backup-remote-password">
+              <span>{t("appDataBackup.remoteRestorePassword")}</span>
+              <input className="search-input" type="password" value={remoteRestorePassword} onChange={(e) => setRemoteRestorePassword(e.target.value)} />
             </label>
+
+            <div className="app-data-backup-remote-list">
+              {remoteBackups.length === 0 ? (
+                <div className="settings-empty">{t("appDataBackup.noRemoteBackups")}</div>
+              ) : (
+                remoteBackups.map((remote) => (
+                  <div className="app-data-backup-remote-row" key={remote.path}>
+                    <div>
+                      <strong>{remote.name}</strong>
+                      <span>{t("appDataBackup.remoteMeta", { size: remote.size, modifiedAt: remote.modifiedAt || "-" })}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => previewRemoteBackup(remote)}
+                      disabled={busy === `webdav-preview:${remote.path}`}
+                    >
+                      {t("appDataBackup.previewRemoteBackup", { name: remote.name })}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={exportLocalBackup} disabled={busy === "local-export"}>
-            {busy === "local-export" ? t("appDataBackup.exporting") : t("appDataBackup.exportEncryptedFile")}
-          </button>
-        </section>
-
-        <section className="app-data-backup-block">
-          <div className="app-data-backup-block-head">
-            <h6>{t("appDataBackup.localRestore")}</h6>
-            <span>{t("appDataBackup.localRestoreHint")}</span>
-          </div>
-          <div className="app-data-backup-file-row">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={chooseLocalBackup} disabled={busy === "local-choose"}>
-              {t("appDataBackup.chooseLocalBackup")}
-            </button>
-            {restorePath && <span className="app-data-backup-path">{restorePath}</span>}
-          </div>
-          <label className="field">
-            <span>{t("appDataBackup.restorePassword")}</span>
-            <input className="search-input" type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} />
-          </label>
-          <button type="button" className="btn btn-primary btn-sm" onClick={previewLocalBackup} disabled={busy === "local-preview"}>
-            {busy === "local-preview" ? t("appDataBackup.previewing") : t("appDataBackup.previewLocalBackup")}
-          </button>
-        </section>
-      </div>
-
-      <section className="app-data-backup-block app-data-backup-webdav">
-        <div className="app-data-backup-block-head">
-          <h6>{t("appDataBackup.webdavBackup")}</h6>
-          <span>{t("appDataBackup.webdavHint")}</span>
-        </div>
-        <div className="app-data-backup-webdav-grid">
-          <label className="field">
-            <span>{t("appDataBackup.webdavUrl")}</span>
-            <input className="search-input" value={webdavDraft.url} onChange={(e) => setWebdavDraft({ ...webdavDraft, url: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>{t("appDataBackup.webdavUsername")}</span>
-            <input className="search-input" value={webdavDraft.username} onChange={(e) => setWebdavDraft({ ...webdavDraft, username: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>{t("appDataBackup.webdavPassword")}</span>
-            <input className="search-input" type="password" value={webdavDraft.password} onChange={(e) => setWebdavDraft({ ...webdavDraft, password: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>{t("appDataBackup.remoteFolder")}</span>
-            <input className="search-input" value={webdavDraft.rootPath} onChange={(e) => setWebdavDraft({ ...webdavDraft, rootPath: e.target.value })} />
-          </label>
-        </div>
-        <div className="app-data-backup-actions">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={saveWebDAVTarget}>
-            {t("appDataBackup.saveWebdavTarget")}
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={testWebDAVTarget} disabled={busy === "webdav-test"}>
-            {busy === "webdav-test" ? t("appDataBackup.testingWebdav") : t("appDataBackup.testWebdav")}
-          </button>
-        </div>
-
-        <div className="app-data-backup-remote-tools">
-          <label className="field">
-            <span>{t("appDataBackup.webdavBackupPassword")}</span>
-            <input className="search-input" type="password" value={webdavBackupPassword} onChange={(e) => setWebdavBackupPassword(e.target.value)} />
-          </label>
-          <button type="button" className="btn btn-primary btn-sm" onClick={uploadWebDAVBackup} disabled={busy === "webdav-upload"}>
-            {busy === "webdav-upload" ? t("appDataBackup.uploading") : t("appDataBackup.uploadCurrentData")}
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={refreshRemoteBackups} disabled={busy === "webdav-list"}>
-            {busy === "webdav-list" ? t("appDataBackup.refreshing") : t("appDataBackup.refreshRemoteList")}
-          </button>
-        </div>
-
-        <label className="field app-data-backup-remote-password">
-          <span>{t("appDataBackup.remoteRestorePassword")}</span>
-          <input className="search-input" type="password" value={remoteRestorePassword} onChange={(e) => setRemoteRestorePassword(e.target.value)} />
-        </label>
-
-        <div className="app-data-backup-remote-list">
-          {remoteBackups.length === 0 ? (
-            <div className="settings-empty">{t("appDataBackup.noRemoteBackups")}</div>
-          ) : (
-            remoteBackups.map((remote) => (
-              <div className="app-data-backup-remote-row" key={remote.path}>
-                <div>
-                  <strong>{remote.name}</strong>
-                  <span>{t("appDataBackup.remoteMeta", { size: remote.size, modifiedAt: remote.modifiedAt || "-" })}</span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => previewRemoteBackup(remote)}
-                  disabled={busy === `webdav-preview:${remote.path}`}
-                >
-                  {t("appDataBackup.previewRemoteBackup", { name: remote.name })}
-                </button>
-              </div>
-            ))
-          )}
         </div>
       </section>
 
       {preview && (
-        <section className="app-data-backup-restore-confirm">
+        <section className="app-data-backup-restore-confirm" aria-labelledby="app-data-backup-restore-title">
+          <div className="app-data-backup-area-head">
+            <div>
+              <h6 id="app-data-backup-restore-title">{t("appDataBackup.restoreSectionTitle")}</h6>
+              <span>{t("appDataBackup.restoreSectionHint")}</span>
+            </div>
+          </div>
           <SummaryPreview preview={preview} />
           <div className="app-data-backup-restore-warning">{t("appDataBackup.restoreWarning")}</div>
           <button type="button" className="btn btn-primary btn-sm" onClick={restorePreview} disabled={busy === "restore"}>
@@ -576,9 +610,9 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         </section>
       )}
 
-      <section className="app-data-backup-activities">
+      <section className="app-data-backup-activities" aria-labelledby="app-data-backup-activity-title">
         <div className="app-data-backup-block-head">
-          <h6>{t("appDataBackup.activityTitle")}</h6>
+          <h6 id="app-data-backup-activity-title">{t("appDataBackup.activityTitle")}</h6>
           <span>{t("appDataBackup.activityHint")}</span>
         </div>
         {backupState.activities.length === 0 ? (

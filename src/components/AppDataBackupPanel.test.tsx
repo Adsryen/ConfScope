@@ -94,6 +94,27 @@ describe("AppDataBackupPanel", () => {
     Object.values(appApi).forEach((fn) => fn.mockReset());
   });
 
+  it("separates local, cloud, restore, and activity work areas", async () => {
+    const restored = backupPayload("layout-preview");
+    appDataBackupApi.selectAppDataBackupOpenFile.mockResolvedValue("C:\\tmp\\restore.csbackup");
+    appDataBackupApi.readAppDataBackupFile.mockResolvedValue({
+      plaintextJson: JSON.stringify(restored),
+      summary: { format: "confscope.app-data-backup", schemaVersion: 1, appVersion: "1.4.2", sourcePlatform: "windows", createdAt: restored.createdAt, size: 120 },
+    });
+    renderPanel();
+
+    expect(screen.getByRole("region", { name: "Local backups" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Cloud backups" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Recent app backup activity" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose local backup" }));
+    await waitFor(() => expect(screen.getByText("C:\\tmp\\restore.csbackup")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Restore password"), { target: { value: "restore-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview local backup" }));
+
+    expect(await screen.findByRole("region", { name: "Restore confirmation" })).toBeInTheDocument();
+  });
+
   it("exports current app data to an encrypted local backup file", async () => {
     appDataBackupApi.selectAppDataBackupSaveFile.mockResolvedValue("C:\\tmp\\confscope.csbackup");
     appDataBackupApi.writeAppDataBackupFile.mockResolvedValue({
