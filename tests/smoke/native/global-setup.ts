@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLocalSnapshotFixtures } from "../env/snapshots";
-import { cleanupSmokeContainers, createSmokeNetwork, dockerAvailable, startNacosContainer } from "../env/docker";
+import { cleanupSmokeContainers, createSmokeNetwork, dockerAvailable, startNacosContainer, startWebDAVContainer, waitForWebDAV } from "../env/docker";
 import { cleanupNacosSeed, seedNacos, waitForNacos } from "../env/nacos";
 import { initializeReports, recordCase } from "../env/report";
 import { nativeSmokeBuildArgs, pnpmExecutable, resolveNativeSmokeExecutable } from "../env/nativeApp";
@@ -45,17 +45,26 @@ async function globalSetup(): Promise<void> {
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     startNacosContainer(endpoint);
   }
+  startWebDAVContainer(state.webdav, state.webdavDir);
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     await waitForNacos(endpoint);
     await cleanupNacosSeed(endpoint);
     await seedNacos(endpoint);
   }
+  await waitForWebDAV(state.webdav);
   recordCase(state, {
     id: "ENV-NACOS-01",
     area: "Environment",
     status: "PASS",
     evidence: "Docker Nacos dev/sandbox/prod started and seeded",
     notes: `${state.nacos.dev.baseUrl}, ${state.nacos.sandbox.baseUrl}, ${state.nacos.prod.baseUrl}`,
+  });
+  recordCase(state, {
+    id: "ENV-WEBDAV-01",
+    area: "Environment",
+    status: "PASS",
+    evidence: `Docker WebDAV started at ${state.webdav.baseUrl}`,
+    notes: `Storage mounted at ${state.webdavDir}`,
   });
 
   buildNativeWailsApp(state);

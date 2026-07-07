@@ -104,6 +104,15 @@ type GoApp = {
   ListSnapshots(): Promise<any[]>;
   DeleteSnapshot(id: string): Promise<void>;
   ValidateSnapshot(path: string): Promise<void>;
+  SelectAppDataBackupSaveFile(defaultName: string): Promise<string>;
+  SelectAppDataBackupOpenFile(): Promise<string>;
+  WriteAppDataBackupFile(path: string, plaintextJson: string, password: string, meta: any): Promise<any>;
+  ReadAppDataBackupFile(path: string, password: string): Promise<any>;
+  CreateAppDataRecoveryPoint(plaintextJson: string, password: string, meta: any): Promise<any>;
+  TestAppDataWebDAV(target: any): Promise<void>;
+  ListAppDataWebDAVBackups(target: any): Promise<any[]>;
+  UploadAppDataWebDAVBackup(target: any, plaintextJson: string, password: string, meta: any): Promise<any>;
+  DownloadAppDataWebDAVBackup(target: any, remotePath: string, password: string): Promise<any>;
 };
 
 declare global {
@@ -264,5 +273,27 @@ export const ListSnapshots = () => app().ListSnapshots();
 export const DeleteSnapshot = (id: string) => app().DeleteSnapshot(id);
 
 export const ValidateSnapshot = (path: string) => app().ValidateSnapshot(path);
+
+export const SelectAppDataBackupSaveFile = (defaultName: string) => app().SelectAppDataBackupSaveFile(defaultName);
+
+export const SelectAppDataBackupOpenFile = () => app().SelectAppDataBackupOpenFile();
+
+export const WriteAppDataBackupFile = (path: string, plaintextJson: string, password: string, meta: any) =>
+  app().WriteAppDataBackupFile(path, plaintextJson, password, meta);
+
+export const ReadAppDataBackupFile = (path: string, password: string) => app().ReadAppDataBackupFile(path, password);
+
+export const CreateAppDataRecoveryPoint = (plaintextJson: string, password: string, meta: any) =>
+  app().CreateAppDataRecoveryPoint(plaintextJson, password, meta);
+
+export const TestAppDataWebDAV = (target: any) => app().TestAppDataWebDAV(target);
+
+export const ListAppDataWebDAVBackups = (target: any) => app().ListAppDataWebDAVBackups(target);
+
+export const UploadAppDataWebDAVBackup = (target: any, plaintextJson: string, password: string, meta: any) =>
+  app().UploadAppDataWebDAVBackup(target, plaintextJson, password, meta);
+
+export const DownloadAppDataWebDAVBackup = (target: any, remotePath: string, password: string) =>
+  app().DownloadAppDataWebDAVBackup(target, remotePath, password);
 
 export {};

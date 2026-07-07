@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"confscope/internal/appbackup"
 	"confscope/internal/nacos"
 	"confscope/internal/provider"
 	"confscope/internal/ssh"
@@ -227,6 +228,102 @@ func (a *App) SelectLocalSnapshotDirectory() (string, error) {
 
 func (a *App) ValidateLocalSnapshotDirectory(path string) provider.LocalSnapshotValidation {
 	return provider.ValidateLocalSnapshotDirectory(path)
+}
+
+func (a *App) SelectAppDataBackupSaveFile(defaultName string) (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("wails runtime is not ready")
+	}
+	name := defaultName
+	if name == "" {
+		name = "confscope-app-data.csbackup"
+	}
+	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "保存 ConfScope 应用数据备份",
+		DefaultFilename: name,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "ConfScope 应用数据备份 (*.csbackup)", Pattern: "*.csbackup"},
+		},
+	})
+}
+
+func (a *App) SelectAppDataBackupOpenFile() (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("wails runtime is not ready")
+	}
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 ConfScope 应用数据备份",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "ConfScope 应用数据备份 (*.csbackup)", Pattern: "*.csbackup"},
+		},
+	})
+}
+
+// WriteAppDataBackupFile 加密并写入本地应用数据备份文件。
+func (a *App) WriteAppDataBackupFile(path string, plaintextJSON string, password string, meta appbackup.PackageMeta) (appbackup.Summary, error) {
+	packageBytes, summary, err := appbackup.EncryptPackage([]byte(plaintextJSON), password, meta)
+	if err != nil {
+		return appbackup.Summary{}, err
+	}
+	if err := appbackup.WriteLocalBackup(path, packageBytes); err != nil {
+		return appbackup.Summary{}, err
+	}
+	return summary, nil
+}
+
+// ReadAppDataBackupFile 读取并解密本地应用数据备份文件。
+func (a *App) ReadAppDataBackupFile(path string, password string) (appbackup.DecryptedPackage, error) {
+	packageBytes, err := appbackup.ReadLocalBackup(path)
+	if err != nil {
+		return appbackup.DecryptedPackage{}, err
+	}
+	plaintext, summary, err := appbackup.DecryptPackage(packageBytes, password)
+	if err != nil {
+		return appbackup.DecryptedPackage{}, err
+	}
+	return appbackup.DecryptedPackage{PlaintextJSON: string(plaintext), Summary: summary}, nil
+}
+
+// CreateAppDataRecoveryPoint 在用户数据目录下创建恢复前的自动恢复点。
+func (a *App) CreateAppDataRecoveryPoint(plaintextJSON string, password string, meta appbackup.PackageMeta) (appbackup.Summary, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return appbackup.Summary{}, fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	path := filepath.Join(homeDir, ".confscope", "app-data-recovery-points", appbackup.DefaultBackupFileName(meta))
+	return a.WriteAppDataBackupFile(path, plaintextJSON, password, meta)
+}
+
+// TestAppDataWebDAV 测试应用数据备份 WebDAV 目标。
+func (a *App) TestAppDataWebDAV(target appbackup.WebDAVTarget) error {
+	return appbackup.NewWebDAVClient().Test(target)
+}
+
+// ListAppDataWebDAVBackups 列出 WebDAV 远端应用数据备份。
+func (a *App) ListAppDataWebDAVBackups(target appbackup.WebDAVTarget) ([]appbackup.RemoteBackup, error) {
+	return appbackup.NewWebDAVClient().List(target)
+}
+
+// UploadAppDataWebDAVBackup 加密并上传应用数据备份到 WebDAV。
+func (a *App) UploadAppDataWebDAVBackup(target appbackup.WebDAVTarget, plaintextJSON string, password string, meta appbackup.PackageMeta) (appbackup.RemoteBackup, error) {
+	packageBytes, _, err := appbackup.EncryptPackage([]byte(plaintextJSON), password, meta)
+	if err != nil {
+		return appbackup.RemoteBackup{}, err
+	}
+	return appbackup.NewWebDAVClient().Upload(target, appbackup.DefaultBackupFileName(meta), packageBytes)
+}
+
+// DownloadAppDataWebDAVBackup 下载并解密 WebDAV 应用数据备份。
+func (a *App) DownloadAppDataWebDAVBackup(target appbackup.WebDAVTarget, remotePath string, password string) (appbackup.DecryptedPackage, error) {
+	packageBytes, err := appbackup.NewWebDAVClient().Download(target, remotePath)
+	if err != nil {
+		return appbackup.DecryptedPackage{}, err
+	}
+	plaintext, summary, err := appbackup.DecryptPackage(packageBytes, password)
+	if err != nil {
+		return appbackup.DecryptedPackage{}, err
+	}
+	return appbackup.DecryptedPackage{PlaintextJSON: string(plaintext), Summary: summary}, nil
 }
 
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。

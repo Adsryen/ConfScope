@@ -848,6 +848,214 @@ button,
   background: rgba(244, 67, 54, 0.07);
 }
 
+.settings-subsection-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 12px;
+}
+
+.settings-subsection-head h5 {
+  margin: 0;
+  color: var(--text-hi);
+  font-size: 13px;
+}
+
+.app-data-backup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.app-data-backup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.app-data-backup-block,
+.app-data-backup-restore-confirm,
+.app-data-backup-activities {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.app-data-backup-block-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.app-data-backup-block-head h6 {
+  margin: 0;
+  color: var(--text-hi);
+  font-size: 12px;
+}
+
+.app-data-backup-block-head span,
+.app-data-backup-remote-row span,
+.app-data-backup-activity span,
+.app-data-backup-path {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.app-data-backup-fields,
+.app-data-backup-webdav-grid,
+.app-data-backup-remote-tools {
+  display: grid;
+  gap: 10px;
+}
+
+.app-data-backup-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-data-backup-webdav-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.app-data-backup-actions,
+.app-data-backup-file-row,
+.app-data-backup-remote-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.app-data-backup-remote-tools .field,
+.app-data-backup-remote-password {
+  min-width: min(260px, 100%);
+}
+
+.app-data-backup-remote-list,
+.app-data-backup-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app-data-backup-remote-row,
+.app-data-backup-activity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.app-data-backup-remote-row:first-child,
+.app-data-backup-activity:first-child {
+  border-top: none;
+}
+
+.app-data-backup-remote-row > div,
+.app-data-backup-activity > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-data-backup-remote-row strong,
+.app-data-backup-activity strong {
+  color: var(--text-hi);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.app-data-backup-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(125, 184, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(125, 184, 255, 0.06);
+}
+
+.app-data-backup-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-data-backup-preview-head strong {
+  color: var(--text-hi);
+  font-size: 12px;
+}
+
+.app-data-backup-preview-head span {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.app-data-backup-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.app-data-backup-summary-grid span {
+  overflow-wrap: anywhere;
+}
+
+.app-data-backup-restore-warning {
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.app-data-backup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-dim);
+}
+
+.app-data-backup-dot.success {
+  background: var(--green);
+}
+
+.app-data-backup-dot.failure {
+  background: var(--red);
+}
+
+.app-data-backup-activity {
+  justify-content: flex-start;
+}
+
+.app-data-backup-activity time {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.app-data-backup-error {
+  margin: 0;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
@@ -1165,6 +1373,25 @@ button,
 
   .settings-proxy-grid {
     grid-template-columns: 1fr;
+  }
+
+  .app-data-backup-grid,
+  .app-data-backup-fields,
+  .app-data-backup-webdav-grid,
+  .app-data-backup-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-data-backup-preview-head,
+  .app-data-backup-remote-row,
+  .app-data-backup-activity {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .app-data-backup-activity time {
+    margin-left: 0;
+    white-space: normal;
   }
 
   .settings-setting-row {

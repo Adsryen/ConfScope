@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
+import AppDataBackupPanel from "./AppDataBackupPanel";
 import LanguageSwitch from "./LanguageSwitch";
 
 export default function SettingsView() {
@@ -138,11 +139,12 @@ export default function SettingsView() {
             </label>
           </section>
 
-          <section id="settings-local-data" className="settings-panel settings-panel-danger">
+          <section id="settings-local-data" className="settings-panel">
             <div className="settings-panel-head">
               <h4>{t("settings.localData")}</h4>
               <div className="settings-panel-description">{t("settings.localDataDescription")}</div>
             </div>
+            <AppDataBackupPanel />
             <div className="settings-setting-row">
               <div>
                 <strong>{t("settings.dangerZone")}</strong>
