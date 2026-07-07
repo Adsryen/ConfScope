@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-07
+
+### Added
+- 新增应用数据备份与恢复，覆盖连接、SSH 配置档案、设置、操作历史、ApplyPlan、验证记录、UI 与语言状态。
+- 支持本地 `.csbackup` 加密备份包导出、预览和完整恢复。
+- 支持单个 WebDAV 备份目标，提供连接测试、上传、远端列表、下载预览和恢复。
+- 恢复前自动创建加密恢复点，恢复点创建失败时阻止覆盖当前数据。
+
+### Engineering
+- 新增 Go `internal/appbackup` 加密包、本地文件读写和 WebDAV 客户端测试。
+- 扩展 Vite smoke 与 Windows native Wails smoke，使用 Docker WebDAV 覆盖应用数据备份恢复链路。
+
 ## [1.4.2] - 2026-07-07
 
 ### Engineering
