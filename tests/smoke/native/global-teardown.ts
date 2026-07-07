@@ -44,6 +44,11 @@ export function recordKnownNativeGaps(state: SmokeState): void {
       "Apollo is covered by Vite + Docker OpenAPI smoke; native Wails form/browser/diff/audit automation is not covered yet.",
     ],
     [
+      "GAP-NATIVE-CONSUL",
+      "Consul provider",
+      "Consul is covered by Vite + Docker Consul smoke; native Wails form/browser/diff/audit automation is not covered yet.",
+    ],
+    [
       "GAP-NATIVE-APPDATA-WEBDAV-LIST",
       "App Data Backup",
       "Native smoke verifies WebDAV upload/download/restore through real Wails bindings; explicit refresh/list assertion remains covered outside native automation.",

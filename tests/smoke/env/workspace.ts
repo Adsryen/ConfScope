@@ -28,6 +28,14 @@ export interface SmokeApolloEndpoint {
   namespaceName: string;
 }
 
+export interface SmokeConsulEndpoint {
+  containerName: string;
+  hostPort: number;
+  baseUrl: string;
+  datacenter: string;
+  keyPrefix: string;
+}
+
 export interface SmokeWorkspace {
   runId: string;
   projectRoot: string;
@@ -45,6 +53,7 @@ export interface SmokeWorkspace {
     prod: SmokeNacosEndpoint;
   };
   apollo: SmokeApolloEndpoint;
+  consul: SmokeConsulEndpoint;
   webdav: SmokeWebDAVEndpoint;
 }
 
@@ -103,6 +112,7 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
       prod: nacosEndpoint("prod", 18860),
     },
     apollo: apolloEndpoint(),
+    consul: consulEndpoint(),
     webdav: webDAVEndpoint(),
   };
 }
@@ -152,6 +162,16 @@ function apolloEndpoint(): SmokeApolloEndpoint {
     appId: "order-service",
     cluster: "default",
     namespaceName: "application",
+  };
+}
+
+function consulEndpoint(): SmokeConsulEndpoint {
+  return {
+    containerName: "confscope-smoke-consul",
+    hostPort: 18863,
+    baseUrl: "http://127.0.0.1:18863",
+    datacenter: "dc1",
+    keyPrefix: "apps/order/",
   };
 }
 

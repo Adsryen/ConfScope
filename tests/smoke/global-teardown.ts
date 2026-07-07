@@ -1,4 +1,5 @@
 import { cleanupSmokeContainers } from "./env/docker";
+import { cleanupConsulSeed } from "./env/consul";
 import { cleanupNacosSeed } from "./env/nacos";
 import { recordCase, writeFinalReport } from "./env/report";
 import { stopSmokeWebServer } from "./env/webServer";
@@ -10,6 +11,7 @@ async function globalTeardown(): Promise<void> {
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     await cleanupNacosSeed(endpoint);
   }
+  await cleanupConsulSeed(state.consul);
   if (process.env.CONFSCOPE_SMOKE_KEEP !== "1") {
     cleanupSmokeContainers();
     recordCase(state, {
@@ -34,7 +36,6 @@ async function globalTeardown(): Promise<void> {
 
 function recordKnownGaps(state: ReturnType<typeof loadSmokeState>): void {
   for (const item of [
-    ["GAP-CONSUL", "Consul provider", "Consul provider is documented as planned, not implemented."],
     [
       "GAP-CONFIG-WEBDAV",
       "Config snapshot WebDAV",

@@ -5,11 +5,13 @@ import {
   createSmokeNetwork,
   dockerAvailable,
   startApolloContainer,
+  startConsulContainer,
   startNacosContainer,
   startWebDAVContainer,
   waitForWebDAV,
 } from "./env/docker";
 import { waitForApollo } from "./env/apollo";
+import { seedConsul, waitForConsul } from "./env/consul";
 import { cleanupNacosSeed, seedNacos, waitForNacos } from "./env/nacos";
 import { initializeReports, recordCase } from "./env/report";
 import { smokeWebServerUrl, startSmokeWebServer } from "./env/webServer";
@@ -42,6 +44,7 @@ async function globalSetup(): Promise<void> {
     startNacosContainer(endpoint);
   }
   startApolloContainer(state.apollo, join(state.projectRoot, "tests", "smoke", "fixtures", "apollo", "server.mjs"));
+  startConsulContainer(state.consul);
   startWebDAVContainer(state.webdav, state.webdavDir);
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     await waitForNacos(endpoint);
@@ -49,6 +52,8 @@ async function globalSetup(): Promise<void> {
     await seedNacos(endpoint);
   }
   await waitForApollo(state.apollo);
+  await seedConsul(state.consul);
+  await waitForConsul(state.consul);
   await waitForWebDAV(state.webdav);
   recordCase(state, {
     id: "ENV-NACOS-01",
@@ -63,6 +68,13 @@ async function globalSetup(): Promise<void> {
     status: "PASS",
     evidence: "Docker Apollo-compatible OpenAPI fixture started and verified",
     notes: `${state.apollo.baseUrl} / ${state.apollo.env} / ${state.apollo.appId} / ${state.apollo.cluster} / ${state.apollo.namespaceName}`,
+  });
+  recordCase(state, {
+    id: "ENV-CONSUL-01",
+    area: "Environment",
+    status: "PASS",
+    evidence: "Docker Consul KV started and seeded",
+    notes: `${state.consul.baseUrl} / ${state.consul.datacenter} / ${state.consul.keyPrefix}`,
   });
   recordCase(state, {
     id: "ENV-WEBDAV-01",

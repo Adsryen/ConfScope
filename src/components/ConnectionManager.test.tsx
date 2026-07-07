@@ -309,6 +309,54 @@ describe("ConnectionManager", () => {
     ]);
   });
 
+  it("enables Consul provider fields and saves them", async () => {
+    const onChange = vi.fn();
+    apiMocks.testConnection.mockResolvedValueOnce({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+    renderManager(onChange);
+
+    const providerSelect = screen.getByRole("combobox", { name: "配置中心" });
+    const consulOption = within(providerSelect).getByRole("option", { name: "Consul" });
+    expect(consulOption).not.toBeDisabled();
+
+    fireEvent.change(providerSelect, { target: { value: "consul" } });
+
+    expect(screen.queryByRole("combobox", { name: "Nacos 类型" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Apollo Token")).not.toBeInTheDocument();
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "Consul KV" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://localhost:8500" } });
+    fireEvent.change(fieldByLabel("Consul Token"), { target: { value: "consul-token" } });
+    fireEvent.change(fieldByLabel("Consul Datacenter"), { target: { value: "dc1" } });
+    fireEvent.change(fieldByLabel("Consul Key Prefix"), { target: { value: "apps/order/" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    await screen.findByText("连接测试成功");
+    expect(apiMocks.testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "consul",
+        baseUrl: "http://localhost:8500",
+        consulToken: "consul-token",
+        consulDatacenter: "dc1",
+        consulKeyPrefix: "apps/order/",
+        defaultNamespace: "dc1",
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        provider: "consul",
+        sourceName: "Consul KV",
+        baseUrl: "http://localhost:8500",
+        consulToken: "consul-token",
+        consulDatacenter: "dc1",
+        consulKeyPrefix: "apps/order/",
+        defaultNamespace: "dc1",
+      }),
+    ]);
+  });
+
   it("keeps a custom source name when switching to local snapshot", () => {
     renderManager();
 

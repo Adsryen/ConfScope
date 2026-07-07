@@ -180,6 +180,31 @@ describe("connection store", () => {
     );
   });
 
+  it("preserves Consul connection fields when persisting", () => {
+    const created = upsertConnection({
+      name: "consul-dev",
+      provider: "consul",
+      baseUrl: "http://localhost:8500",
+      username: "",
+      password: "",
+      defaultNamespace: "dc1",
+      consulToken: "consul-token",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+    });
+
+    expect(loadConnections()[0]).toEqual(created);
+    expect(loadConnections()[0]).toEqual(
+      expect.objectContaining({
+        provider: "consul",
+        defaultNamespace: "dc1",
+        consulToken: "consul-token",
+        consulDatacenter: "dc1",
+        consulKeyPrefix: "apps/order/",
+      })
+    );
+  });
+
   it("preserves local snapshot force and validation metadata", () => {
     const created = upsertConnection({
       name: "local-snapshot",

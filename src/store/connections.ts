@@ -83,6 +83,12 @@ export interface Connection {
   apolloNamespaceName?: string;
   /** Apollo OpenAPI token。 */
   apolloToken?: string;
+  /** Consul HTTP API token，可为空。 */
+  consulToken?: string;
+  /** Consul datacenter，例如 dc1。 */
+  consulDatacenter?: string;
+  /** Consul KV key prefix，用于限定浏览范围。 */
+  consulKeyPrefix?: string;
 }
 
 const KEY = "cs.connections";
@@ -221,5 +227,8 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     apolloCluster: raw.apolloCluster?.trim() || "",
     apolloNamespaceName: raw.apolloNamespaceName?.trim() || "",
     apolloToken: raw.apolloToken ?? "",
+    consulToken: raw.consulToken ?? "",
+    consulDatacenter: raw.consulDatacenter?.trim() || "",
+    consulKeyPrefix: raw.consulKeyPrefix?.trim() || "",
   };
 }

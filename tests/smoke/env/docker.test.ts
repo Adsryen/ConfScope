@@ -2,8 +2,8 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from "vitest";
-import { apolloContainerOptions, webDAVContainerOptions } from "./docker";
-import type { SmokeApolloEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+import { apolloContainerOptions, consulContainerOptions, webDAVContainerOptions } from "./docker";
+import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeWebDAVEndpoint } from "./workspace";
 
 describe("webDAVContainerOptions", () => {
   it("builds a loopback generic WebDAV container with mounted smoke storage and basic auth", () => {
@@ -80,5 +80,26 @@ describe("apolloContainerOptions", () => {
       ])
     );
     expect(options.command).toEqual(["node", "/srv/apollo-server.mjs"]);
+  });
+});
+
+describe("consulContainerOptions", () => {
+  it("builds a loopback Consul dev agent container with the smoke datacenter", () => {
+    const endpoint: SmokeConsulEndpoint = {
+      containerName: "confscope-smoke-consul",
+      hostPort: 18863,
+      baseUrl: "http://127.0.0.1:18863",
+      datacenter: "dc1",
+      keyPrefix: "apps/order/",
+    };
+
+    const options = consulContainerOptions(endpoint);
+
+    expect(options.name).toBe("confscope-smoke-consul");
+    expect(options.image).toBe("hashicorp/consul:1.20.0");
+    expect(options.args).toEqual(
+      expect.arrayContaining(["--network", "confscope-smoke", "-p", "127.0.0.1:18863:8500"])
+    );
+    expect(options.command).toEqual(["agent", "-dev", "-client=0.0.0.0", "-datacenter=dc1"]);
   });
 });

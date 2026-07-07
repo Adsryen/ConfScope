@@ -1,0 +1,61 @@
+import type { Locator } from "@playwright/test";
+import { expect, pass, test } from "./smokeTest";
+
+test("creates and reads a Consul KV connection through the UI", async ({ page, smoke }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Connections" }).click();
+  await page.getByRole("button", { name: "Add Source" }).click();
+  await page.getByRole("combobox", { name: /Project/ }).selectOption("Smoke Project");
+  await page.getByRole("combobox", { name: "Config Center" }).selectOption("consul");
+  await page.getByLabel("Source Name").fill("Consul KV");
+  await page.getByLabel("Target Address").fill(smoke.consul.baseUrl);
+  await page.getByLabel("Consul Datacenter").fill(smoke.consul.datacenter);
+  await page.getByLabel("Consul Key Prefix").fill(smoke.consul.keyPrefix);
+
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  await expect(page.getByText("Connection test succeeded")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: /^Save$/ }).click();
+  await expect(page.locator(".conn-item").filter({ hasText: "Consul KV" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Config Browser" }).click();
+  await pickSelect(page.locator(".browse-header .page-actions"), 0, "Consul KV");
+  await expect(page.locator(".browser-item").filter({ hasText: "apps/order/app.yaml" })).toBeVisible({ timeout: 30_000 });
+  await page.locator(".browser-item").filter({ hasText: "apps/order/app.yaml" }).click();
+  await expect(page.locator(".browser-detail")).toContainText("feature: true", { timeout: 20_000 });
+
+  await page.getByRole("button", { name: "Config Compare" }).click();
+  await pickConsulDiffSource(page.locator(".source-picker").nth(0), "apps/order/app.yaml");
+  await pickConsulDiffSource(page.locator(".source-picker").nth(1), "apps/order/app.yaml");
+  await page.getByRole("button", { name: "Load & Compare" }).click();
+  await expect(page.locator(".diff-result")).toContainText("feature: true", { timeout: 30_000 });
+  await expect(page.locator(".diff-result")).toContainText("Both sides are identical", { timeout: 30_000 });
+
+  await page.getByRole("button", { name: "Config Matrix" }).click();
+  await page.getByRole("button", { name: "Run Audit" }).click();
+  await expect(page.locator(".audit-matrix")).toContainText("apps/order/app.yaml", { timeout: 30_000 });
+  await expect(page.locator(".audit-matrix")).toContainText("feature", { timeout: 30_000 });
+
+  pass(smoke, "FS-CONSUL-CONN-01", "Consul provider", "Created Consul KV connection through Connection Manager form and tested it");
+  pass(smoke, "FS-CONSUL-BROWSE-01", "Consul provider", "Browsed and opened Consul KV content from Docker Consul");
+  pass(smoke, "FS-CONSUL-DIFF-01", "Consul provider", "Compared Consul KV document through Config Compare");
+  pass(smoke, "FS-CONSUL-AUDIT-01", "Consul provider", "Included Consul KV document in Config Matrix audit");
+});
+
+async function pickConsulDiffSource(sourcePicker: Locator, dataId: string): Promise<void> {
+  await pickSelect(sourcePicker, 1, "Consul KV");
+  await pickCombobox(sourcePicker.locator(".combo").nth(0), dataId);
+}
+
+async function pickSelect(scope: Locator, index: number, optionText: string): Promise<void> {
+  const select = scope.locator(".sel").nth(index);
+  await select.getByRole("button").click();
+  await select.locator(".sel-option").filter({ hasText: optionText }).first().click();
+}
+
+async function pickCombobox(combo: Locator, optionText: string): Promise<void> {
+  await combo.locator("input").click();
+  const option = combo.locator(".combo-option").filter({ hasText: optionText }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+}

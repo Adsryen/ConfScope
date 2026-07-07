@@ -50,6 +50,8 @@ describe("config center api", () => {
     apolloAppId: "",
     apolloCluster: "",
     apolloNamespaceName: "",
+    consulDatacenter: "",
+    consulKeyPrefix: "",
   };
   const ref: ConfigRef = {
     provider: "nacos",

@@ -24,6 +24,9 @@ describe("createSmokeWorkspace", () => {
     expect(workspace.apollo.appId).toBe("order-service");
     expect(workspace.apollo.cluster).toBe("default");
     expect(workspace.apollo.namespaceName).toBe("application");
+    expect(workspace.consul.baseUrl).toBe("http://127.0.0.1:18863");
+    expect(workspace.consul.datacenter).toBe("dc1");
+    expect(workspace.consul.keyPrefix).toBe("apps/order/");
     expect(workspace.webdav.baseUrl).toBe("http://127.0.0.1:18861");
     expect(workspace.webdav.username).toBe("smoke");
     expect(workspace.webdav.password).toBe("smoke-pass");

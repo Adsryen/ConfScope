@@ -56,6 +56,7 @@ func NewApp() *App {
 		providers: map[provider.ProviderType]provider.ConfigProvider{
 			provider.ProviderNacos:  provider.NewNacosProvider(nacosClient),
 			provider.ProviderApollo: provider.NewApolloProvider(nil),
+			provider.ProviderConsul: provider.NewConsulProvider(nil),
 			provider.ProviderLocal:  provider.NewLocalProvider(),
 		},
 	}

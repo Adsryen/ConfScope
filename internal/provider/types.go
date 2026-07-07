@@ -42,6 +42,9 @@ type ConnectionProfile struct {
 	ApolloAppID         string `json:"apolloAppId"`
 	ApolloCluster       string `json:"apolloCluster"`
 	ApolloNamespaceName string `json:"apolloNamespaceName"`
+
+	ConsulDatacenter string `json:"consulDatacenter"`
+	ConsulKeyPrefix  string `json:"consulKeyPrefix"`
 }
 
 type ConfigRef struct {

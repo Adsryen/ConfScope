@@ -217,6 +217,10 @@ async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfil
     const baseUrl = await resolveBaseUrl(conn);
     return call(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
   }
+  if ((conn.provider ?? "nacos") === "consul") {
+    const baseUrl = await resolveBaseUrl(conn);
+    return call(toConnectionProfile(conn, baseUrl, conn.consulToken ?? "", ""));
+  }
   const apiVersion = await getVersion(conn);
   const accessToken = await getToken(conn);
   const baseUrl = await resolveBaseUrl(conn);
@@ -241,13 +245,14 @@ function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: str
   const optional = conn as Connection & { environment?: string; safetyLevel?: string };
   const provider = providerForConnection(conn);
   const isApollo = provider === "apollo";
+  const isConsul = provider === "consul";
   return {
     id: conn.id,
     name: conn.name,
     provider,
     distribution: conn.distribution ?? "opensource",
     authType:
-      conn.sourceType === "local-snapshot" || provider === "apollo"
+      conn.sourceType === "local-snapshot" || provider === "apollo" || provider === "consul"
         ? "none"
         : (conn.authType ?? (conn.username ? "nacos-password" : "none")),
     baseUrl,
@@ -263,6 +268,8 @@ function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: str
     apolloAppId: isApollo ? (conn.apolloAppId ?? conn.defaultNamespace ?? "") : "",
     apolloCluster: isApollo ? (conn.apolloCluster ?? "") : "",
     apolloNamespaceName: isApollo ? (conn.apolloNamespaceName ?? "") : "",
+    consulDatacenter: isConsul ? (conn.consulDatacenter ?? conn.defaultNamespace ?? "") : "",
+    consulKeyPrefix: isConsul ? (conn.consulKeyPrefix ?? "") : "",
   };
 }
 
@@ -271,10 +278,17 @@ function toConfigRef(conn: Connection, namespace: string, dataId: string, group:
     provider: providerForConnection(conn),
     connectionId: conn.id,
     namespace,
-    group: apolloGroupForConnection(conn, group),
+    group: providerGroupForConnection(conn, group),
     dataId,
     key: "",
   };
+}
+
+function providerGroupForConnection(conn: Connection, group: string): string {
+  const provider = providerForConnection(conn);
+  if (provider === "apollo") return apolloGroupForConnection(conn, group);
+  if (provider === "consul") return consulGroupForConnection(conn, group);
+  return group;
 }
 
 function apolloGroupForConnection(conn: Connection, group: string): string {
@@ -282,6 +296,13 @@ function apolloGroupForConnection(conn: Connection, group: string): string {
   const value = group.trim();
   if (value && value !== "DEFAULT_GROUP") return value;
   return conn.apolloCluster?.trim() || "default";
+}
+
+function consulGroupForConnection(conn: Connection, group: string): string {
+  if (providerForConnection(conn) !== "consul") return group;
+  const value = group.trim();
+  if (value && value !== "DEFAULT_GROUP") return value;
+  return conn.consulKeyPrefix?.trim() || "";
 }
 
 function fromConfigCenterNamespace(item: ConfigCenterNamespace): Namespace {
@@ -357,6 +378,11 @@ export async function testConnection(conn: Connection): Promise<LoginResult> {
     await configCenterTestConnection(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
+  if ((conn.provider ?? "nacos") === "consul") {
+    const baseUrl = await resolveBaseUrl(conn);
+    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, conn.consulToken ?? "", ""));
+    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+  }
   if (conn.authType === "aliyun-aksk") {
     const apiVersion = await getVersion(conn);
     const baseUrl = await resolveBaseUrl(conn);
@@ -385,8 +411,8 @@ export async function listConfigs(
 ): Promise<ConfigPage> {
   return withProfile(conn, async (profile) => {
     const normalizedGroup =
-      providerForConnection(conn) === "apollo"
-        ? apolloGroupForConnection(conn, group)
+      providerForConnection(conn) === "apollo" || providerForConnection(conn) === "consul"
+        ? providerGroupForConnection(conn, group)
         : conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group
           ? "DEFAULT_GROUP"
           : group;

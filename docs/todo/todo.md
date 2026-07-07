@@ -504,10 +504,10 @@
 
 ---
 
-### 2.6 `v1.5.0`: Apollo 只读第一阶段
+### 2.6 `v1.5.0`: Apollo 与 Consul 只读第一阶段
 
 **版本性质**: MINOR
-**目标**: 支持 Apollo OpenAPI 的连接、浏览、读取、diff、审计。第一阶段只做只读能力，不做发布/回滚。
+**目标**: 支持 Apollo OpenAPI 与 Consul KV 的连接、浏览、读取、diff、审计。第一阶段只做只读能力，不做发布/回滚。
 
 #### P0
 
@@ -536,6 +536,33 @@
   - 原始字段：Apollo appId/cluster/namespaceName，Nacos tenant/group/dataId。
 - [x] Apollo Go client 测试。
   - 使用 `httptest.Server` 覆盖连接、浏览、读取、错误处理。
+- [x] Consul KV 适配。
+  - Consul HTTP API 地址。
+  - token。
+  - datacenter。
+  - key prefix。
+  - KV value base64 解码。
+- [x] Consul provider 专属连接表单。
+  - 显示地址、token、datacenter、key prefix。
+  - 不显示 Nacos/Apollo 专属认证与概念字段。
+  - 保存时将 datacenter 作为通用默认 namespace。
+- [x] Consul 概念映射。
+  - 通用 `namespace` 映射 Consul `datacenter`。
+  - 通用 `group` 映射 Consul `key prefix`。
+  - 通用 `dataId` 映射 Consul 完整 KV key。
+  - 通用 `key` 第一阶段为空。
+- [x] Consul 浏览。
+  - datacenter 列表。
+  - prefix 下 KV key 列表。
+  - 单个 KV 文本内容读取。
+- [x] Consul 参与统一 diff 和 AuditView。
+  - `DEFAULT_GROUP` 兼容映射为连接配置的 key prefix。
+  - 完整 KV key 用于 diff/audit 定位。
+- [x] Consul Go client 测试。
+  - 使用 `httptest.Server` 覆盖连接、浏览、读取、错误处理。
+- [x] Consul Docker smoke。
+  - 使用真实 Docker Consul 容器 seed KV 数据。
+  - Playwright 通过 UI 表单创建连接、测试连接、浏览、diff、audit。
 
 #### P1
 
@@ -545,11 +572,21 @@
   - token 失效。
   - 权限不足。
   - app/cluster/namespace 不存在。
+- [x] Consul 错误提示。
+  - 网络失败。
+  - token/权限失败。
+  - datacenter/prefix 不可访问。
+  - key 不存在。
+  - 非文本 value 阻断。
 - [x] Apollo 样例 fixture。
   - app。
   - cluster。
   - namespace。
   - item。
+- [x] Consul 样例 fixture。
+  - datacenter。
+  - key prefix。
+  - YAML/JSON/Properties/Text KV。
 
 #### P2
 
@@ -634,12 +671,6 @@
 
 #### P1
 
-- [ ] Consul KV。
-  - KV 浏览。
-  - token 认证。
-  - datacenter 选择。
-  - key prefix 过滤。
-  - 与 Nacos/Apollo/local 的 diff 和 AuditView。
 - [ ] 阿里云 MSE / Nacos 企业治理增强。
   - RAM 角色、STS 临时凭证、KMS/系统钥匙串托管凭据评估。
   - 企业权限视图与批量治理策略。
