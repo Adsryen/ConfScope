@@ -36,7 +36,8 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Network" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Smart Compare" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Local Data" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Backup" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Local Data" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "App Data Backup" })).toBeInTheDocument();
     expect(
       screen.getByText("Connection-specific credentials, SSH tunnels, and security policies stay in Connection Manager.")
@@ -66,16 +67,16 @@ describe("SettingsView", () => {
   it("scrolls the settings panel container from rail navigation", () => {
     renderSettings("en-US");
     const panels = document.querySelector(".settings-panels") as HTMLDivElement;
-    const localDataPanel = document.getElementById("settings-local-data") as HTMLElement;
+    const backupPanel = document.getElementById("settings-backup") as HTMLElement;
     const scrollTo = vi.fn();
     const scrollIntoView = vi.fn();
     panels.scrollTo = scrollTo;
-    localDataPanel.scrollIntoView = scrollIntoView;
+    backupPanel.scrollIntoView = scrollIntoView;
     Object.defineProperty(panels, "scrollTop", { value: 120, configurable: true });
     panels.getBoundingClientRect = vi.fn(() => new DOMRect(0, 20, 0, 0));
-    localDataPanel.getBoundingClientRect = vi.fn(() => new DOMRect(0, 420, 0, 0));
+    backupPanel.getBoundingClientRect = vi.fn(() => new DOMRect(0, 420, 0, 0));
 
-    fireEvent.click(screen.getByRole("button", { name: "Local Data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Backup" }));
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 520, behavior: "smooth" });
     expect(scrollIntoView).not.toHaveBeenCalled();

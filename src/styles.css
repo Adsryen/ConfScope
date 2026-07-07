@@ -861,28 +861,75 @@ button,
   font-size: 13px;
 }
 
-.app-data-backup-panel {
+.settings-backup-panel {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.app-data-backup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   min-width: 0;
 }
 
-.app-data-backup-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.app-data-backup-block,
+.app-data-backup-work-area,
 .app-data-backup-restore-confirm,
 .app-data-backup-activities {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-data-backup-area-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 3px solid rgba(125, 184, 255, 0.5);
+}
+
+.app-data-backup-cloud .app-data-backup-area-head {
+  border-left-color: rgba(87, 211, 146, 0.58);
+}
+
+.app-data-backup-restore-confirm .app-data-backup-area-head {
+  border-left-color: rgba(255, 202, 87, 0.65);
+}
+
+.app-data-backup-area-head h6 {
+  margin: 0 0 3px;
+  color: var(--text-hi);
+  font-size: 13px;
+}
+
+.app-data-backup-area-head span {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.app-data-backup-split,
+.app-data-backup-cloud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  min-width: 0;
+}
+
+.app-data-backup-step {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .app-data-backup-block-head {
@@ -892,7 +939,8 @@ button,
   min-width: 0;
 }
 
-.app-data-backup-block-head h6 {
+.app-data-backup-block-head h6,
+.app-data-backup-block-head strong {
   margin: 0;
   color: var(--text-hi);
   font-size: 12px;
@@ -920,10 +968,11 @@ button,
 }
 
 .app-data-backup-webdav-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .app-data-backup-actions,
+.app-data-backup-action-row,
 .app-data-backup-file-row,
 .app-data-backup-remote-tools {
   display: flex;
@@ -1375,7 +1424,8 @@ button,
     grid-template-columns: 1fr;
   }
 
-  .app-data-backup-grid,
+  .app-data-backup-split,
+  .app-data-backup-cloud-grid,
   .app-data-backup-fields,
   .app-data-backup-webdav-grid,
   .app-data-backup-summary-grid {
@@ -1396,6 +1446,15 @@ button,
 
   .settings-setting-row {
     align-items: flex-start;
+  }
+
+  .settings-danger-zone {
+    flex-direction: column;
+  }
+
+  .settings-danger-zone .btn {
+    width: fit-content;
+    max-width: 100%;
   }
 
   .ssh-overview,

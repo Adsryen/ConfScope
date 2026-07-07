@@ -15,7 +15,7 @@ export default function SettingsView() {
     { id: "settings-general", label: t("settings.groupBasic") },
     { id: "settings-network", label: t("settings.groupNetwork") },
     { id: "settings-compare", label: t("settings.comparePreferences") },
-    { id: "settings-local-data", label: t("settings.localData") },
+    { id: "settings-backup", label: t("settings.backup") },
   ];
 
   const update = (patch: Partial<AppSettings>) => {
@@ -139,13 +139,13 @@ export default function SettingsView() {
             </label>
           </section>
 
-          <section id="settings-local-data" className="settings-panel">
+          <section id="settings-backup" className="settings-panel settings-backup-panel">
             <div className="settings-panel-head">
-              <h4>{t("settings.localData")}</h4>
-              <div className="settings-panel-description">{t("settings.localDataDescription")}</div>
+              <h4>{t("settings.backup")}</h4>
+              <div className="settings-panel-description">{t("settings.backupDescription")}</div>
             </div>
             <AppDataBackupPanel />
-            <div className="settings-setting-row">
+            <div className="settings-setting-row settings-danger-zone">
               <div>
                 <strong>{t("settings.dangerZone")}</strong>
                 <div className="settings-panel-description">{t("settings.clearHistoryHint")}</div>
