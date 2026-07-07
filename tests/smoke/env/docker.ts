@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import type { SmokeApolloEndpoint, SmokeNacosEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeNacosEndpoint, SmokeWebDAVEndpoint } from "./workspace";
 
 export interface DockerRunOptions {
   image: string;
@@ -88,6 +88,19 @@ export function startApolloContainer(endpoint: SmokeApolloEndpoint, serverFile: 
   runDetachedContainer(apolloContainerOptions(endpoint, serverFile));
 }
 
+export function consulContainerOptions(endpoint: SmokeConsulEndpoint): DockerRunOptions {
+  return {
+    name: endpoint.containerName,
+    image: "hashicorp/consul:1.20.0",
+    args: ["--network", "confscope-smoke", "-p", `127.0.0.1:${endpoint.hostPort}:8500`],
+    command: ["agent", "-dev", "-client=0.0.0.0", `-datacenter=${endpoint.datacenter}`],
+  };
+}
+
+export function startConsulContainer(endpoint: SmokeConsulEndpoint): void {
+  runDetachedContainer(consulContainerOptions(endpoint));
+}
+
 export function webDAVContainerOptions(endpoint: SmokeWebDAVEndpoint, dataDir: string): DockerRunOptions {
   return {
     name: endpoint.containerName,
@@ -143,6 +156,7 @@ export function cleanupSmokeContainers(): void {
     "confscope-smoke-nacos-sandbox",
     "confscope-smoke-nacos-prod",
     "confscope-smoke-apollo",
+    "confscope-smoke-consul",
     "confscope-smoke-webdav",
     "confscope-smoke-sshd",
   ]) {

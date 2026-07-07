@@ -33,6 +33,8 @@ export interface ConnectionProfile {
   apolloAppId: string;
   apolloCluster: string;
   apolloNamespaceName: string;
+  consulDatacenter: string;
+  consulKeyPrefix: string;
 }
 
 export interface ConfigRef {

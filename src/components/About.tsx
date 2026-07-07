@@ -372,7 +372,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
           <div className="about-badges">
             <span className="badge badge-success">{t("about.centerNacos")}</span>
             <span className="badge badge-success">{t("about.centerApolloReadOnly")}</span>
-            <span className="badge badge-planned">{t("about.centerConsulPlanned")}</span>
+            <span className="badge badge-success">{t("about.centerConsulReadOnly")}</span>
           </div>
         </div>
 

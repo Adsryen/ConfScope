@@ -51,10 +51,19 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   apolloCluster: "default",
   apolloNamespaceName: "application",
   apolloToken: "",
+  consulToken: "",
+  consulDatacenter: "dc1",
+  consulKeyPrefix: "",
 });
 
 type HelpPopover = { text: string; top: number; left: number };
 type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+function providerDefaultNamespace(draft: Pick<Draft, "provider" | "defaultNamespace" | "apolloAppId" | "consulDatacenter">): string {
+  if (draft.provider === "apollo") return draft.apolloAppId?.trim() || "";
+  if (draft.provider === "consul") return draft.consulDatacenter?.trim() || "";
+  return draft.defaultNamespace ?? "";
+}
 
 function latencyText(t: Translate, startedAt: number): string {
   return t("connection.testLatency", { time: Math.max(0, Date.now() - startedAt) });
@@ -134,6 +143,7 @@ function traceHasSSH(snapshot: Draft): boolean {
 
 function traceProviderName(snapshot: Draft, t: Translate): string {
   if (snapshot.provider === "apollo") return "Apollo";
+  if (snapshot.provider === "consul") return "Consul";
   return snapshot.distribution === "aliyun-mse" ? t("connection.aliyunMseNacos") : "Nacos";
 }
 
@@ -162,6 +172,7 @@ function looksLikeConfigCenterResponse(message: string): boolean {
   return (
     text.includes("nacos 返回") ||
     text.includes("apollo 返回") ||
+    text.includes("consul 返回") ||
     text.includes("http status") ||
     text.includes('"status":') ||
     text.includes("check signature") ||
@@ -180,6 +191,8 @@ function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, d
   const interfaceName =
     snapshot.provider === "apollo"
       ? "Apollo OpenAPI"
+      : snapshot.provider === "consul"
+        ? "Consul HTTP API"
       : snapshot.distribution === "aliyun-mse"
         ? t("connection.traceMseNacosApi")
         : t("connection.traceNacosApi");
@@ -260,7 +273,7 @@ function connectionTestKey(draft: Draft): string {
     username: draft.username ?? "",
     accessKeyId: draft.accessKeyId ?? "",
     securityToken: draft.securityToken ?? "",
-    defaultNamespace: draft.defaultNamespace ?? "",
+    defaultNamespace: providerDefaultNamespace(draft),
     sshProfileId: draft.sshProfileId ?? "",
     sshConfig: sshConfig.host ? sshConfig : undefined,
     forceLocalSnapshot: !!draft.forceLocalSnapshot,
@@ -269,6 +282,9 @@ function connectionTestKey(draft: Draft): string {
     apolloCluster: draft.apolloCluster ?? "",
     apolloNamespaceName: draft.apolloNamespaceName ?? "",
     apolloToken: draft.apolloToken ?? "",
+    consulToken: draft.consulToken ?? "",
+    consulDatacenter: draft.consulDatacenter ?? "",
+    consulKeyPrefix: draft.consulKeyPrefix ?? "",
   });
 }
 
@@ -290,6 +306,9 @@ function namespaceLoadKey(draft: Draft): string {
     apolloCluster: draft.apolloCluster ?? "",
     apolloNamespaceName: draft.apolloNamespaceName ?? "",
     apolloToken: draft.apolloToken ?? "",
+    consulToken: draft.consulToken ?? "",
+    consulDatacenter: draft.consulDatacenter ?? "",
+    consulKeyPrefix: draft.consulKeyPrefix ?? "",
   });
 }
 
@@ -596,13 +615,14 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         ...d,
         provider,
         sourceType,
-        distribution: provider === "apollo" ? "opensource" : d.distribution,
-        authType: provider === "apollo" ? "none" : d.authType,
-        username: provider === "apollo" ? "" : d.username,
-        password: provider === "apollo" ? "" : d.password,
+        distribution: provider === "apollo" || provider === "consul" ? "opensource" : d.distribution,
+        authType: provider === "apollo" || provider === "consul" ? "none" : d.authType,
+        username: provider === "apollo" || provider === "consul" ? "" : d.username,
+        password: provider === "apollo" || provider === "consul" ? "" : d.password,
         apolloEnv: provider === "apollo" ? d.apolloEnv || "DEV" : d.apolloEnv,
         apolloCluster: provider === "apollo" ? d.apolloCluster || "default" : d.apolloCluster,
         apolloNamespaceName: provider === "apollo" ? d.apolloNamespaceName || "application" : d.apolloNamespaceName,
+        consulDatacenter: provider === "consul" ? d.consulDatacenter || "dc1" : d.consulDatacenter,
         sourceName: shouldDefaultLocalName ? localSnapshotSourceNamePreset.label : shouldClearLocalName ? "" : d.sourceName,
       };
     });
@@ -791,12 +811,15 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           }
         : undefined,
       baseUrl: toSave.sourceType === "local-snapshot" ? toSave.localPath?.trim() || "" : toSave.baseUrl.trim(),
-      defaultNamespace: toSave.provider === "apollo" ? toSave.apolloAppId?.trim() || "" : (toSave.defaultNamespace ?? ""),
+      defaultNamespace: providerDefaultNamespace(toSave),
       apolloEnv: toSave.apolloEnv?.trim() || "",
       apolloAppId: toSave.apolloAppId?.trim() || "",
       apolloCluster: toSave.apolloCluster?.trim() || "",
       apolloNamespaceName: toSave.apolloNamespaceName?.trim() || "",
       apolloToken: toSave.apolloToken ?? "",
+      consulToken: toSave.consulToken ?? "",
+      consulDatacenter: toSave.consulDatacenter?.trim() || "",
+      consulKeyPrefix: toSave.consulKeyPrefix?.trim() || "",
     });
     clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
     const savedProject = connectionProjectName(saved);
@@ -827,6 +850,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     const startedAt = Date.now();
     const snapshot: Draft = {
       ...draft,
+      defaultNamespace: providerDefaultNamespace(draft),
       tags: [...(draft.tags ?? [])],
       sshConfig: draft.sshConfig ? { ...draft.sshConfig } : undefined,
     };
@@ -841,7 +865,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     }
     setTestingKey(snapshotKey);
     try {
-      if (snapshot.provider === "apollo" || snapshot.authType === "aliyun-aksk" || snapshot.username) {
+      if (snapshot.provider === "apollo" || snapshot.provider === "consul" || snapshot.authType === "aliyun-aksk" || snapshot.username) {
         const r = await testConnection({ ...(snapshot as Connection), id: snapshot.id ?? "test" });
         if (currentTestKeyRef.current !== snapshotKey) return;
         const latency = latencyText(t, startedAt);
@@ -1071,6 +1095,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           </span>
                           {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
                           {c.provider === "apollo" && <span className="conn-provider-badge apollo">Apollo</span>}
+                          {c.provider === "consul" && <span className="conn-provider-badge consul">Consul</span>}
                           {c.provider === "local" && (
                             <span className="conn-provider-badge local">{t("connection.sourceTypeSnapshot")}</span>
                           )}
@@ -1269,6 +1294,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 >
                   <option value="nacos">Nacos</option>
                   <option value="apollo">Apollo</option>
+                  <option value="consul">Consul</option>
                   <option value="local">{t("connection.sourceTypeSnapshot")}</option>
                 </select>
               </label>
@@ -1501,6 +1527,80 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   onChange={(e) => set({ apolloNamespaceName: e.target.value })}
                 />
               </label>
+            </section>
+          )}
+
+          {draft.provider === "consul" && (
+            <section className="conn-form-section">
+              <div className="conn-section-title">{t("connection.sectionAuth")}</div>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.addressHelp")}>
+                  {t("connection.address")}
+                </FieldLabel>
+                <input
+                  className="search-input wide mono"
+                  value={draft.baseUrl}
+                  placeholder="http://localhost:8500"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ baseUrl: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.consulTokenHelp")}>
+                  {t("connection.consulToken")}
+                </FieldLabel>
+                <div className="pwd-field">
+                  <input
+                    className="search-input wide mono"
+                    type={showPwd ? "text" : "password"}
+                    value={draft.consulToken ?? ""}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ consulToken: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="pwd-toggle"
+                    title={showPwd ? t("connection.hide") : t("connection.show")}
+                    onClick={() => setShowPwd((v) => !v)}
+                  >
+                    {showPwd ? "🙈" : "👁"}
+                  </button>
+                </div>
+              </label>
+              <div className="field-row">
+                <label className="field">
+                  <FieldLabel {...fieldLabelProps} tip={t("connection.consulDatacenterHelp")}>
+                    {t("connection.consulDatacenter")}
+                  </FieldLabel>
+                  <input
+                    className="search-input mono"
+                    value={draft.consulDatacenter ?? ""}
+                    placeholder="dc1"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ consulDatacenter: e.target.value, defaultNamespace: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  <FieldLabel {...fieldLabelProps} tip={t("connection.consulKeyPrefixHelp")}>
+                    {t("connection.consulKeyPrefix")}
+                  </FieldLabel>
+                  <input
+                    className="search-input mono"
+                    value={draft.consulKeyPrefix ?? ""}
+                    placeholder="apps/order/"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ consulKeyPrefix: e.target.value })}
+                  />
+                </label>
+              </div>
             </section>
           )}
 

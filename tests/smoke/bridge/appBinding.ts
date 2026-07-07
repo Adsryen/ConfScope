@@ -9,6 +9,12 @@ import {
   type SmokeApolloNamespace,
 } from "../env/apollo";
 import {
+  getConsulKV,
+  listConsulDatacenters,
+  listConsulKV,
+  type SmokeConsulKV,
+} from "../env/consul";
+import {
   deleteNacosConfig,
   getNacosConfig,
   listNacosConfigs,
@@ -17,18 +23,20 @@ import {
   type SmokeNacosConfig,
   type SmokeNacosConfigSummary,
 } from "../env/nacos";
-import type { SmokeNacosEndpoint, SmokeState } from "../env/workspace";
+import type { SmokeConsulEndpoint, SmokeNacosEndpoint, SmokeState } from "../env/workspace";
 
 interface ConnectionProfile {
   id: string;
   name: string;
-  provider: "nacos" | "local" | "apollo";
+  provider: "nacos" | "local" | "apollo" | "consul";
   baseUrl: string;
   accessToken: string;
   apolloEnv: string;
   apolloAppId: string;
   apolloCluster: string;
   apolloNamespaceName: string;
+  consulDatacenter: string;
+  consulKeyPrefix: string;
 }
 
 interface ConfigRef {
@@ -450,6 +458,10 @@ async function testConnection(profile: ConnectionProfile): Promise<void> {
     await getApolloNamespace(apolloEndpointForProfile(profile));
     return;
   }
+  if (profile.provider === "consul") {
+    await listConsulKV(consulEndpointForProfile(profile));
+    return;
+  }
   await listNacosConfigs(endpointForProfile(profile), { namespace: "", group: "DEFAULT_GROUP", dataId: "", pageNo: 1, pageSize: 1 });
 }
 
@@ -466,6 +478,12 @@ async function listNamespaces(state: SmokeState, profile: ConnectionProfile): Pr
     return [
       { id: endpoint.appId, name: `${endpoint.appId} / ${endpoint.env} / ${endpoint.cluster}`, configCount: namespaces.length, kind: 0 },
     ];
+  }
+  if (profile.provider === "consul") {
+    const endpoint = consulEndpointForProfile(profile, state);
+    const datacenters = await listConsulDatacenters(endpoint);
+    const values = datacenters.length > 0 ? datacenters : [endpoint.datacenter];
+    return values.map((id) => ({ id, name: id, configCount: 0, kind: 0 }));
   }
   await listNacosConfigs(endpointForProfile(profile, state), { namespace: "", group: "DEFAULT_GROUP", dataId: "", pageNo: 1, pageSize: 1 });
   return [{ id: "", name: "public", configCount: 0, kind: 0 }];
@@ -512,6 +530,27 @@ async function listConfigs(state: SmokeState, profile: ConnectionProfile, reques
       })),
     };
   }
+  if (profile.provider === "consul") {
+    const endpoint = consulEndpointForProfile(profile, state, { namespace: request.namespace, group: request.group, dataId: "" });
+    const filtered = (await listConsulKV(endpoint, endpoint.keyPrefix))
+      .filter((item) => matchesConsulKeyFilter(item.key, request.dataId))
+      .sort((left, right) => left.key.localeCompare(right.key));
+    const pageNo = request.pageNo > 0 ? request.pageNo : 1;
+    const pageSize = request.pageSize > 0 ? request.pageSize : filtered.length || 1;
+    const start = Math.max(0, (pageNo - 1) * pageSize);
+    const pageItems = filtered.slice(start, start + pageSize);
+    return {
+      totalCount: filtered.length,
+      pageNumber: pageNo,
+      pagesAvailable: filtered.length ? Math.ceil(filtered.length / pageSize) : 0,
+      pageItems: pageItems.map((item) => ({
+        ref: refFor(profile, { namespace: endpoint.datacenter, group: endpoint.keyPrefix, dataId: item.key }),
+        content: item.value,
+        format: typeFromDataId(item.key),
+        updateTime: consulVersion(item),
+      })),
+    };
+  }
   const page = await listNacosConfigs(endpointForProfile(profile, state), request);
   return {
     totalCount: page.totalCount,
@@ -553,6 +592,18 @@ async function getConfigDocument(state: SmokeState, profile: ConnectionProfile, 
       updateTime: apolloNamespaceUpdateTime(namespace),
     };
   }
+  if (profile.provider === "consul") {
+    const endpoint = consulEndpointForProfile(profile, state, ref);
+    const item = await getConsulKV(endpoint, ref.dataId);
+    return {
+      ref: refFor(profile, { namespace: endpoint.datacenter, group: endpoint.keyPrefix, dataId: item.key }),
+      content: item.value,
+      format: typeFromDataId(item.key),
+      version: consulVersion(item),
+      source: `consul:${endpoint.datacenter}/${item.key}`,
+      updateTime: consulVersion(item),
+    };
+  }
   const content = await getNacosConfig(endpointForProfile(profile, state), ref);
   return { ref: refFor(profile, ref), content, format: typeFromDataId(ref.dataId), version: "", source: profile.baseUrl, updateTime: "" };
 }
@@ -560,6 +611,7 @@ async function getConfigDocument(state: SmokeState, profile: ConnectionProfile, 
 async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot publish configs");
   if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
+  if (profile.provider === "consul") throw new Error("Consul provider is read-only in smoke");
   await publishAndWait(endpointForProfile(profile, state), {
     namespace: request.ref.namespace,
     group: request.ref.group,
@@ -572,6 +624,7 @@ async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfil
 async function deleteFromApplyPlan(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot delete configs");
   if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
+  if (profile.provider === "consul") throw new Error("Consul provider is read-only in smoke");
   await deleteNacosConfig(endpointForProfile(profile, state), ref);
 }
 
@@ -826,6 +879,18 @@ function apolloEndpointForProfile(profile: ConnectionProfile, state?: SmokeState
   };
 }
 
+function consulEndpointForProfile(profile: ConnectionProfile, state?: SmokeState, ref?: ConfigRef): SmokeConsulEndpoint {
+  const fallback = state?.consul;
+  const refGroup = ref?.group?.trim();
+  return {
+    containerName: fallback?.containerName ?? "external-consul",
+    hostPort: fallback?.hostPort ?? 0,
+    baseUrl: profile.baseUrl || fallback?.baseUrl || "",
+    datacenter: ref?.namespace || profile.consulDatacenter || fallback?.datacenter || "dc1",
+    keyPrefix: refGroup && refGroup !== "DEFAULT_GROUP" ? refGroup : profile.consulKeyPrefix || fallback?.keyPrefix || "",
+  };
+}
+
 function matchesApolloNamespaceFilter(namespaceName: string, filter: string): boolean {
   const value = filter.trim();
   if (!value) return true;
@@ -836,9 +901,23 @@ function matchesApolloNamespaceFilter(namespaceName: string, filter: string): bo
   return namespaceName === value;
 }
 
+function matchesConsulKeyFilter(key: string, filter: string): boolean {
+  const value = filter.trim();
+  if (!value) return true;
+  if (value.includes("*")) {
+    const needle = value.replaceAll("*", "");
+    return !needle || key.includes(needle);
+  }
+  return key.includes(value);
+}
+
 function apolloFormat(namespace: SmokeApolloNamespace): string {
   if (namespace.format?.trim()) return namespace.format.trim().toLowerCase();
   return typeFromDataId(namespace.namespaceName);
+}
+
+function consulVersion(item: SmokeConsulKV): string {
+  return item.modifyIndex > 0 ? String(item.modifyIndex) : "";
 }
 
 function sourceArg(args: unknown[], index: number): SnapshotSource {
@@ -871,7 +950,8 @@ function configSnapshotsArg(args: unknown[], index: number): ConfigSnapshot[] {
 
 function profileArg(args: unknown[], index: number): ConnectionProfile {
   const value = args[index] as Partial<ConnectionProfile>;
-  const provider = value.provider === "local" ? "local" : value.provider === "apollo" ? "apollo" : "nacos";
+  const provider =
+    value.provider === "local" ? "local" : value.provider === "apollo" ? "apollo" : value.provider === "consul" ? "consul" : "nacos";
   return {
     id: String(value.id ?? ""),
     name: String(value.name ?? ""),
@@ -882,6 +962,8 @@ function profileArg(args: unknown[], index: number): ConnectionProfile {
     apolloAppId: String(value.apolloAppId ?? ""),
     apolloCluster: String(value.apolloCluster ?? ""),
     apolloNamespaceName: String(value.apolloNamespaceName ?? ""),
+    consulDatacenter: String(value.consulDatacenter ?? ""),
+    consulKeyPrefix: String(value.consulKeyPrefix ?? ""),
   };
 }
 

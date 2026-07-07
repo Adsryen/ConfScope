@@ -95,6 +95,8 @@ function expectedProfile(conn: Connection, accessToken = "token-1", apiVersion =
     apolloAppId: "",
     apolloCluster: "",
     apolloNamespaceName: "",
+    consulDatacenter: "",
+    consulKeyPrefix: "",
   };
 }
 
@@ -505,6 +507,121 @@ describe("nacos api compatibility bridge", () => {
       namespace: "order-service",
       dataId: "",
       group: "default",
+      pageNo: 1,
+      pageSize: 20,
+    });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
+  });
+
+  it("routes Consul connections through configCenter with token and KV prefix fields", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-consul"),
+      provider: "consul",
+      baseUrl: "http://127.0.0.1:8500",
+      username: "",
+      password: "",
+      defaultNamespace: "dc1",
+      consulToken: "consul-token",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+    };
+    const profile = {
+      ...expectedProfile(conn, "consul-token", ""),
+      provider: "consul",
+      authType: "none",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+    };
+    const ref = {
+      ...expectedRef(conn, "dc1", "apps/order/app.yaml", "apps/order/"),
+      provider: "consul",
+    };
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([{ id: "dc1", name: "dc1", configCount: 0, kind: 0 }]);
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "server:\n  port: 8080\n", format: "yaml", updateTime: "42" }],
+    });
+    goApp.ConfigCenterGetConfig.mockResolvedValue({
+      ref,
+      content: "server:\n  port: 8080\n",
+      format: "yaml",
+      version: "42",
+      source: "consul:dc1/apps/order/app.yaml",
+      updateTime: "42",
+    });
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+    await expect(listNamespaces(conn)).resolves.toEqual([{ namespace: "dc1", namespaceShowName: "dc1", configCount: 0, kind: 0 }]);
+    await expect(listConfigs(conn, "dc1", "", "apps/order/", 1, 20)).resolves.toEqual({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "apps/order/app.yaml", group: "apps/order/", content: "server:\n  port: 8080\n", configType: "yaml", updateTime: "42" }],
+    });
+    await expect(getConfig(conn, "dc1", "apps/order/app.yaml", "apps/order/")).resolves.toBe("server:\n  port: 8080\n");
+
+    expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(profile);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(profile);
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(profile, {
+      namespace: "dc1",
+      dataId: "",
+      group: "apps/order/",
+      pageNo: 1,
+      pageSize: 20,
+    });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
+  });
+
+  it("maps generic DEFAULT_GROUP inputs to Consul key prefix for diff and audit flows", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-consul-default-group"),
+      provider: "consul",
+      baseUrl: "http://127.0.0.1:8500",
+      username: "",
+      password: "",
+      defaultNamespace: "dc1",
+      consulToken: "consul-token",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+    };
+    const profile = {
+      ...expectedProfile(conn, "consul-token", ""),
+      provider: "consul",
+      authType: "none",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+    };
+    const ref = {
+      ...expectedRef(conn, "dc1", "apps/order/app.yaml", "apps/order/"),
+      provider: "consul",
+    };
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "server:\n  port: 8080\n", format: "yaml", updateTime: "42" }],
+    });
+    goApp.ConfigCenterGetConfig.mockResolvedValue({
+      ref,
+      content: "server:\n  port: 8080\n",
+      format: "yaml",
+      version: "42",
+      source: "consul:dc1/apps/order/app.yaml",
+      updateTime: "42",
+    });
+
+    await listConfigs(conn, "dc1", "", "DEFAULT_GROUP", 1, 20);
+    await getConfig(conn, "dc1", "apps/order/app.yaml", "DEFAULT_GROUP");
+
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(profile, {
+      namespace: "dc1",
+      dataId: "",
+      group: "apps/order/",
       pageNo: 1,
       pageSize: 20,
     });

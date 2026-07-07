@@ -274,7 +274,7 @@ describe("About", () => {
     });
   });
 
-  it("shows Apollo as read-only supported instead of planned", async () => {
+  it("shows Apollo and Consul as read-only supported instead of planned", async () => {
     disableAutoUpdateCheck();
 
     renderAbout("en-US");
@@ -282,7 +282,8 @@ describe("About", () => {
     await screen.findByText("v1.0.0");
     expect(screen.getByText("Nacos")).toBeInTheDocument();
     expect(screen.getByText("Apollo Read-only")).toBeInTheDocument();
-    expect(screen.getByText("Consul Planned")).toBeInTheDocument();
+    expect(screen.getByText("Consul KV Read-only")).toBeInTheDocument();
     expect(screen.queryByText("Apollo 🔜")).not.toBeInTheDocument();
+    expect(screen.queryByText("Consul Planned")).not.toBeInTheDocument();
   });
 });

@@ -176,4 +176,69 @@ describe("createSmokeAppBinding app data backup methods", () => {
       source: "apollo:DEV/order-service/default/application",
     });
   });
+
+  it("routes Consul ConfigCenter bridge calls through Consul KV HTTP API", async () => {
+    const state = smokeState();
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/catalog/datacenters") {
+        return new Response(JSON.stringify(["dc1"]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/v1/kv/apps/order/" && url.searchParams.get("dc") === "dc1" && url.searchParams.get("recurse") === "true") {
+        return new Response(
+          JSON.stringify([
+            { Key: "apps/order/app.yaml", Value: Buffer.from("feature: true\nserver:\n  port: 8080\n").toString("base64"), ModifyIndex: 42 },
+            { Key: "apps/order/feature.json", Value: Buffer.from('{"enabled":true}\n').toString("base64"), ModifyIndex: 43 },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.pathname === "/v1/kv/apps/order/app.yaml" && url.searchParams.get("dc") === "dc1") {
+        return new Response(
+          JSON.stringify([
+            { Key: "apps/order/app.yaml", Value: Buffer.from("feature: true\nserver:\n  port: 8080\n").toString("base64"), ModifyIndex: 42 },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = createSmokeAppBinding(state);
+    const profile = {
+      id: "smoke-consul",
+      name: "Consul KV",
+      provider: "consul",
+      baseUrl: state.consul.baseUrl,
+      accessToken: "",
+      consulDatacenter: state.consul.datacenter,
+      consulKeyPrefix: state.consul.keyPrefix,
+    };
+
+    await expect(invoke("ConfigCenterTestConnection", [profile])).resolves.toBeUndefined();
+    await expect(invoke("ConfigCenterListNamespaces", [profile])).resolves.toEqual([{ id: "dc1", name: "dc1", configCount: 0, kind: 0 }]);
+    await expect(
+      invoke("ConfigCenterListConfigs", [profile, { namespace: "dc1", group: "apps/order/", dataId: "", pageNo: 1, pageSize: 20 }])
+    ).resolves.toMatchObject({
+      totalCount: 2,
+      pageItems: expect.arrayContaining([
+        expect.objectContaining({
+          content: "feature: true\nserver:\n  port: 8080\n",
+          format: "yaml",
+          ref: expect.objectContaining({ provider: "consul", namespace: "dc1", group: "apps/order/", dataId: "apps/order/app.yaml" }),
+        }),
+      ]),
+    });
+    await expect(
+      invoke("ConfigCenterGetConfig", [
+        profile,
+        { provider: "consul", connectionId: "smoke-consul", namespace: "dc1", group: "apps/order/", dataId: "apps/order/app.yaml" },
+      ])
+    ).resolves.toMatchObject({
+      content: "feature: true\nserver:\n  port: 8080\n",
+      format: "yaml",
+      version: "42",
+      source: "consul:dc1/apps/order/app.yaml",
+    });
+  });
 });
