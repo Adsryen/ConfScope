@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"confscope/internal/appbackup"
 	"confscope/internal/provider"
 	"confscope/internal/updatecheck"
 )
@@ -336,5 +337,39 @@ func TestValidateLocalSnapshotDirectoryRejectsInvalidPaths(t *testing.T) {
 	emptyDir := t.TempDir()
 	if result := app.ValidateLocalSnapshotDirectory(emptyDir); result.Valid || result.Message != "未找到快照清单或标准目录结构" || result.Code != "missing_structure" {
 		t.Fatalf("empty dir result = %+v", result)
+	}
+}
+
+func TestAppDataBackupLocalBindingsEncryptAndReadBack(t *testing.T) {
+	app := NewApp()
+	path := filepath.Join(t.TempDir(), "app.csbackup")
+	meta := appbackup.PackageMeta{
+		AppVersion:     "1.4.2",
+		SourcePlatform: "windows",
+		CreatedAt:      "2026-07-07T08:00:00.000Z",
+	}
+	plaintext := `{"schemaVersion":1,"data":{"connections":[{"password":"secret"}]}}`
+
+	summary, err := app.WriteAppDataBackupFile(path, plaintext, "backup-password", meta)
+	if err != nil {
+		t.Fatalf("WriteAppDataBackupFile returned error: %v", err)
+	}
+	if summary.SchemaVersion != appbackup.PackageSchemaVersion {
+		t.Fatalf("summary schema = %d, want %d", summary.SchemaVersion, appbackup.PackageSchemaVersion)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read backup file: %v", err)
+	}
+	if strings.Contains(string(raw), "secret") {
+		t.Fatal("backup file contains plaintext secret")
+	}
+
+	decrypted, err := app.ReadAppDataBackupFile(path, "backup-password")
+	if err != nil {
+		t.Fatalf("ReadAppDataBackupFile returned error: %v", err)
+	}
+	if decrypted.PlaintextJSON != plaintext {
+		t.Fatalf("PlaintextJSON = %s, want %s", decrypted.PlaintextJSON, plaintext)
 	}
 }

@@ -43,6 +43,15 @@ const WAILS_METHODS = [
   "ListSnapshots",
   "DeleteSnapshot",
   "ValidateSnapshot",
+  "SelectAppDataBackupSaveFile",
+  "SelectAppDataBackupOpenFile",
+  "WriteAppDataBackupFile",
+  "ReadAppDataBackupFile",
+  "CreateAppDataRecoveryPoint",
+  "TestAppDataWebDAV",
+  "ListAppDataWebDAVBackups",
+  "UploadAppDataWebDAVBackup",
+  "DownloadAppDataWebDAVBackup",
 ] as const;
 
 export async function installWailsBridge(page: Page, state: SmokeState): Promise<void> {
@@ -59,7 +68,9 @@ export async function installWailsBridge(page: Page, state: SmokeState): Promise
         };
       };
       for (const item of storage) {
-        window.localStorage.setItem(item.key, item.value);
+        if (window.localStorage.getItem(item.key) === null) {
+          window.localStorage.setItem(item.key, item.value);
+        }
       }
       const app: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
       for (const method of methods) {

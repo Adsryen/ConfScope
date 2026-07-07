@@ -37,6 +37,7 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "Network" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Smart Compare" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Local Data" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "App Data Backup" })).toBeInTheDocument();
     expect(
       screen.getByText("Connection-specific credentials, SSH tunnels, and security policies stay in Connection Manager.")
     ).toBeInTheDocument();

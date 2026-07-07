@@ -8,12 +8,23 @@ export interface SmokeNacosEndpoint {
   baseUrl: string;
 }
 
+export interface SmokeWebDAVEndpoint {
+  containerName: string;
+  hostPort: number;
+  baseUrl: string;
+  username: string;
+  password: string;
+  rootPath: string;
+}
+
 export interface SmokeWorkspace {
   runId: string;
   projectRoot: string;
   rootDir: string;
   homeDir: string;
   localSnapshotsDir: string;
+  appBackupsDir: string;
+  webdavDir: string;
   reportsDir: string;
   screenshotsDir: string;
   statePath: string;
@@ -22,6 +33,7 @@ export interface SmokeWorkspace {
     sandbox: SmokeNacosEndpoint;
     prod: SmokeNacosEndpoint;
   };
+  webdav: SmokeWebDAVEndpoint;
 }
 
 export interface SmokeState extends SmokeWorkspace {
@@ -56,6 +68,8 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
   const rootDir = join(projectRoot, ".tmp", `full-smoke-${runId}`);
   const homeDir = join(rootDir, "home");
   const localSnapshotsDir = join(rootDir, "local-snapshots");
+  const appBackupsDir = join(rootDir, "app-backups");
+  const webdavDir = join(rootDir, "webdav");
   const reportsDir = join(rootDir, "reports");
   const screenshotsDir = join(reportsDir, "screenshots");
   const statePath = join(rootDir, "state.json");
@@ -66,6 +80,8 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
     rootDir,
     homeDir,
     localSnapshotsDir,
+    appBackupsDir,
+    webdavDir,
     reportsDir,
     screenshotsDir,
     statePath,
@@ -74,12 +90,15 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
       sandbox: nacosEndpoint("sandbox", 18859),
       prod: nacosEndpoint("prod", 18860),
     },
+    webdav: webDAVEndpoint(),
   };
 }
 
 export function ensureSmokeWorkspace(workspace: SmokeWorkspace): SmokeWorkspace {
   mkdirSync(workspace.homeDir, { recursive: true });
   mkdirSync(workspace.localSnapshotsDir, { recursive: true });
+  mkdirSync(workspace.appBackupsDir, { recursive: true });
+  mkdirSync(workspace.webdavDir, { recursive: true });
   mkdirSync(workspace.screenshotsDir, { recursive: true });
   return workspace;
 }
@@ -107,5 +126,16 @@ function nacosEndpoint(role: SmokeNacosEndpoint["role"], hostPort: number): Smok
     containerName: `confscope-smoke-nacos-${role}`,
     hostPort,
     baseUrl: `http://127.0.0.1:${hostPort}/nacos`,
+  };
+}
+
+function webDAVEndpoint(): SmokeWebDAVEndpoint {
+  return {
+    containerName: "confscope-smoke-webdav",
+    hostPort: 18861,
+    baseUrl: "http://127.0.0.1:18861",
+    username: "smoke",
+    password: "smoke-pass",
+    rootPath: "/confscope",
   };
 }

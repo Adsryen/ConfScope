@@ -51,6 +51,7 @@ test("creates a Nacos connection through the native Wails UI and browses real co
   expect(browse.content).toContain("feature: true");
   pass(smoke, "NATIVE-CONFIG-BROWSE-01", "Browse", "Config Browser opened smoke-app.yaml from real Docker Nacos");
 
+  await verifyNativeAppDataWebDAVBackup(native, smoke);
   await verifyNavigationPages(native, smoke);
 });
 
@@ -203,6 +204,108 @@ async function browseSeededConfig(native: NativeControlClient): Promise<BrowseRe
   );
 
   return { listed: true, content };
+}
+
+async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smoke: SmokeState): Promise<void> {
+  const target = {
+    url: smoke.webdav.baseUrl,
+    username: smoke.webdav.username,
+    password: smoke.webdav.password,
+    rootPath: smoke.webdav.rootPath,
+    backupPassword: "native-app-data-pass",
+  };
+  await native.eval<boolean>(`
+    ${DOM_HELPERS}
+    clickButton("Settings");
+    await waitFor(() => pageText().includes("App Data Backup"), 20_000, "App Data Backup panel");
+    await setInputByLabel("WebDAV URL", ${JSON.stringify(target.url)});
+    await setInputByLabel("WebDAV username", ${JSON.stringify(target.username)});
+    await setInputByLabel("WebDAV password", ${JSON.stringify(target.password)});
+    await setInputByLabel("Remote folder", ${JSON.stringify(target.rootPath)});
+    clickButton("Save WebDAV target");
+    clickButton("Test WebDAV");
+    return true;
+  `, 30_000);
+
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("WebDAV connection passed"), value: text, text };
+    `,
+    30_000,
+    "WebDAV connection passed"
+  );
+  pass(smoke, "NATIVE-APPDATA-WEBDAV-TEST-01", "App Data Backup", "Settings tested Docker WebDAV through real Wails binding");
+
+  await native.eval<boolean>(`
+    ${DOM_HELPERS}
+    await setInputByLabel("WebDAV backup password", ${JSON.stringify(target.backupPassword)});
+    clickButton("Upload current data");
+    return true;
+  `, 10_000);
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("WebDAV backup uploaded"), value: text, text };
+    `,
+    45_000,
+    "WebDAV backup uploaded"
+  );
+  pass(smoke, "NATIVE-APPDATA-WEBDAV-UPLOAD-01", "App Data Backup", "Uploaded app data backup to Docker WebDAV through real Go binding");
+
+  await native.eval<boolean>(`
+    ${DOM_HELPERS}
+    clickButton("Refresh remote list");
+    return true;
+  `, 10_000);
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: /confscope-app-data-.*\\.csbackup/.test(text), value: text, text };
+    `,
+    30_000,
+    "remote app data backup list"
+  );
+
+  await native.eval<boolean>(`
+    ${DOM_HELPERS}
+    localStorage.setItem("cs.connections", "[]");
+    await setInputByLabel("Remote restore password", ${JSON.stringify(target.backupPassword)});
+    clickButton("Preview confscope-app-data-");
+    return true;
+  `, 10_000);
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("Connections: 1"), value: text, text };
+    `,
+    30_000,
+    "remote backup preview"
+  );
+  await native.eval<boolean>(`
+    ${DOM_HELPERS}
+    clickButton("Restore this backup");
+    return true;
+  `, 10_000);
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const connections = localStorage.getItem("cs.connections") || "";
+      return { done: connections.includes("Native Dev Nacos"), value: connections, text: pageText() };
+    `,
+    45_000,
+    "restored native app data"
+  );
+  pass(smoke, "NATIVE-APPDATA-WEBDAV-RESTORE-01", "App Data Backup", "Downloaded WebDAV backup and restored native app localStorage");
 }
 
 async function verifyNavigationPages(native: NativeControlClient, smoke: SmokeState): Promise<void> {

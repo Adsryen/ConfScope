@@ -2,5 +2,5 @@
 
 - Apollo provider
 - Consul provider
-- WebDAV backup and restore
 - Native Wails WebView automation
+- Config-center snapshot WebDAV sync is not covered by the app-data backup feature

@@ -36,7 +36,7 @@ function recordKnownGaps(state: ReturnType<typeof loadSmokeState>): void {
   for (const item of [
     ["GAP-APOLLO", "Apollo provider", "Apollo provider is documented as planned, not implemented."],
     ["GAP-CONSUL", "Consul provider", "Consul provider is documented as planned, not implemented."],
-    ["GAP-WEBDAV", "WebDAV backup", "WebDAV backup/restore is documented as planned, not implemented."],
+    ["GAP-CONFIG-WEBDAV", "Config snapshot WebDAV", "Application-data WebDAV backup is covered; config-center snapshot WebDAV sync remains a separate scope."],
     ["GAP-NATIVE-WAILS", "Native desktop automation", "This first round uses Vite + Playwright + Wails bridge, not native WebView automation."],
   ] as const) {
     recordCase(state, { id: item[0], area: item[1], status: "NOT_RUN_UNIMPLEMENTED", evidence: "docs/todo and current code", notes: item[2] });
