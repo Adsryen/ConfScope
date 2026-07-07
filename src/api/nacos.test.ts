@@ -91,6 +91,10 @@ function expectedProfile(conn: Connection, accessToken = "token-1", apiVersion =
     environment: "",
     safetyLevel: "",
     useProxy: false,
+    apolloEnv: "",
+    apolloAppId: "",
+    apolloCluster: "",
+    apolloNamespaceName: "",
   };
 }
 
@@ -376,6 +380,135 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledTimes(2);
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(localProfile, ref);
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(localProfile);
+  });
+
+  it("routes Apollo connections through configCenter with Apollo profile fields and token", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-apollo"),
+      provider: "apollo",
+      baseUrl: "http://127.0.0.1:8070",
+      username: "",
+      password: "",
+      defaultNamespace: "order-service",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    };
+    const profile = {
+      ...expectedProfile(conn, "apollo-token", ""),
+      provider: "apollo",
+      authType: "none",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+    };
+    const ref = {
+      ...expectedRef(conn, "order-service", "application", "default"),
+      provider: "apollo",
+    };
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([
+      { id: "order-service", name: "order-service / DEV / default", configCount: 1, kind: 0 },
+    ]);
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "", format: "properties", updateTime: "2026-07-07T10:00:00+08:00" }],
+    });
+    goApp.ConfigCenterGetConfig.mockResolvedValue({
+      ref,
+      content: "server.port=8080\n",
+      format: "properties",
+      version: "release-1",
+      source: "apollo:DEV/order-service/default/application",
+      updateTime: "2026-07-07T10:00:00+08:00",
+    });
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(testConnection(conn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+    await expect(listNamespaces(conn)).resolves.toEqual([
+      { namespace: "order-service", namespaceShowName: "order-service / DEV / default", configCount: 1, kind: 0 },
+    ]);
+    await expect(listConfigs(conn, "order-service", "", "", 1, 20)).resolves.toEqual({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "application", group: "default", content: "", configType: "properties", updateTime: "2026-07-07T10:00:00+08:00" },
+      ],
+    });
+    await expect(getConfig(conn, "order-service", "application", "default")).resolves.toBe("server.port=8080\n");
+
+    expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(profile);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(profile);
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(profile, {
+      namespace: "order-service",
+      dataId: "",
+      group: "default",
+      pageNo: 1,
+      pageSize: 20,
+    });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
+  });
+
+  it("maps generic DEFAULT_GROUP inputs to Apollo cluster for diff and audit flows", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-apollo-default-group"),
+      provider: "apollo",
+      baseUrl: "http://127.0.0.1:8070",
+      username: "",
+      password: "",
+      defaultNamespace: "order-service",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    };
+    const profile = {
+      ...expectedProfile(conn, "apollo-token", ""),
+      provider: "apollo",
+      authType: "none",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+    };
+    const ref = {
+      ...expectedRef(conn, "order-service", "application", "default"),
+      provider: "apollo",
+    };
+    goApp.ConfigCenterListConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ ref, content: "", format: "properties", updateTime: "" }],
+    });
+    goApp.ConfigCenterGetConfig.mockResolvedValue({
+      ref,
+      content: "feature.enabled=true\n",
+      format: "properties",
+      version: "",
+      source: "",
+      updateTime: "",
+    });
+
+    await listConfigs(conn, "order-service", "", "DEFAULT_GROUP", 1, 20);
+    await getConfig(conn, "order-service", "application", "DEFAULT_GROUP");
+
+    expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(profile, {
+      namespace: "order-service",
+      dataId: "",
+      group: "default",
+      pageNo: 1,
+      pageSize: 20,
+    });
+    expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
   });
 
   it("blocks default direct writes before they can reach Wails bindings", async () => {

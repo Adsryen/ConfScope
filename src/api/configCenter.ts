@@ -29,6 +29,10 @@ export interface ConnectionProfile {
   environment: string;
   safetyLevel: string;
   useProxy: boolean;
+  apolloEnv: string;
+  apolloAppId: string;
+  apolloCluster: string;
+  apolloNamespaceName: string;
 }
 
 export interface ConfigRef {

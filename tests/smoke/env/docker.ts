@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import type { SmokeNacosEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+import type { SmokeApolloEndpoint, SmokeNacosEndpoint, SmokeWebDAVEndpoint } from "./workspace";
 
 export interface DockerRunOptions {
   image: string;
   name: string;
   args: string[];
+  command?: string[];
 }
 
 export function dockerAvailable(): boolean {
@@ -35,7 +36,9 @@ export function removeContainer(name: string): void {
 
 export function runDetachedContainer(options: DockerRunOptions): void {
   removeContainer(options.name);
-  execFileSync("docker", ["run", "-d", "--name", options.name, ...options.args, options.image], { stdio: "pipe" });
+  execFileSync("docker", ["run", "-d", "--name", options.name, ...options.args, options.image, ...(options.command ?? [])], {
+    stdio: "pipe",
+  });
 }
 
 export function startNacosContainer(endpoint: SmokeNacosEndpoint): void {
@@ -53,6 +56,36 @@ export function startNacosContainer(endpoint: SmokeNacosEndpoint): void {
       "NACOS_AUTH_ENABLE=false",
     ],
   });
+}
+
+export function apolloContainerOptions(endpoint: SmokeApolloEndpoint, serverFile: string): DockerRunOptions {
+  return {
+    name: endpoint.containerName,
+    image: "node:20-alpine",
+    args: [
+      "--network",
+      "confscope-smoke",
+      "-p",
+      `127.0.0.1:${endpoint.hostPort}:8070`,
+      "-v",
+      `${serverFile}:/srv/apollo-server.mjs:ro`,
+      "-e",
+      `APOLLO_SMOKE_TOKEN=${endpoint.token}`,
+      "-e",
+      `APOLLO_SMOKE_ENV=${endpoint.env}`,
+      "-e",
+      `APOLLO_SMOKE_APP_ID=${endpoint.appId}`,
+      "-e",
+      `APOLLO_SMOKE_CLUSTER=${endpoint.cluster}`,
+      "-e",
+      `APOLLO_SMOKE_NAMESPACE=${endpoint.namespaceName}`,
+    ],
+    command: ["node", "/srv/apollo-server.mjs"],
+  };
+}
+
+export function startApolloContainer(endpoint: SmokeApolloEndpoint, serverFile: string): void {
+  runDetachedContainer(apolloContainerOptions(endpoint, serverFile));
 }
 
 export function webDAVContainerOptions(endpoint: SmokeWebDAVEndpoint, dataDir: string): DockerRunOptions {
@@ -109,6 +142,7 @@ export function cleanupSmokeContainers(): void {
     "confscope-smoke-nacos-dev",
     "confscope-smoke-nacos-sandbox",
     "confscope-smoke-nacos-prod",
+    "confscope-smoke-apollo",
     "confscope-smoke-webdav",
     "confscope-smoke-sshd",
   ]) {

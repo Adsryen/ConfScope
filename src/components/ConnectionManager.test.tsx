@@ -58,13 +58,7 @@ function setProject(name: string) {
   fireEvent.change(input, { target: { value: name } });
 }
 
-function saveConnection(fields: {
-  name: string;
-  project?: string;
-  environment?: string;
-  source?: string;
-  baseUrl?: string;
-}) {
+function saveConnection(fields: { name: string; project?: string; environment?: string; source?: string; baseUrl?: string }) {
   fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: fields.name } });
   if (fields.project) setProject(fields.project);
   if (fields.environment) fireEvent.change(controlByLabel("环境"), { target: { value: fields.environment } });
@@ -91,9 +85,7 @@ describe("ConnectionManager", () => {
     apiMocks.clearToken.mockReset();
     apiMocks.listNamespaces.mockReset();
     apiMocks.testConnection.mockReset();
-    apiMocks.listNamespaces.mockResolvedValue([
-      { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 3, kind: 0 },
-    ]);
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 3, kind: 0 }]);
     clipboardMocks.copyText.mockReset();
     appApiMocks.selectLocalSnapshotDirectory.mockReset();
     appApiMocks.validateLocalSnapshotDirectory.mockReset();
@@ -180,17 +172,17 @@ describe("ConnectionManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "加载命名空间" }));
 
     await screen.findByRole("option", { name: "开发命名空间 / dev-tenant (3)" });
-    const namespaceSelect = screen
-      .getByRole("option", { name: "开发命名空间 / dev-tenant (3)" })
-      .closest("select") as HTMLSelectElement;
+    const namespaceSelect = screen.getByRole("option", { name: "开发命名空间 / dev-tenant (3)" }).closest("select") as HTMLSelectElement;
     fireEvent.change(namespaceSelect, { target: { value: "dev-tenant" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(apiMocks.listNamespaces).toHaveBeenCalledWith(expect.objectContaining({
-      baseUrl: "http://dev.example.com/nacos",
-      username: "nacos",
-      password: "secret",
-    }));
+    expect(apiMocks.listNamespaces).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "http://dev.example.com/nacos",
+        username: "nacos",
+        password: "secret",
+      })
+    );
     expect(onChange).toHaveBeenCalledWith([
       expect.objectContaining({
         defaultNamespace: "dev-tenant",
@@ -264,6 +256,59 @@ describe("ConnectionManager", () => {
     expect(within(preset).queryByRole("option", { name: "云上公网" })).not.toBeInTheDocument();
   });
 
+  it("enables Apollo provider fields and saves them", async () => {
+    const onChange = vi.fn();
+    apiMocks.testConnection.mockResolvedValueOnce({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+    renderManager(onChange);
+
+    const providerSelect = screen.getByRole("combobox", { name: "配置中心" });
+    const apolloOption = within(providerSelect).getByRole("option", { name: "Apollo" });
+    expect(apolloOption).not.toBeDisabled();
+
+    fireEvent.change(providerSelect, { target: { value: "apollo" } });
+
+    expect(screen.queryByRole("combobox", { name: "Nacos 类型" })).not.toBeInTheDocument();
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "Apollo OpenAPI" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://localhost:8070" } });
+    fireEvent.change(fieldByLabel("Apollo Token"), { target: { value: "apollo-token" } });
+    fireEvent.change(fieldByLabel("Apollo 环境"), { target: { value: "DEV" } });
+    fireEvent.change(fieldByLabel("Apollo App ID"), { target: { value: "order-service" } });
+    fireEvent.change(fieldByLabel("Apollo 集群"), { target: { value: "default" } });
+    fireEvent.change(fieldByLabel("Apollo Namespace"), { target: { value: "application" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
+
+    await screen.findByText("连接测试成功");
+    expect(apiMocks.testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "apollo",
+        baseUrl: "http://localhost:8070",
+        apolloToken: "apollo-token",
+        apolloEnv: "DEV",
+        apolloAppId: "order-service",
+        apolloCluster: "default",
+        apolloNamespaceName: "application",
+        defaultNamespace: "order-service",
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        provider: "apollo",
+        sourceName: "Apollo OpenAPI",
+        baseUrl: "http://localhost:8070",
+        apolloToken: "apollo-token",
+        apolloEnv: "DEV",
+        apolloAppId: "order-service",
+        apolloCluster: "default",
+        apolloNamespaceName: "application",
+        defaultNamespace: "order-service",
+      }),
+    ]);
+  });
+
   it("keeps a custom source name when switching to local snapshot", () => {
     renderManager();
 
@@ -304,9 +349,7 @@ describe("ConnectionManager", () => {
     fireEvent.keyDown(within(projectTitle).getByDisplayValue("交易平台"), { key: "Enter" });
 
     expect(within(connectionList()).getByText("交易平台")).toBeInTheDocument();
-    expect(onChange).toHaveBeenLastCalledWith([
-      expect.objectContaining({ projectName: "交易平台" }),
-    ]);
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ projectName: "交易平台" })]);
 
     const envTitle = connectionList().querySelector(".conn-env-name")?.closest(".conn-env-title") as HTMLElement;
     expect(within(envTitle).queryByTitle("重命名环境")).not.toBeInTheDocument();
@@ -366,10 +409,12 @@ describe("ConnectionManager", () => {
 
     const savedList = onChange.mock.calls[onChange.mock.calls.length - 1][0];
     expect(savedList).toHaveLength(2);
-    expect(savedList).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceName: "云上内网", name: "dev-inner" }),
-      expect.objectContaining({ sourceName: "云上内网 副本", name: "dev-inner 副本" }),
-    ]));
+    expect(savedList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceName: "云上内网", name: "dev-inner" }),
+        expect.objectContaining({ sourceName: "云上内网 副本", name: "dev-inner 副本" }),
+      ])
+    );
   });
 
   it("shows connection test success and failure as a link trace", async () => {
@@ -458,7 +503,8 @@ describe("ConnectionManager", () => {
   });
 
   it("classifies localhost tunnel reset errors as remote-forward failures", async () => {
-    const rawError = '登录请求失败: Post "http://localhost:1811/nacos/v1/auth/login": read tcp 127.0.0.1:12442->127.0.0.1:1811: wsarecv: An existing connection was forcibly closed by the remote host.';
+    const rawError =
+      '登录请求失败: Post "http://localhost:1811/nacos/v1/auth/login": read tcp 127.0.0.1:12442->127.0.0.1:1811: wsarecv: An existing connection was forcibly closed by the remote host.';
     apiMocks.testConnection.mockRejectedValueOnce(new Error(rawError));
     clipboardMocks.copyText.mockResolvedValueOnce(true);
     renderManager();
@@ -503,9 +549,12 @@ describe("ConnectionManager", () => {
   it("does not block a new connection test after editing the tested snapshot", async () => {
     let resolveFirst!: (value: { accessToken: string; tokenTtl: number; globalAdmin: boolean }) => void;
     apiMocks.testConnection
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveFirst = resolve;
-      }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
       .mockResolvedValueOnce({ accessToken: "token-2", tokenTtl: 18000, globalAdmin: false });
     renderManager();
 
@@ -598,18 +647,18 @@ describe("ConnectionManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存为 SSH 配置档案" }));
 
     expect(screen.getByText("SSH 配置档案已保存")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "SSH 配置档案" })).toHaveDisplayValue(
-      "ssh-dev (ops@jump.example.com:22)"
-    );
+    expect(screen.getByRole("combobox", { name: "SSH 配置档案" })).toHaveDisplayValue("ssh-dev (ops@jump.example.com:22)");
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     const saved = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0][0];
-    expect(saved).toEqual(expect.objectContaining({
-      name: "ssh-dev",
-      sourceName: "云上内网",
-      sshProfileId: expect.stringMatching(/^ssh_/),
-    }));
+    expect(saved).toEqual(
+      expect.objectContaining({
+        name: "ssh-dev",
+        sourceName: "云上内网",
+        sshProfileId: expect.stringMatching(/^ssh_/),
+      })
+    );
     expect(saved.sshConfig).toBeUndefined();
     expect(JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]")).toEqual([
       expect.objectContaining({

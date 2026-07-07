@@ -11,15 +11,19 @@ describe("createSmokeWorkspace", () => {
     expect(workspace.runId).toBe("20260707-120000");
     expect(workspace.rootDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000");
     expect(workspace.homeDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/home");
-    expect(workspace.localSnapshotsDir.replaceAll("\\", "/")).toBe(
-      "C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/local-snapshots"
-    );
+    expect(workspace.localSnapshotsDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/local-snapshots");
     expect(workspace.appBackupsDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/app-backups");
     expect(workspace.webdavDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/webdav");
     expect(workspace.reportsDir.replaceAll("\\", "/")).toBe("C:/repo/ConfScope/.tmp/full-smoke-20260707-120000/reports");
     expect(workspace.nacos.dev.baseUrl).toBe("http://127.0.0.1:18858/nacos");
     expect(workspace.nacos.sandbox.baseUrl).toBe("http://127.0.0.1:18859/nacos");
     expect(workspace.nacos.prod.baseUrl).toBe("http://127.0.0.1:18860/nacos");
+    expect(workspace.apollo.baseUrl).toBe("http://127.0.0.1:18862");
+    expect(workspace.apollo.token).toBe("apollo-smoke-token");
+    expect(workspace.apollo.env).toBe("DEV");
+    expect(workspace.apollo.appId).toBe("order-service");
+    expect(workspace.apollo.cluster).toBe("default");
+    expect(workspace.apollo.namespaceName).toBe("application");
     expect(workspace.webdav.baseUrl).toBe("http://127.0.0.1:18861");
     expect(workspace.webdav.username).toBe("smoke");
     expect(workspace.webdav.password).toBe("smoke-pass");

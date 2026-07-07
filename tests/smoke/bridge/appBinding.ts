@@ -2,6 +2,13 @@ import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, posix, relative, sep } from "node:path";
 import {
+  apolloNamespaceContent,
+  apolloNamespaceUpdateTime,
+  getApolloNamespace,
+  listApolloNamespaces,
+  type SmokeApolloNamespace,
+} from "../env/apollo";
+import {
   deleteNacosConfig,
   getNacosConfig,
   listNacosConfigs,
@@ -15,8 +22,13 @@ import type { SmokeNacosEndpoint, SmokeState } from "../env/workspace";
 interface ConnectionProfile {
   id: string;
   name: string;
-  provider: "nacos" | "local";
+  provider: "nacos" | "local" | "apollo";
   baseUrl: string;
+  accessToken: string;
+  apolloEnv: string;
+  apolloAppId: string;
+  apolloCluster: string;
+  apolloNamespaceName: string;
 }
 
 interface ConfigRef {
@@ -253,7 +265,12 @@ function readAppDataBackupFile(path: string, password: string): { plaintextJson:
   };
 }
 
-function createAppDataRecoveryPoint(state: SmokeState, plaintextJson: string, password: string, meta: AppDataPackageMeta): AppDataPackageSummary {
+function createAppDataRecoveryPoint(
+  state: SmokeState,
+  plaintextJson: string,
+  password: string,
+  meta: AppDataPackageMeta
+): AppDataPackageSummary {
   const dir = join(state.appBackupsDir, "recovery-points");
   mkdirSync(dir, { recursive: true });
   return writeAppDataBackupFile(join(dir, `recovery-${Date.now()}.csbackup`), plaintextJson, password, meta);
@@ -415,13 +432,22 @@ function webDAVTagText(value: string, tagName: string): string {
 }
 
 function decodeXmlEntities(value: string): string {
-  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&apos;/g, "'");
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 async function testConnection(profile: ConnectionProfile): Promise<void> {
   if (profile.provider === "local") {
     const result = validateLocalSnapshotDirectory(profile.baseUrl);
     if (!result.valid) throw new Error(result.message);
+    return;
+  }
+  if (profile.provider === "apollo") {
+    await getApolloNamespace(apolloEndpointForProfile(profile));
     return;
   }
   await listNacosConfigs(endpointForProfile(profile), { namespace: "", group: "DEFAULT_GROUP", dataId: "", pageNo: 1, pageSize: 1 });
@@ -433,6 +459,13 @@ async function listNamespaces(state: SmokeState, profile: ConnectionProfile): Pr
     const counts = new Map<string, number>();
     for (const file of files) counts.set(file.namespace, (counts.get(file.namespace) ?? 0) + 1);
     return [...counts.entries()].map(([id, count]) => ({ id, name: id || "public", configCount: count, kind: 0 }));
+  }
+  if (profile.provider === "apollo") {
+    const endpoint = apolloEndpointForProfile(profile, state);
+    const namespaces = await listApolloNamespaces(endpoint);
+    return [
+      { id: endpoint.appId, name: `${endpoint.appId} / ${endpoint.env} / ${endpoint.cluster}`, configCount: namespaces.length, kind: 0 },
+    ];
   }
   await listNacosConfigs(endpointForProfile(profile, state), { namespace: "", group: "DEFAULT_GROUP", dataId: "", pageNo: 1, pageSize: 1 });
   return [{ id: "", name: "public", configCount: 0, kind: 0 }];
@@ -458,6 +491,27 @@ async function listConfigs(state: SmokeState, profile: ConnectionProfile, reques
       })),
     };
   }
+  if (profile.provider === "apollo") {
+    const endpoint = apolloEndpointForProfile(profile, state);
+    const filtered = (await listApolloNamespaces(endpoint))
+      .filter((namespace) => matchesApolloNamespaceFilter(namespace.namespaceName, request.dataId))
+      .sort((left, right) => left.namespaceName.localeCompare(right.namespaceName));
+    const pageNo = request.pageNo > 0 ? request.pageNo : 1;
+    const pageSize = request.pageSize > 0 ? request.pageSize : filtered.length || 1;
+    const start = Math.max(0, (pageNo - 1) * pageSize);
+    const pageItems = filtered.slice(start, start + pageSize);
+    return {
+      totalCount: filtered.length,
+      pageNumber: pageNo,
+      pagesAvailable: filtered.length ? Math.ceil(filtered.length / pageSize) : 0,
+      pageItems: pageItems.map((namespace) => ({
+        ref: refFor(profile, { namespace: endpoint.appId, group: endpoint.cluster, dataId: namespace.namespaceName }),
+        content: apolloNamespaceContent(namespace),
+        format: apolloFormat(namespace),
+        updateTime: apolloNamespaceUpdateTime(namespace),
+      })),
+    };
+  }
   const page = await listNacosConfigs(endpointForProfile(profile, state), request);
   return {
     totalCount: page.totalCount,
@@ -474,9 +528,30 @@ async function listConfigs(state: SmokeState, profile: ConnectionProfile, reques
 
 async function getConfigDocument(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<unknown> {
   if (profile.provider === "local") {
-    const item = scanLocalConfigs(profile.baseUrl).find((file) => file.namespace === ref.namespace && file.group === ref.group && file.dataId === ref.dataId);
+    const item = scanLocalConfigs(profile.baseUrl).find(
+      (file) => file.namespace === ref.namespace && file.group === ref.group && file.dataId === ref.dataId
+    );
     if (!item) throw new Error(`local config not found: ${ref.group}/${ref.dataId}`);
-    return { ref: refFor(profile, item), content: item.content, format: item.format, version: item.version, source: item.path, updateTime: item.updateTime };
+    return {
+      ref: refFor(profile, item),
+      content: item.content,
+      format: item.format,
+      version: item.version,
+      source: item.path,
+      updateTime: item.updateTime,
+    };
+  }
+  if (profile.provider === "apollo") {
+    const endpoint = apolloEndpointForProfile(profile, state, ref);
+    const namespace = await getApolloNamespace(endpoint);
+    return {
+      ref: refFor(profile, { namespace: endpoint.appId, group: endpoint.cluster, dataId: endpoint.namespaceName }),
+      content: apolloNamespaceContent(namespace),
+      format: apolloFormat(namespace),
+      version: namespace.releaseKey ?? "",
+      source: `apollo:${endpoint.env}/${endpoint.appId}/${endpoint.cluster}/${endpoint.namespaceName}`,
+      updateTime: apolloNamespaceUpdateTime(namespace),
+    };
   }
   const content = await getNacosConfig(endpointForProfile(profile, state), ref);
   return { ref: refFor(profile, ref), content, format: typeFromDataId(ref.dataId), version: "", source: profile.baseUrl, updateTime: "" };
@@ -484,6 +559,7 @@ async function getConfigDocument(state: SmokeState, profile: ConnectionProfile, 
 
 async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot publish configs");
+  if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
   await publishAndWait(endpointForProfile(profile, state), {
     namespace: request.ref.namespace,
     group: request.ref.group,
@@ -495,6 +571,7 @@ async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfil
 
 async function deleteFromApplyPlan(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot delete configs");
+  if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
   await deleteNacosConfig(endpointForProfile(profile, state), ref);
 }
 
@@ -543,7 +620,9 @@ function validateLocalSnapshotDirectory(path: string): unknown {
       return validation(path, checkedAt, false, "invalid_metadata", "metadata.json is not valid snapshot metadata", 0);
     }
   }
-  const legacyMarker = ["manifest.json", "confscope.snapshot.json", ".metadata.yml", ".metadata.yaml"].some((name) => existsSync(join(path, name)));
+  const legacyMarker = ["manifest.json", "confscope.snapshot.json", ".metadata.yml", ".metadata.yaml"].some((name) =>
+    existsSync(join(path, name))
+  );
   const configCount = scanLocalConfigs(path).length;
   if (legacyMarker && configCount > 0) {
     return {
@@ -560,7 +639,14 @@ function validateLocalSnapshotDirectory(path: string): unknown {
       checkedAt,
     };
   }
-  return validation(path, checkedAt, false, configCount > 0 ? "missing_structure" : "missing_configs", "No comparable config files were found", configCount);
+  return validation(
+    path,
+    checkedAt,
+    false,
+    configCount > 0 ? "missing_structure" : "missing_configs",
+    "No comparable config files were found",
+    configCount
+  );
 }
 
 function validateSnapshotOrThrow(path: string): void {
@@ -569,7 +655,19 @@ function validateSnapshotOrThrow(path: string): void {
 }
 
 function validation(path: string, checkedAt: string, valid: boolean, code: string, message: string, configCount: number): unknown {
-  return { valid, path, code, message, configCount, hasManifest: false, matchedMarkers: [], schemaVersion: 0, layout: "", legacy: false, checkedAt };
+  return {
+    valid,
+    path,
+    code,
+    message,
+    configCount,
+    hasManifest: false,
+    matchedMarkers: [],
+    schemaVersion: 0,
+    layout: "",
+    legacy: false,
+    checkedAt,
+  };
 }
 
 function createSnapshot(state: SmokeState, source: SnapshotSource, configs: ConfigSnapshot[]): Snapshot {
@@ -587,7 +685,11 @@ function createSnapshot(state: SmokeState, source: SnapshotSource, configs: Conf
     createdAt: timestamp,
     updatedAt: timestamp,
     source,
-    configs: configs.map((item) => ({ ...item, namespace: item.namespace || source.namespace || "public", contentType: item.contentType || item.configType || typeFromDataId(item.dataId) })),
+    configs: configs.map((item) => ({
+      ...item,
+      namespace: item.namespace || source.namespace || "public",
+      contentType: item.contentType || item.configType || typeFromDataId(item.dataId),
+    })),
   };
   mkdirSync(snapshotDir, { recursive: true });
   writeFileSync(join(snapshotDir, "metadata.json"), JSON.stringify(snapshot, null, 2), "utf8");
@@ -669,7 +771,14 @@ function readStrictMetadata(root: string): { version: string; configs: Map<strin
   if (!existsSync(metadataPath)) return { version: "", configs };
   const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as {
     id?: string;
-    configs?: Array<{ namespace?: string; group?: string; dataId?: string; contentType?: string; configType?: string; updateTime?: string }>;
+    configs?: Array<{
+      namespace?: string;
+      group?: string;
+      dataId?: string;
+      contentType?: string;
+      configType?: string;
+      updateTime?: string;
+    }>;
   };
   for (const config of metadata.configs ?? []) {
     configs.set(`${config.namespace || "public"}|${config.group ?? ""}|${config.dataId ?? ""}`, {
@@ -703,6 +812,35 @@ function endpointForBaseUrl(state: SmokeState, baseUrl: string): SmokeNacosEndpo
   return { role: "dev", containerName: "external-nacos", hostPort: 0, baseUrl };
 }
 
+function apolloEndpointForProfile(profile: ConnectionProfile, state?: SmokeState, ref?: ConfigRef) {
+  const fallback = state?.apollo;
+  return {
+    containerName: fallback?.containerName ?? "external-apollo",
+    hostPort: fallback?.hostPort ?? 0,
+    baseUrl: profile.baseUrl || fallback?.baseUrl || "",
+    token: profile.accessToken || fallback?.token || "",
+    env: profile.apolloEnv || fallback?.env || "DEV",
+    appId: ref?.namespace || profile.apolloAppId || fallback?.appId || "",
+    cluster: ref?.group || profile.apolloCluster || fallback?.cluster || "default",
+    namespaceName: ref?.dataId || profile.apolloNamespaceName || fallback?.namespaceName || "application",
+  };
+}
+
+function matchesApolloNamespaceFilter(namespaceName: string, filter: string): boolean {
+  const value = filter.trim();
+  if (!value) return true;
+  if (value.includes("*")) {
+    const needle = value.replaceAll("*", "");
+    return !needle || namespaceName.includes(needle);
+  }
+  return namespaceName === value;
+}
+
+function apolloFormat(namespace: SmokeApolloNamespace): string {
+  if (namespace.format?.trim()) return namespace.format.trim().toLowerCase();
+  return typeFromDataId(namespace.namespaceName);
+}
+
 function sourceArg(args: unknown[], index: number): SnapshotSource {
   const value = args[index] as Partial<SnapshotSource>;
   return {
@@ -733,11 +871,17 @@ function configSnapshotsArg(args: unknown[], index: number): ConfigSnapshot[] {
 
 function profileArg(args: unknown[], index: number): ConnectionProfile {
   const value = args[index] as Partial<ConnectionProfile>;
+  const provider = value.provider === "local" ? "local" : value.provider === "apollo" ? "apollo" : "nacos";
   return {
     id: String(value.id ?? ""),
     name: String(value.name ?? ""),
-    provider: value.provider === "local" ? "local" : "nacos",
+    provider,
     baseUrl: String(value.baseUrl ?? ""),
+    accessToken: String(value.accessToken ?? ""),
+    apolloEnv: String(value.apolloEnv ?? ""),
+    apolloAppId: String(value.apolloAppId ?? ""),
+    apolloCluster: String(value.apolloCluster ?? ""),
+    apolloNamespaceName: String(value.apolloNamespaceName ?? ""),
   };
 }
 

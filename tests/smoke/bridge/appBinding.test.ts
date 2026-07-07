@@ -97,4 +97,83 @@ describe("createSmokeAppBinding app data backup methods", () => {
       },
     ]);
   });
+
+  it("routes Apollo ConfigCenter bridge calls through Apollo OpenAPI", async () => {
+    const state = smokeState();
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces")) {
+        return new Response(
+          JSON.stringify([
+            {
+              appId: "order-service",
+              clusterName: "default",
+              namespaceName: "application",
+              format: "properties",
+              items: [],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application")) {
+        return new Response(
+          JSON.stringify({
+            appId: "order-service",
+            clusterName: "default",
+            namespaceName: "application",
+            format: "properties",
+            releaseKey: "release-1",
+            items: [
+              { key: "feature.enabled", value: "true", dataChangeLastModifiedTime: "2026-07-07T10:02:00+08:00" },
+              { key: "server.port", value: "8080", dataChangeLastModifiedTime: "2026-07-07T10:01:00+08:00" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = createSmokeAppBinding(state);
+    const profile = {
+      id: "smoke-apollo",
+      name: "Apollo OpenAPI",
+      provider: "apollo",
+      baseUrl: state.apollo.baseUrl,
+      accessToken: state.apollo.token,
+      apolloEnv: state.apollo.env,
+      apolloAppId: state.apollo.appId,
+      apolloCluster: state.apollo.cluster,
+      apolloNamespaceName: state.apollo.namespaceName,
+    };
+
+    await expect(invoke("ConfigCenterTestConnection", [profile])).resolves.toBeUndefined();
+    await expect(invoke("ConfigCenterListNamespaces", [profile])).resolves.toEqual([
+      { id: "order-service", name: "order-service / DEV / default", configCount: 1, kind: 0 },
+    ]);
+    await expect(
+      invoke("ConfigCenterListConfigs", [profile, { namespace: "order-service", group: "", dataId: "", pageNo: 1, pageSize: 20 }])
+    ).resolves.toMatchObject({
+      totalCount: 1,
+      pageItems: [
+        {
+          content: "",
+          format: "properties",
+          ref: { provider: "apollo", namespace: "order-service", group: "default", dataId: "application" },
+        },
+      ],
+    });
+    await expect(
+      invoke("ConfigCenterGetConfig", [
+        profile,
+        { provider: "apollo", connectionId: "smoke-apollo", namespace: "order-service", group: "default", dataId: "application" },
+      ])
+    ).resolves.toMatchObject({
+      content: "feature.enabled=true\nserver.port=8080\n",
+      format: "properties",
+      version: "release-1",
+      source: "apollo:DEV/order-service/default/application",
+    });
+  });
 });

@@ -46,6 +46,10 @@ describe("config center api", () => {
     environment: "dev",
     safetyLevel: "test",
     useProxy: false,
+    apolloEnv: "",
+    apolloAppId: "",
+    apolloCluster: "",
+    apolloNamespaceName: "",
   };
   const ref: ConfigRef = {
     provider: "nacos",

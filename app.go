@@ -54,8 +54,9 @@ func NewApp() *App {
 		nacos:  nacosClient,
 		sshMgr: ssh.NewManager(),
 		providers: map[provider.ProviderType]provider.ConfigProvider{
-			provider.ProviderNacos: provider.NewNacosProvider(nacosClient),
-			provider.ProviderLocal: provider.NewLocalProvider(),
+			provider.ProviderNacos:  provider.NewNacosProvider(nacosClient),
+			provider.ProviderApollo: provider.NewApolloProvider(nil),
+			provider.ProviderLocal:  provider.NewLocalProvider(),
 		},
 	}
 }

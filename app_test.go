@@ -84,6 +84,21 @@ func TestNewAppRegistersNacosProvider(t *testing.T) {
 	}
 }
 
+func TestNewAppRegistersApolloProvider(t *testing.T) {
+	app := NewApp()
+
+	p, err := app.providerFor(provider.ProviderApollo)
+	if err != nil {
+		t.Fatalf("providerFor returned error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("providerFor returned nil provider")
+	}
+	if _, ok := p.(*provider.ApolloProvider); !ok {
+		t.Fatalf("provider type = %T, want *provider.ApolloProvider", p)
+	}
+}
+
 type fakeConfigProvider struct {
 	calls []string
 }
@@ -259,7 +274,7 @@ func TestNacosApplyPlanWriteBindingsReachNacos(t *testing.T) {
 func TestConfigCenterMethodsRejectUnsupportedProvider(t *testing.T) {
 	app := NewApp()
 
-	_, err := app.ConfigCenterListNamespaces(provider.ConnectionProfile{Provider: provider.ProviderApollo})
+	_, err := app.ConfigCenterListNamespaces(provider.ConnectionProfile{Provider: provider.ProviderConsul})
 	if err == nil {
 		t.Fatal("ConfigCenterListNamespaces returned nil error")
 	}
