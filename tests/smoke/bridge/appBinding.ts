@@ -300,15 +300,14 @@ async function listAppDataWebDAVBackups(target: AppDataWebDAVTarget): Promise<Re
   }
   const xml = await response.text();
   const backups: RemoteBackup[] = [];
-  for (const match of xml.matchAll(/<d:response>([\s\S]*?)<\/d:response>/g)) {
-    const block = match[1] ?? "";
-    const href = textMatch(block, /<d:href>([\s\S]*?)<\/d:href>/);
+  for (const block of webDAVResponseBlocks(xml)) {
+    const href = webDAVTagText(block, "href");
     if (!href || href.endsWith("/") || !href.endsWith(".csbackup")) continue;
     backups.push({
       name: posix.basename(href),
       path: href,
-      size: Number(textMatch(block, /<d:getcontentlength>([\s\S]*?)<\/d:getcontentlength>/) || "0"),
-      modifiedAt: textMatch(block, /<d:getlastmodified>([\s\S]*?)<\/d:getlastmodified>/),
+      size: Number(webDAVTagText(block, "getcontentlength") || "0"),
+      modifiedAt: webDAVTagText(block, "getlastmodified"),
     });
   }
   return backups.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
@@ -403,8 +402,20 @@ function normalizeRemotePath(path: string): string {
   return trimmed.startsWith("/") ? trimmed.replace(/\/+$/g, "") : `/${trimmed.replace(/\/+$/g, "")}`;
 }
 
-function textMatch(value: string, pattern: RegExp): string {
-  return (value.match(pattern)?.[1] ?? "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&apos;/g, "'");
+const XML_TAG_PREFIX = String.raw`(?:[A-Za-z_][\w.-]*:)?`;
+
+function webDAVResponseBlocks(xml: string): string[] {
+  const pattern = new RegExp(`<${XML_TAG_PREFIX}response\\b[^>]*>([\\s\\S]*?)<\\/${XML_TAG_PREFIX}response>`, "gi");
+  return [...xml.matchAll(pattern)].map((match) => match[1] ?? "");
+}
+
+function webDAVTagText(value: string, tagName: string): string {
+  const pattern = new RegExp(`<${XML_TAG_PREFIX}${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${XML_TAG_PREFIX}${tagName}>`, "i");
+  return decodeXmlEntities(value.match(pattern)?.[1] ?? "");
+}
+
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&apos;/g, "'");
 }
 
 async function testConnection(profile: ConnectionProfile): Promise<void> {

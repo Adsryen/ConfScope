@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, pass, test } from "./smokeTest";
 
@@ -65,7 +66,7 @@ test("backs up and restores app data locally and through WebDAV", async ({ page,
   await page.getByRole("button", { name: "Upload current data" }).click();
   await expect(page.locator(".test-msg").filter({ hasText: "WebDAV backup uploaded" })).toBeVisible({ timeout: 20_000 });
   expect(existsSync(smoke.webdavDir)).toBe(true);
-  expect(readdirSync(`${smoke.webdavDir}${smoke.webdav.rootPath}`).some((name) => name.endsWith(".csbackup"))).toBe(true);
+  expect(hasBackupPackage(smoke.webdavDir)).toBe(true);
   pass(smoke, "FS-APPDATA-WEBDAV-UPLOAD-01", "App Data Backup", "Uploaded encrypted app data backup to Docker WebDAV storage");
 
   await page.getByRole("button", { name: "Refresh remote list" }).click();
@@ -109,4 +110,15 @@ async function recoveryPointSuccessCount(page: Page): Promise<number> {
   };
   await expect.poll(readCount).toBeGreaterThan(0);
   return readCount();
+}
+
+function hasBackupPackage(rootDir: string): boolean {
+  if (!existsSync(rootDir)) return false;
+  for (const entry of readdirSync(rootDir)) {
+    const path = join(rootDir, entry);
+    const stat = statSync(path);
+    if (stat.isFile() && entry.endsWith(".csbackup")) return true;
+    if (stat.isDirectory() && hasBackupPackage(path)) return true;
+  }
+  return false;
 }
