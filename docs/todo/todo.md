@@ -1,6 +1,6 @@
 # ConfScope 开发待办规划
 
-**最后更新**: 2026-06-30
+**最后更新**: 2026-07-07
 **规划参考**: `ConfigCenterComparer`
 **当前定位**: Go + Wails 桌面端配置中心管理、对比、审计工具。MVP 已支持 Nacos，后续应从“单配置浏览与 diff”升级为“多环境配置治理”。
 
@@ -511,41 +511,41 @@
 
 #### P0
 
-- [ ] Apollo OpenAPI 适配。
+- [x] Apollo OpenAPI 适配。
   - Portal/OpenAPI 地址。
   - token。
   - appId。
   - cluster。
   - namespaceName。
-- [ ] Apollo provider 专属连接表单。
+- [x] Apollo provider 专属连接表单。
   - 不强行展示 Nacos 的 group/dataId 字段。
   - 表单明确 Apollo 的 appId、cluster、namespaceName。
   - 权限不足时允许手动输入 appId/cluster/namespaceName。
-- [ ] Apollo 概念映射。
-  - Nacos `namespace` 对应 Apollo 的 `appId + cluster + namespaceName` 组合。
-  - Nacos `group` 在 Apollo 中没有直接等价物，可显示为 cluster 或固定为空。
-  - Nacos `dataId` 可映射为 namespaceName 或单个配置集合。
+- [x] Apollo 概念映射。
+  - 通用 `namespace` 映射 Apollo `appId`。
+  - 通用 `group` 映射 Apollo `cluster`。
+  - 通用 `dataId` 映射 Apollo `namespaceName`。
   - Apollo item 的 `key/value` 天然适合审计矩阵。
-- [ ] Apollo 浏览。
+- [x] Apollo 浏览。
   - App 列表如果 API 权限允许则自动获取。
   - 权限不足时允许手动输入 appId。
   - Apollo namespace 配置项列表。
   - Apollo 配置详情。
-- [ ] Apollo 参与统一 diff 和 AuditView。
+- [x] Apollo 参与统一 diff 和 AuditView。
   - 通用列：环境、namespace、group、dataId、key、value。
   - 原始字段：Apollo appId/cluster/namespaceName，Nacos tenant/group/dataId。
-- [ ] Apollo Go client 测试。
+- [x] Apollo Go client 测试。
   - 使用 `httptest.Server` 覆盖连接、浏览、读取、错误处理。
 
 #### P1
 
 - [ ] Apollo 审计导出。
-- [ ] Apollo 错误提示。
+- [x] Apollo 错误提示。
   - 网络失败。
   - token 失效。
   - 权限不足。
   - app/cluster/namespace 不存在。
-- [ ] Apollo 样例 fixture。
+- [x] Apollo 样例 fixture。
   - app。
   - cluster。
   - namespace。

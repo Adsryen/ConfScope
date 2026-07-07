@@ -12,19 +12,9 @@ import {
   renameProject,
   upsertConnection,
 } from "../store/connections";
-import {
-  loadSSHProfiles,
-  normalizeSSHConfig,
-  sshProfileLabel,
-  upsertSSHProfile,
-  type SSHProfile,
-} from "../store/sshProfiles";
+import { loadSSHProfiles, normalizeSSHConfig, sshProfileLabel, upsertSSHProfile, type SSHProfile } from "../store/sshProfiles";
 import { clearToken, listNamespaces, testConnection, type Namespace } from "../api/nacos";
-import {
-  selectLocalSnapshotDirectory,
-  validateLocalSnapshotDirectory,
-  type LocalSnapshotValidation,
-} from "../api/app";
+import { selectLocalSnapshotDirectory, validateLocalSnapshotDirectory, type LocalSnapshotValidation } from "../api/app";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
@@ -56,6 +46,11 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   sshConfig: undefined,
   sshProfileId: "",
   useProxy: false,
+  apolloEnv: "DEV",
+  apolloAppId: "",
+  apolloCluster: "default",
+  apolloNamespaceName: "application",
+  apolloToken: "",
 });
 
 type HelpPopover = { text: string; top: number; left: number };
@@ -86,9 +81,9 @@ function TestButton({ onClick, running }: { onClick: () => void; running: boolea
   const slow = elapsed > 3;
   const label = running
     ? slow
-      ? `${t('connection.retrying')} (${elapsed}s)...`
-      : `${t('connection.testing')} (${elapsed}s)...`
-    : t('connection.test');
+      ? `${t("connection.retrying")} (${elapsed}s)...`
+      : `${t("connection.testing")} (${elapsed}s)...`
+    : t("connection.test");
 
   return (
     <button className={`btn btn-ghost${slow ? " warn" : ""}`} onClick={onClick} disabled={running}>
@@ -138,6 +133,7 @@ function traceHasSSH(snapshot: Draft): boolean {
 }
 
 function traceProviderName(snapshot: Draft, t: Translate): string {
+  if (snapshot.provider === "apollo") return "Apollo";
   return snapshot.distribution === "aliyun-mse" ? t("connection.aliyunMseNacos") : "Nacos";
 }
 
@@ -152,14 +148,12 @@ function looksLikeTunnelForwardError(message: string): boolean {
   const text = message.toLowerCase();
   return (
     (text.includes("localhost") || text.includes("127.0.0.1")) &&
-    (
-      text.includes("wsarecv") ||
+    (text.includes("wsarecv") ||
       text.includes("forcibly closed") ||
       text.includes("connection reset") ||
       text.includes("connection refused") ||
       text.includes("broken pipe") ||
-      text.includes("eof")
-    )
+      text.includes("eof"))
   );
 }
 
@@ -167,8 +161,9 @@ function looksLikeConfigCenterResponse(message: string): boolean {
   const text = message.toLowerCase();
   return (
     text.includes("nacos 返回") ||
+    text.includes("apollo 返回") ||
     text.includes("http status") ||
-    text.includes("\"status\":") ||
+    text.includes('"status":') ||
     text.includes("check signature") ||
     text.includes("invalid access key") ||
     text.includes("invalid signature") ||
@@ -182,7 +177,12 @@ function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, d
   const tunnelForwardError = hasSSH && !ok && looksLikeTunnelForwardError(detail);
   const configCenterResponse = ok || looksLikeConfigCenterResponse(detail);
   const sshSetupError = hasSSH && !ok && !tunnelForwardError && !configCenterResponse;
-  const interfaceName = snapshot.distribution === "aliyun-mse" ? t("connection.traceMseNacosApi") : t("connection.traceNacosApi");
+  const interfaceName =
+    snapshot.provider === "apollo"
+      ? "Apollo OpenAPI"
+      : snapshot.distribution === "aliyun-mse"
+        ? t("connection.traceMseNacosApi")
+        : t("connection.traceNacosApi");
   const steps: TraceStep[] = [
     {
       name: t("connection.traceConnectionParams"),
@@ -216,8 +216,8 @@ function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, d
         : sshSetupError
           ? t("connection.traceRemoteTargetSkipped")
           : ok
-          ? t("connection.traceRemoteTargetConnected")
-          : t("connection.traceRemoteTargetConfirmed"),
+            ? t("connection.traceRemoteTargetConnected")
+            : t("connection.traceRemoteTargetConfirmed"),
     });
   }
   steps.push({
@@ -227,19 +227,23 @@ function buildConnectionTrace(snapshot: Draft, startedAt: number, ok: boolean, d
       ? t("connection.traceApiSkippedRemoteFailed")
       : sshSetupError
         ? t("connection.traceApiSkippedSshFailed")
-      : detail,
+        : detail,
     latencyMs: elapsedMs(startedAt),
   });
   return {
     ok,
     title: ok ? t("connection.traceSuccessTitle") : t("connection.traceFailureTitle"),
     summary: ok
-      ? hasSSH ? t("connection.traceSuccessSshSummary") : t("connection.traceSuccessDirectSummary")
+      ? hasSSH
+        ? t("connection.traceSuccessSshSummary")
+        : t("connection.traceSuccessDirectSummary")
       : tunnelForwardError
         ? t("connection.traceFailureTunnelSummary")
         : sshSetupError
           ? t("connection.traceFailureSshSummary")
-        : hasSSH ? t("connection.traceFailureSshApiSummary") : t("connection.traceFailureDirectSummary"),
+          : hasSSH
+            ? t("connection.traceFailureSshApiSummary")
+            : t("connection.traceFailureDirectSummary"),
     steps,
   };
 }
@@ -260,6 +264,11 @@ function connectionTestKey(draft: Draft): string {
     sshProfileId: draft.sshProfileId ?? "",
     sshConfig: sshConfig.host ? sshConfig : undefined,
     forceLocalSnapshot: !!draft.forceLocalSnapshot,
+    apolloEnv: draft.apolloEnv ?? "",
+    apolloAppId: draft.apolloAppId ?? "",
+    apolloCluster: draft.apolloCluster ?? "",
+    apolloNamespaceName: draft.apolloNamespaceName ?? "",
+    apolloToken: draft.apolloToken ?? "",
   });
 }
 
@@ -276,6 +285,11 @@ function namespaceLoadKey(draft: Draft): string {
     securityToken: draft.securityToken ?? "",
     sshProfileId: draft.sshProfileId ?? "",
     sshConfig: sshConfig.host ? sshConfig : undefined,
+    apolloEnv: draft.apolloEnv ?? "",
+    apolloAppId: draft.apolloAppId ?? "",
+    apolloCluster: draft.apolloCluster ?? "",
+    apolloNamespaceName: draft.apolloNamespaceName ?? "",
+    apolloToken: draft.apolloToken ?? "",
   });
 }
 
@@ -312,17 +326,11 @@ function getHelpPopover(text: string, target: HTMLElement): HelpPopover {
   const left = Math.min(Math.max(rect.left + rect.width / 2 - width / 2, 12), window.innerWidth - width - 12);
   const estimatedHeight = 92;
   const top =
-    rect.top > estimatedHeight + 18
-      ? rect.top - estimatedHeight - 8
-      : Math.min(rect.bottom + 8, window.innerHeight - estimatedHeight - 12);
+    rect.top > estimatedHeight + 18 ? rect.top - estimatedHeight - 8 : Math.min(rect.bottom + 8, window.innerHeight - estimatedHeight - 12);
   return { text, top, left };
 }
 
-function HelpTip({ text, onShow, onHide }: {
-  text: string;
-  onShow: (popover: HelpPopover) => void;
-  onHide: () => void;
-}) {
+function HelpTip({ text, onShow, onHide }: { text: string; onShow: (popover: HelpPopover) => void; onHide: () => void }) {
   const show = (target: EventTarget & HTMLElement) => onShow(getHelpPopover(text, target));
   return (
     <span
@@ -355,7 +363,11 @@ function FieldLabel({
   return (
     <span className="field-label">
       <span>{children}</span>
-      {required && <span className="required-mark" aria-hidden="true">*</span>}
+      {required && (
+        <span className="required-mark" aria-hidden="true">
+          *
+        </span>
+      )}
       {tip && <HelpTip text={tip} onShow={onHelpShow} onHide={onHelpHide} />}
     </span>
   );
@@ -363,7 +375,7 @@ function FieldLabel({
 
 export default function ConnectionManager({ onClose, onChange, embedded = false }: Props) {
   const { t } = useTranslation();
-  const defaultNewEnvironment = t('connection.environmentDev');
+  const defaultNewEnvironment = t("connection.environmentDev");
   const [list, setList] = useState<Connection[]>(loadConnections());
   const [sshProfiles, setSSHProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
   const [draft, setDraft] = useState<Draft>(emptyDraft(defaultNewEnvironment));
@@ -380,9 +392,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [namespaceOptions, setNamespaceOptions] = useState<Namespace[]>([]);
   const [namespaceError, setNamespaceError] = useState<string | null>(null);
   const [activeProject, setActiveProject] = useState(emptyDraft(defaultNewEnvironment).projectName ?? DEFAULT_PROJECT_NAME);
-  const [activeEnvironment, setActiveEnvironment] = useState(
-    emptyDraft(defaultNewEnvironment).environmentName ?? defaultNewEnvironment
-  );
+  const [activeEnvironment, setActiveEnvironment] = useState(emptyDraft(defaultNewEnvironment).environmentName ?? defaultNewEnvironment);
   const [creatingProject, setCreatingProject] = useState(false);
   const [renamingProject, setRenamingProject] = useState<{ oldName: string; value: string } | null>(null);
   // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
@@ -484,7 +494,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const saveInlineSSHAsProfile = () => {
     const config = normalizeSSHConfig(draft.sshConfig);
     if (!config.host.trim() || !config.username.trim()) {
-      setTestMsg({ ok: false, text: t('connection.sshProfileRequired') });
+      setTestMsg({ ok: false, text: t("connection.sshProfileRequired") });
       return;
     }
     const profile = upsertSSHProfile({
@@ -494,7 +504,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setSSHProfiles(loadSSHProfiles());
     setDraft((d) => ({ ...d, sshProfileId: profile.id, sshConfig: undefined }));
     setShowSSHConfig(true);
-    setTestMsg({ ok: true, text: t('connection.sshProfileSaved') });
+    setTestMsg({ ok: true, text: t("connection.sshProfileSaved") });
   };
 
   const setAccessMode = (mode: "direct" | "ssh") => {
@@ -507,67 +517,66 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setDraft((d) => ({
       ...d,
       sourceType: "nacos",
-      sshConfig: d.sshProfileId ? undefined : d.sshConfig ?? {
-        host: "",
-        port: 22,
-        username: "root",
-        authType: "password",
-      },
+      sshConfig: d.sshProfileId
+        ? undefined
+        : (d.sshConfig ?? {
+            host: "",
+            port: 22,
+            username: "root",
+            authType: "password",
+          }),
     }));
     setShowSSHConfig(true);
   };
 
-  const groupedConnections = list.reduce<
-    { project: string; environments: { environment: string; connections: Connection[] }[] }[]
-  >((projects, conn) => {
-    const project = connectionProjectName(conn);
-    const environment = connectionEnvironmentName(conn);
-    let projectGroup = projects.find((item) => item.project === project);
-    if (!projectGroup) {
-      projectGroup = { project, environments: [] };
-      projects.push(projectGroup);
-    }
-    let envGroup = projectGroup.environments.find((item) => item.environment === environment);
-    if (!envGroup) {
-      envGroup = { environment, connections: [] };
-      projectGroup.environments.push(envGroup);
-    }
-    envGroup.connections.push(conn);
-    return projects;
-  }, []);
+  const groupedConnections = list.reduce<{ project: string; environments: { environment: string; connections: Connection[] }[] }[]>(
+    (projects, conn) => {
+      const project = connectionProjectName(conn);
+      const environment = connectionEnvironmentName(conn);
+      let projectGroup = projects.find((item) => item.project === project);
+      if (!projectGroup) {
+        projectGroup = { project, environments: [] };
+        projects.push(projectGroup);
+      }
+      let envGroup = projectGroup.environments.find((item) => item.environment === environment);
+      if (!envGroup) {
+        envGroup = { environment, connections: [] };
+        projectGroup.environments.push(envGroup);
+      }
+      envGroup.connections.push(conn);
+      return projects;
+    },
+    []
+  );
   const projectOptions = groupedConnections.map((project) => project.project);
   const environmentPresets = [
-    t('connection.environmentDev'),
-    t('connection.environmentTest'),
-    t('connection.environmentStaging'),
-    t('connection.environmentProd'),
-    t('connection.environmentCanary'),
-    t('connection.environmentLocal'),
+    t("connection.environmentDev"),
+    t("connection.environmentTest"),
+    t("connection.environmentStaging"),
+    t("connection.environmentProd"),
+    t("connection.environmentCanary"),
+    t("connection.environmentLocal"),
   ];
   const currentEnvironment = draft.environmentName?.trim();
   const environmentOptions = Array.from(
-    new Set(currentEnvironment && !environmentPresets.includes(currentEnvironment)
-      ? [currentEnvironment, ...environmentPresets]
-      : environmentPresets)
+    new Set(
+      currentEnvironment && !environmentPresets.includes(currentEnvironment)
+        ? [currentEnvironment, ...environmentPresets]
+        : environmentPresets
+    )
   );
   const accessMode = showSSHConfig || draft.sshConfig || draft.sshProfileId ? "ssh" : "direct";
   const nacosSourceNamePresets = [
-    { label: t('connection.sourcePresetPublic'), mode: "direct" as const },
-    { label: t('connection.sourcePresetCloudIntranet'), mode: "direct" as const },
-    { label: t('connection.sourcePresetCompanyIntranet'), mode: "direct" as const },
-    { label: t('connection.sourcePresetOffice'), mode: "direct" as const },
+    { label: t("connection.sourcePresetPublic"), mode: "direct" as const },
+    { label: t("connection.sourcePresetCloudIntranet"), mode: "direct" as const },
+    { label: t("connection.sourcePresetCompanyIntranet"), mode: "direct" as const },
+    { label: t("connection.sourcePresetOffice"), mode: "direct" as const },
   ];
-  const localSnapshotSourceNamePreset = { label: t('connection.sourcePresetLocalSnapshot'), mode: "direct" as const };
-  const sourceNamePresets = draft.provider === "local"
-    ? [localSnapshotSourceNamePreset]
-    : nacosSourceNamePresets;
-  const selectedSourcePreset = sourceNamePresets.some((item) => item.label === draft.sourceName)
-    ? draft.sourceName ?? ""
-    : "";
+  const localSnapshotSourceNamePreset = { label: t("connection.sourcePresetLocalSnapshot"), mode: "direct" as const };
+  const sourceNamePresets = draft.provider === "local" ? [localSnapshotSourceNamePreset] : nacosSourceNamePresets;
+  const selectedSourcePreset = sourceNamePresets.some((item) => item.label === draft.sourceName) ? (draft.sourceName ?? "") : "";
   const currentProjectName = (draft.projectName ?? DEFAULT_PROJECT_NAME).trim();
-  const selectedProjectOption = !creatingProject && projectOptions.includes(currentProjectName)
-    ? currentProjectName
-    : "__new__";
+  const selectedProjectOption = !creatingProject && projectOptions.includes(currentProjectName) ? currentProjectName : "__new__";
   const showProjectInput = creatingProject || projectOptions.length === 0 || selectedProjectOption === "__new__";
 
   function deriveSourceType(provider: Draft["provider"]): Draft["sourceType"] {
@@ -587,11 +596,14 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         ...d,
         provider,
         sourceType,
-        sourceName: shouldDefaultLocalName
-          ? localSnapshotSourceNamePreset.label
-          : shouldClearLocalName
-            ? ""
-            : d.sourceName,
+        distribution: provider === "apollo" ? "opensource" : d.distribution,
+        authType: provider === "apollo" ? "none" : d.authType,
+        username: provider === "apollo" ? "" : d.username,
+        password: provider === "apollo" ? "" : d.password,
+        apolloEnv: provider === "apollo" ? d.apolloEnv || "DEV" : d.apolloEnv,
+        apolloCluster: provider === "apollo" ? d.apolloCluster || "default" : d.apolloCluster,
+        apolloNamespaceName: provider === "apollo" ? d.apolloNamespaceName || "application" : d.apolloNamespaceName,
+        sourceName: shouldDefaultLocalName ? localSnapshotSourceNamePreset.label : shouldClearLocalName ? "" : d.sourceName,
       };
     });
     setLocalValidation(null);
@@ -630,26 +642,30 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setNamespaceResultKey(null);
     setNamespaceOptions([]);
     setNamespaceError(null);
-    setLocalValidation(c.localValidation ? {
-      valid: c.localValidation.valid,
-      path: c.localPath ?? "",
-      code: c.localValidation.code ?? "",
-      message: c.localValidation.message,
-      configCount: c.localValidation.configCount,
-      schemaVersion: c.localValidation.schemaVersion ?? 0,
-      layout: c.localValidation.layout ?? "",
-      legacy: c.localValidation.legacy ?? false,
-      hasManifest: false,
-      matchedMarkers: [],
-      checkedAt: c.localValidation.checkedAt,
-    } : null);
+    setLocalValidation(
+      c.localValidation
+        ? {
+            valid: c.localValidation.valid,
+            path: c.localPath ?? "",
+            code: c.localValidation.code ?? "",
+            message: c.localValidation.message,
+            configCount: c.localValidation.configCount,
+            schemaVersion: c.localValidation.schemaVersion ?? 0,
+            layout: c.localValidation.layout ?? "",
+            legacy: c.localValidation.legacy ?? false,
+            hasManifest: false,
+            matchedMarkers: [],
+            checkedAt: c.localValidation.checkedAt,
+          }
+        : null
+    );
     setConfirmDel(null);
     setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
   };
 
   const duplicateConnection = (c: Connection) => {
-    const sourceName = copyLabel(connectionSourceName(c), t('connection.sourceName'), t('connection.copySuffix'));
-    const label = copyLabel(c.name, sourceName, t('connection.copySuffix'));
+    const sourceName = copyLabel(connectionSourceName(c), t("connection.sourceName"), t("connection.copySuffix"));
+    const label = copyLabel(c.name, sourceName, t("connection.copySuffix"));
     setActiveProject(connectionProjectName(c));
     setActiveEnvironment(connectionEnvironmentName(c));
     setDraft({
@@ -660,26 +676,30 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       isDefaultSource: false,
     });
     setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
-    setTestMsg({ ok: true, text: t('connection.copyReady') });
+    setTestMsg({ ok: true, text: t("connection.copyReady") });
     setTestTrace(null);
     setTestResultKey(null);
     setTestingKey(null);
     setNamespaceResultKey(null);
     setNamespaceOptions([]);
     setNamespaceError(null);
-    setLocalValidation(c.localValidation ? {
-      valid: c.localValidation.valid,
-      path: c.localPath ?? "",
-      code: c.localValidation.code ?? "",
-      message: c.localValidation.message,
-      configCount: c.localValidation.configCount,
-      schemaVersion: c.localValidation.schemaVersion ?? 0,
-      layout: c.localValidation.layout ?? "",
-      legacy: c.localValidation.legacy ?? false,
-      hasManifest: false,
-      matchedMarkers: [],
-      checkedAt: c.localValidation.checkedAt,
-    } : null);
+    setLocalValidation(
+      c.localValidation
+        ? {
+            valid: c.localValidation.valid,
+            path: c.localPath ?? "",
+            code: c.localValidation.code ?? "",
+            message: c.localValidation.message,
+            configCount: c.localValidation.configCount,
+            schemaVersion: c.localValidation.schemaVersion ?? 0,
+            layout: c.localValidation.layout ?? "",
+            legacy: c.localValidation.legacy ?? false,
+            hasManifest: false,
+            matchedMarkers: [],
+            checkedAt: c.localValidation.checkedAt,
+          }
+        : null
+    );
     setConfirmDel(null);
     setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
   };
@@ -710,24 +730,29 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     if (activeProject === renamingProject.oldName) setActiveProject(nextName);
     setDraft((d) => ({
       ...d,
-      projectName:
-        (d.projectName ?? DEFAULT_PROJECT_NAME) === renamingProject.oldName ? nextName : d.projectName,
+      projectName: (d.projectName ?? DEFAULT_PROJECT_NAME) === renamingProject.oldName ? nextName : d.projectName,
     }));
     setRenamingProject(null);
   };
 
   const save = () => {
     if (!draft.sourceName?.trim() || (draft.provider !== "local" && !draft.baseUrl.trim())) {
-      setTestMsg({ ok: false, text: t('connection.nameAndAddressRequired') });
+      setTestMsg({ ok: false, text: t("connection.nameAndAddressRequired") });
       return;
     }
     if (draft.provider === "local") {
       if (!draft.localPath?.trim()) {
-        setTestMsg({ ok: false, text: t('connection.localPathRequired') });
+        setTestMsg({ ok: false, text: t("connection.localPathRequired") });
         return;
       }
       if (!draft.forceLocalSnapshot && (!localValidation?.valid || localValidation.path !== draft.localPath.trim())) {
-        setTestMsg({ ok: false, text: t('connection.localValidationRequired') });
+        setTestMsg({ ok: false, text: t("connection.localValidationRequired") });
+        return;
+      }
+    }
+    if (draft.provider === "apollo") {
+      if (!draft.apolloToken?.trim() || !draft.apolloAppId?.trim() || !draft.apolloCluster?.trim() || !draft.apolloNamespaceName?.trim()) {
+        setTestMsg({ ok: false, text: t("connection.apolloRequired") });
         return;
       }
     }
@@ -753,17 +778,25 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       sourceType: toSave.sourceType ?? "nacos",
       localPath: toSave.localPath?.trim() || "",
       forceLocalSnapshot: !!toSave.forceLocalSnapshot,
-      localValidation: localValidation ? {
-        valid: localValidation.valid,
-        code: localValidation.code,
-        message: localValidation.message,
-        configCount: localValidation.configCount,
-        schemaVersion: localValidation.schemaVersion,
-        layout: localValidation.layout,
-        legacy: localValidation.legacy,
-        checkedAt: localValidation.checkedAt,
-      } : undefined,
+      localValidation: localValidation
+        ? {
+            valid: localValidation.valid,
+            code: localValidation.code,
+            message: localValidation.message,
+            configCount: localValidation.configCount,
+            schemaVersion: localValidation.schemaVersion,
+            layout: localValidation.layout,
+            legacy: localValidation.legacy,
+            checkedAt: localValidation.checkedAt,
+          }
+        : undefined,
       baseUrl: toSave.sourceType === "local-snapshot" ? toSave.localPath?.trim() || "" : toSave.baseUrl.trim(),
+      defaultNamespace: toSave.provider === "apollo" ? toSave.apolloAppId?.trim() || "" : (toSave.defaultNamespace ?? ""),
+      apolloEnv: toSave.apolloEnv?.trim() || "",
+      apolloAppId: toSave.apolloAppId?.trim() || "",
+      apolloCluster: toSave.apolloCluster?.trim() || "",
+      apolloNamespaceName: toSave.apolloNamespaceName?.trim() || "",
+      apolloToken: toSave.apolloToken ?? "",
     });
     clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
     const savedProject = connectionProjectName(saved);
@@ -808,15 +841,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     }
     setTestingKey(snapshotKey);
     try {
-      if (snapshot.authType === "aliyun-aksk" || snapshot.username) {
+      if (snapshot.provider === "apollo" || snapshot.authType === "aliyun-aksk" || snapshot.username) {
         const r = await testConnection({ ...(snapshot as Connection), id: snapshot.id ?? "test" });
         if (currentTestKeyRef.current !== snapshotKey) return;
         const latency = latencyText(t, startedAt);
         setTestMsg({
           ok: true,
-          text: r.globalAdmin
-            ? t("connection.testConnectedAdmin", { latency })
-            : t("connection.testConnected", { latency }),
+          text: r.globalAdmin ? t("connection.testConnectedAdmin", { latency }) : t("connection.testConnected", { latency }),
         });
         setTestTrace(
           buildConnectionTrace(
@@ -851,7 +882,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     if (!draft.baseUrl.trim()) {
       setNamespaceResultKey(currentNamespaceKey);
       setNamespaceOptions([]);
-      setNamespaceError(t('connection.addressRequired'));
+      setNamespaceError(t("connection.addressRequired"));
       return;
     }
 
@@ -889,7 +920,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   ) => {
     setTestResultKey(resultKey);
     if (!path) {
-      setTestMsg({ ok: false, text: t('connection.localPathRequired') });
+      setTestMsg({ ok: false, text: t("connection.localPathRequired") });
       return null;
     }
     setValidatingLocal(true);
@@ -945,385 +976,405 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     <>
       <div className={embedded ? "page-header" : "modal-header"}>
         <div>
-          <h3>{t('connection.title')}</h3>
-          {embedded && <div className="page-subtitle">{t('connection.pageSubtitle')}</div>}
+          <h3>{t("connection.title")}</h3>
+          {embedded && <div className="page-subtitle">{t("connection.pageSubtitle")}</div>}
         </div>
         {!embedded && (
-          <button className="modal-x" onClick={onClose} title={t('common.close')}>
+          <button className="modal-x" onClick={onClose} title={t("common.close")}>
             ×
           </button>
         )}
       </div>
 
       <div className={embedded ? "conn-mgr conn-mgr-page" : "modal-body conn-mgr"}>
-          <div className="conn-list">
-            <div className="conn-list-title">{t('connection.savedConnections')}</div>
-            <button className="btn btn-primary btn-sm conn-create-btn" onClick={() => startNew()}>
-              {t('connection.addSource')}
-            </button>
-            {list.length === 0 && <div className="conn-empty">{t('connection.noConnections')}</div>}
-            {groupedConnections.map((project) => (
-              <div className="conn-group" key={project.project}>
-                <div
-                  className={`conn-group-title${activeProject === project.project ? " active" : ""}`}
-                  onClick={() => selectContext(project.project)}
-                >
-                  {renamingProject?.oldName === project.project ? (
-                    <input
-                      className="conn-inline-input"
-                      value={renamingProject.value}
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setRenamingProject({ ...renamingProject, value: e.target.value })}
-                      onBlur={commitProjectRename}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitProjectRename();
-                        if (e.key === "Escape") setRenamingProject(null);
-                      }}
-                    />
-                  ) : (
-                    <span className="conn-group-name">{project.project}</span>
-                  )}
-                  <div className="conn-tree-actions">
-                    <button
-                      className="conn-tree-btn"
-                      title={t('connection.addSource')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startNew(project.project, project.environments[0]?.environment ?? DEFAULT_ENVIRONMENT_NAME);
-                      }}
-                    >
-                      +
-                    </button>
-                    <button
-                      className="conn-tree-btn"
-                      title={t('connection.renameProject')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenamingProject({ oldName: project.project, value: project.project });
-                      }}
-                    >
-                      ✎
-                    </button>
-                  </div>
+        <div className="conn-list">
+          <div className="conn-list-title">{t("connection.savedConnections")}</div>
+          <button className="btn btn-primary btn-sm conn-create-btn" onClick={() => startNew()}>
+            {t("connection.addSource")}
+          </button>
+          {list.length === 0 && <div className="conn-empty">{t("connection.noConnections")}</div>}
+          {groupedConnections.map((project) => (
+            <div className="conn-group" key={project.project}>
+              <div
+                className={`conn-group-title${activeProject === project.project ? " active" : ""}`}
+                onClick={() => selectContext(project.project)}
+              >
+                {renamingProject?.oldName === project.project ? (
+                  <input
+                    className="conn-inline-input"
+                    value={renamingProject.value}
+                    autoFocus
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setRenamingProject({ ...renamingProject, value: e.target.value })}
+                    onBlur={commitProjectRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitProjectRename();
+                      if (e.key === "Escape") setRenamingProject(null);
+                    }}
+                  />
+                ) : (
+                  <span className="conn-group-name">{project.project}</span>
+                )}
+                <div className="conn-tree-actions">
+                  <button
+                    className="conn-tree-btn"
+                    title={t("connection.addSource")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startNew(project.project, project.environments[0]?.environment ?? DEFAULT_ENVIRONMENT_NAME);
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    className="conn-tree-btn"
+                    title={t("connection.renameProject")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRenamingProject({ oldName: project.project, value: project.project });
+                    }}
+                  >
+                    ✎
+                  </button>
                 </div>
-                {project.environments.map((env) => (
-                  <div className="conn-env-group" key={`${project.project}/${env.environment}`}>
-                    <div
-                      className={`conn-env-title${
-                        activeProject === project.project && activeEnvironment === env.environment ? " active" : ""
-                      }`}
-                      onClick={() => selectContext(project.project, env.environment)}
-                    >
-                      <span className="conn-env-name">{env.environment}</span>
-                      <div className="conn-tree-actions">
-                        <button
-                          className="conn-tree-btn"
-                          title={t('connection.addSource')}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startNew(project.project, env.environment);
-                          }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                    {env.connections.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`conn-item${draft.id === c.id ? " active" : ""}`}
-                        onClick={() => edit(c)}
+              </div>
+              {project.environments.map((env) => (
+                <div className="conn-env-group" key={`${project.project}/${env.environment}`}>
+                  <div
+                    className={`conn-env-title${
+                      activeProject === project.project && activeEnvironment === env.environment ? " active" : ""
+                    }`}
+                    onClick={() => selectContext(project.project, env.environment)}
+                  >
+                    <span className="conn-env-name">{env.environment}</span>
+                    <div className="conn-tree-actions">
+                      <button
+                        className="conn-tree-btn"
+                        title={t("connection.addSource")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startNew(project.project, env.environment);
+                        }}
                       >
-                        <div className="conn-item-main">
-                          <div className="conn-item-name">
-                            {connectionSourceName(c)}
-                            {c.isDefaultSource && <span className="conn-ssh-badge">{t('connection.defaultSource')}</span>}
-                            <span className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}>{connectionEnvironmentName(c)}</span>
-                            {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
-                            {c.provider === "local" && <span className="conn-provider-badge local">{t('connection.sourceTypeSnapshot')}</span>}
-                            {(c.sshConfig || c.sshProfileId) && <span className="conn-ssh-badge" title={t("connection.sshConfig")}>🔒SSH</span>}
-                          </div>
-                          <div className="conn-item-url">
-                            <span>{sourceAddress(c)}</span>
-                            {connectionLabelMeta(c) && <span>{t('connection.connectionLabelShort')}: {connectionLabelMeta(c)}</span>}
-                          </div>
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  {env.connections.map((c) => (
+                    <div key={c.id} className={`conn-item${draft.id === c.id ? " active" : ""}`} onClick={() => edit(c)}>
+                      <div className="conn-item-main">
+                        <div className="conn-item-name">
+                          {connectionSourceName(c)}
+                          {c.isDefaultSource && <span className="conn-ssh-badge">{t("connection.defaultSource")}</span>}
+                          <span className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}>
+                            {connectionEnvironmentName(c)}
+                          </span>
+                          {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
+                          {c.provider === "apollo" && <span className="conn-provider-badge apollo">Apollo</span>}
+                          {c.provider === "local" && (
+                            <span className="conn-provider-badge local">{t("connection.sourceTypeSnapshot")}</span>
+                          )}
+                          {(c.sshConfig || c.sshProfileId) && (
+                            <span className="conn-ssh-badge" title={t("connection.sshConfig")}>
+                              🔒SSH
+                            </span>
+                          )}
                         </div>
-                        <div className="conn-item-actions">
-                          <button
-                            className="conn-item-action"
-                            title={t('connection.copy')}
-                            aria-label={t('connection.copy')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              duplicateConnection(c);
-                            }}
-                          >
-                            ⧉
-                          </button>
-                          {confirmDel === c.id ? (
-                            <button
-                              className="conn-item-del confirm"
-                              title={t('connection.confirmDelete')}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                askOrRemove(c.id);
-                              }}
-                            >
-                              {t('connection.deleteConfirm')}
-                            </button>
-                          ) : (
-                            <button
-                              className="conn-item-del"
-                              title={t('common.delete')}
-                              aria-label={t('common.delete')}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                askOrRemove(c.id);
-                              }}
-                            >
-                              ×
-                            </button>
+                        <div className="conn-item-url">
+                          <span>{sourceAddress(c)}</span>
+                          {connectionLabelMeta(c) && (
+                            <span>
+                              {t("connection.connectionLabelShort")}: {connectionLabelMeta(c)}
+                            </span>
                           )}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+                      <div className="conn-item-actions">
+                        <button
+                          className="conn-item-action"
+                          title={t("connection.copy")}
+                          aria-label={t("connection.copy")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            duplicateConnection(c);
+                          }}
+                        >
+                          ⧉
+                        </button>
+                        {confirmDel === c.id ? (
+                          <button
+                            className="conn-item-del confirm"
+                            title={t("connection.confirmDelete")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              askOrRemove(c.id);
+                            }}
+                          >
+                            {t("connection.deleteConfirm")}
+                          </button>
+                        ) : (
+                          <button
+                            className="conn-item-del"
+                            title={t("common.delete")}
+                            aria-label={t("common.delete")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              askOrRemove(c.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
 
-          <div
-            className="conn-form"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                save();
-              }
-            }}
-          >
-            <div className="conn-form-title">{draft.id ? t('connection.edit') : t('connection.new')}</div>
-            {helpPopover && (
-              <div
-                className="help-popover"
-                style={{ top: helpPopover.top, left: helpPopover.left }}
-              >
-                {helpPopover.text}
-              </div>
-            )}
+        <div
+          className="conn-form"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+          }}
+        >
+          <div className="conn-form-title">{draft.id ? t("connection.edit") : t("connection.new")}</div>
+          {helpPopover && (
+            <div className="help-popover" style={{ top: helpPopover.top, left: helpPopover.left }}>
+              {helpPopover.text}
+            </div>
+          )}
 
-            <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionBasic')}</div>
-              <div className="field-row">
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.projectHelp')}>{t('connection.project')}</FieldLabel>
-                  {projectOptions.length > 0 && (
-                    <select
-                      className="search-input wide"
-                      value={selectedProjectOption}
-                      onChange={(e) => {
-                        if (e.target.value === "__new__") {
-                          setCreatingProject(true);
-                          set({ projectName: "" });
-                          return;
-                        }
-                        setCreatingProject(false);
-                        set({ projectName: e.target.value });
-                      }}
-                    >
-                      {projectOptions.map((name) => (
-                        <option value={name} key={name}>
-                          {name}
-                        </option>
-                      ))}
-                      <option value="__new__">{t('connection.projectNewOption')}</option>
-                    </select>
-                  )}
-                  {showProjectInput && (
-                    <input
-                      className="search-input wide"
-                      value={draft.projectName ?? ""}
-                      placeholder={t('connection.projectPlaceholder')}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      onChange={(e) => set({ projectName: e.target.value })}
-                    />
-                  )}
-                </label>
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.environmentHelp')}>{t('connection.environment')}</FieldLabel>
+          <section className="conn-form-section">
+            <div className="conn-section-title">{t("connection.sectionBasic")}</div>
+            <div className="field-row">
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.projectHelp")}>
+                  {t("connection.project")}
+                </FieldLabel>
+                {projectOptions.length > 0 && (
                   <select
                     className="search-input wide"
-                    value={draft.environmentName ?? ""}
-                    onChange={(e) => set({ environmentName: e.target.value })}
+                    value={selectedProjectOption}
+                    onChange={(e) => {
+                      if (e.target.value === "__new__") {
+                        setCreatingProject(true);
+                        set({ projectName: "" });
+                        return;
+                      }
+                      setCreatingProject(false);
+                      set({ projectName: e.target.value });
+                    }}
                   >
-                    {environmentOptions.map((name) => (
+                    {projectOptions.map((name) => (
                       <option value={name} key={name}>
                         {name}
                       </option>
                     ))}
+                    <option value="__new__">{t("connection.projectNewOption")}</option>
                   </select>
-                </label>
-              </div>
-            </section>
-
-            <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionNetwork')}</div>
-              <div className="field-row">
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.sourceNameHelp')}>{t('connection.sourceName')}</FieldLabel>
+                )}
+                {showProjectInput && (
                   <input
                     className="search-input wide"
-                    value={draft.sourceName ?? ""}
-                    placeholder={t('connection.sourceNamePlaceholder')}
-                    autoFocus
+                    value={draft.projectName ?? ""}
+                    placeholder={t("connection.projectPlaceholder")}
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
-                    onChange={(e) => set({ sourceName: e.target.value })}
+                    onChange={(e) => set({ projectName: e.target.value })}
                   />
-                </label>
-                <label className="field check-field">
-                  <FieldLabel {...fieldLabelProps} tip={t('connection.defaultSourceHelp')}>{t('connection.defaultSource')}</FieldLabel>
-                  <input
-                    type="checkbox"
-                    checked={!!draft.isDefaultSource}
-                    onChange={(e) => set({ isDefaultSource: e.target.checked })}
-                  />
-                </label>
-              </div>
-              <div className="field-row">
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} tip={t('connection.sourcePresetHelp')}>{t('connection.sourcePreset')}</FieldLabel>
-                  <select
-                    className="search-input wide"
-                    value={selectedSourcePreset}
-                    onChange={(e) => {
-                      const preset = sourceNamePresets.find((item) => item.label === e.target.value);
-                      if (!preset) return;
-                      setDraft((d) => ({ ...d, sourceName: preset.label }));
-                      setAccessMode(preset.mode);
-                    }}
-                  >
-                    <option value="">{t('connection.sourcePresetCustom')}</option>
-                    {sourceNamePresets.map((item) => (
-                      <option value={item.label} key={item.label}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.providerHelp')}>{t('connection.provider')}</FieldLabel>
-                  <select
-                    className="search-input wide"
-                    value={draft.provider ?? "nacos"}
-                    onChange={(e) => setProvider(e.target.value as Draft["provider"])}
-                  >
-                    <option value="nacos">Nacos</option>
-                    <option value="apollo" disabled>Apollo（{t('app.planned')}）</option>
-                    <option value="local">{t('connection.sourceTypeSnapshot')}</option>
-                  </select>
-                </label>
-              </div>
-              {draft.provider === "apollo" && (
-                <div className="field-hint" style={{ padding: "12px 0" }}>Apollo {t('app.auditPlanned')}</div>
-              )}
-              {draft.provider === "local" && (
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.localPathHelp')}>{t('connection.localPath')}</FieldLabel>
-                  <div className="path-field">
-                    <input
-                      className="search-input wide mono"
-                      value={draft.localPath ?? ""}
-                      placeholder={t('connection.localPathPlaceholder')}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      onChange={(e) => set({ localPath: e.target.value, baseUrl: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={doSelectLocalSnapshotDirectory}
-                      disabled={selectingLocalDir}
-                    >
-                      {selectingLocalDir ? t('connection.selectingFolder') : t('connection.selectFolder')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => doValidateLocalSnapshot()}
-                      disabled={validatingLocal}
-                    >
-                      {validatingLocal ? t('connection.validatingLocal') : t('connection.validateLocal')}
-                    </button>
-                  </div>
-                  <div className="field-hint">{t('connection.localPathStructureHint')}</div>
-                  <label className="force-local-field">
-                    <input
-                      type="checkbox"
-                      checked={!!draft.forceLocalSnapshot}
-                      onChange={(e) => set({ forceLocalSnapshot: e.target.checked })}
-                    />
-                    <span>{t('connection.forceLocalSnapshot')}</span>
-                  </label>
-                  {draft.forceLocalSnapshot && (
-                    <div className="field-warning">{t('connection.forceLocalSnapshotHelp')}</div>
-                  )}
-                  {localValidation && (
-                    <div className={`local-validation ${localValidation.valid ? "ok" : "err"}`}>
-                      {localValidation.valid
-                        ? t('connection.localValidationOk').replace("{count}", String(localValidation.configCount))
-                        : localSnapshotValidationMessage(localValidation, t)}
-                      <span className="local-validation-path">{localValidation.path}</span>
-                    </div>
-                  )}
-                </label>
-              )}
+                )}
+              </label>
               <label className="field">
-                <FieldLabel {...fieldLabelProps} tip={t('connection.nameHelp')}>{t('connection.name')}</FieldLabel>
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.environmentHelp")}>
+                  {t("connection.environment")}
+                </FieldLabel>
+                <select
+                  className="search-input wide"
+                  value={draft.environmentName ?? ""}
+                  onChange={(e) => set({ environmentName: e.target.value })}
+                >
+                  {environmentOptions.map((name) => (
+                    <option value={name} key={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="conn-form-section">
+            <div className="conn-section-title">{t("connection.sectionNetwork")}</div>
+            <div className="field-row">
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.sourceNameHelp")}>
+                  {t("connection.sourceName")}
+                </FieldLabel>
                 <input
                   className="search-input wide"
-                  value={draft.name}
-                  placeholder={t('connection.namePlaceholder')}
+                  value={draft.sourceName ?? ""}
+                  placeholder={t("connection.sourceNamePlaceholder")}
+                  autoFocus
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  onChange={(e) => set({ name: e.target.value })}
+                  onChange={(e) => set({ sourceName: e.target.value })}
                 />
               </label>
-            </section>
-            {draft.provider !== "local" && <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionAuth')}</div>
+              <label className="field check-field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.defaultSourceHelp")}>
+                  {t("connection.defaultSource")}
+                </FieldLabel>
+                <input type="checkbox" checked={!!draft.isDefaultSource} onChange={(e) => set({ isDefaultSource: e.target.checked })} />
+              </label>
+            </div>
+            <div className="field-row">
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.sourcePresetHelp")}>
+                  {t("connection.sourcePreset")}
+                </FieldLabel>
+                <select
+                  className="search-input wide"
+                  value={selectedSourcePreset}
+                  onChange={(e) => {
+                    const preset = sourceNamePresets.find((item) => item.label === e.target.value);
+                    if (!preset) return;
+                    setDraft((d) => ({ ...d, sourceName: preset.label }));
+                    setAccessMode(preset.mode);
+                  }}
+                >
+                  <option value="">{t("connection.sourcePresetCustom")}</option>
+                  {sourceNamePresets.map((item) => (
+                    <option value={item.label} key={item.label}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.providerHelp")}>
+                  {t("connection.provider")}
+                </FieldLabel>
+                <select
+                  className="search-input wide"
+                  value={draft.provider ?? "nacos"}
+                  onChange={(e) => setProvider(e.target.value as Draft["provider"])}
+                >
+                  <option value="nacos">Nacos</option>
+                  <option value="apollo">Apollo</option>
+                  <option value="local">{t("connection.sourceTypeSnapshot")}</option>
+                </select>
+              </label>
+            </div>
+            {draft.provider === "local" && (
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.localPathHelp")}>
+                  {t("connection.localPath")}
+                </FieldLabel>
+                <div className="path-field">
+                  <input
+                    className="search-input wide mono"
+                    value={draft.localPath ?? ""}
+                    placeholder={t("connection.localPathPlaceholder")}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ localPath: e.target.value, baseUrl: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={doSelectLocalSnapshotDirectory}
+                    disabled={selectingLocalDir}
+                  >
+                    {selectingLocalDir ? t("connection.selectingFolder") : t("connection.selectFolder")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => doValidateLocalSnapshot()}
+                    disabled={validatingLocal}
+                  >
+                    {validatingLocal ? t("connection.validatingLocal") : t("connection.validateLocal")}
+                  </button>
+                </div>
+                <div className="field-hint">{t("connection.localPathStructureHint")}</div>
+                <label className="force-local-field">
+                  <input
+                    type="checkbox"
+                    checked={!!draft.forceLocalSnapshot}
+                    onChange={(e) => set({ forceLocalSnapshot: e.target.checked })}
+                  />
+                  <span>{t("connection.forceLocalSnapshot")}</span>
+                </label>
+                {draft.forceLocalSnapshot && <div className="field-warning">{t("connection.forceLocalSnapshotHelp")}</div>}
+                {localValidation && (
+                  <div className={`local-validation ${localValidation.valid ? "ok" : "err"}`}>
+                    {localValidation.valid
+                      ? t("connection.localValidationOk").replace("{count}", String(localValidation.configCount))
+                      : localSnapshotValidationMessage(localValidation, t)}
+                    <span className="local-validation-path">{localValidation.path}</span>
+                  </div>
+                )}
+              </label>
+            )}
+            <label className="field">
+              <FieldLabel {...fieldLabelProps} tip={t("connection.nameHelp")}>
+                {t("connection.name")}
+              </FieldLabel>
+              <input
+                className="search-input wide"
+                value={draft.name}
+                placeholder={t("connection.namePlaceholder")}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                onChange={(e) => set({ name: e.target.value })}
+              />
+            </label>
+          </section>
+          {draft.provider === "nacos" && (
+            <section className="conn-form-section">
+              <div className="conn-section-title">{t("connection.sectionAuth")}</div>
               <div className="field-row">
                 <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.distributionHelp')}>{t('connection.distribution')}</FieldLabel>
+                  <FieldLabel {...fieldLabelProps} required tip={t("connection.distributionHelp")}>
+                    {t("connection.distribution")}
+                  </FieldLabel>
                   <select
                     className="search-input wide"
                     value={draft.distribution ?? "opensource"}
                     onChange={(e) => setDistribution(e.target.value as Draft["distribution"])}
                   >
-                    <option value="opensource">{t('connection.opensourceNacos')}</option>
-                    <option value="aliyun-mse">{t('connection.aliyunMseNacos')}</option>
+                    <option value="opensource">{t("connection.opensourceNacos")}</option>
+                    <option value="aliyun-mse">{t("connection.aliyunMseNacos")}</option>
                   </select>
                 </label>
                 <label className="field">
-                  <FieldLabel {...fieldLabelProps} required tip={t('connection.accessModeHelp')}>{t('connection.accessMode')}</FieldLabel>
+                  <FieldLabel {...fieldLabelProps} required tip={t("connection.accessModeHelp")}>
+                    {t("connection.accessMode")}
+                  </FieldLabel>
                   <select
                     className="search-input wide"
                     value={accessMode}
                     onChange={(e) => setAccessMode(e.target.value as "direct" | "ssh")}
                   >
-                    <option value="direct">{t('connection.accessModeDirect')}</option>
-                    <option value="ssh">{t('connection.accessModeSsh')}</option>
+                    <option value="direct">{t("connection.accessModeDirect")}</option>
+                    <option value="ssh">{t("connection.accessModeSsh")}</option>
                   </select>
                 </label>
               </div>
               <label className="field">
-                <FieldLabel {...fieldLabelProps} required tip={t('connection.addressHelp')}>{t('connection.address')}</FieldLabel>
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.addressHelp")}>
+                  {t("connection.address")}
+                </FieldLabel>
                 <input
                   className="search-input wide mono"
                   value={draft.baseUrl}
@@ -1335,105 +1386,174 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 />
               </label>
               <label className="field">
-                <FieldLabel {...fieldLabelProps} required tip={t('connection.authTypeHelp')}>{t('connection.authType')}</FieldLabel>
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.authTypeHelp")}>
+                  {t("connection.authType")}
+                </FieldLabel>
                 <select
                   className="search-input wide"
                   value={draft.authType ?? "nacos-password"}
                   onChange={(e) => set({ authType: e.target.value as Draft["authType"] })}
                 >
-                  <option value="none">{t('connection.noAuth')}</option>
-                  <option value="nacos-password">{t('connection.nacosPasswordAuth')}</option>
-                  <option value="aliyun-aksk">{t('connection.aliyunAKSKAuth')}</option>
+                  <option value="none">{t("connection.noAuth")}</option>
+                  <option value="nacos-password">{t("connection.nacosPasswordAuth")}</option>
+                  <option value="aliyun-aksk">{t("connection.aliyunAKSKAuth")}</option>
                 </select>
               </label>
-            </section>}
+            </section>
+          )}
 
+          {draft.provider === "apollo" && (
             <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionSecurity')}</div>
-              {draft.provider !== "local" && (
-              <label className="check-field">
-                <FieldLabel {...fieldLabelProps} tip={t('connection.useProxyHelp')}>{t('connection.useProxy')}</FieldLabel>
+              <div className="conn-section-title">{t("connection.sectionAuth")}</div>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.addressHelp")}>
+                  {t("connection.address")}
+                </FieldLabel>
                 <input
-                  type="checkbox"
-                  checked={!!draft.useProxy}
-                  onChange={(e) => set({ useProxy: e.target.checked })}
+                  className="search-input wide mono"
+                  value={draft.baseUrl}
+                  placeholder="http://localhost:8070"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ baseUrl: e.target.value })}
                 />
               </label>
-              )}
-              {!draft.useProxy && <div className="field-hint">{t('connection.proxyOffHint')}</div>}
-            </section>
-
-            {draft.provider !== "local" && <section className="conn-form-section">
-              <div className="conn-section-title">{t('connection.sectionAdvanced')}</div>
-              {draft.authType !== "aliyun-aksk" && (
-              <div className="field-row">
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t('connection.usernameHelp')}>{t('connection.username')}</FieldLabel>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloTokenHelp")}>
+                  {t("connection.apolloToken")}
+                </FieldLabel>
+                <div className="pwd-field">
                   <input
-                    className="search-input mono"
-                    value={draft.username}
-                    placeholder={t('connection.usernamePlaceholder')}
+                    className="search-input wide mono"
+                    type={showPwd ? "text" : "password"}
+                    value={draft.apolloToken ?? ""}
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
-                    onChange={(e) => set({ username: e.target.value })}
+                    onChange={(e) => set({ apolloToken: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="pwd-toggle"
+                    title={showPwd ? t("connection.hide") : t("connection.show")}
+                    onClick={() => setShowPwd((v) => !v)}
+                  >
+                    {showPwd ? "🙈" : "👁"}
+                  </button>
+                </div>
+              </label>
+              <div className="field-row">
+                <label className="field">
+                  <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloEnvHelp")}>
+                    {t("connection.apolloEnv")}
+                  </FieldLabel>
+                  <input
+                    className="search-input mono"
+                    value={draft.apolloEnv ?? ""}
+                    placeholder="DEV"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ apolloEnv: e.target.value })}
                   />
                 </label>
                 <label className="field">
-                  <FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t('connection.passwordHelp')}>{t('connection.password')}</FieldLabel>
-                  <div className="pwd-field">
-                    <input
-                      className="search-input wide mono"
-                      type={showPwd ? "text" : "password"}
-                      value={draft.password}
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      onChange={(e) => set({ password: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      className="pwd-toggle"
-                      title={showPwd ? t('connection.hide') : t('connection.show')}
-                      onClick={() => setShowPwd((v) => !v)}
-                    >
-                      {showPwd ? "🙈" : "👁"}
-                    </button>
-                  </div>
+                  <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloClusterHelp")}>
+                    {t("connection.apolloCluster")}
+                  </FieldLabel>
+                  <input
+                    className="search-input mono"
+                    value={draft.apolloCluster ?? ""}
+                    placeholder="default"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ apolloCluster: e.target.value })}
+                  />
                 </label>
               </div>
-              )}
-              {draft.authType === "aliyun-aksk" && (
-              <>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloAppIdHelp")}>
+                  {t("connection.apolloAppId")}
+                </FieldLabel>
+                <input
+                  className="search-input wide mono"
+                  value={draft.apolloAppId ?? ""}
+                  placeholder="order-service"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ apolloAppId: e.target.value, defaultNamespace: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloNamespaceNameHelp")}>
+                  {t("connection.apolloNamespaceName")}
+                </FieldLabel>
+                <input
+                  className="search-input wide mono"
+                  value={draft.apolloNamespaceName ?? ""}
+                  placeholder="application"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => set({ apolloNamespaceName: e.target.value })}
+                />
+              </label>
+            </section>
+          )}
+
+          <section className="conn-form-section">
+            <div className="conn-section-title">{t("connection.sectionSecurity")}</div>
+            {draft.provider !== "local" && (
+              <label className="check-field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.useProxyHelp")}>
+                  {t("connection.useProxy")}
+                </FieldLabel>
+                <input type="checkbox" checked={!!draft.useProxy} onChange={(e) => set({ useProxy: e.target.checked })} />
+              </label>
+            )}
+            {!draft.useProxy && <div className="field-hint">{t("connection.proxyOffHint")}</div>}
+          </section>
+
+          {draft.provider === "nacos" && (
+            <section className="conn-form-section">
+              <div className="conn-section-title">{t("connection.sectionAdvanced")}</div>
+              {draft.authType !== "aliyun-aksk" && (
                 <div className="field-row">
                   <label className="field">
-                    <FieldLabel {...fieldLabelProps} required tip={t('connection.accessKeyHelp')}>{t('connection.accessKeyId')}</FieldLabel>
+                    <FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t("connection.usernameHelp")}>
+                      {t("connection.username")}
+                    </FieldLabel>
                     <input
                       className="search-input mono"
-                      value={draft.accessKeyId ?? ""}
-                      placeholder={t('connection.accessKeyIdPlaceholder')}
+                      value={draft.username}
+                      placeholder={t("connection.usernamePlaceholder")}
                       autoCapitalize="off"
                       autoCorrect="off"
                       spellCheck={false}
-                      onChange={(e) => set({ accessKeyId: e.target.value })}
+                      onChange={(e) => set({ username: e.target.value })}
                     />
                   </label>
                   <label className="field">
-                    <FieldLabel {...fieldLabelProps} required tip={t('connection.accessKeyHelp')}>{t('connection.accessKeySecret')}</FieldLabel>
+                    <FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t("connection.passwordHelp")}>
+                      {t("connection.password")}
+                    </FieldLabel>
                     <div className="pwd-field">
                       <input
                         className="search-input wide mono"
                         type={showPwd ? "text" : "password"}
-                        value={draft.accessKeySecret ?? ""}
+                        value={draft.password}
                         autoCapitalize="off"
                         autoCorrect="off"
                         spellCheck={false}
-                        onChange={(e) => set({ accessKeySecret: e.target.value })}
+                        onChange={(e) => set({ password: e.target.value })}
                       />
                       <button
                         type="button"
                         className="pwd-toggle"
-                        title={showPwd ? t('connection.hide') : t('connection.show')}
+                        title={showPwd ? t("connection.hide") : t("connection.show")}
                         onClick={() => setShowPwd((v) => !v)}
                       >
                         {showPwd ? "🙈" : "👁"}
@@ -1441,39 +1561,81 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     </div>
                   </label>
                 </div>
-                <label className="field">
-                  <FieldLabel {...fieldLabelProps} tip={t('connection.securityTokenHelp')}>{t('connection.securityToken')}</FieldLabel>
-                  <input
-                    className="search-input wide mono"
-                    value={draft.securityToken ?? ""}
-                    placeholder={t('connection.securityTokenPlaceholder')}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(e) => set({ securityToken: e.target.value })}
-                  />
-                </label>
-              </>
+              )}
+              {draft.authType === "aliyun-aksk" && (
+                <>
+                  <div className="field-row">
+                    <label className="field">
+                      <FieldLabel {...fieldLabelProps} required tip={t("connection.accessKeyHelp")}>
+                        {t("connection.accessKeyId")}
+                      </FieldLabel>
+                      <input
+                        className="search-input mono"
+                        value={draft.accessKeyId ?? ""}
+                        placeholder={t("connection.accessKeyIdPlaceholder")}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        onChange={(e) => set({ accessKeyId: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      <FieldLabel {...fieldLabelProps} required tip={t("connection.accessKeyHelp")}>
+                        {t("connection.accessKeySecret")}
+                      </FieldLabel>
+                      <div className="pwd-field">
+                        <input
+                          className="search-input wide mono"
+                          type={showPwd ? "text" : "password"}
+                          value={draft.accessKeySecret ?? ""}
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          onChange={(e) => set({ accessKeySecret: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          className="pwd-toggle"
+                          title={showPwd ? t("connection.hide") : t("connection.show")}
+                          onClick={() => setShowPwd((v) => !v)}
+                        >
+                          {showPwd ? "🙈" : "👁"}
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                  <label className="field">
+                    <FieldLabel {...fieldLabelProps} tip={t("connection.securityTokenHelp")}>
+                      {t("connection.securityToken")}
+                    </FieldLabel>
+                    <input
+                      className="search-input wide mono"
+                      value={draft.securityToken ?? ""}
+                      placeholder={t("connection.securityTokenPlaceholder")}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onChange={(e) => set({ securityToken: e.target.value })}
+                    />
+                  </label>
+                </>
               )}
               <label className="field">
-                <FieldLabel {...fieldLabelProps} tip={t('connection.defaultNamespaceHelp')}>{t('connection.defaultNamespace')}</FieldLabel>
+                <FieldLabel {...fieldLabelProps} tip={t("connection.defaultNamespaceHelp")}>
+                  {t("connection.defaultNamespace")}
+                </FieldLabel>
                 <div className="namespace-field">
                   <input
                     className="search-input wide mono"
                     value={draft.defaultNamespace}
-                    placeholder={t('connection.defaultNamespacePlaceholder')}
+                    placeholder={t("connection.defaultNamespacePlaceholder")}
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
                     onChange={(e) => set({ defaultNamespace: e.target.value })}
                   />
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={loadDefaultNamespaceOptions}
-                    disabled={loadingNamespaces}
-                  >
-                    {loadingNamespaces ? t('connection.loadingNamespaces') : t('connection.loadNamespaces')}
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={loadDefaultNamespaceOptions} disabled={loadingNamespaces}>
+                    {loadingNamespaces ? t("connection.loadingNamespaces") : t("connection.loadNamespaces")}
                   </button>
                 </div>
                 {(visibleNamespaces.length > 0 || visibleNamespaceError) && (
@@ -1484,7 +1646,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         value={draft.defaultNamespace}
                         onChange={(e) => set({ defaultNamespace: e.target.value })}
                       >
-                        <option value="">{t('app.namespaceDefault')}</option>
+                        <option value="">{t("app.namespaceDefault")}</option>
                         {visibleNamespaces
                           .filter((item) => item.namespace)
                           .map((item) => (
@@ -1497,7 +1659,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {visibleNamespaceError && (
                       <div className="field-error-box">
                         <span className="field-error">
-                          {t('connection.loadNamespacesFailed')}: {visibleNamespaceError}
+                          {t("connection.loadNamespacesFailed")}: {visibleNamespaceError}
                         </span>
                         <div className="field-error-actions">
                           <button
@@ -1506,39 +1668,38 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             onClick={loadDefaultNamespaceOptions}
                             disabled={loadingNamespaces}
                           >
-                            {t('common.retry')}
+                            {t("common.retry")}
                           </button>
-                          <CopyButton text={`${t('connection.loadNamespacesFailed')}: ${visibleNamespaceError}`} label={t("common.copyError")} />
+                          <CopyButton
+                            text={`${t("connection.loadNamespacesFailed")}: ${visibleNamespaceError}`}
+                            label={t("common.copyError")}
+                          />
                         </div>
                       </div>
                     )}
                   </div>
                 )}
               </label>
-            </section>}
+            </section>
+          )}
 
-            {/* SSH 隧道配置 */}
-            {draft.provider !== "local" && accessMode === "ssh" && <section className="conn-form-section">
+          {/* SSH 隧道配置 */}
+          {draft.provider === "nacos" && accessMode === "ssh" && (
+            <section className="conn-form-section">
               <div className="conn-section-title">SSH</div>
-              <button
-                type="button"
-                className="ssh-toggle"
-                onClick={() => setShowSSHConfig(!showSSHConfig)}
-              >
-                {showSSHConfig ? "▼" : "▶"} {t('connection.sshConfig')}
-                {(draft.sshConfig?.host || selectedSSHProfile) && <span className="ssh-badge">{t('connection.sshConfigured')}</span>}
+              <button type="button" className="ssh-toggle" onClick={() => setShowSSHConfig(!showSSHConfig)}>
+                {showSSHConfig ? "▼" : "▶"} {t("connection.sshConfig")}
+                {(draft.sshConfig?.host || selectedSSHProfile) && <span className="ssh-badge">{t("connection.sshConfigured")}</span>}
               </button>
 
               {showSSHConfig && (
                 <div className="ssh-config">
                   <label className="field">
-                    <FieldLabel {...fieldLabelProps} tip={t('connection.sshProfileHelp')}>{t('connection.sshProfile')}</FieldLabel>
-                    <select
-                      className="search-input wide"
-                      value={draft.sshProfileId ?? ""}
-                      onChange={(e) => setSSHProfile(e.target.value)}
-                    >
-                      <option value="">{t('connection.sshProfileInline')}</option>
+                    <FieldLabel {...fieldLabelProps} tip={t("connection.sshProfileHelp")}>
+                      {t("connection.sshProfile")}
+                    </FieldLabel>
+                    <select className="search-input wide" value={draft.sshProfileId ?? ""} onChange={(e) => setSSHProfile(e.target.value)}>
+                      <option value="">{t("connection.sshProfileInline")}</option>
                       {sshProfiles.map((profile) => (
                         <option value={profile.id} key={profile.id}>
                           {sshProfileLabel(profile)}
@@ -1551,172 +1712,189 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     <div className="ssh-profile-summary">
                       <div className="ssh-profile-title">{sshProfileLabel(selectedSSHProfile)}</div>
                       <div className="ssh-profile-meta">
-                        {selectedSSHProfile.config.authType === "key" ? t('connection.keyAuth') : t('connection.passwordAuth')}
+                        {selectedSSHProfile.config.authType === "key" ? t("connection.keyAuth") : t("connection.passwordAuth")}
                         {selectedSSHProfile.config.localPort ? ` / localhost:${selectedSSHProfile.config.localPort}` : ""}
                       </div>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={copySSHProfileToInline}>
-                        {t('connection.sshProfileCopyInline')}
+                        {t("connection.sshProfileCopyInline")}
                       </button>
                     </div>
                   )}
 
                   {!selectedSSHProfile && (
                     <>
-                  <label className="field">
-                    <FieldLabel {...fieldLabelProps} required tip={t('connection.sshHostHelp')}>{t('connection.sshHost')}</FieldLabel>
-                    <input
-                      className="search-input wide"
-                      value={draft.sshConfig?.host || ""}
-                      placeholder={t('connection.sshHostPlaceholder')}
-                      onChange={(e) => setSSH({ host: e.target.value })}
-                    />
-                  </label>
-
-                  <div className="field-row">
-                    <label className="field">
-                      <FieldLabel {...fieldLabelProps} required tip={t('connection.sshPortHelp')}>{t('connection.sshPort')}</FieldLabel>
-                      <input
-                        className="search-input mono"
-                        type="number"
-                        value={draft.sshConfig?.port || 22}
-                        onChange={(e) => setSSH({ port: parseInt(e.target.value) || 22 })}
-                      />
-                    </label>
-                    <label className="field">
-                      <FieldLabel {...fieldLabelProps} required tip={t('connection.sshUsernameHelp')}>{t('connection.sshUsername')}</FieldLabel>
-                      <input
-                        className="search-input mono"
-                        value={draft.sshConfig?.username || ""}
-                        placeholder="root"
-                        onChange={(e) => setSSH({ username: e.target.value })}
-                      />
-                    </label>
-                  </div>
-
-                  <label className="field">
-                    <FieldLabel {...fieldLabelProps} required tip={t('connection.sshAuthHelp')}>{t('connection.authType')}</FieldLabel>
-                    <select
-                      className="search-input wide"
-                      value={draft.sshConfig?.authType || "password"}
-                      onChange={(e) => setSSH({ authType: e.target.value as "password" | "key" })}
-                    >
-                      <option value="password">{t('connection.passwordAuth')}</option>
-                      <option value="key">{t('connection.keyAuth')}</option>
-                    </select>
-                  </label>
-
-                  {(draft.sshConfig?.authType ?? "password") === "password" && (
-                    <label className="field">
-                      <FieldLabel {...fieldLabelProps} required tip={t('connection.sshPasswordHelp')}>{t('connection.sshPassword')}</FieldLabel>
-                      <div className="pwd-field">
+                      <label className="field">
+                        <FieldLabel {...fieldLabelProps} required tip={t("connection.sshHostHelp")}>
+                          {t("connection.sshHost")}
+                        </FieldLabel>
                         <input
-                          className="search-input wide mono"
-                          type={showSSHPwd ? "text" : "password"}
-                          value={draft.sshConfig?.password || ""}
-                          onChange={(e) => setSSH({ password: e.target.value })}
-                        />
-                        <button
-                          type="button"
-                          className="pwd-toggle"
-                          title={showSSHPwd ? t('connection.hide') : t('connection.show')}
-                          onClick={() => setShowSSHPwd((v) => !v)}
-                        >
-                          {showSSHPwd ? "🙈" : "👁"}
-                        </button>
-                      </div>
-                    </label>
-                  )}
-
-                  {draft.sshConfig?.authType === "key" && (
-                    <>
-                      <label className="field">
-                        <FieldLabel {...fieldLabelProps} required tip={t('connection.privateKeyHelp')}>{t('connection.privateKey')}</FieldLabel>
-                        <textarea
-                          className="search-input wide mono ssh-key"
-                          value={draft.sshConfig?.privateKey || ""}
-                          placeholder="-----BEGIN RSA PRIVATE KEY-----"
-                          onChange={(e) => setSSH({ privateKey: e.target.value })}
+                          className="search-input wide"
+                          value={draft.sshConfig?.host || ""}
+                          placeholder={t("connection.sshHostPlaceholder")}
+                          onChange={(e) => setSSH({ host: e.target.value })}
                         />
                       </label>
-                      <label className="field">
-                        <FieldLabel {...fieldLabelProps} tip={t('connection.privateKeyPasswordHelp')}>{t('connection.privateKeyPassword')}</FieldLabel>
-                        <div className="pwd-field">
+
+                      <div className="field-row">
+                        <label className="field">
+                          <FieldLabel {...fieldLabelProps} required tip={t("connection.sshPortHelp")}>
+                            {t("connection.sshPort")}
+                          </FieldLabel>
                           <input
-                            className="search-input wide mono"
-                            type={showSSHPassphrase ? "text" : "password"}
-                            value={draft.sshConfig?.passphrase || ""}
-                            onChange={(e) => setSSH({ passphrase: e.target.value })}
+                            className="search-input mono"
+                            type="number"
+                            value={draft.sshConfig?.port || 22}
+                            onChange={(e) => setSSH({ port: parseInt(e.target.value) || 22 })}
                           />
-                          <button
-                            type="button"
-                            className="pwd-toggle"
-                            title={showSSHPassphrase ? t('connection.hide') : t('connection.show')}
-                            onClick={() => setShowSSHPassphrase((v) => !v)}
-                          >
-                            {showSSHPassphrase ? "🙈" : "👁"}
-                          </button>
-                        </div>
+                        </label>
+                        <label className="field">
+                          <FieldLabel {...fieldLabelProps} required tip={t("connection.sshUsernameHelp")}>
+                            {t("connection.sshUsername")}
+                          </FieldLabel>
+                          <input
+                            className="search-input mono"
+                            value={draft.sshConfig?.username || ""}
+                            placeholder="root"
+                            onChange={(e) => setSSH({ username: e.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      <label className="field">
+                        <FieldLabel {...fieldLabelProps} required tip={t("connection.sshAuthHelp")}>
+                          {t("connection.authType")}
+                        </FieldLabel>
+                        <select
+                          className="search-input wide"
+                          value={draft.sshConfig?.authType || "password"}
+                          onChange={(e) => setSSH({ authType: e.target.value as "password" | "key" })}
+                        >
+                          <option value="password">{t("connection.passwordAuth")}</option>
+                          <option value="key">{t("connection.keyAuth")}</option>
+                        </select>
                       </label>
-                    </>
-                  )}
 
-                  <label className="field">
-                    <FieldLabel {...fieldLabelProps} tip={t('connection.localPortHelp')}>{t('connection.localPort')}</FieldLabel>
-                    <input
-                      className="search-input mono"
-                      type="number"
-                      value={draft.sshConfig?.localPort || ""}
-                      placeholder={t('connection.localPortPlaceholder')}
-                      onChange={(e) => setSSH({ localPort: parseInt(e.target.value) || undefined })}
-                    />
-                  </label>
+                      {(draft.sshConfig?.authType ?? "password") === "password" && (
+                        <label className="field">
+                          <FieldLabel {...fieldLabelProps} required tip={t("connection.sshPasswordHelp")}>
+                            {t("connection.sshPassword")}
+                          </FieldLabel>
+                          <div className="pwd-field">
+                            <input
+                              className="search-input wide mono"
+                              type={showSSHPwd ? "text" : "password"}
+                              value={draft.sshConfig?.password || ""}
+                              onChange={(e) => setSSH({ password: e.target.value })}
+                            />
+                            <button
+                              type="button"
+                              className="pwd-toggle"
+                              title={showSSHPwd ? t("connection.hide") : t("connection.show")}
+                              onClick={() => setShowSSHPwd((v) => !v)}
+                            >
+                              {showSSHPwd ? "🙈" : "👁"}
+                            </button>
+                          </div>
+                        </label>
+                      )}
 
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={saveInlineSSHAsProfile}
-                  >
-                    {t('connection.sshProfileSave')}
-                  </button>
+                      {draft.sshConfig?.authType === "key" && (
+                        <>
+                          <label className="field">
+                            <FieldLabel {...fieldLabelProps} required tip={t("connection.privateKeyHelp")}>
+                              {t("connection.privateKey")}
+                            </FieldLabel>
+                            <textarea
+                              className="search-input wide mono ssh-key"
+                              value={draft.sshConfig?.privateKey || ""}
+                              placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                              onChange={(e) => setSSH({ privateKey: e.target.value })}
+                            />
+                          </label>
+                          <label className="field">
+                            <FieldLabel {...fieldLabelProps} tip={t("connection.privateKeyPasswordHelp")}>
+                              {t("connection.privateKeyPassword")}
+                            </FieldLabel>
+                            <div className="pwd-field">
+                              <input
+                                className="search-input wide mono"
+                                type={showSSHPassphrase ? "text" : "password"}
+                                value={draft.sshConfig?.passphrase || ""}
+                                onChange={(e) => setSSH({ passphrase: e.target.value })}
+                              />
+                              <button
+                                type="button"
+                                className="pwd-toggle"
+                                title={showSSHPassphrase ? t("connection.hide") : t("connection.show")}
+                                onClick={() => setShowSSHPassphrase((v) => !v)}
+                              >
+                                {showSSHPassphrase ? "🙈" : "👁"}
+                              </button>
+                            </div>
+                          </label>
+                        </>
+                      )}
 
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      setDraft((d) => ({ ...d, sshConfig: undefined, sshProfileId: "" }));
-                      setShowSSHConfig(false);
-                    }}
-                  >
-                    {t('connection.removeSSH')}
-                  </button>
+                      <label className="field">
+                        <FieldLabel {...fieldLabelProps} tip={t("connection.localPortHelp")}>
+                          {t("connection.localPort")}
+                        </FieldLabel>
+                        <input
+                          className="search-input mono"
+                          type="number"
+                          value={draft.sshConfig?.localPort || ""}
+                          placeholder={t("connection.localPortPlaceholder")}
+                          onChange={(e) => setSSH({ localPort: parseInt(e.target.value) || undefined })}
+                        />
+                      </label>
+
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={saveInlineSSHAsProfile}>
+                        {t("connection.sshProfileSave")}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setDraft((d) => ({ ...d, sshConfig: undefined, sshProfileId: "" }));
+                          setShowSSHConfig(false);
+                        }}
+                      >
+                        {t("connection.removeSSH")}
+                      </button>
                     </>
                   )}
                 </div>
               )}
-            </section>}
+            </section>
+          )}
 
-            {visibleTestTrace ? (
-              <TestTraceView trace={visibleTestTrace} />
-            ) : visibleTestMsg && (
+          {visibleTestTrace ? (
+            <TestTraceView trace={visibleTestTrace} />
+          ) : (
+            visibleTestMsg && (
               <div className={`test-msg ${visibleTestMsg.ok ? "ok" : "err"}`}>
-                <span className="test-msg-text" title={visibleTestMsg.text}>{displayTestMessage(visibleTestMsg.text)}</span>
+                <span className="test-msg-text" title={visibleTestMsg.text}>
+                  {displayTestMessage(visibleTestMsg.text)}
+                </span>
                 {!visibleTestMsg.ok && <CopyButton text={visibleTestMsg.text} label={t("common.copyError")} />}
               </div>
-            )}
+            )
+          )}
 
-            <div className="conn-form-actions">
-              <TestButton onClick={doTest} running={testingCurrent} />
-              <div className="spacer" />
-              {draft.id && (
-                <button className="btn btn-ghost" onClick={() => startNew()}>
-                  {t('connection.new')}
-                </button>
-              )}
-              <button className="btn btn-primary" onClick={save}>
-                {t('common.save')}
+          <div className="conn-form-actions">
+            <TestButton onClick={doTest} running={testingCurrent} />
+            <div className="spacer" />
+            {draft.id && (
+              <button className="btn btn-ghost" onClick={() => startNew()}>
+                {t("connection.new")}
               </button>
-            </div>
+            )}
+            <button className="btn btn-primary" onClick={save}>
+              {t("common.save")}
+            </button>
           </div>
+        </div>
       </div>
     </>
   );
@@ -1729,7 +1907,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         {content}
-    </div>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,17 @@ export interface SmokeWebDAVEndpoint {
   rootPath: string;
 }
 
+export interface SmokeApolloEndpoint {
+  containerName: string;
+  hostPort: number;
+  baseUrl: string;
+  token: string;
+  env: string;
+  appId: string;
+  cluster: string;
+  namespaceName: string;
+}
+
 export interface SmokeWorkspace {
   runId: string;
   projectRoot: string;
@@ -33,6 +44,7 @@ export interface SmokeWorkspace {
     sandbox: SmokeNacosEndpoint;
     prod: SmokeNacosEndpoint;
   };
+  apollo: SmokeApolloEndpoint;
   webdav: SmokeWebDAVEndpoint;
 }
 
@@ -90,6 +102,7 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
       sandbox: nacosEndpoint("sandbox", 18859),
       prod: nacosEndpoint("prod", 18860),
     },
+    apollo: apolloEndpoint(),
     webdav: webDAVEndpoint(),
   };
 }
@@ -126,6 +139,19 @@ function nacosEndpoint(role: SmokeNacosEndpoint["role"], hostPort: number): Smok
     containerName: `confscope-smoke-nacos-${role}`,
     hostPort,
     baseUrl: `http://127.0.0.1:${hostPort}/nacos`,
+  };
+}
+
+function apolloEndpoint(): SmokeApolloEndpoint {
+  return {
+    containerName: "confscope-smoke-apollo",
+    hostPort: 18862,
+    baseUrl: "http://127.0.0.1:18862",
+    token: "apollo-smoke-token",
+    env: "DEV",
+    appId: "order-service",
+    cluster: "default",
+    namespaceName: "application",
   };
 }
 

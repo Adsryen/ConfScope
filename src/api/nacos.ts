@@ -9,9 +9,11 @@ import {
 import {
   getConfig as configCenterGetConfig,
   getHistoryDetail as configCenterGetHistoryDetail,
+  deleteConfigFromApplyPlan as configCenterDeleteConfigFromApplyPlan,
   listConfigs as configCenterListConfigs,
   listHistory as configCenterListHistory,
   listNamespaces as configCenterListNamespaces,
+  publishConfigFromApplyPlan as configCenterPublishConfigFromApplyPlan,
   testConnection as configCenterTestConnection,
   type ConfigDocument as ConfigCenterConfigDocument,
   type ConfigPage as ConfigCenterConfigPage,
@@ -20,6 +22,7 @@ import {
   type HistoryDetail as ConfigCenterHistoryDetail,
   type HistoryPage as ConfigCenterHistoryPage,
   type Namespace as ConfigCenterNamespace,
+  type ProviderType,
 } from "./configCenter";
 import { translate } from "../locales";
 import type { Connection } from "../store/connections";
@@ -210,6 +213,10 @@ async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfil
     const baseUrl = await resolveBaseUrl(conn);
     return call(toConnectionProfile(conn, baseUrl, "", "v1"));
   }
+  if ((conn.provider ?? "nacos") === "apollo") {
+    const baseUrl = await resolveBaseUrl(conn);
+    return call(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
+  }
   const apiVersion = await getVersion(conn);
   const accessToken = await getToken(conn);
   const baseUrl = await resolveBaseUrl(conn);
@@ -225,14 +232,24 @@ async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfil
   }
 }
 
-function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: string, apiVersion: ApiVersion): ConnectionProfile {
+function providerForConnection(conn: Connection): ProviderType {
+  if (conn.sourceType === "local-snapshot") return "local";
+  return conn.provider ?? "nacos";
+}
+
+function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: string, apiVersion: string): ConnectionProfile {
   const optional = conn as Connection & { environment?: string; safetyLevel?: string };
+  const provider = providerForConnection(conn);
+  const isApollo = provider === "apollo";
   return {
     id: conn.id,
     name: conn.name,
-    provider: conn.sourceType === "local-snapshot" ? "local" : "nacos",
+    provider,
     distribution: conn.distribution ?? "opensource",
-    authType: conn.sourceType === "local-snapshot" ? "none" : (conn.authType ?? (conn.username ? "nacos-password" : "none")),
+    authType:
+      conn.sourceType === "local-snapshot" || provider === "apollo"
+        ? "none"
+        : (conn.authType ?? (conn.username ? "nacos-password" : "none")),
     baseUrl,
     accessToken,
     apiVersion,
@@ -242,18 +259,29 @@ function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: str
     environment: optional.environment ?? "",
     safetyLevel: optional.safetyLevel ?? "",
     useProxy: !!conn.useProxy,
+    apolloEnv: isApollo ? (conn.apolloEnv ?? "") : "",
+    apolloAppId: isApollo ? (conn.apolloAppId ?? conn.defaultNamespace ?? "") : "",
+    apolloCluster: isApollo ? (conn.apolloCluster ?? "") : "",
+    apolloNamespaceName: isApollo ? (conn.apolloNamespaceName ?? "") : "",
   };
 }
 
 function toConfigRef(conn: Connection, namespace: string, dataId: string, group: string): ConfigRef {
   return {
-    provider: conn.sourceType === "local-snapshot" ? "local" : "nacos",
+    provider: providerForConnection(conn),
     connectionId: conn.id,
     namespace,
-    group,
+    group: apolloGroupForConnection(conn, group),
     dataId,
     key: "",
   };
+}
+
+function apolloGroupForConnection(conn: Connection, group: string): string {
+  if (providerForConnection(conn) !== "apollo") return group;
+  const value = group.trim();
+  if (value && value !== "DEFAULT_GROUP") return value;
+  return conn.apolloCluster?.trim() || "default";
 }
 
 function fromConfigCenterNamespace(item: ConfigCenterNamespace): Namespace {
@@ -324,6 +352,11 @@ export async function testConnection(conn: Connection): Promise<LoginResult> {
     await configCenterTestConnection(toConnectionProfile(conn, baseUrl, "", "v1"));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
+  if ((conn.provider ?? "nacos") === "apollo") {
+    const baseUrl = await resolveBaseUrl(conn);
+    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
+    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+  }
   if (conn.authType === "aliyun-aksk") {
     const apiVersion = await getVersion(conn);
     const baseUrl = await resolveBaseUrl(conn);
@@ -351,7 +384,12 @@ export async function listConfigs(
   pageSize: number
 ): Promise<ConfigPage> {
   return withProfile(conn, async (profile) => {
-    const normalizedGroup = conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group ? "DEFAULT_GROUP" : group;
+    const normalizedGroup =
+      providerForConnection(conn) === "apollo"
+        ? apolloGroupForConnection(conn, group)
+        : conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group
+          ? "DEFAULT_GROUP"
+          : group;
     const page = await configCenterListConfigs(profile, { namespace, dataId, group: normalizedGroup, pageNo, pageSize });
     return fromConfigCenterConfigPage(page);
   });
@@ -405,6 +443,15 @@ export async function publishConfigFromApplyPlan(
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotPublishReadonly"));
   }
+  if ((conn.provider ?? "nacos") !== "nacos") {
+    return withProfile(conn, (profile) =>
+      configCenterPublishConfigFromApplyPlan(profile, {
+        ref: toConfigRef(conn, namespace, dataId, group),
+        content,
+        format: configType,
+      })
+    );
+  }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>
     NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
@@ -418,6 +465,9 @@ export async function deleteConfig(_conn: Connection, _namespace: string, _dataI
 export async function deleteConfigFromApplyPlan(conn: Connection, namespace: string, dataId: string, group: string): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotDeleteReadonly"));
+  }
+  if ((conn.provider ?? "nacos") !== "nacos") {
+    return withProfile(conn, (profile) => configCenterDeleteConfigFromApplyPlan(profile, toConfigRef(conn, namespace, dataId, group)));
   }
   const baseUrl = await resolveBaseUrl(conn);
   return withAuth(conn, (accessToken, apiVersion) =>

@@ -37,6 +37,11 @@ type ConnectionProfile struct {
 	Environment     string       `json:"environment"`
 	SafetyLevel     string       `json:"safetyLevel"`
 	UseProxy        bool         `json:"useProxy"`
+
+	ApolloEnv           string `json:"apolloEnv"`
+	ApolloAppID         string `json:"apolloAppId"`
+	ApolloCluster       string `json:"apolloCluster"`
+	ApolloNamespaceName string `json:"apolloNamespaceName"`
 }
 
 type ConfigRef struct {

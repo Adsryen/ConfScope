@@ -370,9 +370,9 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         <div className="about-section about-full">
           <h3>{t("about.supportedCenters")}</h3>
           <div className="about-badges">
-            <span className="badge badge-success">Nacos ✅</span>
-            <span className="badge badge-planned">Apollo 🔜</span>
-            <span className="badge badge-planned">Consul 🔜</span>
+            <span className="badge badge-success">{t("about.centerNacos")}</span>
+            <span className="badge badge-success">{t("about.centerApolloReadOnly")}</span>
+            <span className="badge badge-planned">{t("about.centerConsulPlanned")}</span>
           </div>
         </div>
 

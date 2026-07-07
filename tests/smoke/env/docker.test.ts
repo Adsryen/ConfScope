@@ -2,8 +2,8 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from "vitest";
-import { webDAVContainerOptions } from "./docker";
-import type { SmokeWebDAVEndpoint } from "./workspace";
+import { apolloContainerOptions, webDAVContainerOptions } from "./docker";
+import type { SmokeApolloEndpoint, SmokeWebDAVEndpoint } from "./workspace";
 
 describe("webDAVContainerOptions", () => {
   it("builds a loopback generic WebDAV container with mounted smoke storage and basic auth", () => {
@@ -39,5 +39,46 @@ describe("webDAVContainerOptions", () => {
       ])
     );
     expect(options.args).not.toContain("node");
+  });
+});
+
+describe("apolloContainerOptions", () => {
+  it("builds a loopback Apollo-compatible OpenAPI fixture container", () => {
+    const endpoint: SmokeApolloEndpoint = {
+      containerName: "confscope-smoke-apollo",
+      hostPort: 18862,
+      baseUrl: "http://127.0.0.1:18862",
+      token: "apollo-smoke-token",
+      env: "DEV",
+      appId: "order-service",
+      cluster: "default",
+      namespaceName: "application",
+    };
+
+    const options = apolloContainerOptions(endpoint, "C:/repo/ConfScope/tests/smoke/fixtures/apollo/server.mjs");
+
+    expect(options.name).toBe("confscope-smoke-apollo");
+    expect(options.image).toBe("node:20-alpine");
+    expect(options.args).toEqual(
+      expect.arrayContaining([
+        "--network",
+        "confscope-smoke",
+        "-p",
+        "127.0.0.1:18862:8070",
+        "-v",
+        "C:/repo/ConfScope/tests/smoke/fixtures/apollo/server.mjs:/srv/apollo-server.mjs:ro",
+        "-e",
+        "APOLLO_SMOKE_TOKEN=apollo-smoke-token",
+        "-e",
+        "APOLLO_SMOKE_ENV=DEV",
+        "-e",
+        "APOLLO_SMOKE_APP_ID=order-service",
+        "-e",
+        "APOLLO_SMOKE_CLUSTER=default",
+        "-e",
+        "APOLLO_SMOKE_NAMESPACE=application",
+      ])
+    );
+    expect(options.command).toEqual(["node", "/srv/apollo-server.mjs"]);
   });
 });

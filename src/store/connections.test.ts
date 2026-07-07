@@ -151,6 +151,35 @@ describe("connection store", () => {
     expect(loadConnections()[0]).toEqual(expect.objectContaining({ sshProfileId: "ssh-prod" }));
   });
 
+  it("preserves Apollo connection fields when persisting", () => {
+    const created = upsertConnection({
+      name: "apollo-dev",
+      provider: "apollo",
+      baseUrl: "http://localhost:8070",
+      username: "",
+      password: "",
+      defaultNamespace: "order-service",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    });
+
+    expect(loadConnections()[0]).toEqual(created);
+    expect(loadConnections()[0]).toEqual(
+      expect.objectContaining({
+        provider: "apollo",
+        defaultNamespace: "order-service",
+        apolloEnv: "DEV",
+        apolloAppId: "order-service",
+        apolloCluster: "default",
+        apolloNamespaceName: "application",
+        apolloToken: "apollo-token",
+      })
+    );
+  });
+
   it("preserves local snapshot force and validation metadata", () => {
     const created = upsertConnection({
       name: "local-snapshot",

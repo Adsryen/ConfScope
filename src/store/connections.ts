@@ -8,7 +8,7 @@ export interface SSHConfig {
   /** SSH 用户名 */
   username: string;
   /** 认证方式：password 或 key */
-  authType: 'password' | 'key';
+  authType: "password" | "key";
   /** SSH 密码（password 认证时使用） */
   password?: string;
   /** SSH 私钥内容（key 认证时使用） */
@@ -73,6 +73,16 @@ export interface Connection {
   sshProfileId?: string;
   /** 是否通过系统代理连接 Nacos（默认关闭）。 */
   useProxy?: boolean;
+  /** Apollo OpenAPI 环境，例如 DEV/FAT/UAT/PRO。 */
+  apolloEnv?: string;
+  /** Apollo App ID，同时作为现有浏览/Diff/Audit 第一维 namespace 的默认值。 */
+  apolloAppId?: string;
+  /** Apollo 集群名称，默认 default。 */
+  apolloCluster?: string;
+  /** Apollo Namespace 名称，例如 application。 */
+  apolloNamespaceName?: string;
+  /** Apollo OpenAPI token。 */
+  apolloToken?: string;
 }
 
 const KEY = "cs.connections";
@@ -134,9 +144,7 @@ export function renameProject(oldName: string, newName: string): Connection[] {
   const list = loadConnections();
   if (!to || from === to) return list;
 
-  const next = list.map((conn) =>
-    connectionProjectName(conn) === from ? normalizeConnection({ ...conn, projectName: to }) : conn
-  );
+  const next = list.map((conn) => (connectionProjectName(conn) === from ? normalizeConnection({ ...conn, projectName: to }) : conn));
   saveAll(next);
   return next;
 }
@@ -208,5 +216,10 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     sshConfig: raw.sshConfig,
     sshProfileId: raw.sshProfileId ?? "",
     useProxy: raw.useProxy ?? false,
+    apolloEnv: raw.apolloEnv?.trim() || "",
+    apolloAppId: raw.apolloAppId?.trim() || "",
+    apolloCluster: raw.apolloCluster?.trim() || "",
+    apolloNamespaceName: raw.apolloNamespaceName?.trim() || "",
+    apolloToken: raw.apolloToken ?? "",
   };
 }

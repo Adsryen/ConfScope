@@ -1,5 +1,15 @@
+import { join } from "node:path";
 import { createLocalSnapshotFixtures } from "./env/snapshots";
-import { cleanupSmokeContainers, createSmokeNetwork, dockerAvailable, startNacosContainer, startWebDAVContainer, waitForWebDAV } from "./env/docker";
+import {
+  cleanupSmokeContainers,
+  createSmokeNetwork,
+  dockerAvailable,
+  startApolloContainer,
+  startNacosContainer,
+  startWebDAVContainer,
+  waitForWebDAV,
+} from "./env/docker";
+import { waitForApollo } from "./env/apollo";
 import { cleanupNacosSeed, seedNacos, waitForNacos } from "./env/nacos";
 import { initializeReports, recordCase } from "./env/report";
 import { smokeWebServerUrl, startSmokeWebServer } from "./env/webServer";
@@ -31,12 +41,14 @@ async function globalSetup(): Promise<void> {
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     startNacosContainer(endpoint);
   }
+  startApolloContainer(state.apollo, join(state.projectRoot, "tests", "smoke", "fixtures", "apollo", "server.mjs"));
   startWebDAVContainer(state.webdav, state.webdavDir);
   for (const endpoint of [state.nacos.dev, state.nacos.sandbox, state.nacos.prod]) {
     await waitForNacos(endpoint);
     await cleanupNacosSeed(endpoint);
     await seedNacos(endpoint);
   }
+  await waitForApollo(state.apollo);
   await waitForWebDAV(state.webdav);
   recordCase(state, {
     id: "ENV-NACOS-01",
@@ -44,6 +56,13 @@ async function globalSetup(): Promise<void> {
     status: "PASS",
     evidence: "Docker Nacos dev/sandbox/prod started and seeded",
     notes: `${state.nacos.dev.baseUrl}, ${state.nacos.sandbox.baseUrl}, ${state.nacos.prod.baseUrl}`,
+  });
+  recordCase(state, {
+    id: "ENV-APOLLO-01",
+    area: "Environment",
+    status: "PASS",
+    evidence: "Docker Apollo-compatible OpenAPI fixture started and verified",
+    notes: `${state.apollo.baseUrl} / ${state.apollo.env} / ${state.apollo.appId} / ${state.apollo.cluster} / ${state.apollo.namespaceName}`,
   });
   recordCase(state, {
     id: "ENV-WEBDAV-01",

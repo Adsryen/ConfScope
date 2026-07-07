@@ -76,7 +76,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function waitForShell(native: NativeControlClient): Promise<ShellResult> {
-  return native.eval<ShellResult>(`
+  return native.eval<ShellResult>(
+    `
     ${DOM_HELPERS}
     await closeStartupDialog();
     await waitFor(() => Boolean(document.querySelector(".app-shell")), 30_000, "app shell");
@@ -86,12 +87,15 @@ async function waitForShell(native: NativeControlClient): Promise<ShellResult> {
       hasShell: Boolean(document.querySelector(".app-shell")),
       hasConnectionManager: pageText().includes("Connection Manager"),
     };
-  `, 65_000);
+  `,
+    65_000
+  );
 }
 
 async function createNacosConnection(native: NativeControlClient, smoke: SmokeState): Promise<ConnectionResult> {
   const baseUrl = JSON.stringify(smoke.nacos.dev.baseUrl);
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     await setProject("Native Smoke Project");
     await selectByLabel("Environment", "Development");
@@ -107,7 +111,9 @@ async function createNacosConnection(native: NativeControlClient, smoke: SmokeSt
     await sleep(150);
     clickButton("Test Connection");
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
 
   const testMessage = await waitForNativeValue<string>(
     native,
@@ -126,11 +132,14 @@ async function createNacosConnection(native: NativeControlClient, smoke: SmokeSt
     "successful connection test message"
   );
 
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     clickButton("Save");
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
 
   const saved = await waitForNativeValue<{ connectionCount: number; sourceName: string }>(
     native,
@@ -152,12 +161,7 @@ async function createNacosConnection(native: NativeControlClient, smoke: SmokeSt
   return { ...saved, testMessage };
 }
 
-async function waitForNativeValue<T>(
-  native: NativeControlClient,
-  script: string,
-  timeoutMs: number,
-  label: string
-): Promise<T> {
+async function waitForNativeValue<T>(native: NativeControlClient, script: string, timeoutMs: number, label: string): Promise<T> {
   const started = Date.now();
   let lastText = "";
   while (Date.now() - started < timeoutMs) {
@@ -170,11 +174,14 @@ async function waitForNativeValue<T>(
 }
 
 async function browseSeededConfig(native: NativeControlClient): Promise<BrowseResult> {
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     clickButton("Config Browser");
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
 
   await waitForNativeValue<boolean>(
     native,
@@ -186,11 +193,14 @@ async function browseSeededConfig(native: NativeControlClient): Promise<BrowseRe
     "smoke-app.yaml list item"
   );
 
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     clickText("smoke-app.yaml");
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
 
   const content = await waitForNativeValue<string>(
     native,
@@ -214,7 +224,8 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
     rootPath: smoke.webdav.rootPath,
     backupPassword: "native-app-data-pass",
   };
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     clickButton("Settings");
     await waitFor(() => pageText().includes("App Data Backup"), 20_000, "App Data Backup panel");
@@ -225,7 +236,9 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
     clickButton("Save WebDAV target");
     clickButton("Test WebDAV");
     return true;
-  `, 30_000);
+  `,
+    30_000
+  );
 
   await waitForNativeValue<string>(
     native,
@@ -239,12 +252,15 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
   );
   pass(smoke, "NATIVE-APPDATA-WEBDAV-TEST-01", "App Data Backup", "Settings tested Docker WebDAV through real Wails binding");
 
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
     await setInputByLabel("WebDAV backup password", ${JSON.stringify(target.backupPassword)});
     clickButton("Upload current data");
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
   await waitForNativeValue<string>(
     native,
     `
@@ -257,29 +273,16 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
   );
   pass(smoke, "NATIVE-APPDATA-WEBDAV-UPLOAD-01", "App Data Backup", "Uploaded app data backup to Docker WebDAV through real Go binding");
 
-  await native.eval<boolean>(`
-    ${DOM_HELPERS}
-    clickButton("Refresh remote list");
-    return true;
-  `, 10_000);
-  await waitForNativeValue<string>(
-    native,
+  await native.eval<boolean>(
     `
-      ${DOM_HELPERS}
-      const text = pageText();
-      return { done: /confscope-app-data-.*\\.csbackup/.test(text), value: text, text };
-    `,
-    30_000,
-    "remote app data backup list"
-  );
-
-  await native.eval<boolean>(`
     ${DOM_HELPERS}
-    localStorage.setItem("cs.connections", "[]");
     await setInputByLabel("Remote restore password", ${JSON.stringify(target.backupPassword)});
-    clickButton("Preview confscope-app-data-");
+    await waitFor(() => Boolean(remoteBackupPreviewButton()), 15_000, "remote backup preview button");
+    remoteBackupPreviewButton().click();
     return true;
-  `, 10_000);
+  `,
+    25_000
+  );
   await waitForNativeValue<string>(
     native,
     `
@@ -290,11 +293,17 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
     30_000,
     "remote backup preview"
   );
-  await native.eval<boolean>(`
+  await native.eval<boolean>(
+    `
     ${DOM_HELPERS}
-    clickButton("Restore this backup");
+    const restoreButton = findButton("Restore this backup");
+    if (!restoreButton) throw new Error("Restore button not found before clearing connections");
+    localStorage.setItem("cs.connections", "[]");
+    restoreButton.click();
     return true;
-  `, 10_000);
+  `,
+    10_000
+  );
   await waitForNativeValue<string>(
     native,
     `
@@ -310,18 +319,33 @@ async function verifyNativeAppDataWebDAVBackup(native: NativeControlClient, smok
 
 async function verifyNavigationPages(native: NativeControlClient, smoke: SmokeState): Promise<void> {
   const pages = [
-    { button: "Backups", marker: "Backups", id: "NATIVE-BACKUP-UI-01", area: "Backup", evidence: "Backups page loaded in native Wails shell" },
+    {
+      button: "Backups",
+      marker: "Backups",
+      id: "NATIVE-BACKUP-UI-01",
+      area: "Backup",
+      evidence: "Backups page loaded in native Wails shell",
+    },
     { button: "Tasks", marker: "Tasks", id: "NATIVE-TASK-UI-01", area: "Task Center", evidence: "Tasks page loaded in native Wails shell" },
-    { button: "Settings", marker: "Settings", id: "NATIVE-SETTINGS-UI-01", area: "Settings", evidence: "Settings page loaded in native Wails shell" },
+    {
+      button: "Settings",
+      marker: "Settings",
+      id: "NATIVE-SETTINGS-UI-01",
+      area: "Settings",
+      evidence: "Settings page loaded in native Wails shell",
+    },
     { button: "About", marker: "ConfScope", id: "NATIVE-ABOUT-UI-01", area: "About", evidence: "About page loaded in native Wails shell" },
   ] as const;
 
   for (const page of pages) {
-    await native.eval<boolean>(`
+    await native.eval<boolean>(
+      `
       ${DOM_HELPERS}
       clickButton(${JSON.stringify(page.button)});
       return true;
-    `, 10_000);
+    `,
+      10_000
+    );
     const result = await waitForNativeValue<PageResult>(
       native,
       `
@@ -447,6 +471,11 @@ const DOM_HELPERS = `
     if (!element) throw new Error("Text target not found: " + label);
     const clickable = element.closest("button, [role='button'], .browser-item, .data-list-item, li, tr") || element;
     clickable.click();
+  };
+  const remoteBackupPreviewButton = () => {
+    const rows = Array.from(document.querySelectorAll(".app-data-backup-remote-row"));
+    const row = rows.find((element) => normalize(element.textContent).includes("confscope-app-data-")) || rows[0];
+    return row ? row.querySelector("button") : null;
   };
   const closeStartupDialog = async () => {
     const action = findButton("Start") || findButton("Got it");

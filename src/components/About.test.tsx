@@ -273,4 +273,16 @@ describe("About", () => {
       source: "App Updates",
     });
   });
+
+  it("shows Apollo as read-only supported instead of planned", async () => {
+    disableAutoUpdateCheck();
+
+    renderAbout("en-US");
+
+    await screen.findByText("v1.0.0");
+    expect(screen.getByText("Nacos")).toBeInTheDocument();
+    expect(screen.getByText("Apollo Read-only")).toBeInTheDocument();
+    expect(screen.getByText("Consul Planned")).toBeInTheDocument();
+    expect(screen.queryByText("Apollo 🔜")).not.toBeInTheDocument();
+  });
 });
