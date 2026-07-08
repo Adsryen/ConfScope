@@ -49,12 +49,19 @@ function normalizeProfile(raw: Partial<SSHProfile> & { id?: string }): SSHProfil
   };
 }
 
+function normalizeStoredProfile(value: unknown): SSHProfile | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return normalizeProfile(value as Partial<SSHProfile> & { id?: string });
+}
+
 export function loadSSHProfiles(): SSHProfile[] {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.map(normalizeProfile) : [];
+    return Array.isArray(arr)
+      ? arr.map(normalizeStoredProfile).filter((profile): profile is SSHProfile => profile !== null)
+      : [];
   } catch {
     return [];
   }
