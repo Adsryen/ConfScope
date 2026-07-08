@@ -1,20 +1,31 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "../i18n";
+import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
+import CopyButton from "./CopyButton";
 import LanguageSwitch from "./LanguageSwitch";
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export default function SettingsView() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [saved, setSaved] = useState(false);
+  const [credentialPending, setCredentialPending] = useState(() => countMigratableStoredCredentials());
+  const [credentialSummary, setCredentialSummary] = useState<CredentialMigrationSummary | null>(null);
+  const [credentialError, setCredentialError] = useState("");
+  const [credentialBusy, setCredentialBusy] = useState(false);
   const panelsRef = useRef<HTMLDivElement | null>(null);
 
   const sectionLinks = [
     { id: "settings-general", label: t("settings.groupBasic") },
     { id: "settings-network", label: t("settings.groupNetwork") },
     { id: "settings-compare", label: t("settings.comparePreferences") },
+    { id: "settings-credentials", label: t("settings.credentials") },
     { id: "settings-backup", label: t("settings.backup") },
   ];
 
@@ -42,6 +53,21 @@ export default function SettingsView() {
       top: container.scrollTop + targetTop - containerTop,
       behavior: "smooth",
     });
+  };
+
+  const runCredentialMigration = async () => {
+    setCredentialError("");
+    setCredentialSummary(null);
+    setCredentialBusy(true);
+    try {
+      const summary = await migrateStoredCredentials();
+      setCredentialSummary(summary);
+      setCredentialPending(countMigratableStoredCredentials());
+    } catch (e) {
+      setCredentialError(toErrorMessage(e));
+    } finally {
+      setCredentialBusy(false);
+    }
   };
 
   return (
@@ -137,6 +163,53 @@ export default function SettingsView() {
                 onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
               />
             </label>
+          </section>
+
+          <section id="settings-credentials" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.credentials")}</h4>
+              <div className="settings-panel-description">{t("settings.credentialsDescription")}</div>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.credentialMigrationTitle")}</strong>
+                <div className="settings-panel-description">
+                  {credentialPending > 0
+                    ? t("settings.credentialMigrationPending", { count: credentialPending })
+                    : t("settings.credentialMigrationNone")}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={credentialBusy || credentialPending === 0}
+                onClick={runCredentialMigration}
+              >
+                {credentialBusy ? t("settings.migratingCredentials") : t("settings.migrateCredentials")}
+              </button>
+            </div>
+            {credentialSummary && (
+              <div className="test-msg ok">
+                <span className="test-msg-text">
+                  {t("settings.credentialMigrationSummary", {
+                    migrated: credentialSummary.migrated,
+                    unsupported: credentialSummary.unsupported,
+                    failed: credentialSummary.failed,
+                  })}
+                </span>
+              </div>
+            )}
+            {credentialError && (
+              <div className="inline-error" role="alert">
+                <div className="inline-error-head">
+                  <span className="inline-error-title">{t("settings.credentialMigrationFailed")}</span>
+                  <div className="inline-error-actions">
+                    <CopyButton text={credentialError} label={t("common.copyError")} />
+                  </div>
+                </div>
+                <pre className="inline-error-body">{credentialError}</pre>
+              </div>
+            )}
           </section>
 
           <section id="settings-backup" className="settings-panel settings-backup-panel">

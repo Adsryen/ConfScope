@@ -80,6 +80,65 @@ describe("appDataBackup store", () => {
     expect(loadAppDataBackupState().webdav).toEqual(next.webdav);
   });
 
+  it("preserves migrated WebDAV password secret refs", () => {
+    localStorage.setItem(
+      "cs.appDataBackup",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope",
+          passwordSecretRef: {
+            ref: "app-data-webdav.default.password",
+            namespace: "app-data-webdav",
+            ownerId: "default",
+            field: "password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+        activities: [],
+      })
+    );
+
+    expect(loadAppDataBackupState().webdav.passwordSecretRef).toEqual({
+      ref: "app-data-webdav.default.password",
+      namespace: "app-data-webdav",
+      ownerId: "default",
+      field: "password",
+      migratedAt: "2026-07-08T00:00:00.000Z",
+      status: "stored",
+    });
+  });
+
+  it("drops WebDAV password secret refs with an invalid namespace", () => {
+    localStorage.setItem(
+      "cs.appDataBackup",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope",
+          passwordSecretRef: {
+            ref: "app-data-webdav.default.password",
+            namespace: "connection",
+            ownerId: "default",
+            field: "password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+        activities: [],
+      })
+    );
+
+    expect(loadAppDataBackupState().webdav.passwordSecretRef).toBeUndefined();
+  });
+
   it("records activities newest first and clears them without deleting WebDAV settings", () => {
     saveAppDataBackupState({
       webdav: {

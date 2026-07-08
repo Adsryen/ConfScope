@@ -39,6 +39,7 @@ const goApp = {
   NacosDeleteConfigFromApplyPlan: vi.fn(),
   CreateSSHTunnel: vi.fn(),
   StopSSHTunnel: vi.fn(),
+  ReadSecureSecret: vi.fn(),
 };
 
 class MemoryStorage {
@@ -121,6 +122,7 @@ describe("nacos api compatibility bridge", () => {
       tokenTtl: 18000,
       globalAdmin: true,
     });
+    goApp.ReadSecureSecret.mockImplementation(async (ref: { field: string }) => `stored-${ref.field}`);
     vi.stubGlobal("go", {
       main: {
         App: goApp,
@@ -314,6 +316,73 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.NacosDetectVersion).not.toHaveBeenCalled();
   });
 
+  it("hydrates migrated Nacos and MSE credentials before calling backend bindings", async () => {
+    const passwordConn: Connection = {
+      ...makeConnection("conn-secretref-password"),
+      password: "",
+      secretRefs: {
+        password: {
+          ref: "connection.conn-secretref-password.password",
+          namespace: "connection",
+          ownerId: "conn-secretref-password",
+          field: "password",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+      },
+    };
+    const mseConn: Connection = {
+      ...makeConnection("conn-secretref-mse"),
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      username: "",
+      password: "",
+      accessKeyId: "",
+      accessKeySecret: "",
+      securityToken: "",
+      secretRefs: {
+        accessKeyId: {
+          ref: "connection.conn-secretref-mse.accessKeyId",
+          namespace: "connection",
+          ownerId: "conn-secretref-mse",
+          field: "accessKeyId",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+        accessKeySecret: {
+          ref: "connection.conn-secretref-mse.accessKeySecret",
+          namespace: "connection",
+          ownerId: "conn-secretref-mse",
+          field: "accessKeySecret",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+        securityToken: {
+          ref: "connection.conn-secretref-mse.securityToken",
+          namespace: "connection",
+          ownerId: "conn-secretref-mse",
+          field: "securityToken",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+      },
+    };
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(listNamespaces(passwordConn)).resolves.toEqual([]);
+    await expect(testConnection(mseConn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+
+    expect(goApp.NacosLogin).toHaveBeenCalledWith(passwordConn.baseUrl, "nacos", "stored-password", "v3");
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessKeyId: "stored-accessKeyId",
+        accessKeySecret: "stored-accessKeySecret",
+        securityToken: "stored-securityToken",
+      })
+    );
+  });
+
   it("routes local snapshot sources through the local provider without Nacos auth", async () => {
     const conn: Connection = {
       ...makeConnection("conn-local"),
@@ -456,6 +525,60 @@ describe("nacos api compatibility bridge", () => {
       pageSize: 20,
     });
     expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledWith(profile, ref);
+  });
+
+  it("hydrates migrated Apollo and Consul tokens before building provider profiles", async () => {
+    const apolloConn: Connection = {
+      ...makeConnection("conn-secretref-apollo"),
+      provider: "apollo",
+      baseUrl: "http://127.0.0.1:8070",
+      username: "",
+      password: "",
+      defaultNamespace: "order-service",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "",
+      secretRefs: {
+        apolloToken: {
+          ref: "connection.conn-secretref-apollo.apolloToken",
+          namespace: "connection",
+          ownerId: "conn-secretref-apollo",
+          field: "apolloToken",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+      },
+    };
+    const consulConn: Connection = {
+      ...makeConnection("conn-secretref-consul"),
+      provider: "consul",
+      baseUrl: "http://127.0.0.1:8500",
+      username: "",
+      password: "",
+      defaultNamespace: "dc1",
+      consulToken: "",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+      secretRefs: {
+        consulToken: {
+          ref: "connection.conn-secretref-consul.consulToken",
+          namespace: "connection",
+          ownerId: "conn-secretref-consul",
+          field: "consulToken",
+          migratedAt: "2026-07-08T00:00:00.000Z",
+          status: "stored",
+        },
+      },
+    };
+    goApp.ConfigCenterTestConnection.mockResolvedValue(undefined);
+
+    await expect(testConnection(apolloConn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+    await expect(testConnection(consulConn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
+
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ provider: "apollo", accessToken: "stored-apolloToken" }));
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ provider: "consul", accessToken: "stored-consulToken" }));
   });
 
   it("maps generic DEFAULT_GROUP inputs to Apollo cluster for diff and audit flows", async () => {

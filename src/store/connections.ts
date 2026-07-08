@@ -1,5 +1,7 @@
 // Nacos 连接的本地持久化。桌面端单机工具，连接信息（含密码）存 localStorage。
 
+import type { ConnectionSecretField, StoredSecretPointer } from "../lib/credentialSecrets";
+
 export interface SSHConfig {
   /** SSH 服务器地址 */
   host: string;
@@ -89,10 +91,20 @@ export interface Connection {
   consulDatacenter?: string;
   /** Consul KV key prefix，用于限定浏览范围。 */
   consulKeyPrefix?: string;
+  /** 已迁移到系统凭据库的小凭据指针；SSH auth family 暂不迁移。 */
+  secretRefs?: Partial<Record<ConnectionSecretField, StoredSecretPointer>>;
 }
 
 const KEY = "cs.connections";
 let idSeq = 0;
+const CONNECTION_SECRET_FIELDS: ConnectionSecretField[] = [
+  "password",
+  "accessKeyId",
+  "accessKeySecret",
+  "securityToken",
+  "apolloToken",
+  "consulToken",
+];
 
 function genId(): string {
   idSeq = (idSeq + 1) % 1000000;
@@ -104,7 +116,7 @@ export function loadConnections(): Connection[] {
     const raw = localStorage.getItem(KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.map(normalizeConnection) : [];
+    return Array.isArray(arr) ? arr.map(normalizeStoredConnection).filter((conn): conn is Connection => conn !== null) : [];
   } catch {
     return [];
   }
@@ -187,6 +199,50 @@ export function connectionDisplayLabel(conn: Connection): string {
   return `${connectionProjectName(conn)} / ${connectionEnvironmentName(conn)} / ${connectionSourceName(conn)}`;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeStoredConnection(value: unknown): Connection | null {
+  if (!isObjectRecord(value)) return null;
+  return normalizeConnection(value);
+}
+
+function normalizeSecretPointer(value: unknown): StoredSecretPointer | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const status = value.status;
+  if (status !== "stored" && status !== "missing" && status !== "unsupported") return undefined;
+  const ref = stringValue(value.ref);
+  const namespace = stringValue(value.namespace);
+  const ownerId = stringValue(value.ownerId);
+  const field = stringValue(value.field);
+  const migratedAt = stringValue(value.migratedAt);
+  if (!ref || !namespace || !ownerId || !field || !migratedAt) return undefined;
+  if (namespace !== "connection") return undefined;
+  return {
+    ref,
+    namespace: namespace as StoredSecretPointer["namespace"],
+    ownerId,
+    field,
+    migratedAt,
+    status,
+  };
+}
+
+function normalizeConnectionSecretRefs(value: unknown): Partial<Record<ConnectionSecretField, StoredSecretPointer>> | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const refs: Partial<Record<ConnectionSecretField, StoredSecretPointer>> = {};
+  for (const field of CONNECTION_SECRET_FIELDS) {
+    const pointer = normalizeSecretPointer(value[field]);
+    if (pointer) refs[field] = pointer;
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
+}
+
 function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connection {
   const provider = raw.provider ?? "nacos";
   const distribution = raw.distribution ?? "opensource";
@@ -230,5 +286,6 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     consulToken: raw.consulToken ?? "",
     consulDatacenter: raw.consulDatacenter?.trim() || "",
     consulKeyPrefix: raw.consulKeyPrefix?.trim() || "",
+    secretRefs: normalizeConnectionSecretRefs(raw.secretRefs),
   };
 }

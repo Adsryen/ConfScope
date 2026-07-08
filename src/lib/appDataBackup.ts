@@ -6,6 +6,13 @@ import { loadConnections } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
 import { loadSettings } from "../store/settings";
 import { loadSSHProfiles } from "../store/sshProfiles";
+import { loadSnapshotWebDAVState } from "../store/snapshotWebDAV";
+import {
+  CONNECTION_SECRET_FIELDS,
+  normalizeStoredSecretPointer,
+  resolveSecret,
+  type StoredSecretPointer,
+} from "./credentialSecrets";
 
 export const APP_DATA_BACKUP_SCHEMA_VERSION = 1;
 
@@ -25,6 +32,7 @@ export interface AppDataBackupData {
   ui: unknown;
   locale: string;
   appDataBackup: unknown;
+  snapshotWebDAV: unknown;
 }
 
 export interface AppDataBackupPayload {
@@ -51,6 +59,10 @@ export interface AppDataBackupSummary {
   hasUi: boolean;
   locale: string;
   includesSensitiveData: boolean;
+}
+
+export interface CollectPortableAppDataBackupDeps {
+  resolveSecret?: (pointer: StoredSecretPointer) => Promise<string>;
 }
 
 const UI_KEY = "cs.ui";
@@ -108,6 +120,61 @@ function containsSensitiveData(value: unknown): boolean {
   return Object.entries(value).some(([key, item]) => (SENSITIVE_KEYS.has(key) && typeof item === "string" && item.length > 0) || containsSensitiveData(item));
 }
 
+function cloneJsonObject<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function cloneRecord(value: unknown): Record<string, unknown> | null {
+  return isObject(value) ? { ...value } : null;
+}
+
+function removeKey(record: Record<string, unknown>, key: string): void {
+  delete record[key];
+}
+
+function hasPortablePlaintextSecret(record: Record<string, unknown>, key: string): boolean {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0;
+}
+
+async function resolvePortablePointer(pointer: StoredSecretPointer, deps?: CollectPortableAppDataBackupDeps): Promise<string> {
+  try {
+    return deps?.resolveSecret ? await deps.resolveSecret(pointer) : await resolveSecret(pointer);
+  } catch (e) {
+    throw new Error(`导出应用数据备份前无法解析 ${pointer.ref}: ${String(e)}`);
+  }
+}
+
+async function portableConnectionRecord(value: unknown, deps?: CollectPortableAppDataBackupDeps): Promise<unknown> {
+  const conn = cloneRecord(value);
+  if (!conn) return value;
+  const refs = cloneRecord(conn.secretRefs);
+  if (!refs) return conn;
+
+  for (const field of CONNECTION_SECRET_FIELDS) {
+    const pointer = normalizeStoredSecretPointer(refs[field]);
+    if (pointer?.status === "stored" && !hasPortablePlaintextSecret(conn, field)) {
+      conn[field] = await resolvePortablePointer(pointer, deps);
+    }
+  }
+  removeKey(conn, "secretRefs");
+  return conn;
+}
+
+async function portableWebDAVState(value: unknown, deps: CollectPortableAppDataBackupDeps | undefined): Promise<unknown> {
+  const state = cloneRecord(value);
+  if (!state) return value;
+  const webdav = cloneRecord(state.webdav);
+  if (!webdav) return state;
+  const pointer = normalizeStoredSecretPointer(webdav.passwordSecretRef);
+  if (pointer?.status === "stored" && !hasPortablePlaintextSecret(webdav, "password")) {
+    webdav.password = await resolvePortablePointer(pointer, deps);
+  }
+  removeKey(webdav, "passwordSecretRef");
+  state.webdav = webdav;
+  return state;
+}
+
 export function collectAppDataBackupPayload(input: CollectAppDataBackupInput): AppDataBackupPayload {
   return {
     schemaVersion: APP_DATA_BACKUP_SCHEMA_VERSION,
@@ -124,8 +191,20 @@ export function collectAppDataBackupPayload(input: CollectAppDataBackupInput): A
       ui: readJsonStorage(UI_KEY, {}),
       locale: localeValue(localStorage.getItem(LOCALE_KEY)),
       appDataBackup: loadAppDataBackupState(),
+      snapshotWebDAV: loadSnapshotWebDAVState(),
     },
   };
+}
+
+export async function collectPortableAppDataBackupPayload(
+  input: CollectAppDataBackupInput,
+  deps?: CollectPortableAppDataBackupDeps
+): Promise<AppDataBackupPayload> {
+  const payload = cloneJsonObject(collectAppDataBackupPayload(input));
+  payload.data.connections = await Promise.all(payload.data.connections.map((item) => portableConnectionRecord(item, deps)));
+  payload.data.appDataBackup = await portableWebDAVState(payload.data.appDataBackup, deps);
+  payload.data.snapshotWebDAV = await portableWebDAVState(payload.data.snapshotWebDAV, deps);
+  return payload;
 }
 
 export function validateAppDataBackupPayload(value: unknown): AppDataBackupPayload {
@@ -157,6 +236,7 @@ export function validateAppDataBackupPayload(value: unknown): AppDataBackupPaylo
       ui: objectSection(data, "ui"),
       locale: sectionLocale(data),
       appDataBackup: objectSection(data, "appDataBackup"),
+      snapshotWebDAV: isObject(data.snapshotWebDAV) ? data.snapshotWebDAV : { webdav: {} },
     },
   };
 }
@@ -193,5 +273,6 @@ export function restoreAppDataBackupPayload(value: unknown): AppDataBackupPayloa
   localStorage.setItem(UI_KEY, JSON.stringify(payload.data.ui));
   localStorage.setItem(LOCALE_KEY, payload.data.locale);
   localStorage.setItem("cs.appDataBackup", JSON.stringify(payload.data.appDataBackup));
+  localStorage.setItem("cs.snapshotWebDAV", JSON.stringify(payload.data.snapshotWebDAV));
   return payload;
 }

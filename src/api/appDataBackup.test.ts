@@ -24,11 +24,13 @@ const goApp = {
   ListAppDataWebDAVBackups: vi.fn(),
   UploadAppDataWebDAVBackup: vi.fn(),
   DownloadAppDataWebDAVBackup: vi.fn(),
+  ReadSecureSecret: vi.fn(),
 };
 
 describe("appDataBackup api", () => {
   beforeEach(() => {
     Object.values(goApp).forEach((fn) => fn.mockReset());
+    goApp.ReadSecureSecret.mockResolvedValue("stored-webdav-password");
     vi.stubGlobal("go", {
       main: {
         App: goApp,
@@ -88,5 +90,41 @@ describe("appDataBackup api", () => {
     goApp.ListAppDataWebDAVBackups.mockResolvedValue(null);
 
     await expect(listAppDataWebDAVBackups(target)).resolves.toEqual([]);
+  });
+
+  it("hydrates migrated WebDAV passwords before calling native bindings", async () => {
+    const target = {
+      enabled: true,
+      url: "https://dav.example.com",
+      username: "ops",
+      password: "",
+      rootPath: "/confscope",
+      passwordSecretRef: {
+        ref: "app-data-webdav.default.password",
+        namespace: "app-data-webdav" as const,
+        ownerId: "default",
+        field: "password",
+        migratedAt: "2026-07-08T00:00:00.000Z",
+        status: "stored" as const,
+      },
+    };
+    const meta = { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" };
+    goApp.TestAppDataWebDAV.mockResolvedValue(undefined);
+    goApp.ListAppDataWebDAVBackups.mockResolvedValue([]);
+    goApp.UploadAppDataWebDAVBackup.mockResolvedValue({ name: "app.csbackup", path: "/confscope/app.csbackup", size: 10 });
+    goApp.DownloadAppDataWebDAVBackup.mockResolvedValue({ plaintextJson: "{\"schemaVersion\":1}", summary: { schemaVersion: 1 } });
+
+    await expect(testAppDataWebDAV(target)).resolves.toBeUndefined();
+    await expect(listAppDataWebDAVBackups(target)).resolves.toEqual([]);
+    await expect(uploadAppDataWebDAVBackup(target, "{\"ok\":true}", "package-pass", meta)).resolves.toMatchObject({ name: "app.csbackup" });
+    await expect(downloadAppDataWebDAVBackup(target, "/confscope/app.csbackup", "package-pass")).resolves.toMatchObject({
+      plaintextJson: "{\"schemaVersion\":1}",
+    });
+
+    const hydrated = { ...target, password: "stored-webdav-password" };
+    expect(goApp.TestAppDataWebDAV).toHaveBeenCalledWith(hydrated);
+    expect(goApp.ListAppDataWebDAVBackups).toHaveBeenCalledWith(hydrated);
+    expect(goApp.UploadAppDataWebDAVBackup).toHaveBeenCalledWith(hydrated, "{\"ok\":true}", "package-pass", meta);
+    expect(goApp.DownloadAppDataWebDAVBackup).toHaveBeenCalledWith(hydrated, "/confscope/app.csbackup", "package-pass");
   });
 });

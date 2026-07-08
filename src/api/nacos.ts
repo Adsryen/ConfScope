@@ -27,6 +27,7 @@ import {
 import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
+import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
@@ -176,7 +177,8 @@ export async function getToken(conn: Connection, force = false): Promise<string>
 
   const apiVersion = await getVersion(conn);
   const baseUrl = await resolveBaseUrl(conn);
-  const res = await NacosLogin(baseUrl, conn.username, conn.password, apiVersion);
+  const credentialConn = await hydrateConnectionSecrets(conn);
+  const res = await NacosLogin(baseUrl, credentialConn.username, credentialConn.password, apiVersion);
   const ttl = res.tokenTtl > 0 ? res.tokenTtl : 18000;
   tokenCache.set(conn.id, {
     token: res.accessToken,
@@ -209,28 +211,29 @@ async function withAuth<T>(conn: Connection, call: (token: string, apiVersion: A
 }
 
 async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfile) => Promise<T>): Promise<T> {
+  const credentialConn = await hydrateConnectionSecrets(conn);
   if (conn.sourceType === "local-snapshot") {
     const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(conn, baseUrl, "", "v1"));
+    return call(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
   }
   if ((conn.provider ?? "nacos") === "apollo") {
     const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
+    return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
   }
   if ((conn.provider ?? "nacos") === "consul") {
     const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(conn, baseUrl, conn.consulToken ?? "", ""));
+    return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
   }
   const apiVersion = await getVersion(conn);
   const accessToken = await getToken(conn);
   const baseUrl = await resolveBaseUrl(conn);
   try {
-    return await call(toConnectionProfile(conn, baseUrl, accessToken, apiVersion));
+    return await call(toConnectionProfile(credentialConn, baseUrl, accessToken, apiVersion));
   } catch (e) {
     const msg = String(e);
     if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
       const fresh = await getToken(conn, true);
-      return await call(toConnectionProfile(conn, baseUrl, fresh, apiVersion));
+      return await call(toConnectionProfile(credentialConn, baseUrl, fresh, apiVersion));
     }
     throw e;
   }
@@ -368,30 +371,31 @@ function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): Histo
 
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
+  const credentialConn = await hydrateConnectionSecrets(conn);
   if (conn.sourceType === "local-snapshot") {
     const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, "", "v1"));
+    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
   if ((conn.provider ?? "nacos") === "apollo") {
     const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, conn.apolloToken ?? "", ""));
+    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
   if ((conn.provider ?? "nacos") === "consul") {
     const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, conn.consulToken ?? "", ""));
+    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
   if (conn.authType === "aliyun-aksk") {
     const apiVersion = await getVersion(conn);
     const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(conn, baseUrl, "", apiVersion));
+    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", apiVersion));
     return { accessToken: "", tokenTtl: 0, globalAdmin: false };
   }
   const apiVersion = await getVersion(conn);
   const baseUrl = await resolveBaseUrl(conn);
-  return NacosLogin(baseUrl, conn.username, conn.password, apiVersion);
+  return NacosLogin(baseUrl, credentialConn.username, credentialConn.password, apiVersion);
 }
 
 export async function listNamespaces(conn: Connection): Promise<Namespace[]> {
