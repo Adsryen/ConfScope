@@ -477,5 +477,15 @@ describe("AuditView", () => {
     await waitFor(() => {
       expect(exportMocks.exportAuditCSV).toHaveBeenCalledWith(expect.any(Array), expect.any(Array), { sanitize: true });
     });
+    const envSources = exportMocks.exportAuditCSV.mock.calls[0][1];
+    expect(envSources[0].conn).toMatchObject({
+      id: "c1",
+      provider: "nacos",
+      sourceName: "company-lan",
+    });
+    expect(envSources[0]).toMatchObject({
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+    });
   });
 });

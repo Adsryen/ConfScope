@@ -25,7 +25,7 @@ export const SMOKE_CONSUL_CONFIGS: SmokeConsulKV[] = [
   },
   {
     key: "apps/order/runtime.properties",
-    value: "feature.enabled=true\nserver.port=8080\n",
+    value: "feature.enabled=true\nserver.port=8080\ndb.password=consul-secret\n",
     modifyIndex: 0,
   },
   {

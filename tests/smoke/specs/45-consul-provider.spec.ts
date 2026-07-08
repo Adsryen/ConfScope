@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test";
+import { downloadAuditCSV } from "./auditExport";
 import { expect, pass, test } from "./smokeTest";
 
 test("creates and reads a Consul KV connection through the UI", async ({ page, smoke }) => {
@@ -35,11 +36,21 @@ test("creates and reads a Consul KV connection through the UI", async ({ page, s
   await page.getByRole("button", { name: "Run Audit" }).click();
   await expect(page.locator(".audit-matrix")).toContainText("apps/order/app.yaml", { timeout: 30_000 });
   await expect(page.locator(".audit-matrix")).toContainText("feature", { timeout: 30_000 });
+  const auditCsv = await downloadAuditCSV(page);
+  expect(auditCsv).toContain("providerType,namespace,group,dataId,key,status");
+  expect(auditCsv).toContain("consul");
+  expect(auditCsv).toContain("apps/order/app.yaml");
+  expect(auditCsv).toContain("feature");
+  expect(auditCsv).toContain("db.password");
+  expect(auditCsv).toContain("***");
+  expect(auditCsv).not.toContain("consul-secret");
+  expect(auditCsv).not.toContain(smoke.consul.baseUrl);
 
   pass(smoke, "FS-CONSUL-CONN-01", "Consul provider", "Created Consul KV connection through Connection Manager form and tested it");
   pass(smoke, "FS-CONSUL-BROWSE-01", "Consul provider", "Browsed and opened Consul KV content from Docker Consul");
   pass(smoke, "FS-CONSUL-DIFF-01", "Consul provider", "Compared Consul KV document through Config Compare");
   pass(smoke, "FS-CONSUL-AUDIT-01", "Consul provider", "Included Consul KV document in Config Matrix audit");
+  pass(smoke, "FS-CONSUL-AUDIT-EXPORT-01", "Consul provider", "Exported Consul audit CSV through the visible Config Matrix UI with provider/source metadata and masked secrets");
 });
 
 async function pickConsulDiffSource(sourcePicker: Locator, dataId: string): Promise<void> {

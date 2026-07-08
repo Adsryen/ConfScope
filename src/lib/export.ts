@@ -43,33 +43,76 @@ export interface DiffItem {
 /** JSON 导出结构 */
 export interface ExportMetadata {
   metadata: {
+    schemaVersion: number;
     exportedAt: string;
     envCount: number;
     rowCount: number;
     sanitized: boolean;
   };
+  sources: AuditExportSource[];
   rows: Array<{
+    providerType: string;
+    namespace: string;
+    group: string;
     dataId: string;
     key: string;
     status: string;
-    values: Record<string, { value?: string; updatedAt?: string; exists: boolean }>;
+    ignoreReason?: string;
+    originalDataIds: Record<string, string>;
+    values: Record<string, { value?: string; updatedAt?: string; exists: boolean; originalDataId?: string }>;
   }>;
 }
 
-/** 敏感字段正则 */
-const SENSITIVE_RE = /(password|token|secretKey|accessKey|secret|privateKey|passphrase)/i;
-const SENSITIVE_LINE_RE = /^(\s*["']?[^"'=:]*?(?:password|token|secretKey|accessKey|secret|privateKey|passphrase)[^"'=:]*?["']?\s*[:=]\s*)(.*?)(\s*,?\s*)$/i;
+export interface AuditExportSource {
+  envId: string;
+  provider: string;
+  connectionId: string;
+  connectionName: string;
+  projectName: string;
+  environmentName: string;
+  sourceName: string;
+  sourceType: string;
+  namespace: string;
+  group: string;
+}
+
+/** 敏感字段匹配，AK/SK 只按独立 path 片段命中，避免误伤普通单词。 */
+const SENSITIVE_SUBSTRING_RE = /(password|token|secretKey|accessKey|accessKeyId|accessKeySecret|securityToken|privateKey|passphrase)/i;
+const SENSITIVE_SEGMENTS = new Set([
+  "password",
+  "token",
+  "secret",
+  "secretkey",
+  "accesskey",
+  "accesskeyid",
+  "accesskeysecret",
+  "securitytoken",
+  "ak",
+  "sk",
+  "privatekey",
+  "passphrase",
+]);
+const KEY_VALUE_LINE_RE = /^(\s*["']?)([^"'=:]*?)(["']?\s*[:=]\s*)(.*?)(\s*,?\s*)$/;
 
 /** 脱敏替换 */
 function sanitizeValue(key: string, value: string | undefined): string | undefined {
   if (value === undefined) return value;
-  if (SENSITIVE_RE.test(key)) return "***";
+  if (isSensitiveKey(key)) return "***";
   return value;
 }
 
 /** 判断字段名是否命中敏感模式。 */
 function isSensitiveKey(key: string): boolean {
-  return SENSITIVE_RE.test(key);
+  if (SENSITIVE_SUBSTRING_RE.test(key)) return true;
+  return keySegments(key).some((segment) => SENSITIVE_SEGMENTS.has(segment));
+}
+
+function keySegments(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1.$2")
+    .split(/[^a-z0-9]+/i)
+    .map((part) => part.toLowerCase())
+    .filter(Boolean);
 }
 
 /** 对配置内容逐行脱敏，保留常见 key/value 结构。 */
@@ -78,9 +121,11 @@ function sanitizeConfigContent(content: string): string {
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => {
-      const match = line.match(SENSITIVE_LINE_RE);
+      const match = line.match(KEY_VALUE_LINE_RE);
       if (!match) return line;
-      const [, prefix, value, suffix] = match;
+      const [, prefixStart, key, separator, value, suffix] = match;
+      if (!isSensitiveKey(key)) return line;
+      const prefix = `${prefixStart}${key}${separator}`;
       const trimmedValue = value.trim();
       const masked = prefix.includes(":") && /^["']/.test(trimmedValue) ? '"***"' : "***";
       return `${prefix}${masked}${suffix}`;
@@ -113,18 +158,70 @@ function csvField(value: string | undefined): string {
   return value;
 }
 
+function auditEnvId(source: EnvSource): string {
+  return `${source.conn.id}:${source.namespace}`;
+}
+
+function providerOf(source: EnvSource): string {
+  return source.conn.provider ?? (source.conn.sourceType === "local-snapshot" ? "local" : "nacos");
+}
+
+function sourceNameOf(source: EnvSource): string {
+  return source.conn.sourceName || source.conn.name || "default";
+}
+
+function sourceLabel(source: EnvSource): string {
+  const provider = providerOf(source);
+  const project = source.conn.projectName || "Default Project";
+  const environment = source.conn.environmentName || source.conn.name || "Default Environment";
+  const sourceName = sourceNameOf(source);
+  const connectionName = source.conn.name || sourceName;
+  const namespace = source.namespace || "public";
+  const group = source.group || "DEFAULT_GROUP";
+  return `${provider}:${project}/${environment}/${sourceName}/${connectionName}/${namespace}/${group}`;
+}
+
+function auditSources(envSources: EnvSource[]): AuditExportSource[] {
+  return envSources.map((source) => ({
+    envId: auditEnvId(source),
+    provider: providerOf(source),
+    connectionId: source.conn.id,
+    connectionName: source.conn.name || "",
+    projectName: source.conn.projectName || "",
+    environmentName: source.conn.environmentName || "",
+    sourceName: sourceNameOf(source),
+    sourceType: source.conn.sourceType || providerOf(source),
+    namespace: source.namespace,
+    group: source.group || "DEFAULT_GROUP",
+  }));
+}
+
 /** 导出审计结果为 CSV（UTF-8 BOM） */
 export function exportAuditCSV(
   rows: AuditRow[],
   envSources: EnvSource[],
   options: ExportOptions
 ): string {
-  const envIds = envSources.map((s) => `${s.conn.id}:${s.namespace}`);
-  const envLabels = envSources.map(
-    (s) => `${s.conn.environmentName || s.conn.name}/${s.conn.name || s.conn.sourceName}/${s.namespace || "public"}`
-  );
+  const sources = auditSources(envSources);
+  const envIds = sources.map((source) => source.envId);
+  const envLabels = envSources.map(sourceLabel);
 
-  const header = ["dataId", "key", "status", ...envLabels, ...envLabels.map((l) => `${l}_updatedAt`)].join(",");
+  const header = [
+    "providerType",
+    "namespace",
+    "group",
+    "dataId",
+    "key",
+    "status",
+    "ignoreReason",
+    "originalDataIds",
+    ...envLabels.map((label) => `${label}_value`),
+    ...envLabels.map((label) => `${label}_exists`),
+    ...envLabels.map((label) => `${label}_updatedAt`),
+    ...envLabels.map((label) => `${label}_originalDataId`),
+  ]
+    .map(csvField)
+    .join(",");
 
   const body = rows
     .map((row) => {
@@ -134,11 +231,26 @@ export function exportAuditCSV(
         const value = options.sanitize ? sanitizeValue(row.key, rawValue) : rawValue;
         return csvField(value);
       });
+      const exists = envIds.map((envId) => csvField(row.values[envId]?.exists ? "true" : "false"));
       const updatedAts = envIds.map((envId) => {
         const cell = row.values[envId];
         return csvField(cell?.updatedAt);
       });
-      return [csvField(row.dataId), csvField(row.key), csvField(row.status), ...values, ...updatedAts].join(",");
+      const originalDataIds = envIds.map((envId) => csvField(row.originalDataIds[envId]));
+      return [
+        csvField(row.providerType),
+        csvField(row.namespace),
+        csvField(row.group),
+        csvField(row.dataId),
+        csvField(row.key),
+        csvField(row.status),
+        csvField(row.ignoreReason),
+        csvField(JSON.stringify(row.originalDataIds)),
+        ...values,
+        ...exists,
+        ...updatedAts,
+        ...originalDataIds,
+      ].join(",");
     })
     .join("\n");
 
@@ -152,24 +264,37 @@ export function exportAuditJSON(
   envSources: EnvSource[],
   options: ExportOptions
 ): ExportMetadata {
-  const envIds = envSources.map((s) => `${s.conn.id}:${s.namespace}`);
+  const sources = auditSources(envSources);
+  const envIds = sources.map((source) => source.envId);
 
   return {
     metadata: {
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       envCount: envSources.length,
       rowCount: rows.length,
       sanitized: options.sanitize,
     },
+    sources,
     rows: rows.map((row) => {
-      const values: Record<string, { value?: string; updatedAt?: string; exists: boolean }> = {};
+      const values: Record<string, { value?: string; updatedAt?: string; exists: boolean; originalDataId?: string }> = {};
       for (const envId of envIds) {
         const cell = row.values[envId];
         const rawValue = cell?.exists ? cell.value : undefined;
         const value = options.sanitize ? sanitizeValue(row.key, rawValue) : rawValue;
-        values[envId] = { value, updatedAt: cell?.updatedAt, exists: cell?.exists ?? false };
+        values[envId] = { value, updatedAt: cell?.updatedAt, exists: cell?.exists ?? false, originalDataId: row.originalDataIds[envId] };
       }
-      return { dataId: row.dataId, key: row.key, status: row.status, values };
+      return {
+        providerType: row.providerType,
+        namespace: row.namespace,
+        group: row.group,
+        dataId: row.dataId,
+        key: row.key,
+        status: row.status,
+        ignoreReason: row.ignoreReason,
+        originalDataIds: row.originalDataIds,
+        values,
+      };
     }),
   };
 }
