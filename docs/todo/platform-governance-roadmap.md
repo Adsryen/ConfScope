@@ -16,6 +16,7 @@
 - 应用数据本地/WebDAV 备份恢复，使用 `.csbackup`。
 - 配置中心快照 WebDAV 同步，使用 `.cssnapshot`，已发布 `v1.6.0`。
 - 全量真实 smoke：Docker Nacos、Apollo fixture、Consul、WebDAV。
+- 审计导出 provider 字段与脱敏增强，已发布 `v1.6.1`。
 
 ## v1.x 小步增强
 
@@ -126,25 +127,26 @@
 - 2026-07-08：接受“`v1.x` 小步增强 + `v2.0.0` 平台化重构”路线。
 - 2026-07-08：配置快照 WebDAV 已作为 `v1.6.0` 完成，不再作为未完成候选项。
 - 2026-07-08：确认下一项 `v1.x` P0 任务为 `audit-export-provider-hardening`，并创建 Trellis 任务 `07-08-audit-export-provider-hardening`。
+- 2026-07-08：`audit-export-provider-hardening` 已完成并发布 `v1.6.1`。
+- 2026-07-08：确认下一项 `v1.x` P0 任务为 `local-data-migration-guardrails`，并创建 Trellis 任务 `07-08-local-data-migration-guardrails`。
 
 ## 当前执行任务
 
-当前优先任务：`audit-export-provider-hardening`
+当前优先任务：`local-data-migration-guardrails`
 
 目标：
 
-- 补齐 Nacos/Apollo/Consul/local 审计导出字段一致性。
-- 默认脱敏导出 password、token、AK/SK、privateKey、passphrase、WebDAV password 等敏感值。
-- 在 CSV/JSON 中保留 provider、connection/source、namespace/group/dataId/key、status、updatedAt、originalDataIds。
-- 通过 Apollo/Consul Docker smoke 从真实 UI 下载审计导出文件并断言内容。
+- 建立旧 localStorage 数据 fixture，覆盖连接、settings、SSH profiles、operation history、apply plans、apply verifications、app data backup state、UI 和 locale。
+- 验证旧数据直接加载和 `.csbackup` schema v1 恢复后，经当前 loader normalize 仍可被产品使用。
+- 只修补测试证明的 normalize 兼容缺口，不引入 v2 数据模型、数据库或账号体系。
 
 计划文件：
 
-- `docs/todo/audit-export-provider-hardening-plan.md`
-- `docs/superpowers/plans/2026-07-08-audit-export-provider-hardening.md` 是本机执行技能使用的 ignored 计划镜像。
+- `docs/todo/local-data-migration-guardrails-plan.md`
+- `docs/superpowers/plans/2026-07-08-local-data-migration-guardrails.md` 是本机执行技能使用的 ignored 计划镜像。
 
 后续顺序：
 
-1. 完成 `audit-export-provider-hardening`。
-2. 再确认是否进入 `local-data-migration-guardrails`。
-3. 再确认 `credential-security-discovery`。
+1. 完成 `local-data-migration-guardrails`。
+2. 再确认 `credential-security-discovery`。
+3. 再评估是否进入 v2 平台化数据模型迁移。
