@@ -8,11 +8,13 @@ import {
   getHistoryDetail,
   deleteConfig,
   deleteConfigFromApplyPlan,
+  deleteConfigRefFromApplyPlan,
   listConfigs,
   listHistory,
   listNamespaces,
   publishConfig,
   publishConfigFromApplyPlan,
+  publishConfigRefFromApplyPlan,
   testConnection,
 } from "./nacos";
 import type { Connection } from "../store/connections";
@@ -23,6 +25,8 @@ const goApp = {
   ConfigCenterGetConfig: vi.fn(),
   ConfigCenterPublishConfig: vi.fn(),
   ConfigCenterDeleteConfig: vi.fn(),
+  ConfigCenterPublishConfigFromApplyPlan: vi.fn(),
+  ConfigCenterDeleteConfigFromApplyPlan: vi.fn(),
   ConfigCenterListHistory: vi.fn(),
   ConfigCenterGetHistoryDetail: vi.fn(),
   ConfigCenterTestConnection: vi.fn(),
@@ -791,6 +795,49 @@ describe("nacos api compatibility bridge", () => {
       "yaml"
     );
     expect(goApp.NacosDeleteConfigFromApplyPlan).toHaveBeenCalledWith(conn.baseUrl, "token-1", "v3", "public", "app.yaml", "DEFAULT_GROUP");
+  });
+
+  it("routes provider apply-plan ref writes through generic ConfigCenter bindings without dropping keys", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-apollo-apply-ref"),
+      provider: "apollo",
+      baseUrl: "http://127.0.0.1:8070",
+      username: "",
+      password: "",
+      defaultNamespace: "order-service",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    };
+    const ref = {
+      provider: "apollo" as const,
+      connectionId: conn.id,
+      namespace: "order-service",
+      group: "DEFAULT_GROUP",
+      dataId: "application",
+      key: "feature.enabled",
+      expectedVersion: "42",
+    };
+    goApp.ConfigCenterPublishConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.ConfigCenterDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
+
+    await publishConfigRefFromApplyPlan(conn, ref, "enabled", "properties");
+    await deleteConfigRefFromApplyPlan(conn, ref);
+
+    const expected = {
+      ...ref,
+      group: "default",
+    };
+    expect(goApp.ConfigCenterPublishConfigFromApplyPlan).toHaveBeenCalledWith(expect.objectContaining({ provider: "apollo" }), {
+      ref: expected,
+      content: "enabled",
+      format: "properties",
+    });
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(expect.objectContaining({ provider: "apollo" }), expected);
+    expect(goApp.NacosPublishConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.NacosDeleteConfigFromApplyPlan).not.toHaveBeenCalled();
   });
 
   it("rejects apply-plan writes to local snapshot sources with localized readonly errors", async () => {

@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -80,8 +81,78 @@ func (c *Client) GetNamespace(baseURL, token, env, appID, clusterName, namespace
 	return namespace, nil
 }
 
+// UpsertItem 创建或更新 Apollo namespace 中的单个配置项。
+func (c *Client) UpsertItem(baseURL, token, env, appID, clusterName, namespaceName, key, value, operator string) error {
+	path := fmt.Sprintf(
+		"/openapi/v1/envs/%s/apps/%s/clusters/%s/namespaces/%s/items/%s",
+		url.PathEscape(env),
+		url.PathEscape(appID),
+		url.PathEscape(clusterName),
+		url.PathEscape(namespaceName),
+		url.PathEscape(key),
+	)
+	query := url.Values{}
+	query.Set("createIfNotExists", "true")
+	body := map[string]string{
+		"key":                      key,
+		"value":                    value,
+		"comment":                  "ConfScope ApplyPlan",
+		"dataChangeLastModifiedBy": operator,
+		"dataChangeCreatedBy":      operator,
+	}
+	return c.doJSON(baseURL, token, http.MethodPut, path, query, body, nil)
+}
+
+// DeleteItem 删除 Apollo namespace 中的单个配置项。
+func (c *Client) DeleteItem(baseURL, token, env, appID, clusterName, namespaceName, key, operator string) error {
+	path := fmt.Sprintf(
+		"/openapi/v1/envs/%s/apps/%s/clusters/%s/namespaces/%s/items/%s",
+		url.PathEscape(env),
+		url.PathEscape(appID),
+		url.PathEscape(clusterName),
+		url.PathEscape(namespaceName),
+		url.PathEscape(key),
+	)
+	query := url.Values{}
+	query.Set("operator", operator)
+	return c.doJSON(baseURL, token, http.MethodDelete, path, query, nil, nil)
+}
+
+// ReleaseNamespace 发布 Apollo namespace 的当前未发布变更。
+func (c *Client) ReleaseNamespace(baseURL, token, env, appID, clusterName, namespaceName, title, comment, operator string) error {
+	path := fmt.Sprintf(
+		"/openapi/v1/envs/%s/apps/%s/clusters/%s/namespaces/%s/releases",
+		url.PathEscape(env),
+		url.PathEscape(appID),
+		url.PathEscape(clusterName),
+		url.PathEscape(namespaceName),
+	)
+	body := map[string]string{
+		"releaseTitle":   title,
+		"releaseComment": comment,
+		"releasedBy":     operator,
+	}
+	return c.doJSON(baseURL, token, http.MethodPost, path, nil, body, nil)
+}
+
 func (c *Client) getJSON(baseURL, token, path string, target any) error {
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+path, nil)
+	return c.doJSON(baseURL, token, http.MethodGet, path, nil, nil, target)
+}
+
+func (c *Client) doJSON(baseURL, token, method, path string, query url.Values, requestBody any, target any) error {
+	reqURL := strings.TrimRight(baseURL, "/") + path
+	if len(query) > 0 {
+		reqURL += "?" + query.Encode()
+	}
+	var reader io.Reader
+	if requestBody != nil {
+		data, err := json.Marshal(requestBody)
+		if err != nil {
+			return fmt.Errorf("编码 Apollo 请求 JSON 失败: %w", err)
+		}
+		reader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest(method, reqURL, reader)
 	if err != nil {
 		return err
 	}
@@ -89,6 +160,9 @@ func (c *Client) getJSON(baseURL, token, path string, target any) error {
 		req.Header.Set("Authorization", token)
 	}
 	req.Header.Set("Accept", "application/json")
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json;charset=UTF-8")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -96,15 +170,18 @@ func (c *Client) getJSON(baseURL, token, path string, target any) error {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("读取 Apollo 响应失败: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Apollo 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), strings.TrimSpace(string(body)))
+		return fmt.Errorf("Apollo 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), strings.TrimSpace(string(responseBody)))
 	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return fmt.Errorf("解析 Apollo 响应 JSON 失败: %w —— %s", err, strings.TrimSpace(string(body)))
+	if target == nil {
+		return nil
+	}
+	if err := json.Unmarshal(responseBody, target); err != nil {
+		return fmt.Errorf("解析 Apollo 响应 JSON 失败: %w —— %s", err, strings.TrimSpace(string(responseBody)))
 	}
 	return nil
 }

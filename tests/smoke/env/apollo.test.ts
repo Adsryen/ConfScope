@@ -4,7 +4,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { apolloNamespaceContent, getApolloNamespace, listApolloNamespaces, waitForApollo } from "./apollo";
+import {
+  apolloNamespaceContent,
+  deleteApolloItem,
+  getApolloNamespace,
+  listApolloNamespaces,
+  releaseApolloNamespace,
+  upsertApolloItem,
+  waitForApollo,
+} from "./apollo";
 import type { SmokeApolloEndpoint } from "./workspace";
 
 const closers: Array<() => Promise<void>> = [];
@@ -58,6 +66,81 @@ describe("Apollo smoke OpenAPI helper", () => {
     expect(paths).toContain("/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces");
     expect(paths).toContain("/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application");
     expect(apolloNamespaceContent(namespace)).toBe("a.key=first\nz.key=last\n");
+  });
+
+  it("writes deletes and releases Apollo namespace items through OpenAPI", async () => {
+    const requests: Array<{ method: string; url: string; body: string }> = [];
+    const items = new Map<string, string>([
+      ["feature.enabled", "true"],
+      ["server.port", "8080"],
+    ]);
+    let releaseKey = "release-1";
+    const { endpoint } = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks).toString("utf8");
+      requests.push({ method: req.method ?? "", url: req.url ?? "", body });
+      if (req.headers.authorization !== "apollo-token") {
+        json(res, 401, { message: "unauthorized" });
+        return;
+      }
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const namespacePath = "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application";
+      if (req.method === "GET" && url.pathname === namespacePath) {
+        json(res, 200, {
+          appId: "order-service",
+          clusterName: "default",
+          namespaceName: "application",
+          format: "properties",
+          releaseKey,
+          items: [...items.entries()].map(([key, value]) => ({ key, value })),
+        });
+        return;
+      }
+      if (req.method === "PUT" && url.pathname === `${namespacePath}/items/feature.enabled`) {
+        const parsed = JSON.parse(body) as { value?: string };
+        items.set("feature.enabled", String(parsed.value ?? ""));
+        json(res, 200, { key: "feature.enabled", value: parsed.value });
+        return;
+      }
+      if (req.method === "DELETE" && url.pathname === `${namespacePath}/items/server.port`) {
+        items.delete("server.port");
+        json(res, 200, { deleted: true });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === `${namespacePath}/releases`) {
+        releaseKey = "release-2";
+        json(res, 200, { releaseKey });
+        return;
+      }
+      json(res, 404, { message: "not found" });
+    });
+
+    await upsertApolloItem(endpoint, "feature.enabled", "false", "confscope");
+    await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", "plan smoke", "confscope");
+    await deleteApolloItem(endpoint, "server.port", "confscope");
+    await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", "plan smoke", "confscope");
+    const namespace = await getApolloNamespace(endpoint);
+
+    expect(apolloNamespaceContent(namespace)).toBe("feature.enabled=false\n");
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "PUT",
+          url: "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/items/feature.enabled?createIfNotExists=true",
+          body: expect.stringContaining('"dataChangeLastModifiedBy":"confscope"'),
+        }),
+        expect.objectContaining({
+          method: "DELETE",
+          url: "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/items/server.port?operator=confscope",
+        }),
+        expect.objectContaining({
+          method: "POST",
+          url: "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/releases",
+          body: expect.stringContaining('"releasedBy":"confscope"'),
+        }),
+      ])
+    );
   });
 });
 

@@ -309,11 +309,63 @@ async function verifyNativeApolloProvider(native: NativeControlClient, smoke: Sm
   expect(result.content).toContain("feature.enabled=true");
   expect(result.diffText).toContain("Both sides are identical");
   expect(result.auditText).toContain("server.port");
+  const apply = await verifyNativeApolloApplyPlanBinding(native, smoke);
+  expect(apply.directWriteBlocked).toBe(true);
+  expect(apply.published).toBe(true);
+  expect(apply.deleted).toBe(true);
   pass(smoke, "NATIVE-APOLLO-CONNECTION-FORM-01", "Apollo provider", "Created Apollo source through the native Connection Manager form");
   pass(smoke, "NATIVE-APOLLO-CONNECTION-TEST-01", "Apollo provider", "Native connection test reached Docker Apollo OpenAPI fixture");
   pass(smoke, "NATIVE-APOLLO-BROWSE-01", "Apollo provider", "Native Config Browser opened Apollo namespace content");
   pass(smoke, "NATIVE-APOLLO-DIFF-01", "Apollo provider", "Native Config Compare compared Apollo namespace content");
   pass(smoke, "NATIVE-APOLLO-AUDIT-01", "Apollo provider", "Native Config Matrix included Apollo provider content");
+  pass(smoke, "NATIVE-APOLLO-APPLY-01", "Apollo provider", "Native Wails ApplyPlan binding wrote and deleted an Apollo item through Docker OpenAPI");
+}
+
+async function verifyNativeApolloApplyPlanBinding(
+  native: NativeControlClient,
+  smoke: SmokeState
+): Promise<{ directWriteBlocked: boolean; published: boolean; deleted: boolean }> {
+  return native.eval<{ directWriteBlocked: boolean; published: boolean; deleted: boolean }>(
+    `
+    const app = window.go && window.go.main && window.go.main.App;
+    if (!app) throw new Error("Wails App binding not found");
+    const profile = {
+      id: "native-apollo-apply",
+      name: "Native Apollo Apply",
+      provider: "apollo",
+      baseUrl: ${JSON.stringify(smoke.apollo.baseUrl)},
+      accessToken: ${JSON.stringify(smoke.apollo.token)},
+      apolloEnv: ${JSON.stringify(smoke.apollo.env)},
+      apolloAppId: ${JSON.stringify(smoke.apollo.appId)},
+      apolloCluster: ${JSON.stringify(smoke.apollo.cluster)},
+      apolloNamespaceName: ${JSON.stringify(smoke.apollo.namespaceName)}
+    };
+    const ref = {
+      provider: "apollo",
+      connectionId: "native-apollo-apply",
+      namespace: ${JSON.stringify(smoke.apollo.appId)},
+      group: ${JSON.stringify(smoke.apollo.cluster)},
+      dataId: ${JSON.stringify(smoke.apollo.namespaceName)},
+      key: "native.apply"
+    };
+    let directWriteBlocked = false;
+    try {
+      await app.ConfigCenterPublishConfig(profile, { ref, content: "blocked", format: "properties" });
+    } catch {
+      directWriteBlocked = true;
+    }
+    await app.ConfigCenterPublishConfigFromApplyPlan(profile, { ref, content: "ok", format: "properties" });
+    const afterPublish = await app.ConfigCenterGetConfig(profile, { ...ref, key: "" });
+    await app.ConfigCenterDeleteConfigFromApplyPlan(profile, ref);
+    const afterDelete = await app.ConfigCenterGetConfig(profile, { ...ref, key: "" });
+    return {
+      directWriteBlocked,
+      published: String(afterPublish.content || "").includes("native.apply=ok"),
+      deleted: !String(afterDelete.content || "").includes("native.apply=ok")
+    };
+  `,
+    60_000
+  );
 }
 
 async function verifyNativeConsulProvider(native: NativeControlClient, smoke: SmokeState): Promise<void> {
@@ -336,11 +388,89 @@ async function verifyNativeConsulProvider(native: NativeControlClient, smoke: Sm
   expect(result.content).toContain("feature: true");
   expect(result.diffText).toContain("Both sides are identical");
   expect(result.auditText).toContain("apps/order/app.yaml");
+  const apply = await verifyNativeConsulApplyPlanBinding(native, smoke);
+  expect(apply.directWriteBlocked).toBe(true);
+  expect(apply.created).toBe(true);
+  expect(apply.updated).toBe(true);
+  expect(apply.staleBlocked).toBe(true);
+  expect(apply.deleted).toBe(true);
   pass(smoke, "NATIVE-CONSUL-CONNECTION-FORM-01", "Consul provider", "Created Consul source through the native Connection Manager form");
   pass(smoke, "NATIVE-CONSUL-CONNECTION-TEST-01", "Consul provider", "Native connection test reached Docker Consul KV");
   pass(smoke, "NATIVE-CONSUL-BROWSE-01", "Consul provider", "Native Config Browser opened Consul KV content");
   pass(smoke, "NATIVE-CONSUL-DIFF-01", "Consul provider", "Native Config Compare compared Consul KV content");
   pass(smoke, "NATIVE-CONSUL-AUDIT-01", "Consul provider", "Native Config Matrix included Consul provider content");
+  pass(smoke, "NATIVE-CONSUL-APPLY-01", "Consul provider", "Native Wails ApplyPlan binding created, updated, CAS-blocked, and deleted a Consul KV");
+}
+
+async function verifyNativeConsulApplyPlanBinding(
+  native: NativeControlClient,
+  smoke: SmokeState
+): Promise<{ directWriteBlocked: boolean; created: boolean; updated: boolean; staleBlocked: boolean; deleted: boolean }> {
+  return native.eval<{ directWriteBlocked: boolean; created: boolean; updated: boolean; staleBlocked: boolean; deleted: boolean }>(
+    `
+    const app = window.go && window.go.main && window.go.main.App;
+    if (!app) throw new Error("Wails App binding not found");
+    const profile = {
+      id: "native-consul-apply",
+      name: "Native Consul Apply",
+      provider: "consul",
+      baseUrl: ${JSON.stringify(smoke.consul.baseUrl)},
+      accessToken: "",
+      consulDatacenter: ${JSON.stringify(smoke.consul.datacenter)},
+      consulKeyPrefix: ${JSON.stringify(smoke.consul.keyPrefix)}
+    };
+    const key = ${JSON.stringify(smoke.consul.keyPrefix)} + "native-apply-" + Date.now() + ".yaml";
+    const ref = {
+      provider: "consul",
+      connectionId: "native-consul-apply",
+      namespace: ${JSON.stringify(smoke.consul.datacenter)},
+      group: ${JSON.stringify(smoke.consul.keyPrefix)},
+      dataId: key,
+      key: "__document"
+    };
+    let directWriteBlocked = false;
+    try {
+      await app.ConfigCenterPublishConfig(profile, { ref, content: "blocked: true\\n", format: "yaml" });
+    } catch {
+      directWriteBlocked = true;
+    }
+    await app.ConfigCenterPublishConfigFromApplyPlan(profile, { ref: { ...ref, expectedVersion: "0" }, content: "native: created\\n", format: "yaml" });
+    const afterCreate = await app.ConfigCenterGetConfig(profile, ref);
+    const createVersion = String(afterCreate.version || "");
+    await app.ConfigCenterPublishConfigFromApplyPlan(profile, {
+      ref: { ...ref, expectedVersion: createVersion },
+      content: "native: updated\\n",
+      format: "yaml"
+    });
+    const afterUpdate = await app.ConfigCenterGetConfig(profile, ref);
+    const updateVersion = String(afterUpdate.version || "");
+    let staleBlocked = false;
+    try {
+      await app.ConfigCenterPublishConfigFromApplyPlan(profile, {
+        ref: { ...ref, expectedVersion: createVersion },
+        content: "native: stale\\n",
+        format: "yaml"
+      });
+    } catch {
+      staleBlocked = true;
+    }
+    await app.ConfigCenterDeleteConfigFromApplyPlan(profile, { ...ref, expectedVersion: updateVersion });
+    let deleted = false;
+    try {
+      await app.ConfigCenterGetConfig(profile, ref);
+    } catch {
+      deleted = true;
+    }
+    return {
+      directWriteBlocked,
+      created: String(afterCreate.content || "").includes("native: created"),
+      updated: String(afterUpdate.content || "").includes("native: updated"),
+      staleBlocked,
+      deleted
+    };
+  `,
+    60_000
+  );
 }
 
 async function verifyNativeProviderWorkflow(

@@ -181,12 +181,6 @@ func TestConsulProviderRejectsReadonlyOperations(t *testing.T) {
 	profile := ConnectionProfile{ID: "consul-1", Provider: ProviderConsul}
 	ref := ConfigRef{Provider: ProviderConsul, ConnectionID: "consul-1", Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/app.yaml"}
 
-	if err := p.PublishConfig(profile, PublishConfigRequest{Ref: ref}); !errors.Is(err, errConsulReadOnly) {
-		t.Fatalf("PublishConfig error = %v, want errConsulReadOnly", err)
-	}
-	if err := p.DeleteConfig(profile, ref); !errors.Is(err, errConsulReadOnly) {
-		t.Fatalf("DeleteConfig error = %v, want errConsulReadOnly", err)
-	}
 	if _, err := p.ListHistory(profile, ref, PageRequest{}); !errors.Is(err, errConsulReadOnly) {
 		t.Fatalf("ListHistory error = %v, want errConsulReadOnly", err)
 	}
@@ -202,5 +196,106 @@ func TestConsulProviderRequiresKeyForGetConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Consul key") {
 		t.Fatalf("error = %q, want key hint", err.Error())
+	}
+}
+
+func TestConsulProviderPublishesKVWithExpectedVersion(t *testing.T) {
+	server := newProviderConsulIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/v1/kv/apps/order/app.yaml" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("dc") != "dc1" || r.URL.Query().Get("cas") != "42" {
+			t.Fatalf("query = %s, want dc=dc1&cas=42", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`true`))
+	}))
+
+	err := NewConsulProvider(nil).PublishConfig(
+		ConnectionProfile{ID: "consul-1", Provider: ProviderConsul, BaseURL: server.URL, AccessToken: "consul-token", ConsulDatacenter: "dc1", ConsulKeyPrefix: "apps/order/"},
+		PublishConfigRequest{
+			Ref:     ConfigRef{Provider: ProviderConsul, Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/app.yaml", ExpectedVersion: "42"},
+			Content: "server:\n  port: 9090\n",
+			Format:  "yaml",
+		},
+	)
+	if err != nil {
+		t.Fatalf("PublishConfig returned error: %v", err)
+	}
+}
+
+func TestConsulProviderCreatesKVWithExpectedVersionZero(t *testing.T) {
+	server := newProviderConsulIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("cas") != "0" {
+			t.Fatalf("query = %s, want cas=0", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`true`))
+	}))
+
+	err := NewConsulProvider(nil).PublishConfig(
+		ConnectionProfile{ID: "consul-1", Provider: ProviderConsul, BaseURL: server.URL, ConsulDatacenter: "dc1", ConsulKeyPrefix: "apps/order/"},
+		PublishConfigRequest{
+			Ref:     ConfigRef{Provider: ProviderConsul, Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/new.yaml", ExpectedVersion: "0"},
+			Content: "created: true\n",
+			Format:  "yaml",
+		},
+	)
+	if err != nil {
+		t.Fatalf("PublishConfig returned error: %v", err)
+	}
+}
+
+func TestConsulProviderDeletesKVWithExpectedVersion(t *testing.T) {
+	server := newProviderConsulIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %s, want DELETE", r.Method)
+		}
+		if r.URL.Path != "/v1/kv/apps/order/app.yaml" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("dc") != "dc1" || r.URL.Query().Get("cas") != "42" {
+			t.Fatalf("query = %s, want dc=dc1&cas=42", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`true`))
+	}))
+
+	err := NewConsulProvider(nil).DeleteConfig(
+		ConnectionProfile{ID: "consul-1", Provider: ProviderConsul, BaseURL: server.URL, ConsulDatacenter: "dc1", ConsulKeyPrefix: "apps/order/"},
+		ConfigRef{Provider: ProviderConsul, Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/app.yaml", ExpectedVersion: "42"},
+	)
+	if err != nil {
+		t.Fatalf("DeleteConfig returned error: %v", err)
+	}
+}
+
+func TestConsulProviderRequiresExpectedVersionForWrites(t *testing.T) {
+	p := NewConsulProvider(nil)
+	profile := ConnectionProfile{ID: "consul-1", Provider: ProviderConsul, BaseURL: "http://consul.example.com"}
+	ref := ConfigRef{Provider: ProviderConsul, Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/app.yaml"}
+
+	if err := p.PublishConfig(profile, PublishConfigRequest{Ref: ref, Content: "server: 9090\n", Format: "yaml"}); err == nil || !strings.Contains(err.Error(), "expectedVersion") {
+		t.Fatalf("PublishConfig error = %v, want expectedVersion error", err)
+	}
+	if err := p.DeleteConfig(profile, ref); err == nil || !strings.Contains(err.Error(), "expectedVersion") {
+		t.Fatalf("DeleteConfig error = %v, want expectedVersion error", err)
+	}
+}
+
+func TestConsulProviderRejectsInvalidUTF8Content(t *testing.T) {
+	err := NewConsulProvider(nil).PublishConfig(
+		ConnectionProfile{ID: "consul-1", Provider: ProviderConsul, BaseURL: "http://consul.example.com"},
+		PublishConfigRequest{
+			Ref:     ConfigRef{Provider: ProviderConsul, Namespace: "dc1", Group: "apps/order/", DataID: "apps/order/app.yaml", ExpectedVersion: "42"},
+			Content: string([]byte{0xff, 0xfe}),
+			Format:  "text",
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("PublishConfig error = %v, want UTF-8 error", err)
 	}
 }

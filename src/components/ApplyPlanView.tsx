@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { deleteConfigFromApplyPlan, getConfigDocument, publishConfigFromApplyPlan } from "../api/nacos";
+import {
+  deleteConfigFromApplyPlan,
+  deleteConfigRefFromApplyPlan,
+  getConfigDocument,
+  publishConfigFromApplyPlan,
+  publishConfigRefFromApplyPlan,
+} from "../api/nacos";
 import { createSnapshot, getSnapshot } from "../api/snapshot";
 import { useTranslation } from "../i18n";
 import type { ApplyPlan, ApplyPlanAction, ApplyPlanItem, ApplyPlanSummary, ApplyPlanValueSnapshot } from "../lib/applyPlan";
@@ -278,6 +284,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         getConfigDocument,
         publishConfig: publishConfigFromApplyPlan,
         deleteConfig: deleteConfigFromApplyPlan,
+        publishConfigRef: publishConfigRefFromApplyPlan,
+        deleteConfigRef: deleteConfigRefFromApplyPlan,
         createBackupSnapshot: async (configs) => {
           const snapshot = await createSnapshot(
             {

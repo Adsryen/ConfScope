@@ -161,6 +161,20 @@ describe("createSmokeAppBinding app data backup methods", () => {
     await expect(invoke("ImportSnapshotWebDAVPackage", [target, (remote as { path: string }).path, "wrong-pass"])).rejects.toThrow();
   });
 
+  it("creates snapshot files for provider configs whose groups and dataIds contain slashes", async () => {
+    const state = smokeState();
+    const invoke = createSmokeAppBinding(state);
+
+    const snapshot = (await invoke("CreateSnapshot", [
+      { provider: "consul", connectionId: "smoke-consul", connectionName: "Consul KV", namespace: "dc1", namespaceId: "dc1" },
+      [{ namespace: "dc1", group: "apps/order/", dataId: "apps/order/app.yaml", content: "feature: snapshot\n", configType: "yaml" }],
+    ])) as { path: string };
+
+    expect(readFileSync(join(snapshot.path, "configs", "dc1", "apps", "order", "apps", "order", "app.yaml"), "utf8")).toBe(
+      "feature: snapshot\n"
+    );
+  });
+
   it("routes Apollo ConfigCenter bridge calls through Apollo OpenAPI", async () => {
     const state = smokeState();
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -240,6 +254,91 @@ describe("createSmokeAppBinding app data backup methods", () => {
     });
   });
 
+  it("routes Apollo ApplyPlan bridge writes through item APIs and releases before read-back", async () => {
+    const state = smokeState();
+    const items = new Map<string, string>([
+      ["feature.enabled", "true"],
+      ["server.port", "8080"],
+    ]);
+    let releaseKey = "release-1";
+    const requests: Array<{ method: string; path: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        requests.push({ method, path: `${url.pathname}${url.search}` });
+        const namespacePath = "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application";
+        if (url.pathname === namespacePath && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              appId: "order-service",
+              clusterName: "default",
+              namespaceName: "application",
+              format: "properties",
+              releaseKey,
+              items: [...items.entries()].map(([key, value]) => ({ key, value })),
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.pathname === `${namespacePath}/items/feature.enabled` && method === "PUT") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { value?: string };
+          items.set("feature.enabled", String(body.value ?? ""));
+          return new Response(JSON.stringify({ key: "feature.enabled", value: body.value }), { status: 200 });
+        }
+        if (url.pathname === `${namespacePath}/items/server.port` && method === "DELETE") {
+          items.delete("server.port");
+          return new Response(JSON.stringify({ deleted: true }), { status: 200 });
+        }
+        if (url.pathname === `${namespacePath}/releases` && method === "POST") {
+          releaseKey = `release-${Number(releaseKey.split("-")[1] ?? 1) + 1}`;
+          return new Response(JSON.stringify({ releaseKey }), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      })
+    );
+    const invoke = createSmokeAppBinding(state);
+    const profile = {
+      id: "smoke-apollo",
+      name: "Apollo OpenAPI",
+      provider: "apollo",
+      baseUrl: state.apollo.baseUrl,
+      accessToken: state.apollo.token,
+      apolloEnv: state.apollo.env,
+      apolloAppId: state.apollo.appId,
+      apolloCluster: state.apollo.cluster,
+      apolloNamespaceName: state.apollo.namespaceName,
+    };
+    const ref = {
+      provider: "apollo",
+      connectionId: "smoke-apollo",
+      namespace: state.apollo.appId,
+      group: state.apollo.cluster,
+      dataId: state.apollo.namespaceName,
+      key: "feature.enabled",
+    };
+
+    await invoke("ConfigCenterPublishConfigFromApplyPlan", [profile, { ref, content: "false", format: "properties" }]);
+    await expect(invoke("ConfigCenterGetConfig", [profile, { ...ref, key: "" }])).resolves.toMatchObject({
+      content: "feature.enabled=false\nserver.port=8080\n",
+      version: "release-2",
+    });
+    await invoke("ConfigCenterDeleteConfigFromApplyPlan", [profile, { ...ref, key: "server.port" }]);
+    await expect(invoke("ConfigCenterGetConfig", [profile, { ...ref, key: "" }])).resolves.toMatchObject({
+      content: "feature.enabled=false\n",
+      version: "release-3",
+    });
+
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        { method: "PUT", path: `${namespacePathForApollo()}/items/feature.enabled?createIfNotExists=true` },
+        { method: "DELETE", path: `${namespacePathForApollo()}/items/server.port?operator=confscope` },
+        { method: "POST", path: `${namespacePathForApollo()}/releases` },
+      ])
+    );
+  });
+
   it("routes Consul ConfigCenter bridge calls through Consul KV HTTP API", async () => {
     const state = smokeState();
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -304,4 +403,88 @@ describe("createSmokeAppBinding app data backup methods", () => {
       source: "consul:dc1/apps/order/app.yaml",
     });
   });
+
+  it("routes Consul ApplyPlan bridge writes through KV CAS and preserves conflict failures", async () => {
+    const state = smokeState();
+    let value: string | null = "feature: true\nserver:\n  port: 8080\n";
+    let modifyIndex = 42;
+    const requests: Array<{ method: string; path: string; cas: string | null; body: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        const body = init?.body === undefined ? "" : await new Response(init.body).text();
+        requests.push({ method, path: url.pathname, cas: url.searchParams.get("cas"), body });
+        if (url.pathname !== "/v1/kv/apps/order/app.yaml" || url.searchParams.get("dc") !== "dc1") {
+          return new Response("not found", { status: 404 });
+        }
+        if (method === "GET") {
+          if (value === null) return new Response("not found", { status: 404 });
+          return new Response(
+            JSON.stringify([{ Key: "apps/order/app.yaml", Value: Buffer.from(value).toString("base64"), ModifyIndex: modifyIndex }]),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (method === "PUT") {
+          if (url.searchParams.get("cas") !== String(modifyIndex)) return new Response("false", { status: 200 });
+          value = body;
+          modifyIndex += 1;
+          return new Response("true", { status: 200 });
+        }
+        if (method === "DELETE") {
+          if (url.searchParams.get("cas") !== String(modifyIndex)) return new Response("false", { status: 200 });
+          value = null;
+          modifyIndex += 1;
+          return new Response("true", { status: 200 });
+        }
+        return new Response("bad method", { status: 405 });
+      })
+    );
+    const invoke = createSmokeAppBinding(state);
+    const profile = {
+      id: "smoke-consul",
+      name: "Consul KV",
+      provider: "consul",
+      baseUrl: state.consul.baseUrl,
+      accessToken: "",
+      consulDatacenter: state.consul.datacenter,
+      consulKeyPrefix: state.consul.keyPrefix,
+    };
+    const ref = {
+      provider: "consul",
+      connectionId: "smoke-consul",
+      namespace: "dc1",
+      group: "apps/order/",
+      dataId: "apps/order/app.yaml",
+      key: "__document",
+      expectedVersion: "42",
+    };
+
+    await invoke("ConfigCenterPublishConfigFromApplyPlan", [profile, { ref, content: "feature: false\nserver:\n  port: 9090\n", format: "yaml" }]);
+    await expect(invoke("ConfigCenterGetConfig", [profile, ref])).resolves.toMatchObject({
+      content: "feature: false\nserver:\n  port: 9090\n",
+      version: "43",
+    });
+    await expect(
+      invoke("ConfigCenterPublishConfigFromApplyPlan", [
+        profile,
+        { ref: { ...ref, expectedVersion: "42" }, content: "stale: true\n", format: "yaml" },
+      ])
+    ).rejects.toThrow("CAS");
+    await invoke("ConfigCenterDeleteConfigFromApplyPlan", [profile, { ...ref, expectedVersion: "43" }]);
+    await expect(invoke("ConfigCenterGetConfig", [profile, ref])).rejects.toThrow("Consul KV get failed 404");
+
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        { method: "PUT", path: "/v1/kv/apps/order/app.yaml", cas: "42", body: "feature: false\nserver:\n  port: 9090\n" },
+        { method: "PUT", path: "/v1/kv/apps/order/app.yaml", cas: "42", body: "stale: true\n" },
+        { method: "DELETE", path: "/v1/kv/apps/order/app.yaml", cas: "43", body: "" },
+      ])
+    );
+  });
 });
+
+function namespacePathForApollo(): string {
+  return "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application";
+}

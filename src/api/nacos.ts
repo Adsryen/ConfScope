@@ -276,14 +276,14 @@ function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: str
   };
 }
 
-function toConfigRef(conn: Connection, namespace: string, dataId: string, group: string): ConfigRef {
+function toConfigRef(conn: Connection, namespace: string, dataId: string, group: string, key = ""): ConfigRef {
   return {
     provider: providerForConnection(conn),
     connectionId: conn.id,
     namespace,
     group: providerGroupForConnection(conn, group),
     dataId,
-    key: "",
+    key,
   };
 }
 
@@ -488,6 +488,32 @@ export async function publishConfigFromApplyPlan(
   );
 }
 
+export async function publishConfigRefFromApplyPlan(
+  conn: Connection,
+  ref: ConfigRef,
+  content: string,
+  configType: string
+): Promise<void> {
+  if (conn.sourceType === "local-snapshot") {
+    throw new Error(translate("api.localSnapshotPublishReadonly"));
+  }
+  if ((conn.provider ?? "nacos") !== "nacos") {
+    return withProfile(conn, (profile) =>
+      configCenterPublishConfigFromApplyPlan(profile, {
+        ref: {
+          ...ref,
+          provider: providerForConnection(conn),
+          connectionId: conn.id,
+          group: providerGroupForConnection(conn, ref.group),
+        },
+        content,
+        format: configType,
+      })
+    );
+  }
+  return publishConfigFromApplyPlan(conn, ref.namespace, ref.dataId, ref.group, content, configType);
+}
+
 export async function deleteConfig(_conn: Connection, _namespace: string, _dataId: string, _group: string): Promise<void> {
   throw new Error(translate("api.directWriteRequiresApplyPlan"));
 }
@@ -503,6 +529,23 @@ export async function deleteConfigFromApplyPlan(conn: Connection, namespace: str
   return withAuth(conn, (accessToken, apiVersion) =>
     NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group)
   );
+}
+
+export async function deleteConfigRefFromApplyPlan(conn: Connection, ref: ConfigRef): Promise<void> {
+  if (conn.sourceType === "local-snapshot") {
+    throw new Error(translate("api.localSnapshotDeleteReadonly"));
+  }
+  if ((conn.provider ?? "nacos") !== "nacos") {
+    return withProfile(conn, (profile) =>
+      configCenterDeleteConfigFromApplyPlan(profile, {
+        ...ref,
+        provider: providerForConnection(conn),
+        connectionId: conn.id,
+        group: providerGroupForConnection(conn, ref.group),
+      })
+    );
+  }
+  return deleteConfigFromApplyPlan(conn, ref.namespace, ref.dataId, ref.group);
 }
 
 export async function getHistoryDetail(

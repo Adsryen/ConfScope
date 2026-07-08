@@ -4,7 +4,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { getConsulKVContent, listConsulKV, seedConsul, waitForConsul } from "./consul";
+import { deleteConsulKV, getConsulKVContent, listConsulKV, putConsulKV, seedConsul, waitForConsul } from "./consul";
 import type { SmokeConsulEndpoint } from "./workspace";
 
 const closers: Array<() => Promise<void>> = [];
@@ -62,6 +62,39 @@ describe("Consul smoke KV helper", () => {
 
     expect(requests.some((request) => request.method === "PUT" && request.body.includes("feature: true"))).toBe(true);
     expect(requests.map((request) => request.url)).toContain("/v1/kv/apps/order/?dc=dc1&recurse=true");
+  });
+
+  it("writes and deletes KV entries with CAS protection", async () => {
+    const requests: Array<{ method: string; url: string; body: string }> = [];
+    const { endpoint } = await startServer(async (req, res) => {
+      requests.push({ method: req.method ?? "", url: req.url ?? "", body: await readBody(req) });
+      res.setHeader("Content-Type", "application/json");
+
+      if (req.method === "PUT" && req.url === "/v1/kv/apps/order/app.yaml?cas=42&dc=dc1") {
+        res.end("true");
+        return;
+      }
+      if (req.method === "DELETE" && req.url === "/v1/kv/apps/order/app.yaml?cas=43&dc=dc1") {
+        res.end("true");
+        return;
+      }
+      if (req.method === "PUT" && req.url === "/v1/kv/apps/order/app.yaml?cas=41&dc=dc1") {
+        res.end("false");
+        return;
+      }
+      json(res, 404, { message: "not found" });
+    });
+
+    await putConsulKV(endpoint, "apps/order/app.yaml", "server:\n  port: 9090\n", 42);
+    await deleteConsulKV(endpoint, "apps/order/app.yaml", 43);
+    await expect(putConsulKV(endpoint, "apps/order/app.yaml", "stale\n", 41)).rejects.toThrow("CAS");
+
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        { method: "PUT", url: "/v1/kv/apps/order/app.yaml?cas=42&dc=dc1", body: "server:\n  port: 9090\n" },
+        { method: "DELETE", url: "/v1/kv/apps/order/app.yaml?cas=43&dc=dc1", body: "" },
+      ])
+    );
   });
 });
 

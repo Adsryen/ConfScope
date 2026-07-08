@@ -46,12 +46,61 @@ test("creates and reads a Consul KV connection through the UI", async ({ page, s
   expect(auditCsv).not.toContain("consul-secret");
   expect(auditCsv).not.toContain(smoke.consul.baseUrl);
 
+  await page.getByRole("button", { name: "Config Compare" }).click();
+  await pickLocalDiffSource(page.locator(".source-picker").nth(0), "smoke-app.yaml");
+  await pickConsulDiffSource(page.locator(".source-picker").nth(1), "apps/order/app.yaml");
+  await page.getByRole("button", { name: "Load & Compare" }).click();
+  await expect(page.locator(".diff-result")).toContainText("snapshot", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Generate Apply Plan" }).click();
+  await expect(page.getByRole("heading", { name: "Apply Plan" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".apply-count-strip")).toContainText("Overwrite", { timeout: 30_000 });
+  await page.getByLabel("I reviewed this dry-run plan and understand it will write to the target.").check();
+  await page.getByRole("button", { name: "Execute apply" }).click();
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (consul) => {
+          const profile = {
+            id: "smoke-consul",
+            name: "Consul KV",
+            provider: "consul",
+            baseUrl: consul.baseUrl,
+            accessToken: "",
+            consulDatacenter: consul.datacenter,
+            consulKeyPrefix: consul.keyPrefix,
+          };
+          const doc = await window.go.main.App.ConfigCenterGetConfig(profile, {
+            provider: "consul",
+            connectionId: "smoke-consul",
+            namespace: consul.datacenter,
+            group: consul.keyPrefix,
+            dataId: "apps/order/app.yaml",
+            key: "",
+          });
+          return String((doc as { content?: string }).content ?? "");
+        }, smoke.consul),
+      { timeout: 30_000 }
+    )
+    .toContain("feature: snapshot");
+
+  await page.getByRole("button", { name: "Config Browser" }).click();
+  await pickSelect(page.locator(".browse-header .page-actions"), 0, "Consul KV");
+  await page.locator(".browser-item").filter({ hasText: "apps/order/app.yaml" }).click();
+  await expect(page.locator(".browser-detail")).toContainText("feature: snapshot", { timeout: 20_000 });
+
   pass(smoke, "FS-CONSUL-CONN-01", "Consul provider", "Created Consul KV connection through Connection Manager form and tested it");
   pass(smoke, "FS-CONSUL-BROWSE-01", "Consul provider", "Browsed and opened Consul KV content from Docker Consul");
   pass(smoke, "FS-CONSUL-DIFF-01", "Consul provider", "Compared Consul KV document through Config Compare");
   pass(smoke, "FS-CONSUL-AUDIT-01", "Consul provider", "Included Consul KV document in Config Matrix audit");
   pass(smoke, "FS-CONSUL-AUDIT-EXPORT-01", "Consul provider", "Exported Consul audit CSV through the visible Config Matrix UI with provider/source metadata and masked secrets");
+  pass(smoke, "FS-CONSUL-APPLY-01", "Consul provider", "Generated and executed an ApplyPlan from local snapshot to Docker Consul, then read back the CAS-protected KV");
 });
+
+async function pickLocalDiffSource(sourcePicker: Locator, dataId: string): Promise<void> {
+  await pickSelect(sourcePicker, 0, "Local");
+  await pickSelect(sourcePicker, 1, "Strict Snapshot");
+  await pickCombobox(sourcePicker.locator(".combo").nth(0), dataId);
+}
 
 async function pickConsulDiffSource(sourcePicker: Locator, dataId: string): Promise<void> {
   await pickSelect(sourcePicker, 1, "Consul KV");

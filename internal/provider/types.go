@@ -48,12 +48,13 @@ type ConnectionProfile struct {
 }
 
 type ConfigRef struct {
-	Provider     ProviderType `json:"provider"`
-	ConnectionID string       `json:"connectionId"`
-	Namespace    string       `json:"namespace"`
-	Group        string       `json:"group"`
-	DataID       string       `json:"dataId"`
-	Key          string       `json:"key"`
+	Provider        ProviderType `json:"provider"`
+	ConnectionID    string       `json:"connectionId"`
+	Namespace       string       `json:"namespace"`
+	Group           string       `json:"group"`
+	DataID          string       `json:"dataId"`
+	Key             string       `json:"key"`
+	ExpectedVersion string       `json:"expectedVersion,omitempty"`
 }
 
 type Namespace struct {

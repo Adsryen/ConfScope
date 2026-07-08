@@ -84,7 +84,7 @@ function localConnection(id: string, name: string, localPath: string, legacy: bo
       valid: true,
       code: legacy ? "legacy_valid" : "valid",
       message: legacy ? "Directory uses a legacy snapshot layout." : "Directory is valid.",
-      configCount: legacy ? 1 : 2,
+      configCount: legacy ? 1 : 3,
       schemaVersion: legacy ? undefined : 1,
       layout: legacy ? undefined : "confscope-v1",
       legacy,

@@ -1,6 +1,7 @@
 package consul
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -83,6 +85,36 @@ func (c *Client) GetKV(baseURL, token, datacenter, key string) (KVPair, error) {
 	return pairs[0], nil
 }
 
+// PutKV 使用 Consul CAS 写入 KV。
+func (c *Client) PutKV(baseURL, token, datacenter, key, value string, cas uint64) error {
+	query := url.Values{}
+	setNonEmpty(query, "dc", datacenter)
+	query.Set("cas", strconv.FormatUint(cas, 10))
+	ok, err := c.doBool(baseURL, token, http.MethodPut, kvPath(key), query, bytes.NewBufferString(value))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("Consul CAS 冲突，目标已变化: %s", key)
+	}
+	return nil
+}
+
+// DeleteKV 使用 Consul CAS 删除 KV。
+func (c *Client) DeleteKV(baseURL, token, datacenter, key string, cas uint64) error {
+	query := url.Values{}
+	setNonEmpty(query, "dc", datacenter)
+	query.Set("cas", strconv.FormatUint(cas, 10))
+	ok, err := c.doBool(baseURL, token, http.MethodDelete, kvPath(key), query, nil)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("Consul CAS 冲突，目标已变化: %s", key)
+	}
+	return nil
+}
+
 // DecodeValue 解码 Consul KV 的 base64 value，并拒绝非文本内容。
 func DecodeValue(pair KVPair) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(pair.Value)
@@ -93,6 +125,43 @@ func DecodeValue(pair KVPair) (string, error) {
 		return "", fmt.Errorf("Consul KV value 不是可显示文本: %s", pair.Key)
 	}
 	return string(data), nil
+}
+
+func (c *Client) doBool(baseURL, token, method, path string, query url.Values, body io.Reader) (bool, error) {
+	reqURL := strings.TrimRight(baseURL, "/") + path
+	if len(query) > 0 {
+		reqURL += "?" + query.Encode()
+	}
+	req, err := http.NewRequest(method, reqURL, body)
+	if err != nil {
+		return false, err
+	}
+	if token != "" {
+		req.Header.Set("X-Consul-Token", token)
+	}
+	if method == http.MethodPut {
+		req.Header.Set("Content-Type", "text/plain;charset=UTF-8")
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("Consul 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("读取 Consul 响应失败: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("Consul 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), strings.TrimSpace(string(responseBody)))
+	}
+	var ok bool
+	if err := json.Unmarshal(responseBody, &ok); err != nil {
+		return false, fmt.Errorf("解析 Consul 写入响应失败: %w —— %s", err, strings.TrimSpace(string(responseBody)))
+	}
+	return ok, nil
 }
 
 func (c *Client) getJSON(baseURL, token, path string, query url.Values, target any) error {

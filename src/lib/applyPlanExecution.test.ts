@@ -145,6 +145,18 @@ function documentValue(content: string, exists = true, format: BuildApplyPlanInp
   };
 }
 
+function documentValueWithVersion(
+  content: string,
+  version: string,
+  format: BuildApplyPlanInput["items"][number]["sourceValue"]["format"] = "YAML"
+) {
+  return {
+    ...documentValue(content, true, format),
+    version,
+    updateTime: `2026-07-06T00:00:00.000Z-${version}`,
+  };
+}
+
 function absentValue() {
   return { exists: false };
 }
@@ -219,6 +231,8 @@ function deps(documents: Record<string, ConfigDocument | null>, overrides: { bac
     getConfigDocument: docReader(documents),
     publishConfig: overrides.publishReject ? vi.fn().mockRejectedValue(overrides.publishReject) : vi.fn().mockResolvedValue(undefined),
     deleteConfig: vi.fn().mockResolvedValue(undefined),
+    publishConfigRef: vi.fn().mockResolvedValue(undefined),
+    deleteConfigRef: vi.fn().mockResolvedValue(undefined),
     createBackupSnapshot: overrides.backupReject
       ? vi.fn().mockRejectedValue(overrides.backupReject)
       : vi.fn().mockResolvedValue({ id: "snap-before-1", name: "prod_before_apply" }),
@@ -393,6 +407,245 @@ describe("executeApplyPlan", () => {
         type: "apply",
         result: "failure",
         error: expect.stringContaining("Cannot materialize"),
+      })
+    );
+  });
+
+  it("executes Apollo key-level writes through provider refs without falling back to document overwrite", async () => {
+    const apolloSource: Connection = {
+      ...sourceConnection,
+      id: "apollo-dev",
+      provider: "apollo",
+      sourceType: "nacos",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    };
+    const apolloTarget: Connection = {
+      ...targetConnection,
+      id: "apollo-prod",
+      provider: "apollo",
+      sourceType: "nacos",
+      apolloEnv: "DEV",
+      apolloAppId: "order-service",
+      apolloCluster: "default",
+      apolloNamespaceName: "application",
+      apolloToken: "apollo-token",
+    };
+    const targetRef: BuildApplyPlanInput["items"][number]["ref"] = {
+      provider: "apollo",
+      connectionId: "apollo-prod",
+      namespace: "order-service",
+      group: "default",
+      dataId: "application",
+      key: "feature.enabled",
+    };
+    const sourceRef: BuildApplyPlanInput["items"][number]["ref"] = { ...targetRef, connectionId: "apollo-dev" };
+    const plan = buildApplyPlan({
+      id: "plan-apollo-key",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "key",
+      source: planEndpoint(apolloSource, "Apollo Dev / application"),
+      target: planEndpoint(apolloTarget, "Apollo Prod / application"),
+      inputSummary: {
+        sourceType: "audit",
+        scope: "key",
+        sourceLabel: "Apollo Dev / application",
+        targetLabel: "Apollo Prod / application",
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: targetRef,
+          sourceRef,
+          targetRef,
+          sourceValue: { exists: true, value: "enabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+          targetValue: { exists: true, value: "disabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+        },
+      ],
+    });
+    const runDeps = deps({
+      "apollo-dev:application": doc("feature.enabled=enabled", "properties"),
+      "apollo-prod:application": doc("feature.enabled=disabled", "properties"),
+    });
+    runDeps.connections = [apolloSource, apolloTarget];
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.publishConfigRef).toHaveBeenCalledWith(apolloTarget, targetRef, "enabled", "properties");
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+  });
+
+  it("executes Consul document writes through provider refs with expected ModifyIndex versions", async () => {
+    const consulSource: Connection = {
+      ...sourceConnection,
+      id: "consul-dev",
+      provider: "consul",
+      sourceType: "nacos",
+      defaultNamespace: "dc1",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+      consulToken: "consul-token",
+    };
+    const consulTarget: Connection = {
+      ...targetConnection,
+      id: "consul-prod",
+      provider: "consul",
+      sourceType: "nacos",
+      defaultNamespace: "dc1",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+      consulToken: "consul-token",
+    };
+    const consulEndpoint = (connection: Connection, label: string): ApplyPlanEndpoint => ({
+      envId: connection.id,
+      label,
+      provider: "consul",
+      connectionId: connection.id,
+      connectionName: connection.name,
+      namespace: "dc1",
+    });
+    const consulRef = (dataId: string): BuildApplyPlanInput["items"][number]["ref"] => ({
+      provider: "consul",
+      connectionId: "consul-prod",
+      namespace: "dc1",
+      group: "apps/order/",
+      dataId,
+      key: "__document",
+    });
+    const plan = buildApplyPlan({
+      id: "plan-consul-document",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "batch",
+      source: consulEndpoint(consulSource, "Consul Dev / apps/order/"),
+      target: consulEndpoint(consulTarget, "Consul Prod / apps/order/"),
+      inputSummary: {
+        sourceType: "diff",
+        scope: "batch",
+        sourceLabel: "Consul Dev / apps/order/",
+        targetLabel: "Consul Prod / apps/order/",
+        selectedCount: 3,
+      },
+      items: [
+        {
+          ref: consulRef("apps/order/app.yaml"),
+          sourceRef: { ...consulRef("apps/order/app.yaml"), connectionId: "consul-dev" },
+          targetRef: consulRef("apps/order/app.yaml"),
+          sourceValue: documentValue("server:\n  port: 9090\n", true, "YAML"),
+          targetValue: documentValueWithVersion("server:\n  port: 8080\n", "42", "YAML"),
+        },
+        {
+          ref: consulRef("apps/order/new.yaml"),
+          sourceRef: { ...consulRef("apps/order/new.yaml"), connectionId: "consul-dev" },
+          targetRef: consulRef("apps/order/new.yaml"),
+          sourceValue: documentValue("created: true\n", true, "YAML"),
+          targetValue: absentValue(),
+        },
+        {
+          ref: consulRef("apps/order/old.yaml"),
+          sourceRef: { ...consulRef("apps/order/old.yaml"), connectionId: "consul-dev" },
+          targetRef: consulRef("apps/order/old.yaml"),
+          sourceValue: absentValue(),
+          targetValue: documentValueWithVersion("remove: true\n", "51", "YAML"),
+        },
+      ],
+    });
+    const runDeps = deps({
+      "consul-dev:apps/order/app.yaml": doc("server:\n  port: 9090\n", "yaml"),
+      "consul-prod:apps/order/app.yaml": doc("server:\n  port: 8080\n", "yaml", "42"),
+      "consul-dev:apps/order/new.yaml": doc("created: true\n", "yaml"),
+      "consul-prod:apps/order/new.yaml": null,
+      "consul-dev:apps/order/old.yaml": null,
+      "consul-prod:apps/order/old.yaml": doc("remove: true\n", "yaml", "51"),
+    });
+    runDeps.connections = [consulSource, consulTarget];
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.publishConfigRef).toHaveBeenCalledWith(
+      consulTarget,
+      expect.objectContaining({ dataId: "apps/order/app.yaml", expectedVersion: "42" }),
+      "server:\n  port: 9090\n",
+      "yaml"
+    );
+    expect(runDeps.publishConfigRef).toHaveBeenCalledWith(
+      consulTarget,
+      expect.objectContaining({ dataId: "apps/order/new.yaml", expectedVersion: "0" }),
+      "created: true\n",
+      "yaml"
+    );
+    expect(runDeps.deleteConfigRef).toHaveBeenCalledWith(
+      consulTarget,
+      expect.objectContaining({ dataId: "apps/order/old.yaml", expectedVersion: "51" })
+    );
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+  });
+
+  it("records Consul CAS conflicts as failed apply operations after backup", async () => {
+    const consulTarget: Connection = {
+      ...targetConnection,
+      id: "consul-prod",
+      provider: "consul",
+      sourceType: "nacos",
+      defaultNamespace: "dc1",
+      consulDatacenter: "dc1",
+      consulKeyPrefix: "apps/order/",
+      consulToken: "consul-token",
+    };
+    const consulSource: Connection = { ...consulTarget, id: "consul-dev", name: "Consul Dev" };
+    const targetRef: BuildApplyPlanInput["items"][number]["ref"] = {
+      provider: "consul",
+      connectionId: "consul-prod",
+      namespace: "dc1",
+      group: "apps/order/",
+      dataId: "apps/order/app.yaml",
+      key: "__document",
+    };
+    const plan = buildApplyPlan({
+      id: "plan-consul-cas-conflict",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "config",
+      source: planEndpoint(consulSource, "Consul Dev / apps/order/"),
+      target: planEndpoint(consulTarget, "Consul Prod / apps/order/"),
+      inputSummary: {
+        sourceType: "diff",
+        scope: "config",
+        sourceLabel: "Consul Dev / apps/order/",
+        targetLabel: "Consul Prod / apps/order/",
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: targetRef,
+          sourceRef: { ...targetRef, connectionId: "consul-dev" },
+          targetRef,
+          sourceValue: documentValue("server:\n  port: 9090\n", true, "YAML"),
+          targetValue: documentValueWithVersion("server:\n  port: 8080\n", "42", "YAML"),
+        },
+      ],
+    });
+    const runDeps = deps({
+      "consul-dev:apps/order/app.yaml": doc("server:\n  port: 9090\n", "yaml"),
+      "consul-prod:apps/order/app.yaml": doc("server:\n  port: 8080\n", "yaml", "42"),
+    });
+    runDeps.connections = [consulSource, consulTarget];
+    runDeps.publishConfigRef.mockRejectedValueOnce(new Error("Consul CAS 冲突，目标已变化: apps/order/app.yaml"));
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toMatchObject({ ok: false, taskId: "task-apply-1", historyId: "history-1", error: expect.stringContaining("CAS") });
+    expect(runDeps.recordOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "apply",
+        result: "failure",
+        backupSnapshotId: "snap-before-1",
+        error: expect.stringContaining("CAS"),
       })
     );
   });

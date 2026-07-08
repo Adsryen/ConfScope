@@ -41,6 +41,45 @@ export async function getApolloNamespace(endpoint: SmokeApolloEndpoint): Promise
   return namespace;
 }
 
+export async function upsertApolloItem(endpoint: SmokeApolloEndpoint, key: string, value: string, operator: string): Promise<void> {
+  const path = apolloPath(endpoint, `namespaces/${endpoint.namespaceName}/items/${encodeURIComponent(key)}`);
+  await fetchApolloJSON<unknown>(endpoint, path, {
+    method: "PUT",
+    query: new URLSearchParams({ createIfNotExists: "true" }),
+    body: {
+      key,
+      value,
+      comment: "ConfScope ApplyPlan",
+      dataChangeLastModifiedBy: operator,
+      dataChangeCreatedBy: operator,
+    },
+  });
+}
+
+export async function deleteApolloItem(endpoint: SmokeApolloEndpoint, key: string, operator: string): Promise<void> {
+  const path = apolloPath(endpoint, `namespaces/${endpoint.namespaceName}/items/${encodeURIComponent(key)}`);
+  await fetchApolloJSON<unknown>(endpoint, path, {
+    method: "DELETE",
+    query: new URLSearchParams({ operator }),
+  });
+}
+
+export async function releaseApolloNamespace(
+  endpoint: SmokeApolloEndpoint,
+  releaseTitle: string,
+  releaseComment: string,
+  operator: string
+): Promise<void> {
+  await fetchApolloJSON<unknown>(endpoint, apolloPath(endpoint, `namespaces/${endpoint.namespaceName}/releases`), {
+    method: "POST",
+    body: {
+      releaseTitle,
+      releaseComment,
+      releasedBy: operator,
+    },
+  });
+}
+
 export function apolloNamespaceContent(namespace: SmokeApolloNamespace): string {
   return [...namespace.items]
     .sort((left, right) => left.key.localeCompare(right.key))
@@ -70,13 +109,32 @@ function apolloPath(endpoint: SmokeApolloEndpoint, suffix: string): string {
   ].join("/");
 }
 
-async function fetchApolloJSON<T>(endpoint: SmokeApolloEndpoint, path: string): Promise<T> {
-  const response = await fetch(new URL(path, endpoint.baseUrl), {
-    method: "GET",
+interface ApolloRequestOptions {
+  method?: string;
+  query?: URLSearchParams;
+  body?: Record<string, string>;
+}
+
+async function fetchApolloJSON<T>(endpoint: SmokeApolloEndpoint, path: string, options: ApolloRequestOptions = {}): Promise<T> {
+  const url = new URL(path, endpoint.baseUrl);
+  if (options.query) {
+    for (const [key, value] of options.query) url.searchParams.set(key, value);
+  }
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Authorization: endpoint.token,
+  };
+  let body: string | undefined;
+  if (options.body) {
+    headers["Content-Type"] = "application/json;charset=UTF-8";
+    body = JSON.stringify(options.body);
+  }
+  const response = await fetch(url, {
+    method: options.method ?? "GET",
     headers: {
-      Accept: "application/json",
-      Authorization: endpoint.token,
+      ...headers,
     },
+    body,
   });
   if (!response.ok) {
     throw new Error(`Apollo smoke request failed ${response.status}: ${await response.text()}`);

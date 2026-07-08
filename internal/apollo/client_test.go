@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -113,5 +114,102 @@ func TestClientRejectsNamespaceWithoutItems(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "items") {
 		t.Fatalf("error = %q, want missing items hint", err.Error())
+	}
+}
+
+func TestClientUpsertsItemWithCreateIfNotExists(t *testing.T) {
+	server := newApolloIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/items/server.port" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("createIfNotExists") != "true" {
+			t.Fatalf("createIfNotExists = %q, want true", r.URL.Query().Get("createIfNotExists"))
+		}
+		if r.Header.Get("Authorization") != "apollo-token" {
+			t.Fatalf("Authorization = %q, want apollo-token", r.Header.Get("Authorization"))
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["key"] != "server.port" || body["value"] != "8081" {
+			t.Fatalf("unexpected body: %+v", body)
+		}
+		if body["dataChangeLastModifiedBy"] != "confscope" || body["dataChangeCreatedBy"] != "confscope" {
+			t.Fatalf("unexpected operator fields: %+v", body)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"key":"server.port"}`))
+	}))
+
+	err := NewClient().UpsertItem(server.URL, "apollo-token", "DEV", "order-service", "default", "application", "server.port", "8081", "confscope")
+	if err != nil {
+		t.Fatalf("UpsertItem returned error: %v", err)
+	}
+}
+
+func TestClientDeletesItemWithOperator(t *testing.T) {
+	server := newApolloIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %s, want DELETE", r.Method)
+		}
+		if r.URL.Path != "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/items/server.port" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("operator") != "confscope" {
+			t.Fatalf("operator = %q, want confscope", r.URL.Query().Get("operator"))
+		}
+		if r.Header.Get("Authorization") != "apollo-token" {
+			t.Fatalf("Authorization = %q, want apollo-token", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	err := NewClient().DeleteItem(server.URL, "apollo-token", "DEV", "order-service", "default", "application", "server.port", "confscope")
+	if err != nil {
+		t.Fatalf("DeleteItem returned error: %v", err)
+	}
+}
+
+func TestClientReleasesNamespace(t *testing.T) {
+	server := newApolloIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/openapi/v1/envs/DEV/apps/order-service/clusters/default/namespaces/application/releases" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["releaseTitle"] != "ConfScope ApplyPlan" || body["releaseComment"] != "plan plan-1" || body["releasedBy"] != "confscope" {
+			t.Fatalf("unexpected release body: %+v", body)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"releaseKey":"release-1"}`))
+	}))
+
+	err := NewClient().ReleaseNamespace(server.URL, "apollo-token", "DEV", "order-service", "default", "application", "ConfScope ApplyPlan", "plan plan-1", "confscope")
+	if err != nil {
+		t.Fatalf("ReleaseNamespace returned error: %v", err)
+	}
+}
+
+func TestClientReturnsWriteStatusErrorsWithBody(t *testing.T) {
+	server := newApolloIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"release denied"}`))
+	}))
+
+	err := NewClient().ReleaseNamespace(server.URL, "apollo-token", "DEV", "order-service", "default", "application", "title", "comment", "confscope")
+	if err == nil {
+		t.Fatal("ReleaseNamespace returned nil error")
+	}
+	if !strings.Contains(err.Error(), "Apollo 返回 403") || !strings.Contains(err.Error(), "release denied") {
+		t.Fatalf("error = %q, want status and body", err.Error())
 	}
 }

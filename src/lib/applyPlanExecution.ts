@@ -30,6 +30,8 @@ export interface ExecuteApplyPlanDeps {
   getConfigDocument: (conn: Connection, namespace: string, dataId: string, group: string) => Promise<ConfigDocument>;
   publishConfig: (conn: Connection, namespace: string, dataId: string, group: string, content: string, configType: string) => Promise<void>;
   deleteConfig: (conn: Connection, namespace: string, dataId: string, group: string) => Promise<void>;
+  publishConfigRef?: (conn: Connection, ref: ApplyPlanWriteRef, content: string, configType: string) => Promise<void>;
+  deleteConfigRef?: (conn: Connection, ref: ApplyPlanWriteRef) => Promise<void>;
   createBackupSnapshot: (configs: ApplyBackupConfig[]) => Promise<{ id: string; name: string }>;
   recordOperation: (record: Omit<OperationRecord, "id" | "timestamp">) => OperationRecord;
   taskManager: TaskManager;
@@ -241,10 +243,12 @@ async function beforeSnapshots(plan: ApplyPlan, targetConnection: Connection, de
 
 interface PlannedWrite {
   item: ApplyPlanItem;
-  kind: "publish" | "delete";
+  kind: "publish" | "delete" | "publish_ref" | "delete_ref";
   content?: string;
   configType?: string;
 }
+
+type ApplyPlanWriteRef = ApplyPlanItem["ref"] & { expectedVersion?: string };
 
 function contentForDocumentWrite(item: ApplyPlanItem): string {
   return item.afterValue.content ?? item.afterValue.value ?? "";
@@ -254,6 +258,28 @@ function formatForWrite(item: ApplyPlanItem): Format {
   return item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
 }
 
+function valueForKeyWrite(item: ApplyPlanItem): string {
+  return item.afterValue.value ?? item.afterValue.content ?? "";
+}
+
+function isProviderKeyWriteSupported(item: ApplyPlanItem): boolean {
+  const ref = targetRef(item);
+  return ref.provider === "apollo" && formatForWrite(item) === "Properties";
+}
+
+function consulExpectedVersion(item: ApplyPlanItem): string | null {
+  if (item.action === "create") return "0";
+  return item.targetValue.version ?? null;
+}
+
+function providerWriteRef(item: ApplyPlanItem): ApplyPlanWriteRef | string {
+  const ref = targetRef(item);
+  if (ref.provider !== "consul") return ref;
+  const expectedVersion = consulExpectedVersion(item);
+  if (!expectedVersion) return `Consul target ModifyIndex is required for ${ref.dataId}. Regenerate the ApplyPlan.`;
+  return { ...ref, expectedVersion };
+}
+
 function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
   const writes: PlannedWrite[] = [];
   for (const item of plan.items) {
@@ -261,7 +287,29 @@ function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
     if (item.blocked || item.action === "parse_error") return `Cannot execute blocked item ${item.id}.`;
     if (item.action === "skip") continue;
     if (ref.key !== DOCUMENT_KEY) {
-      return `Cannot materialize key-level apply for ${ref.dataId}/${ref.key} with format ${formatForWrite(item)}.`;
+      if (!isProviderKeyWriteSupported(item)) {
+        return `Cannot materialize key-level apply for ${ref.dataId}/${ref.key} with format ${formatForWrite(item)}.`;
+      }
+      if (item.action === "delete") {
+        writes.push({ item, kind: "delete_ref" });
+        continue;
+      }
+      if (item.action === "create" || item.action === "overwrite") {
+        writes.push({ item, kind: "publish_ref", content: valueForKeyWrite(item), configType: nacosType(formatForWrite(item)) });
+        continue;
+      }
+    }
+    if (ref.provider === "consul") {
+      const writeRef = providerWriteRef(item);
+      if (typeof writeRef === "string") return writeRef;
+      if (item.action === "delete") {
+        writes.push({ item, kind: "delete_ref" });
+        continue;
+      }
+      if (item.action === "create" || item.action === "overwrite") {
+        writes.push({ item, kind: "publish_ref", content: contentForDocumentWrite(item), configType: nacosType(formatForWrite(item)) });
+        continue;
+      }
     }
     if (item.action === "delete") {
       writes.push({ item, kind: "delete" });
@@ -346,8 +394,18 @@ export async function executeApplyPlan(plan: ApplyPlan, deps: ExecuteApplyPlanDe
             write.content ?? "",
             write.configType ?? "text"
           );
-        } else {
+        } else if (write.kind === "delete") {
           await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
+        } else if (write.kind === "publish_ref") {
+          if (!deps.publishConfigRef) throw new Error("Provider ref publish binding is not available.");
+          const writeRef = providerWriteRef(write.item);
+          if (typeof writeRef === "string") throw new Error(writeRef);
+          await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
+        } else {
+          if (!deps.deleteConfigRef) throw new Error("Provider ref delete binding is not available.");
+          const writeRef = providerWriteRef(write.item);
+          if (typeof writeRef === "string") throw new Error(writeRef);
+          await deps.deleteConfigRef(targetConnection, writeRef);
         }
         completed += 1;
         deps.taskManager.updateProgress(taskId, completed, 0, writes.length);

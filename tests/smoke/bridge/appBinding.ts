@@ -4,14 +4,19 @@ import { basename, dirname, extname, join, posix, relative, sep } from "node:pat
 import {
   apolloNamespaceContent,
   apolloNamespaceUpdateTime,
+  deleteApolloItem,
   getApolloNamespace,
   listApolloNamespaces,
+  releaseApolloNamespace,
   type SmokeApolloNamespace,
+  upsertApolloItem,
 } from "../env/apollo";
 import {
+  deleteConsulKV,
   getConsulKV,
   listConsulDatacenters,
   listConsulKV,
+  putConsulKV,
   type SmokeConsulKV,
 } from "../env/consul";
 import {
@@ -44,6 +49,7 @@ interface ConfigRef {
   group: string;
   dataId: string;
   key?: string;
+  expectedVersion?: string;
 }
 
 interface ListConfigsRequest {
@@ -850,8 +856,8 @@ async function getConfigDocument(state: SmokeState, profile: ConnectionProfile, 
 
 async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot publish configs");
-  if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
-  if (profile.provider === "consul") throw new Error("Consul provider is read-only in smoke");
+  if (profile.provider === "apollo") return publishApolloFromApplyPlan(state, profile, request);
+  if (profile.provider === "consul") return publishConsulFromApplyPlan(state, profile, request);
   await publishAndWait(endpointForProfile(profile, state), {
     namespace: request.ref.namespace,
     group: request.ref.group,
@@ -863,9 +869,102 @@ async function publishFromApplyPlan(state: SmokeState, profile: ConnectionProfil
 
 async function deleteFromApplyPlan(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
   if (profile.provider === "local") throw new Error("Local snapshot sources are read-only and cannot delete configs");
-  if (profile.provider === "apollo") throw new Error("Apollo provider is read-only in smoke");
-  if (profile.provider === "consul") throw new Error("Consul provider is read-only in smoke");
+  if (profile.provider === "apollo") return deleteApolloFromApplyPlan(state, profile, ref);
+  if (profile.provider === "consul") return deleteConsulFromApplyPlan(state, profile, ref);
   await deleteNacosConfig(endpointForProfile(profile, state), ref);
+}
+
+async function publishApolloFromApplyPlan(state: SmokeState, profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
+  const endpoint = apolloEndpointForProfile(profile, state, request.ref);
+  if (isApolloDocumentRef(request.ref)) {
+    if (request.format.toLowerCase() !== "properties") {
+      throw new Error(`Apollo smoke ApplyPlan only supports properties namespaces, got ${request.format}`);
+    }
+    const desired = parsePropertiesDocument(request.content);
+    const current = await getApolloNamespace(endpoint);
+    if (apolloFormat(current) !== "properties") {
+      throw new Error(`Apollo smoke ApplyPlan only supports properties namespaces, got ${apolloFormat(current)}`);
+    }
+    let changed = false;
+    const currentItems = new Map(current.items.map((item) => [item.key, item.value]));
+    for (const [key, value] of desired) {
+      if (currentItems.get(key) !== value) {
+        await upsertApolloItem(endpoint, key, value, "confscope");
+        changed = true;
+      }
+    }
+    for (const key of currentItems.keys()) {
+      if (!desired.has(key)) {
+        await deleteApolloItem(endpoint, key, "confscope");
+        changed = true;
+      }
+    }
+    if (changed) {
+      await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", "Smoke ApplyPlan document sync", "confscope");
+    }
+    return;
+  }
+  if (request.format.toLowerCase() !== "properties") {
+    throw new Error(`Apollo smoke ApplyPlan only supports properties item writes, got ${request.format}`);
+  }
+  await upsertApolloItem(endpoint, request.ref.key ?? "", request.content, "confscope");
+  await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", `Smoke ApplyPlan item ${request.ref.key}`, "confscope");
+}
+
+async function deleteApolloFromApplyPlan(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
+  const endpoint = apolloEndpointForProfile(profile, state, ref);
+  if (isApolloDocumentRef(ref)) {
+    const current = await getApolloNamespace(endpoint);
+    for (const item of current.items) {
+      await deleteApolloItem(endpoint, item.key, "confscope");
+    }
+    if (current.items.length > 0) {
+      await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", "Smoke ApplyPlan document delete", "confscope");
+    }
+    return;
+  }
+  await deleteApolloItem(endpoint, ref.key ?? "", "confscope");
+  await releaseApolloNamespace(endpoint, "ConfScope ApplyPlan", `Smoke ApplyPlan item delete ${ref.key}`, "confscope");
+}
+
+async function publishConsulFromApplyPlan(state: SmokeState, profile: ConnectionProfile, request: PublishConfigRequest): Promise<void> {
+  const endpoint = consulEndpointForProfile(profile, state, request.ref);
+  await putConsulKV(endpoint, request.ref.dataId, request.content, consulExpectedCAS(request.ref, false));
+}
+
+async function deleteConsulFromApplyPlan(state: SmokeState, profile: ConnectionProfile, ref: ConfigRef): Promise<void> {
+  const endpoint = consulEndpointForProfile(profile, state, ref);
+  await deleteConsulKV(endpoint, ref.dataId, consulExpectedCAS(ref, true));
+}
+
+function consulExpectedCAS(ref: ConfigRef, requireExisting: boolean): number {
+  const value = ref.expectedVersion?.trim();
+  if (!value) throw new Error("Consul expectedVersion is required for CAS write");
+  if (!/^\d+$/.test(value)) throw new Error(`Consul expectedVersion must be a ModifyIndex number: ${value}`);
+  const cas = Number(value);
+  if (!Number.isSafeInteger(cas)) throw new Error(`Consul expectedVersion is too large for smoke CAS: ${value}`);
+  if (requireExisting && cas === 0) throw new Error("Consul delete expectedVersion must be an existing ModifyIndex");
+  return cas;
+}
+
+function isApolloDocumentRef(ref: ConfigRef): boolean {
+  return !ref.key || ref.key === "__document";
+}
+
+function parsePropertiesDocument(content: string): Map<string, string> {
+  const items = new Map<string, string>();
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
+    const equalsIndex = line.indexOf("=");
+    const colonIndex = line.indexOf(":");
+    const index = equalsIndex >= 0 ? equalsIndex : colonIndex;
+    if (index < 0) throw new Error(`Invalid properties line: ${line}`);
+    const key = line.slice(0, index).trim();
+    if (!key) throw new Error(`Invalid properties line: ${line}`);
+    items.set(key, line.slice(index + 1).trim());
+  }
+  return items;
 }
 
 async function publishAndWait(endpoint: SmokeNacosEndpoint, config: SmokeNacosConfig): Promise<void> {
@@ -994,8 +1093,9 @@ function writeSnapshotDirectory(snapshot: Snapshot): void {
   for (const config of snapshot.configs) {
     const namespace = config.namespace || "public";
     const groupDir = join(snapshot.path, "configs", namespace || "public", config.group);
-    mkdirSync(groupDir, { recursive: true });
-    writeFileSync(join(groupDir, ...config.dataId.split("/")), config.content, "utf8");
+    const filePath = join(groupDir, ...config.dataId.split("/"));
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, config.content, "utf8");
   }
 }
 
@@ -1218,6 +1318,7 @@ function refArg(args: unknown[], index: number): ConfigRef {
     group: String(value.group ?? "DEFAULT_GROUP"),
     dataId: String(value.dataId ?? ""),
     key: String(value.key ?? ""),
+    expectedVersion: typeof value.expectedVersion === "string" ? value.expectedVersion : undefined,
   };
 }
 

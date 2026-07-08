@@ -48,10 +48,14 @@ describe("createLocalSnapshotFixtures", () => {
           dataId: "smoke-secret.properties",
           contentType: "properties",
         }),
+        expect.objectContaining({ namespace: "public", group: "DEFAULT_GROUP", dataId: "application.properties", contentType: "properties" }),
       ])
     );
     expect(readFileSync(join(fixtures.strictPublic, "configs", "public", "DEFAULT_GROUP", "smoke-app.yaml"), "utf8")).toContain(
       "feature: snapshot"
+    );
+    expect(readFileSync(join(fixtures.strictPublic, "configs", "public", "DEFAULT_GROUP", "application.properties"), "utf8")).toContain(
+      "feature.enabled=false"
     );
     expect(readFileSync(join(fixtures.legacyPublic, "manifest.json"), "utf8")).toBe("{}");
     expect(fixtures.invalidEmpty).toContain("invalid-empty");

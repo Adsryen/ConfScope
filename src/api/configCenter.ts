@@ -44,6 +44,7 @@ export interface ConfigRef {
   group: string;
   dataId: string;
   key: string;
+  expectedVersion?: string;
 }
 
 export interface Namespace {

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
+import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
@@ -26,6 +26,8 @@ const apiMocks = vi.hoisted(() => ({
   getConfigDocument: vi.fn(),
   publishConfigFromApplyPlan: vi.fn(),
   deleteConfigFromApplyPlan: vi.fn(),
+  publishConfigRefFromApplyPlan: vi.fn(),
+  deleteConfigRefFromApplyPlan: vi.fn(),
 }));
 
 const snapshotMocks = vi.hoisted(() => ({
@@ -73,6 +75,8 @@ vi.mock("../api/nacos", () => ({
   getConfigDocument: apiMocks.getConfigDocument,
   publishConfigFromApplyPlan: apiMocks.publishConfigFromApplyPlan,
   deleteConfigFromApplyPlan: apiMocks.deleteConfigFromApplyPlan,
+  publishConfigRefFromApplyPlan: apiMocks.publishConfigRefFromApplyPlan,
+  deleteConfigRefFromApplyPlan: apiMocks.deleteConfigRefFromApplyPlan,
 }));
 
 vi.mock("../api/snapshot", () => ({
@@ -266,6 +270,8 @@ describe("ApplyPlanView", () => {
     apiMocks.getConfigDocument.mockReset();
     apiMocks.publishConfigFromApplyPlan.mockReset();
     apiMocks.deleteConfigFromApplyPlan.mockReset();
+    apiMocks.publishConfigRefFromApplyPlan.mockReset();
+    apiMocks.deleteConfigRefFromApplyPlan.mockReset();
     snapshotMocks.getSnapshot.mockReset();
     snapshotMocks.createSnapshot.mockReset();
     snapshotMocks.createSnapshot.mockResolvedValue({ id: "snap-before-1", name: "before_apply" });
@@ -410,10 +416,11 @@ describe("ApplyPlanView", () => {
 
     const executeButton = await screen.findByRole("button", { name: "Execute apply" });
     fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    await waitFor(() => expect(executeButton).toBeEnabled());
     fireEvent.click(executeButton);
 
     expect(await screen.findAllByText("plan-saved-1")).toHaveLength(2);
-    expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(savedPlan, expect.any(Object));
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(savedPlan, expect.any(Object)));
     expect(draftMocks.buildApplyPlanFromEntry).toHaveBeenCalledTimes(1);
   });
 
@@ -433,14 +440,18 @@ describe("ApplyPlanView", () => {
 
     const executeButton = await screen.findByRole("button", { name: "Execute apply" });
     fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    await waitFor(() => expect(executeButton).toBeEnabled());
     fireEvent.click(executeButton);
 
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
     const executionDeps = executionMocks.executeApplyPlan.mock.calls[0][1];
     expect(executionDeps).toMatchObject({
       connections: [sourceConn, safeTargetConn],
       getConfigDocument: apiMocks.getConfigDocument,
       publishConfig: apiMocks.publishConfigFromApplyPlan,
       deleteConfig: apiMocks.deleteConfigFromApplyPlan,
+      publishConfigRef: apiMocks.publishConfigRefFromApplyPlan,
+      deleteConfigRef: apiMocks.deleteConfigRefFromApplyPlan,
       recordOperation: historyMocks.recordOperation,
       taskManager: taskManagerMocks.manager,
     });
@@ -522,13 +533,17 @@ describe("ApplyPlanView", () => {
     renderView(entryPayload, [safeTargetConn]);
 
     fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
-    fireEvent.click(screen.getByRole("button", { name: "Execute apply" }));
+    const executeButton = screen.getByRole("button", { name: "Execute apply" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
 
-    expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
-      plan,
-      expect.objectContaining({
-        connections: [safeTargetConn, snapshotSourceConn],
-      })
+    await waitFor(() =>
+      expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
+        plan,
+        expect.objectContaining({
+          connections: [safeTargetConn, snapshotSourceConn],
+        })
+      )
     );
   });
 });

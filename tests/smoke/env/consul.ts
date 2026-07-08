@@ -118,13 +118,20 @@ export async function getConsulKVContent(endpoint: SmokeConsulEndpoint, key: str
   return (await getConsulKV(endpoint, key)).value;
 }
 
-async function putConsulKV(endpoint: SmokeConsulEndpoint, key: string, content: string): Promise<void> {
+export async function putConsulKV(endpoint: SmokeConsulEndpoint, key: string, content: string, cas?: number): Promise<void> {
   const url = consulKVURL(endpoint, key);
+  if (typeof cas === "number") url.searchParams.set("cas", String(cas));
   url.searchParams.set("dc", endpoint.datacenter);
   const response = await fetch(url, { method: "PUT", body: content });
-  if (!response.ok) {
-    throw new Error(`Consul KV put failed ${response.status}: ${await response.text()}`);
-  }
+  await expectConsulBool(response, `put ${key}`);
+}
+
+export async function deleteConsulKV(endpoint: SmokeConsulEndpoint, key: string, cas?: number): Promise<void> {
+  const url = consulKVURL(endpoint, key);
+  if (typeof cas === "number") url.searchParams.set("cas", String(cas));
+  url.searchParams.set("dc", endpoint.datacenter);
+  const response = await fetch(url, { method: "DELETE" });
+  await expectConsulBool(response, `delete ${key}`);
 }
 
 async function deleteConsulPrefix(endpoint: SmokeConsulEndpoint, prefix: string): Promise<void> {
@@ -166,6 +173,16 @@ async function retryConsul(action: () => Promise<void>, label: string): Promise<
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`Timed out during Consul ${label}; lastError=${lastError}`);
+}
+
+async function expectConsulBool(response: Response, label: string): Promise<void> {
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Consul KV ${label} failed ${response.status}: ${text}`);
+  }
+  if (text.trim() === "false") {
+    throw new Error(`Consul CAS conflict during ${label}`);
+  }
 }
 
 function consulKVURL(endpoint: SmokeConsulEndpoint, key: string): URL {
