@@ -185,6 +185,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
     const next = updateSnapshotWebDAVSettings({
       ...snapshotWebDAV,
       enabled: true,
+      passwordSecretRef: snapshotWebDAV.password ? undefined : snapshotWebDAV.passwordSecretRef,
     });
     setSnapshotWebDAV(next.webdav);
     return next.webdav;

@@ -38,6 +38,24 @@ interface CredentialStorePoCResult {
   valueSize: number;
 }
 
+interface CredentialSecretRef {
+  namespace: string;
+  ownerId: string;
+  field: string;
+  ref: string;
+}
+
+interface CredentialSecretRefMigrationResult {
+  migrated: number;
+  refs: CredentialSecretRef[];
+  migrationConnectionPasswordCleared: boolean;
+  apolloTokenCleared: boolean;
+  appDataWebDAVPasswordCleared: boolean;
+  snapshotWebDAVPasswordCleared: boolean;
+  sshPasswordPreserved: boolean;
+  secureReadChecks: number;
+}
+
 interface NativePollResult<T> {
   done: boolean;
   value?: T;
@@ -74,6 +92,12 @@ test("creates a Nacos connection through the native Wails UI and browses real co
   await verifyNativeSSHProfileAndTunnel(native, smoke);
   await verifyNativeAppDataWebDAVBackup(native, smoke);
   await verifyNativeConfigSnapshotWebDAV(native, smoke);
+  const migratedRefs = await verifyCredentialSecretRefMigration(native, smoke);
+  try {
+    await verifyCredentialSecretRefAppDataBackup(native, smoke);
+  } finally {
+    await cleanupCredentialSecretRefs(native, migratedRefs.refs);
+  }
   await verifyNavigationPages(native, smoke);
 });
 
@@ -835,6 +859,386 @@ async function verifyNativeConfigSnapshotWebDAV(native: NativeControlClient, smo
     "snapshot WebDAV diff"
   );
   pass(smoke, "NATIVE-SNAPSHOT-WEBDAV-DIFF-01", "Config Snapshot WebDAV", "Native imported snapshot compared with Docker Nacos in DiffView");
+}
+
+async function createCredentialMigrationConnection(native: NativeControlClient, smoke: SmokeState): Promise<void> {
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    clickButton("Connections");
+    await waitFor(() => pageText().includes("Connection Manager"), 15_000, "Connection Manager");
+    clickButton("Add Source");
+    await setProject("Native Smoke Project");
+    await selectByLabel("Environment", "Development");
+    await setInputByLabel("Source Name", "Native Migration Nacos");
+    await optionalSelectByLabel("Config Center", "Nacos");
+    await optionalSelectByLabel("Nacos Type", "Open-source Nacos");
+    await optionalSelectByLabel("Access Mode", "Direct Nacos");
+    await setInputByLabel("Target Address", ${JSON.stringify(smoke.nacos.dev.baseUrl)});
+    await selectByLabel("Authentication", "Nacos Username/Password");
+    await setInputByLabel("Username", "native-migration-user");
+    await setInputByLabel("Password", "native-migration-password");
+    clickButton("Save");
+    return true;
+  `,
+    30_000
+  );
+
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const connections = JSON.parse(localStorage.getItem("cs.connections") || "[]");
+      const saved = Array.isArray(connections) && connections.find((item) => item && item.sourceName === "Native Migration Nacos");
+      return {
+        done: Boolean(saved && saved.password === "native-migration-password"),
+        value: saved ? saved.sourceName : "",
+        text: pageText(),
+      };
+    `,
+    15_000,
+    "saved Nacos password migration connection"
+  );
+}
+
+async function verifyCredentialSecretRefMigration(native: NativeControlClient, smoke: SmokeState): Promise<CredentialSecretRefMigrationResult> {
+  await createCredentialMigrationConnection(native, smoke);
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    clickButton("Settings");
+    await waitFor(() => pageText().includes("Migrate Credentials"), 20_000, "credential migration panel");
+    clickButton("Migrate Credentials");
+    return true;
+  `,
+    30_000
+  );
+
+  const migration = await waitForNativeValue<CredentialSecretRefMigrationResult>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const connections = JSON.parse(localStorage.getItem("cs.connections") || "[]");
+      const appDataBackup = JSON.parse(localStorage.getItem("cs.appDataBackup") || "{}");
+      const snapshotWebDAV = JSON.parse(localStorage.getItem("cs.snapshotWebDAV") || "{}");
+      const sshProfiles = JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]");
+      const migrationConnection = Array.isArray(connections) ? connections.find((item) => item && item.sourceName === "Native Migration Nacos") : null;
+      const apolloConnection = Array.isArray(connections) ? connections.find((item) => item && item.sourceName === "Native Apollo OpenAPI") : null;
+      const refs = [];
+      const addStoredRef = (pointer) => {
+        if (!pointer || pointer.status !== "stored") return false;
+        refs.push({
+          namespace: pointer.namespace,
+          ownerId: pointer.ownerId,
+          field: pointer.field,
+          ref: pointer.ref,
+        });
+        return true;
+      };
+      const migrationConnectionPasswordCleared = Boolean(
+        migrationConnection &&
+          migrationConnection.password === "" &&
+          addStoredRef(migrationConnection.secretRefs && migrationConnection.secretRefs.password)
+      );
+      const apolloTokenCleared = Boolean(
+        apolloConnection &&
+          apolloConnection.apolloToken === "" &&
+          addStoredRef(apolloConnection.secretRefs && apolloConnection.secretRefs.apolloToken)
+      );
+      const appDataWebDAVPasswordCleared = Boolean(
+        appDataBackup.webdav &&
+          appDataBackup.webdav.password === "" &&
+          addStoredRef(appDataBackup.webdav.passwordSecretRef)
+      );
+      const snapshotWebDAVPasswordCleared = Boolean(
+        snapshotWebDAV.webdav &&
+          snapshotWebDAV.webdav.password === "" &&
+          addStoredRef(snapshotWebDAV.webdav.passwordSecretRef)
+      );
+      const sshPasswordPreserved =
+        Array.isArray(sshProfiles) &&
+        sshProfiles.some((profile) => profile && profile.config && typeof profile.config.password === "string" && profile.config.password.length > 0);
+      if (
+        !migrationConnectionPasswordCleared ||
+        !apolloTokenCleared ||
+        !appDataWebDAVPasswordCleared ||
+        !snapshotWebDAVPasswordCleared ||
+        !sshPasswordPreserved
+      ) {
+        return {
+          done: false,
+          text: JSON.stringify({
+            migrationConnectionPasswordCleared,
+            apolloTokenCleared,
+            appDataWebDAVPasswordCleared,
+            snapshotWebDAVPasswordCleared,
+            sshPasswordPreserved,
+            body: pageText(),
+          }),
+        };
+      }
+      return {
+        done: pageText().includes("Migrated"),
+        value: {
+          migrated: refs.length,
+          refs,
+          migrationConnectionPasswordCleared,
+          apolloTokenCleared,
+          appDataWebDAVPasswordCleared,
+          snapshotWebDAVPasswordCleared,
+          sshPasswordPreserved,
+          secureReadChecks: 0,
+        },
+        text: pageText(),
+      };
+    `,
+    60_000,
+    "credential secretRef migration result"
+  );
+
+  const expectedReadbacks = migration.refs.map((ref) => ({
+    ...ref,
+    expected:
+      ref.namespace === "connection" && ref.field === "password"
+        ? "native-migration-password"
+        : ref.namespace === "connection" && ref.field === "apolloToken"
+          ? smoke.apollo.token
+          : ref.namespace === "app-data-webdav"
+            ? smoke.webdav.password
+            : ref.namespace === "snapshot-webdav"
+              ? smoke.webdav.password
+              : "",
+  }));
+  const secureReadChecks = await native.eval<number>(
+    `
+    const app = window.go && window.go.main && window.go.main.App;
+    if (!app || typeof app.ReadSecureSecret !== "function") {
+      throw new Error("ReadSecureSecret binding not found");
+    }
+    const refs = ${JSON.stringify(expectedReadbacks)};
+    let checks = 0;
+    for (const ref of refs) {
+      if (!ref.expected) {
+        throw new Error("Missing expected secure-store value for " + ref.ref);
+      }
+      const actual = await app.ReadSecureSecret({ namespace: ref.namespace, ownerId: ref.ownerId, field: ref.field });
+      if (actual !== ref.expected) {
+        throw new Error("Secure-store readback mismatch for " + ref.ref);
+      }
+      checks += 1;
+    }
+    return checks;
+  `,
+    60_000
+  );
+
+  expect(migration.migrated).toBeGreaterThanOrEqual(4);
+  expect(secureReadChecks).toBeGreaterThanOrEqual(4);
+  expect(migration.migrationConnectionPasswordCleared).toBe(true);
+  expect(migration.apolloTokenCleared).toBe(true);
+  expect(migration.appDataWebDAVPasswordCleared).toBe(true);
+  expect(migration.snapshotWebDAVPasswordCleared).toBe(true);
+  expect(migration.sshPasswordPreserved).toBe(true);
+  pass(
+    smoke,
+    "NATIVE-CREDENTIAL-SECRETREF-MIGRATION-01",
+    "Security",
+    "Native credential migration moved form-created Nacos, Apollo, and WebDAV secrets to Windows Credential Manager"
+  );
+
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "settings", sidebarCollapsed: false }));
+    if (document.body) {
+      document.body.innerHTML = "<div id=\\"native-smoke-reloading\\">reloading</div>";
+    }
+    setTimeout(() => window.location.reload(), 500);
+    return true;
+  `,
+    10_000
+  );
+  await waitForNativeValue<boolean>(
+    native,
+    `
+      ${DOM_HELPERS}
+      await closeStartupDialog();
+      const ready = Boolean(document.querySelector(".app-shell"));
+      return { done: ready, value: ready, text: pageText() };
+    `,
+    60_000,
+    "app shell after credential migration reload"
+  );
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    clickButton("Settings");
+    await waitFor(() => pageText().includes("App Data Backup"), 20_000, "App Data Backup panel after migration");
+    clickButton("Test WebDAV");
+    return true;
+  `,
+    30_000
+  );
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("WebDAV connection passed"), value: text, text };
+    `,
+    30_000,
+    "app-data WebDAV test after secretRef migration"
+  );
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    clickButton("Backups");
+    await waitFor(() => pageText().includes("Snapshot WebDAV"), 20_000, "Snapshot WebDAV panel after migration");
+    clickButton("Test WebDAV");
+    return true;
+  `,
+    30_000
+  );
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("WebDAV connection passed"), value: text, text };
+    `,
+    30_000,
+    "snapshot WebDAV test after secretRef migration"
+  );
+  pass(
+    smoke,
+    "NATIVE-CREDENTIAL-SECRETREF-WEBDAV-HYDRATE-01",
+    "Security",
+    "Migrated App Data and Snapshot WebDAV targets still test through real Wails bindings"
+  );
+
+  return { ...migration, secureReadChecks };
+}
+
+async function verifyCredentialSecretRefAppDataBackup(native: NativeControlClient, smoke: SmokeState): Promise<void> {
+  const backupPassword = "native-secretref-app-data-pass";
+  const expectedConnectionCount = await native.eval<number>(
+    `
+    const connections = JSON.parse(localStorage.getItem("cs.connections") || "[]");
+    return Array.isArray(connections) ? connections.length : 0;
+  `,
+    5_000
+  );
+
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    clickButton("Settings");
+    await waitFor(() => pageText().includes("App Data Backup"), 20_000, "App Data Backup panel for secretRef package");
+    await setInputByLabel("WebDAV backup password", ${JSON.stringify(backupPassword)});
+    clickButton("Upload current data");
+    return true;
+  `,
+    20_000
+  );
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes("WebDAV backup uploaded"), value: text, text };
+    `,
+    45_000,
+    "secretRef app-data backup uploaded"
+  );
+
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    await setInputByLabel("Remote restore password", ${JSON.stringify(backupPassword)});
+    const previewButton = remoteBackupPreviewButton();
+    if (!previewButton) throw new Error("SecretRef remote backup preview button not found");
+    previewButton.click();
+    return true;
+  `,
+    10_000
+  );
+  await waitForNativeValue<string>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const text = pageText();
+      return { done: text.includes(${JSON.stringify("Connections: " + expectedConnectionCount)}), value: text, text };
+    `,
+    30_000,
+    "secretRef app-data backup preview"
+  );
+
+  await native.eval<boolean>(
+    `
+    ${DOM_HELPERS}
+    const restoreButton = findButton("Restore this backup");
+    if (!restoreButton) throw new Error("Restore button not found for secretRef backup");
+    localStorage.setItem("cs.connections", "[]");
+    restoreButton.click();
+    return true;
+  `,
+    10_000
+  );
+  const restored = await waitForNativeValue<{ connectionRestored: boolean; connectionPasswordPlaintext: boolean; webdavPasswordPlaintext: boolean }>(
+    native,
+    `
+      ${DOM_HELPERS}
+      const connections = JSON.parse(localStorage.getItem("cs.connections") || "[]");
+      const appDataBackup = JSON.parse(localStorage.getItem("cs.appDataBackup") || "{}");
+      const migrationConnection = Array.isArray(connections) ? connections.find((item) => item && item.sourceName === "Native Migration Nacos") : null;
+      const connectionRestored = Boolean(migrationConnection);
+      const connectionPasswordPlaintext = Boolean(
+        migrationConnection &&
+          migrationConnection.password === "native-migration-password" &&
+          !(migrationConnection.secretRefs && migrationConnection.secretRefs.password)
+      );
+      const webdavPasswordPlaintext = Boolean(
+        appDataBackup.webdav &&
+          appDataBackup.webdav.password === ${JSON.stringify(smoke.webdav.password)} &&
+          !appDataBackup.webdav.passwordSecretRef
+      );
+      return {
+        done: connectionRestored && connectionPasswordPlaintext && webdavPasswordPlaintext,
+        value: { connectionRestored, connectionPasswordPlaintext, webdavPasswordPlaintext },
+        text: pageText(),
+      };
+    `,
+    45_000,
+    "restored secretRef app-data backup payload"
+  );
+  expect(restored.connectionRestored).toBe(true);
+  expect(restored.connectionPasswordPlaintext).toBe(true);
+  expect(restored.webdavPasswordPlaintext).toBe(true);
+  pass(
+    smoke,
+    "NATIVE-CREDENTIAL-SECRETREF-APPDATA-BACKUP-01",
+    "App Data Backup",
+    "App-data WebDAV backup after secretRef migration restored portable plaintext credentials"
+  );
+}
+
+async function cleanupCredentialSecretRefs(native: NativeControlClient, refs: CredentialSecretRef[]): Promise<void> {
+  if (refs.length === 0) return;
+  await native.eval<boolean>(
+    `
+    const app = window.go && window.go.main && window.go.main.App;
+    if (!app || typeof app.DeleteSecureSecret !== "function") return true;
+    const refs = ${JSON.stringify(refs)};
+    for (const ref of refs) {
+      try {
+        await app.DeleteSecureSecret({ namespace: ref.namespace, ownerId: ref.ownerId, field: ref.field });
+      } catch {
+      }
+    }
+    return true;
+  `,
+    30_000
+  );
 }
 
 async function verifyNavigationPages(native: NativeControlClient, smoke: SmokeState): Promise<void> {

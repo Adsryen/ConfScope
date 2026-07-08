@@ -16,7 +16,7 @@ import {
 } from "../api/appDataBackup";
 import { useTranslation } from "../i18n";
 import {
-  collectAppDataBackupPayload,
+  collectPortableAppDataBackupPayload,
   restoreAppDataBackupPayload,
   summarizeAppDataBackupPayload,
   validateAppDataBackupPayload,
@@ -194,6 +194,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     username: webdavDraft.username.trim(),
     password: webdavDraft.password,
     rootPath: normalizeRootPath(webdavDraft.rootPath),
+    passwordSecretRef: webdavDraft.password ? undefined : webdavDraft.passwordSecretRef,
   });
 
   const recordActivity = (
@@ -244,7 +245,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       if (!path) return;
       await runWithTask(t("appDataBackup.localExportTask"), "backup", path, async () => {
         const meta = await buildMeta();
-        const payload = collectAppDataBackupPayload(meta);
+        const payload = await collectPortableAppDataBackupPayload(meta);
         await writeAppDataBackupFile(path, JSON.stringify(payload), exportPassword, meta);
       });
       recordActivity("local_export", "success", path, t("appDataBackup.localExported"));
@@ -312,7 +313,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       await runWithTask(t("appDataBackup.restoreTask"), "restore", preview.target, async () => {
         const meta = await buildMeta();
-        const currentPayload = collectAppDataBackupPayload(meta);
+        const currentPayload = await collectPortableAppDataBackupPayload(meta);
         await createAppDataRecoveryPoint(JSON.stringify(currentPayload), preview.password, meta);
         restoreAppDataBackupPayload(preview.payload);
       });
@@ -376,7 +377,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       const remote = await runWithTask(t("appDataBackup.webdavUploadTask"), "backup", target.rootPath, async () => {
         const meta = await buildMeta();
-        const payload = collectAppDataBackupPayload(meta);
+        const payload = await collectPortableAppDataBackupPayload(meta);
         return uploadAppDataWebDAVBackup(target, JSON.stringify(payload), webdavBackupPassword, meta);
       });
       recordActivity("webdav_upload", "success", remote.path, t("appDataBackup.webdavUploaded"));

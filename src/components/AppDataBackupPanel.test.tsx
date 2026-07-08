@@ -75,10 +75,11 @@ function backupPayload(connectionId = "restored-conn") {
   };
 }
 
-function renderPanel(props: Partial<Parameters<typeof AppDataBackupPanel>[0]> = {}) {
+function renderPanel(props: Partial<Parameters<typeof AppDataBackupPanel>[0]> = {}, seedStorage?: () => void) {
   vi.stubGlobal("localStorage", new MemoryStorage());
   localStorage.setItem("locale", "en-US");
   localStorage.setItem("cs.connections", JSON.stringify([{ id: "current-conn", name: "Current", baseUrl: "http://current", password: "local-secret" }]));
+  seedStorage?.();
   appApi.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.4.2", updateSources: [] });
   appApi.getCurrentPlatform.mockResolvedValue("windows");
   return render(
@@ -219,6 +220,79 @@ describe("AppDataBackupPanel", () => {
       rootPath: "/confscope-backups",
     });
     expect(JSON.parse(localStorage.getItem("cs.appDataBackup") || "{}").webdav).toMatchObject({ rootPath: "/confscope-backups" });
+  });
+
+  it("uses migrated WebDAV password secret refs when the password field is blank", async () => {
+    const passwordSecretRef = {
+      namespace: "app-data-webdav",
+      ownerId: "default",
+      field: "password",
+      ref: "app-data-webdav.default.password",
+      migratedAt: "2026-07-08T00:00:00.000Z",
+      status: "stored",
+    };
+    appDataBackupApi.testAppDataWebDAV.mockResolvedValue(undefined);
+    renderPanel({}, () => {
+      localStorage.setItem(
+        "cs.appDataBackup",
+        JSON.stringify({
+          webdav: {
+            enabled: true,
+            url: " https://dav.example.com ",
+            username: "ops",
+            password: "",
+            rootPath: "confscope-backups",
+            passwordSecretRef,
+          },
+          activities: [],
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Test WebDAV" }));
+
+    await waitFor(() => expect(appDataBackupApi.testAppDataWebDAV).toHaveBeenCalled());
+    expect(appDataBackupApi.testAppDataWebDAV).toHaveBeenCalledWith({
+      enabled: true,
+      url: "https://dav.example.com",
+      username: "ops",
+      password: "",
+      rootPath: "/confscope-backups",
+      passwordSecretRef,
+    });
+  });
+
+  it("clears migrated WebDAV password secret refs when a replacement password is saved", async () => {
+    renderPanel({}, () => {
+      localStorage.setItem(
+        "cs.appDataBackup",
+        JSON.stringify({
+          webdav: {
+            enabled: true,
+            url: "https://dav.example.com",
+            username: "ops",
+            password: "",
+            rootPath: "/confscope",
+            passwordSecretRef: {
+              namespace: "app-data-webdav",
+              ownerId: "default",
+              field: "password",
+              ref: "app-data-webdav.default.password",
+              migratedAt: "2026-07-08T00:00:00.000Z",
+              status: "stored",
+            },
+          },
+          activities: [],
+        })
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "replacement-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
+
+    const stored = JSON.parse(localStorage.getItem("cs.appDataBackup") || "{}");
+    expect(stored.webdav.password).toBe("replacement-secret");
+    expect(stored.webdav.passwordSecretRef).toBeUndefined();
   });
 
   it("uploads current data, lists remote backups, downloads a remote backup, and restores it", async () => {

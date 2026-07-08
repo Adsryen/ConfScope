@@ -1,10 +1,24 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "../test/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import SettingsView from "./SettingsView";
+
+const credentialMocks = vi.hoisted(() => ({
+  countMigratableStoredCredentials: vi.fn(() => 0),
+  migrateStoredCredentials: vi.fn(),
+}));
+
+vi.mock("../lib/credentialSecrets", async () => {
+  const actual = await vi.importActual<typeof import("../lib/credentialSecrets")>("../lib/credentialSecrets");
+  return {
+    ...actual,
+    countMigratableStoredCredentials: credentialMocks.countMigratableStoredCredentials,
+    migrateStoredCredentials: credentialMocks.migrateStoredCredentials,
+  };
+});
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -29,6 +43,12 @@ function renderSettings(locale: "zh-CN" | "en-US" = "en-US") {
 }
 
 describe("SettingsView", () => {
+  beforeEach(() => {
+    credentialMocks.countMigratableStoredCredentials.mockReset();
+    credentialMocks.countMigratableStoredCredentials.mockReturnValue(0);
+    credentialMocks.migrateStoredCredentials.mockReset();
+  });
+
   it("renders a grouped settings workbench without empty standalone sections", () => {
     renderSettings("en-US");
 
@@ -36,6 +56,7 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Network" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Smart Compare" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Credentials" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Backup" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Local Data" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "App Data Backup" })).toBeInTheDocument();
@@ -44,6 +65,27 @@ describe("SettingsView", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Authentication" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Security" })).not.toBeInTheDocument();
+  });
+
+  it("runs credential migration and refreshes the migration summary", async () => {
+    credentialMocks.countMigratableStoredCredentials.mockReturnValueOnce(3).mockReturnValue(0);
+    credentialMocks.migrateStoredCredentials.mockResolvedValue({
+      migrated: 2,
+      skipped: 4,
+      unsupported: 1,
+      failed: 0,
+      items: [],
+    });
+
+    renderSettings("en-US");
+
+    expect(screen.getByText("3 credentials ready to migrate")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Migrate Credentials" }));
+
+    await waitFor(() => expect(credentialMocks.migrateStoredCredentials).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Migrated 2 · Unsupported 1 · Failed 0")).toBeInTheDocument();
+    expect(screen.getByText("No plaintext credentials to migrate")).toBeInTheDocument();
   });
 
   it("keeps language, proxy, compare, and local data controls working", () => {

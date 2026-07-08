@@ -205,6 +205,83 @@ describe("connection store", () => {
     );
   });
 
+  it("preserves migrated credential secret refs and drops primitive bad records", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-secretref",
+          name: "secretref",
+          baseUrl: "http://localhost:8848/nacos",
+          username: "nacos",
+          password: "",
+          defaultNamespace: "",
+          secretRefs: {
+            password: {
+              ref: "connection.conn-secretref.password",
+              namespace: "connection",
+              ownerId: "conn-secretref",
+              field: "password",
+              migratedAt: "2026-07-08T00:00:00.000Z",
+              status: "stored",
+            },
+          },
+        },
+        "bad-record",
+      ])
+    );
+
+    expect(loadConnections()).toEqual([
+      expect.objectContaining({
+        id: "conn-secretref",
+        password: "",
+        secretRefs: {
+          password: {
+            ref: "connection.conn-secretref.password",
+            namespace: "connection",
+            ownerId: "conn-secretref",
+            field: "password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+      }),
+    ]);
+  });
+
+  it("drops connection secret refs with an invalid namespace", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-secretref",
+          name: "secretref",
+          baseUrl: "http://localhost:8848/nacos",
+          username: "nacos",
+          password: "",
+          defaultNamespace: "",
+          secretRefs: {
+            password: {
+              ref: "connection.conn-secretref.password",
+              namespace: "legacy-plaintext",
+              ownerId: "conn-secretref",
+              field: "password",
+              migratedAt: "2026-07-08T00:00:00.000Z",
+              status: "stored",
+            },
+          },
+        },
+      ])
+    );
+
+    expect(loadConnections()[0]).toEqual(
+      expect.objectContaining({
+        id: "conn-secretref",
+        secretRefs: undefined,
+      })
+    );
+  });
+
   it("preserves local snapshot force and validation metadata", () => {
     const created = upsertConnection({
       name: "local-snapshot",

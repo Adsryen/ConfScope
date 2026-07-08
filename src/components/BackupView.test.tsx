@@ -312,6 +312,41 @@ describe("BackupView", () => {
     expect(localStorage.getItem("cs.appDataBackup")).toContain("https://app.example.com");
   });
 
+  it("clears migrated snapshot WebDAV password secret refs when a replacement password is saved", async () => {
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/snapshots",
+          passwordSecretRef: {
+            namespace: "snapshot-webdav",
+            ownerId: "default",
+            field: "password",
+            ref: "snapshot-webdav.default.password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+        activities: [],
+      })
+    );
+
+    renderWithI18n(<BackupView />);
+
+    await screen.findByText("Snapshot WebDAV");
+    fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "replacement-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
+
+    const stored = JSON.parse(localStorage.getItem("cs.snapshotWebDAV") || "{}");
+    expect(stored.webdav.password).toBe("replacement-secret");
+    expect(stored.webdav.passwordSecretRef).toBeUndefined();
+  });
+
   it("uploads and imports encrypted config snapshot packages without persisting package passwords", async () => {
     const { listSnapshots } = await import("../api/snapshot");
     const snapshotWebDAV = await import("../api/snapshotWebDAV");

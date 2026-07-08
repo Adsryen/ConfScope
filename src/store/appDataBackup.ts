@@ -1,5 +1,7 @@
 // 应用数据备份设置与活动记录的本地持久化。
 
+import type { StoredSecretPointer } from "../lib/credentialSecrets";
+
 export type AppDataBackupActivityType = "local_export" | "local_restore" | "webdav_upload" | "webdav_restore" | "recovery_point";
 export type AppDataBackupActivityStatus = "success" | "failure";
 
@@ -9,6 +11,7 @@ export interface AppDataWebDAVSettings {
   username: string;
   password: string;
   rootPath: string;
+  passwordSecretRef?: StoredSecretPointer;
 }
 
 export interface AppDataBackupActivity {
@@ -50,6 +53,31 @@ function booleanValue(value: unknown): boolean {
   return typeof value === "boolean" ? value : false;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeSecretPointer(value: unknown): StoredSecretPointer | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const status = value.status;
+  if (status !== "stored" && status !== "missing" && status !== "unsupported") return undefined;
+  const ref = stringValue(value.ref);
+  const namespace = stringValue(value.namespace);
+  const ownerId = stringValue(value.ownerId);
+  const field = stringValue(value.field);
+  const migratedAt = stringValue(value.migratedAt);
+  if (!ref || !namespace || !ownerId || !field || !migratedAt) return undefined;
+  if (namespace !== "app-data-webdav") return undefined;
+  return {
+    ref,
+    namespace: namespace as StoredSecretPointer["namespace"],
+    ownerId,
+    field,
+    migratedAt,
+    status,
+  };
+}
+
 function normalizeRootPath(value: unknown): string {
   const raw = stringValue(value).trim();
   if (!raw) return DEFAULT_WEBDAV.rootPath;
@@ -65,6 +93,7 @@ function normalizeWebDAV(value: unknown): AppDataWebDAVSettings {
     username: stringValue(raw.username).trim(),
     password: stringValue(raw.password),
     rootPath: normalizeRootPath(raw.rootPath),
+    passwordSecretRef: normalizeSecretPointer(raw.passwordSecretRef),
   };
 }
 

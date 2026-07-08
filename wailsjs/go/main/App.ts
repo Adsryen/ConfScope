@@ -6,6 +6,9 @@ type GoApp = {
   InstallAndRestart(downloadedFile: string): Promise<void>;
   GetCurrentPlatform(): Promise<string>;
   RunCredentialStorePoC(runID: string): Promise<CredentialStorePoCResult>;
+  WriteSecureSecret(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
+  ReadSecureSecret(ref: SecureSecretRef): Promise<string>;
+  DeleteSecureSecret(ref: SecureSecretRef): Promise<void>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   ConfigCenterListNamespaces(profile: any): Promise<any>;
@@ -128,6 +131,19 @@ export interface CredentialStorePoCResult {
   valueSize: number;
 }
 
+export interface SecureSecretRef {
+  namespace: string;
+  ownerId: string;
+  field: string;
+}
+
+export interface SecureSecretWriteResult {
+  ref: SecureSecretRef;
+  targetName: string;
+  valueSize: number;
+  verified: boolean;
+}
+
 declare global {
   interface Window {
     go: {
@@ -153,6 +169,12 @@ export const InstallAndRestart = (downloadedFile: string) => app().InstallAndRes
 export const GetCurrentPlatform = () => app().GetCurrentPlatform();
 
 export const RunCredentialStorePoC = (runID: string) => app().RunCredentialStorePoC(runID);
+
+export const WriteSecureSecret = (ref: SecureSecretRef, value: string) => app().WriteSecureSecret(ref, value);
+
+export const ReadSecureSecret = (ref: SecureSecretRef) => app().ReadSecureSecret(ref);
+
+export const DeleteSecureSecret = (ref: SecureSecretRef) => app().DeleteSecureSecret(ref);
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 

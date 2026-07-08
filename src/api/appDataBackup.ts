@@ -10,6 +10,7 @@ import {
   WriteAppDataBackupFile,
 } from "../../wailsjs/go/main/App";
 import type { AppDataWebDAVSettings } from "../store/appDataBackup";
+import { hydrateAppDataWebDAVSettings } from "../lib/credentialSecrets";
 
 export interface AppDataBackupPackageMeta {
   appVersion: string;
@@ -67,28 +68,28 @@ export function createAppDataRecoveryPoint(
   return CreateAppDataRecoveryPoint(plaintextJson, password, meta) as Promise<AppDataBackupPackageSummary>;
 }
 
-export function testAppDataWebDAV(target: AppDataWebDAVSettings): Promise<void> {
-  return TestAppDataWebDAV(target);
+export async function testAppDataWebDAV(target: AppDataWebDAVSettings): Promise<void> {
+  return TestAppDataWebDAV(await hydrateAppDataWebDAVSettings(target));
 }
 
 export async function listAppDataWebDAVBackups(target: AppDataWebDAVSettings): Promise<RemoteAppDataBackup[]> {
-  const result: unknown = await ListAppDataWebDAVBackups(target);
+  const result: unknown = await ListAppDataWebDAVBackups(await hydrateAppDataWebDAVSettings(target));
   return Array.isArray(result) ? (result as RemoteAppDataBackup[]) : [];
 }
 
-export function uploadAppDataWebDAVBackup(
+export async function uploadAppDataWebDAVBackup(
   target: AppDataWebDAVSettings,
   plaintextJson: string,
   password: string,
   meta: AppDataBackupPackageMeta
 ): Promise<RemoteAppDataBackup> {
-  return UploadAppDataWebDAVBackup(target, plaintextJson, password, meta) as Promise<RemoteAppDataBackup>;
+  return UploadAppDataWebDAVBackup(await hydrateAppDataWebDAVSettings(target), plaintextJson, password, meta) as Promise<RemoteAppDataBackup>;
 }
 
-export function downloadAppDataWebDAVBackup(
+export async function downloadAppDataWebDAVBackup(
   target: AppDataWebDAVSettings,
   remotePath: string,
   password: string
 ): Promise<DecryptedAppDataBackupPackage> {
-  return DownloadAppDataWebDAVBackup(target, remotePath, password) as Promise<DecryptedAppDataBackupPackage>;
+  return DownloadAppDataWebDAVBackup(await hydrateAppDataWebDAVSettings(target), remotePath, password) as Promise<DecryptedAppDataBackupPackage>;
 }

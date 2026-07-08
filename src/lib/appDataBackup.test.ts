@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   APP_DATA_BACKUP_SCHEMA_VERSION,
   collectAppDataBackupPayload,
+  collectPortableAppDataBackupPayload,
   restoreAppDataBackupPayload,
   summarizeAppDataBackupPayload,
   validateAppDataBackupPayload,
 } from "./appDataBackup";
+import type { StoredSecretPointer } from "./credentialSecrets";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -64,6 +66,24 @@ function seedCurrentAppData(): void {
     "cs.appDataBackup",
     JSON.stringify({ webdav: { enabled: true, url: "https://dav.example.com", username: "ops", password: "dav-secret", rootPath: "/confscope" } })
   );
+  localStorage.setItem(
+    "cs.snapshotWebDAV",
+    JSON.stringify({
+      webdav: { enabled: true, url: "https://dav.example.com", username: "ops", password: "snapshot-dav-secret", rootPath: "/confscope/snapshots" },
+      activities: [],
+    })
+  );
+}
+
+function pointer(ref: string, namespace: StoredSecretPointer["namespace"], ownerId: string, field: string): StoredSecretPointer {
+  return {
+    ref,
+    namespace,
+    ownerId,
+    field,
+    migratedAt: "2026-07-08T00:00:00.000Z",
+    status: "stored",
+  };
 }
 
 describe("appDataBackup lib", () => {
@@ -88,6 +108,187 @@ describe("appDataBackup lib", () => {
     expect(payload.data.ui).toEqual({ connId: "conn-1", mode: "browse", sidebarCollapsed: false });
     expect(payload.data.locale).toBe("en-US");
     expect(payload.data.appDataBackup).toEqual(expect.objectContaining({ webdav: expect.objectContaining({ password: "dav-secret" }) }));
+    expect(payload.data.snapshotWebDAV).toEqual(expect.objectContaining({ webdav: expect.objectContaining({ password: "snapshot-dav-secret" }) }));
+  });
+
+  it("collects a portable payload by resolving secretRefs back to plaintext and removing source-machine pointers", async () => {
+    seedCurrentAppData();
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-1",
+          name: "Dev",
+          baseUrl: "http://127.0.0.1:8848/nacos",
+          username: "nacos",
+          password: "",
+          apolloToken: "",
+          defaultNamespace: "",
+          secretRefs: {
+            password: pointer("connection.conn-1.password", "connection", "conn-1", "password"),
+            apolloToken: pointer("connection.conn-1.apolloToken", "connection", "conn-1", "apolloToken"),
+          },
+        },
+      ])
+    );
+    localStorage.setItem(
+      "cs.appDataBackup",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope",
+          passwordSecretRef: pointer("app-data-webdav.default.password", "app-data-webdav", "default", "password"),
+        },
+        activities: [],
+      })
+    );
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope/snapshots",
+          passwordSecretRef: pointer("snapshot-webdav.default.password", "snapshot-webdav", "default", "password"),
+        },
+        activities: [],
+      })
+    );
+
+    const payload = await collectPortableAppDataBackupPayload(
+      { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" },
+      { resolveSecret: async (secret) => `resolved:${secret.ref}` }
+    );
+
+    expect(payload.data.connections[0]).toEqual(
+      expect.objectContaining({
+        password: "resolved:connection.conn-1.password",
+        apolloToken: "resolved:connection.conn-1.apolloToken",
+      })
+    );
+    expect(JSON.stringify(payload.data.connections[0])).not.toContain("secretRefs");
+    expect(payload.data.appDataBackup).toEqual(
+      expect.objectContaining({
+        webdav: expect.objectContaining({ password: "resolved:app-data-webdav.default.password" }),
+      })
+    );
+    expect(JSON.stringify(payload.data.appDataBackup)).not.toContain("passwordSecretRef");
+    expect(payload.data.snapshotWebDAV).toEqual(
+      expect.objectContaining({
+        webdav: expect.objectContaining({ password: "resolved:snapshot-webdav.default.password" }),
+      })
+    );
+    expect(JSON.stringify(payload.data.snapshotWebDAV)).not.toContain("passwordSecretRef");
+    expect(localStorage.getItem("cs.connections")).toContain("secretRefs");
+  });
+
+  it("keeps explicit plaintext secrets over stale secretRefs when collecting a portable payload", async () => {
+    seedCurrentAppData();
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-1",
+          name: "Dev",
+          baseUrl: "http://127.0.0.1:8848/nacos",
+          username: "nacos",
+          password: "fresh-nacos-secret",
+          apolloToken: "fresh-apollo-token",
+          defaultNamespace: "",
+          secretRefs: {
+            password: pointer("connection.conn-1.password", "connection", "conn-1", "password"),
+            apolloToken: pointer("connection.conn-1.apolloToken", "connection", "conn-1", "apolloToken"),
+          },
+        },
+      ])
+    );
+    localStorage.setItem(
+      "cs.appDataBackup",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "fresh-app-webdav-secret",
+          rootPath: "/confscope",
+          passwordSecretRef: pointer("app-data-webdav.default.password", "app-data-webdav", "default", "password"),
+        },
+        activities: [],
+      })
+    );
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "fresh-snapshot-webdav-secret",
+          rootPath: "/confscope/snapshots",
+          passwordSecretRef: pointer("snapshot-webdav.default.password", "snapshot-webdav", "default", "password"),
+        },
+        activities: [],
+      })
+    );
+    const resolveSecret = vi.fn(async (secret: StoredSecretPointer) => `stale:${secret.ref}`);
+
+    const payload = await collectPortableAppDataBackupPayload(
+      { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" },
+      { resolveSecret }
+    );
+
+    expect(resolveSecret).not.toHaveBeenCalled();
+    expect(payload.data.connections[0]).toEqual(
+      expect.objectContaining({
+        password: "fresh-nacos-secret",
+        apolloToken: "fresh-apollo-token",
+      })
+    );
+    expect(JSON.stringify(payload.data.connections[0])).not.toContain("secretRefs");
+    expect(payload.data.appDataBackup).toEqual(
+      expect.objectContaining({
+        webdav: expect.objectContaining({ password: "fresh-app-webdav-secret" }),
+      })
+    );
+    expect(JSON.stringify(payload.data.appDataBackup)).not.toContain("passwordSecretRef");
+    expect(payload.data.snapshotWebDAV).toEqual(
+      expect.objectContaining({
+        webdav: expect.objectContaining({ password: "fresh-snapshot-webdav-secret" }),
+      })
+    );
+    expect(JSON.stringify(payload.data.snapshotWebDAV)).not.toContain("passwordSecretRef");
+  });
+
+  it("blocks portable export when any migrated secret cannot be resolved", async () => {
+    seedCurrentAppData();
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-1",
+          name: "Dev",
+          baseUrl: "http://127.0.0.1:8848/nacos",
+          username: "nacos",
+          password: "",
+          defaultNamespace: "",
+          secretRefs: {
+            password: pointer("connection.conn-1.password", "connection", "conn-1", "password"),
+          },
+        },
+      ])
+    );
+
+    await expect(
+      collectPortableAppDataBackupPayload(
+        { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" },
+        { resolveSecret: async () => Promise.reject(new Error("missing secret")) }
+      )
+    ).rejects.toThrow("导出应用数据备份前无法解析 connection.conn-1.password");
   });
 
   it("summarizes section counts for restore preview", () => {
@@ -147,6 +348,9 @@ describe("appDataBackup lib", () => {
     expect(localStorage.getItem("cs.applyPlans")).toBe("[]");
     expect(JSON.parse(localStorage.getItem("cs.ui") || "{}")).toEqual({ connId: "conn-1", mode: "browse", sidebarCollapsed: false });
     expect(localStorage.getItem("locale")).toBe("en-US");
+    expect(JSON.parse(localStorage.getItem("cs.snapshotWebDAV") || "{}")).toEqual(
+      expect.objectContaining({ webdav: expect.objectContaining({ password: "snapshot-dav-secret" }) })
+    );
     expect(localStorage.getItem("cs.unrelated")).toBe("keep");
   });
 });

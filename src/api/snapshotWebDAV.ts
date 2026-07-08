@@ -6,6 +6,7 @@ import {
 } from "../../wailsjs/go/main/App";
 import type { Snapshot } from "./snapshot";
 import type { SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
+import { hydrateSnapshotWebDAVSettings } from "../lib/credentialSecrets";
 
 export interface RemoteSnapshotWebDAVPackage {
   name: string;
@@ -21,22 +22,22 @@ export interface RemoteSnapshotWebDAVPackage {
   createdAt: string;
 }
 
-export function testSnapshotWebDAV(target: SnapshotWebDAVSettings): Promise<void> {
-  return TestSnapshotWebDAV(target);
+export async function testSnapshotWebDAV(target: SnapshotWebDAVSettings): Promise<void> {
+  return TestSnapshotWebDAV(await hydrateSnapshotWebDAVSettings(target));
 }
 
-export function listSnapshotWebDAVPackages(target: SnapshotWebDAVSettings): Promise<RemoteSnapshotWebDAVPackage[]> {
-  return ListSnapshotWebDAVPackages(target) as Promise<RemoteSnapshotWebDAVPackage[]>;
+export async function listSnapshotWebDAVPackages(target: SnapshotWebDAVSettings): Promise<RemoteSnapshotWebDAVPackage[]> {
+  return ListSnapshotWebDAVPackages(await hydrateSnapshotWebDAVSettings(target)) as Promise<RemoteSnapshotWebDAVPackage[]>;
 }
 
-export function uploadSnapshotWebDAVPackage(
+export async function uploadSnapshotWebDAVPackage(
   target: SnapshotWebDAVSettings,
   snapshotId: string,
   password: string
 ): Promise<RemoteSnapshotWebDAVPackage> {
-  return UploadSnapshotWebDAVPackage(target, snapshotId, password) as Promise<RemoteSnapshotWebDAVPackage>;
+  return UploadSnapshotWebDAVPackage(await hydrateSnapshotWebDAVSettings(target), snapshotId, password) as Promise<RemoteSnapshotWebDAVPackage>;
 }
 
-export function importSnapshotWebDAVPackage(target: SnapshotWebDAVSettings, remotePath: string, password: string): Promise<Snapshot> {
-  return ImportSnapshotWebDAVPackage(target, remotePath, password) as Promise<Snapshot>;
+export async function importSnapshotWebDAVPackage(target: SnapshotWebDAVSettings, remotePath: string, password: string): Promise<Snapshot> {
+  return ImportSnapshotWebDAVPackage(await hydrateSnapshotWebDAVSettings(target), remotePath, password) as Promise<Snapshot>;
 }

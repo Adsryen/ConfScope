@@ -104,12 +104,15 @@ Status values:
 | NATIVE-APPDATA-WEBDAV-UPLOAD-01 | App Data Backup | Native WebDAV upload | Windows native + Docker WebDAV | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Real Go binding uploads app data package. |
 | NATIVE-APPDATA-WEBDAV-RESTORE-01 | App Data Backup | Native WebDAV preview/restore | Windows native + Docker WebDAV | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Remote package restores native localStorage. |
 | NATIVE-APPDATA-WEBDAV-LIST-01 | App Data Backup | Native explicit remote refresh/list assertion | Windows native + Docker WebDAV | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Native Settings refreshes Docker WebDAV list and shows uploaded backup row. |
+| NATIVE-CREDENTIAL-SECRETREF-APPDATA-BACKUP-01 | App Data Backup | SecretRef portable backup restore | Windows native + Docker WebDAV + WinCred | PASS | `tests/smoke/native/specs/native-full.spec.ts` | App-data WebDAV backup after secretRef migration restores portable plaintext credentials. |
 
 ## Security, SSH, Settings, And Metadata
 
 | ID | Area | Surface | Environment | Status | Automation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | NATIVE-CREDENTIAL-STORE-POC-01 | Security | Windows Credential Manager PoC | Windows native | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Real Wails binding writes, reads, deletes only a `ConfScope/poc/native-*` test credential. |
+| NATIVE-CREDENTIAL-SECRETREF-MIGRATION-01 | Security | Credential secretRef migration | Windows native + WinCred | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Form-created Nacos, Apollo, and WebDAV credentials migrate into Windows Credential Manager while SSH password stays out of scope. |
+| NATIVE-CREDENTIAL-SECRETREF-WEBDAV-HYDRATE-01 | Security | SecretRef WebDAV hydrate | Windows native + Docker WebDAV + WinCred | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Migrated app-data and snapshot WebDAV targets still test through real Wails bindings. |
 | FS-SSH-UI-01 | SSH Manager | SSH page navigation | Vite bridge | PASS | Covered by `FS-APP-02` | SSH Tunnels page opens without runtime crash. |
 | SSH-CONTAINER-PROFILE-01 | SSH Manager | Docker SSH profile connection test | Windows native + Docker SSH | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Native SSH Manager tests and saves a Docker SSH profile through real Wails binding. |
 | SSH-CONTAINER-TUNNEL-01 | SSH Manager | Nacos over SSH tunnel | Windows native + Docker SSH/Nacos | PASS | `tests/smoke/native/specs/native-full.spec.ts` | Native Nacos connection browses Docker Nacos through Docker SSH tunnel. |

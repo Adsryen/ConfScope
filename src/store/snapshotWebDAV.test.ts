@@ -77,6 +77,65 @@ describe("snapshotWebDAV store", () => {
     expect(localStorage.getItem("cs.appDataBackup")).toContain("https://app-backup.example.com");
   });
 
+  it("preserves migrated WebDAV password secret refs", () => {
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope/snapshots",
+          passwordSecretRef: {
+            ref: "snapshot-webdav.default.password",
+            namespace: "snapshot-webdav",
+            ownerId: "default",
+            field: "password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+        activities: [],
+      })
+    );
+
+    expect(loadSnapshotWebDAVState().webdav.passwordSecretRef).toEqual({
+      ref: "snapshot-webdav.default.password",
+      namespace: "snapshot-webdav",
+      ownerId: "default",
+      field: "password",
+      migratedAt: "2026-07-08T00:00:00.000Z",
+      status: "stored",
+    });
+  });
+
+  it("drops WebDAV password secret refs with an invalid namespace", () => {
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: {
+          enabled: true,
+          url: "https://dav.example.com",
+          username: "ops",
+          password: "",
+          rootPath: "/confscope/snapshots",
+          passwordSecretRef: {
+            ref: "snapshot-webdav.default.password",
+            namespace: "app-data-webdav",
+            ownerId: "default",
+            field: "password",
+            migratedAt: "2026-07-08T00:00:00.000Z",
+            status: "stored",
+          },
+        },
+        activities: [],
+      })
+    );
+
+    expect(loadSnapshotWebDAVState().webdav.passwordSecretRef).toBeUndefined();
+  });
+
   it("records sync activities newest first and clears them without deleting the target", () => {
     updateSnapshotWebDAVSettings({ enabled: true, url: "https://dav.example.com", rootPath: "/remote/snapshots" });
 
