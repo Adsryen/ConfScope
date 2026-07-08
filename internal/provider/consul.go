@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"confscope/internal/consul"
 )
@@ -132,11 +133,30 @@ func (p *ConsulProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (Co
 }
 
 func (p *ConsulProvider) PublishConfig(profile ConnectionProfile, req PublishConfigRequest) error {
-	return errConsulReadOnly
+	target := consulTargetFromRequest(profile, req.Ref, true)
+	if target.key == "" {
+		return errors.New("Consul key is required")
+	}
+	if !utf8.ValidString(req.Content) {
+		return errors.New("Consul KV 写入内容必须是 UTF-8 文本")
+	}
+	cas, err := consulExpectedVersionCAS(req.Ref, false)
+	if err != nil {
+		return err
+	}
+	return p.clientFor(profile).PutKV(profile.BaseURL, profile.AccessToken, target.datacenter, target.key, req.Content, cas)
 }
 
 func (p *ConsulProvider) DeleteConfig(profile ConnectionProfile, ref ConfigRef) error {
-	return errConsulReadOnly
+	target := consulTargetFromRequest(profile, ref, true)
+	if target.key == "" {
+		return errors.New("Consul key is required")
+	}
+	cas, err := consulExpectedVersionCAS(ref, true)
+	if err != nil {
+		return err
+	}
+	return p.clientFor(profile).DeleteKV(profile.BaseURL, profile.AccessToken, target.datacenter, target.key, cas)
 }
 
 func (p *ConsulProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, page PageRequest) (HistoryPage, error) {
@@ -199,6 +219,21 @@ func consulRef(profile ConnectionProfile, datacenter, prefix, key string) Config
 		DataID:       key,
 		Key:          "",
 	}
+}
+
+func consulExpectedVersionCAS(ref ConfigRef, requireExisting bool) (uint64, error) {
+	value := strings.TrimSpace(ref.ExpectedVersion)
+	if value == "" {
+		return 0, errors.New("Consul expectedVersion is required for CAS write")
+	}
+	cas, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("Consul expectedVersion 必须是 ModifyIndex 数字: %w", err)
+	}
+	if requireExisting && cas == 0 {
+		return 0, errors.New("Consul delete expectedVersion must be an existing ModifyIndex")
+	}
+	return cas, nil
 }
 
 func isConsulDirectory(pair consul.KVPair, prefix string) bool {

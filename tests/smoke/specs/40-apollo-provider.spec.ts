@@ -45,12 +45,64 @@ test("creates and reads an Apollo OpenAPI connection through the UI", async ({ p
   expect(auditJson.rows.some((row) => row.providerType === "apollo" && row.dataId === smoke.apollo.namespaceName)).toBe(true);
   expect(JSON.stringify(auditJson)).not.toContain(smoke.apollo.token);
 
+  await page.getByRole("button", { name: "Config Compare" }).click();
+  await pickLocalDiffSource(page.locator(".source-picker").nth(0), `${smoke.apollo.namespaceName}.properties`);
+  await pickApolloDiffSource(page.locator(".source-picker").nth(1), smoke.apollo.namespaceName);
+  await page.getByRole("button", { name: "Load & Compare" }).click();
+  await expect(page.locator(".diff-result")).toContainText("feature.enabled", { timeout: 30_000 });
+  await expect(page.locator(".diff-result")).toContainText("false", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Generate Apply Plan" }).click();
+  await expect(page.getByRole("heading", { name: "Apply Plan" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".apply-count-strip")).toContainText("Overwrite 1", { timeout: 30_000 });
+  await page.getByLabel("I reviewed this dry-run plan and understand it will write to the target.").check();
+  await page.getByRole("button", { name: "Execute apply" }).click();
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (apollo) => {
+          const profile = {
+            id: "smoke-apollo",
+            name: "Apollo OpenAPI",
+            provider: "apollo",
+            baseUrl: apollo.baseUrl,
+            accessToken: apollo.token,
+            apolloEnv: apollo.env,
+            apolloAppId: apollo.appId,
+            apolloCluster: apollo.cluster,
+            apolloNamespaceName: apollo.namespaceName,
+          };
+          const doc = await window.go.main.App.ConfigCenterGetConfig(profile, {
+            provider: "apollo",
+            connectionId: "smoke-apollo",
+            namespace: apollo.appId,
+            group: apollo.cluster,
+            dataId: apollo.namespaceName,
+            key: "",
+          });
+          return String((doc as { content?: string }).content ?? "");
+        }, smoke.apollo),
+      { timeout: 30_000 }
+    )
+    .toContain("feature.enabled=false");
+
+  await page.getByRole("button", { name: "Config Browser" }).click();
+  await pickSelect(page.locator(".browse-header .page-actions"), 0, "Apollo OpenAPI");
+  await page.locator(".browser-item").filter({ hasText: smoke.apollo.namespaceName }).click();
+  await expect(page.locator(".browser-detail")).toContainText("feature.enabled=false", { timeout: 20_000 });
+
   pass(smoke, "FS-APOLLO-CONN-01", "Apollo provider", "Created Apollo OpenAPI connection through Connection Manager form and tested it");
   pass(smoke, "FS-APOLLO-BROWSE-01", "Apollo provider", "Browsed and opened Apollo namespace content from Docker OpenAPI fixture");
   pass(smoke, "FS-APOLLO-DIFF-01", "Apollo provider", "Compared Apollo namespace through Config Compare");
   pass(smoke, "FS-APOLLO-AUDIT-01", "Apollo provider", "Included Apollo namespace in Config Matrix audit");
   pass(smoke, "FS-APOLLO-AUDIT-EXPORT-01", "Apollo provider", "Exported Apollo audit JSON through the visible Config Matrix UI with provider/source metadata");
+  pass(smoke, "FS-APOLLO-APPLY-01", "Apollo provider", "Generated and executed an ApplyPlan from local snapshot to Docker Apollo, then read back the released item");
 });
+
+async function pickLocalDiffSource(sourcePicker: Locator, dataId: string): Promise<void> {
+  await pickSelect(sourcePicker, 0, "Local");
+  await pickSelect(sourcePicker, 1, "Strict Snapshot");
+  await pickCombobox(sourcePicker.locator(".combo").nth(0), dataId);
+}
 
 async function pickApolloDiffSource(sourcePicker: Locator, namespaceName: string): Promise<void> {
   await pickSelect(sourcePicker, 1, "Apollo OpenAPI");

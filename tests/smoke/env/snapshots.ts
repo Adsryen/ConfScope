@@ -29,6 +29,7 @@ function createStrictPublicSnapshot(root: string, runId: string): void {
   mkdirSync(configDir, { recursive: true });
   writeFileSync(join(configDir, "smoke-app.yaml"), "server:\n  port: 6060\nfeature: snapshot\n", "utf8");
   writeFileSync(join(configDir, "smoke-secret.properties"), "password=snapshot-secret\ntoken=snapshot-token\n", "utf8");
+  writeFileSync(join(configDir, "application.properties"), "feature.enabled=false\nserver.port=8080\nz.last=tail\n", "utf8");
 
   const timestamp = new Date("2026-07-07T00:00:00.000Z").toISOString();
   const metadata = {
@@ -58,6 +59,14 @@ function createStrictPublicSnapshot(root: string, runId: string): void {
         namespace: "public",
         group: "DEFAULT_GROUP",
         dataId: "smoke-secret.properties",
+        contentType: "properties",
+        configType: "properties",
+        updateTime: timestamp,
+      },
+      {
+        namespace: "public",
+        group: "DEFAULT_GROUP",
+        dataId: "application.properties",
         contentType: "properties",
         configType: "properties",
         updateTime: timestamp,

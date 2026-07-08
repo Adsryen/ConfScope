@@ -22,7 +22,7 @@ const namespace = {
 
 const basePath = `/openapi/v1/envs/${encodeURIComponent(env)}/apps/${encodeURIComponent(appId)}/clusters/${encodeURIComponent(cluster)}/namespaces`;
 
-createServer((req, res) => {
+createServer(async (req, res) => {
   if (req.headers.authorization !== token) {
     send(res, 401, { message: "unauthorized" });
     return;
@@ -36,8 +36,69 @@ createServer((req, res) => {
     send(res, 200, namespace);
     return;
   }
+  const itemPrefix = `${basePath}/${encodeURIComponent(namespaceName)}/items/`;
+  if (req.method === "PUT" && url.pathname.startsWith(itemPrefix)) {
+    if (url.searchParams.get("createIfNotExists") !== "true") {
+      send(res, 400, { message: "createIfNotExists=true is required" });
+      return;
+    }
+    const key = decodeURIComponent(url.pathname.slice(itemPrefix.length));
+    const body = await readJSON(req);
+    if (!key || String(body.key || "") !== key) {
+      send(res, 400, { message: "item key mismatch" });
+      return;
+    }
+    const existing = namespace.items.find((item) => item.key === key);
+    const next = {
+      key,
+      value: String(body.value ?? ""),
+      comment: String(body.comment ?? ""),
+      dataChangeLastModifiedTime: new Date().toISOString(),
+    };
+    if (existing) Object.assign(existing, next);
+    else namespace.items.push(next);
+    send(res, 200, next);
+    return;
+  }
+  if (req.method === "DELETE" && url.pathname.startsWith(itemPrefix)) {
+    if (!url.searchParams.get("operator")) {
+      send(res, 400, { message: "operator is required" });
+      return;
+    }
+    const key = decodeURIComponent(url.pathname.slice(itemPrefix.length));
+    const before = namespace.items.length;
+    namespace.items = namespace.items.filter((item) => item.key !== key);
+    if (namespace.items.length === before) {
+      send(res, 404, { message: "item not found", key });
+      return;
+    }
+    send(res, 200, { deleted: true, key });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === `${basePath}/${encodeURIComponent(namespaceName)}/releases`) {
+    const body = await readJSON(req);
+    if (!body.releasedBy) {
+      send(res, 400, { message: "releasedBy is required" });
+      return;
+    }
+    namespace.releaseKey = `release-smoke-${Date.now()}`;
+    send(res, 200, {
+      releaseKey: namespace.releaseKey,
+      releaseTitle: body.releaseTitle,
+      releaseComment: body.releaseComment,
+      releasedBy: body.releasedBy,
+    });
+    return;
+  }
   send(res, 404, { message: "not found", path: url.pathname });
 }).listen(port, "0.0.0.0");
+
+async function readJSON(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text ? JSON.parse(text) : {};
+}
 
 function send(res, status, body) {
   res.statusCode = status;

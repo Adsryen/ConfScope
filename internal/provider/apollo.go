@@ -11,6 +11,9 @@ import (
 
 var errApolloReadOnly = errors.New("Apollo 配置中心当前为只读模式")
 
+const apolloDocumentKey = "__document"
+const apolloOperator = "confscope"
+
 // ApolloProvider 实现 Apollo OpenAPI 只读配置中心适配。
 type ApolloProvider struct {
 	client *apollo.Client
@@ -138,11 +141,91 @@ func (p *ApolloProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (Co
 }
 
 func (p *ApolloProvider) PublishConfig(profile ConnectionProfile, req PublishConfigRequest) error {
-	return errApolloReadOnly
+	target, err := apolloTargetFromRequest(profile, req.Ref, true)
+	if err != nil {
+		return err
+	}
+	client := p.clientFor(profile)
+	if isApolloDocumentRef(req.Ref) {
+		if !apolloIsPropertiesFormat(req.Format) {
+			return fmt.Errorf("Apollo ApplyPlan 第一版仅支持 properties namespace 写入，当前格式: %s", req.Format)
+		}
+		desired, err := parseApolloPropertiesDocument(req.Content)
+		if err != nil {
+			return err
+		}
+		current, err := client.GetNamespace(profile.BaseURL, profile.AccessToken, target.env, target.appID, target.cluster, target.namespaceName)
+		if err != nil {
+			return err
+		}
+		if apolloFormat(current) != "properties" {
+			return fmt.Errorf("Apollo ApplyPlan 第一版仅支持 properties namespace 写入，当前 namespace 格式: %s", apolloFormat(current))
+		}
+		if err := p.syncApolloProperties(profile, target, current.Items, desired); err != nil {
+			return err
+		}
+		return nil
+	}
+	if strings.TrimSpace(req.Ref.Key) == "" {
+		return errors.New("Apollo item key is required")
+	}
+	if err := client.UpsertItem(
+		profile.BaseURL,
+		profile.AccessToken,
+		target.env,
+		target.appID,
+		target.cluster,
+		target.namespaceName,
+		strings.TrimSpace(req.Ref.Key),
+		req.Content,
+		apolloOperator,
+	); err != nil {
+		return err
+	}
+	return releaseApolloNamespace(client, profile, target)
 }
 
 func (p *ApolloProvider) DeleteConfig(profile ConnectionProfile, ref ConfigRef) error {
-	return errApolloReadOnly
+	target, err := apolloTargetFromRequest(profile, ref, true)
+	if err != nil {
+		return err
+	}
+	client := p.clientFor(profile)
+	if isApolloDocumentRef(ref) {
+		current, err := client.GetNamespace(profile.BaseURL, profile.AccessToken, target.env, target.appID, target.cluster, target.namespaceName)
+		if err != nil {
+			return err
+		}
+		if apolloFormat(current) != "properties" {
+			return fmt.Errorf("Apollo ApplyPlan 第一版仅支持 properties namespace 删除，当前 namespace 格式: %s", apolloFormat(current))
+		}
+		keys := sortedApolloItemKeys(current.Items)
+		for _, key := range keys {
+			if err := client.DeleteItem(profile.BaseURL, profile.AccessToken, target.env, target.appID, target.cluster, target.namespaceName, key, apolloOperator); err != nil {
+				return err
+			}
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+		return releaseApolloNamespace(client, profile, target)
+	}
+	if strings.TrimSpace(ref.Key) == "" {
+		return errors.New("Apollo item key is required")
+	}
+	if err := client.DeleteItem(
+		profile.BaseURL,
+		profile.AccessToken,
+		target.env,
+		target.appID,
+		target.cluster,
+		target.namespaceName,
+		strings.TrimSpace(ref.Key),
+		apolloOperator,
+	); err != nil {
+		return err
+	}
+	return releaseApolloNamespace(client, profile, target)
 }
 
 func (p *ApolloProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, page PageRequest) (HistoryPage, error) {
@@ -170,6 +253,129 @@ func (p *ApolloProvider) clientFor(profile ConnectionProfile) *apollo.Client {
 		return apollo.NewClientWithProxy()
 	}
 	return p.client
+}
+
+func (p *ApolloProvider) syncApolloProperties(profile ConnectionProfile, target apolloTarget, currentItems []apollo.Item, desired map[string]string) error {
+	client := p.clientFor(profile)
+	current := apolloItemMap(currentItems)
+	changed := 0
+
+	keys := sortedMapKeys(desired)
+	for _, key := range keys {
+		if current[key] == desired[key] {
+			continue
+		}
+		if err := client.UpsertItem(profile.BaseURL, profile.AccessToken, target.env, target.appID, target.cluster, target.namespaceName, key, desired[key], apolloOperator); err != nil {
+			return err
+		}
+		changed += 1
+	}
+
+	removeKeys := make([]string, 0)
+	for key := range current {
+		if _, ok := desired[key]; !ok {
+			removeKeys = append(removeKeys, key)
+		}
+	}
+	sort.Strings(removeKeys)
+	for _, key := range removeKeys {
+		if err := client.DeleteItem(profile.BaseURL, profile.AccessToken, target.env, target.appID, target.cluster, target.namespaceName, key, apolloOperator); err != nil {
+			return err
+		}
+		changed += 1
+	}
+
+	if changed == 0 {
+		return nil
+	}
+	return releaseApolloNamespace(client, profile, target)
+}
+
+func releaseApolloNamespace(client *apollo.Client, profile ConnectionProfile, target apolloTarget) error {
+	return client.ReleaseNamespace(
+		profile.BaseURL,
+		profile.AccessToken,
+		target.env,
+		target.appID,
+		target.cluster,
+		target.namespaceName,
+		"ConfScope ApplyPlan",
+		"Applied by ConfScope ApplyPlan",
+		apolloOperator,
+	)
+}
+
+func isApolloDocumentRef(ref ConfigRef) bool {
+	key := strings.TrimSpace(ref.Key)
+	return key == "" || key == apolloDocumentKey
+}
+
+func apolloIsPropertiesFormat(format string) bool {
+	format = strings.ToLower(strings.TrimSpace(format))
+	return format == "" || format == "properties"
+}
+
+func parseApolloPropertiesDocument(content string) (map[string]string, error) {
+	out := map[string]string{}
+	lines := strings.Split(content, "\n")
+	for index, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "!") {
+			continue
+		}
+		sep := propertiesSeparator(line)
+		if sep < 0 {
+			return nil, fmt.Errorf("Apollo properties 第 %d 行缺少 key=value 分隔符", index+1)
+		}
+		key := strings.TrimSpace(line[:sep])
+		if key == "" {
+			return nil, fmt.Errorf("Apollo properties 第 %d 行 key 为空", index+1)
+		}
+		out[key] = strings.TrimSpace(line[sep+1:])
+	}
+	return out, nil
+}
+
+func propertiesSeparator(line string) int {
+	eq := strings.Index(line, "=")
+	colon := strings.Index(line, ":")
+	switch {
+	case eq < 0:
+		return colon
+	case colon < 0:
+		return eq
+	case eq < colon:
+		return eq
+	default:
+		return colon
+	}
+}
+
+func apolloItemMap(items []apollo.Item) map[string]string {
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		key := strings.TrimSpace(item.Key)
+		if key == "" {
+			continue
+		}
+		out[key] = item.Value
+	}
+	return out
+}
+
+func sortedApolloItemKeys(items []apollo.Item) []string {
+	values := apolloItemMap(items)
+	return sortedMapKeys(values)
+}
+
+func sortedMapKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 type apolloTarget struct {
