@@ -13,6 +13,13 @@ vi.mock("../api/snapshot", () => ({
   deleteSnapshot: vi.fn(),
 }));
 
+vi.mock("../api/snapshotWebDAV", () => ({
+  testSnapshotWebDAV: vi.fn(),
+  listSnapshotWebDAVPackages: vi.fn(),
+  uploadSnapshotWebDAVPackage: vi.fn(),
+  importSnapshotWebDAVPackage: vi.fn(),
+}));
+
 vi.mock("../lib/snapshot", () => ({
   getSnapshotStats: vi.fn((snap: Snapshot) => ({
     totalConfigs: snap.configs.length,
@@ -274,5 +281,108 @@ describe("BackupView", () => {
       resourceId: "snap-1",
       resourceName: "dev-nacos_public_20240101",
     });
+  });
+
+  it("saves and tests the independent snapshot WebDAV target", async () => {
+    const snapshotWebDAV = await import("../api/snapshotWebDAV");
+    vi.mocked(snapshotWebDAV.testSnapshotWebDAV).mockResolvedValue(undefined);
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem("cs.appDataBackup", JSON.stringify({ webdav: { url: "https://app.example.com" }, activities: [] }));
+
+    renderWithI18n(<BackupView />);
+
+    await screen.findByText("Snapshot WebDAV");
+    fireEvent.change(screen.getByLabelText("WebDAV URL"), { target: { value: " https://dav.example.com " } });
+    fireEvent.change(screen.getByLabelText("WebDAV username"), { target: { value: "ops" } });
+    fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "dav-secret" } });
+    fireEvent.change(screen.getByLabelText("Remote folder"), { target: { value: "snapshots" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test WebDAV" }));
+
+    await waitFor(() => expect(snapshotWebDAV.testSnapshotWebDAV).toHaveBeenCalled());
+    expect(snapshotWebDAV.testSnapshotWebDAV).toHaveBeenCalledWith({
+      enabled: true,
+      url: "https://dav.example.com",
+      username: "ops",
+      password: "dav-secret",
+      rootPath: "/snapshots",
+    });
+    expect(localStorage.getItem("cs.snapshotWebDAV")).toContain("dav-secret");
+    expect(localStorage.getItem("cs.appDataBackup")).toContain("https://app.example.com");
+  });
+
+  it("uploads and imports encrypted config snapshot packages without persisting package passwords", async () => {
+    const { listSnapshots } = await import("../api/snapshot");
+    const snapshotWebDAV = await import("../api/snapshotWebDAV");
+    vi.mocked(snapshotWebDAV.uploadSnapshotWebDAVPackage).mockResolvedValue({
+      name: "snap.cssnapshot",
+      path: "/snapshots/snap.cssnapshot",
+      size: 120,
+      modifiedAt: "2026-07-08T08:00:00Z",
+      snapshotId: "snap-1",
+      snapshotName: "dev-nacos_public_20240101",
+      provider: "nacos",
+      connectionId: "conn-1",
+      connectionName: "dev-nacos",
+      configCount: 1,
+      createdAt: "2024-01-01T10:00:00Z",
+    });
+    vi.mocked(snapshotWebDAV.listSnapshotWebDAVPackages).mockResolvedValue([
+      {
+        name: "snap.cssnapshot",
+        path: "/snapshots/snap.cssnapshot",
+        size: 120,
+        modifiedAt: "2026-07-08T08:00:00Z",
+        snapshotId: "snap-1",
+        snapshotName: "dev-nacos_public_20240101",
+        provider: "nacos",
+        connectionId: "conn-1",
+        connectionName: "dev-nacos",
+        configCount: 1,
+        createdAt: "2024-01-01T10:00:00Z",
+      },
+      {
+        name: "app.csbackup",
+        path: "/snapshots/app.csbackup",
+        size: 10,
+        modifiedAt: "2026-07-08T08:00:00Z",
+        snapshotId: "",
+        snapshotName: "",
+        provider: "",
+        connectionId: "",
+        connectionName: "",
+        configCount: 0,
+        createdAt: "",
+      },
+    ]);
+    vi.mocked(snapshotWebDAV.importSnapshotWebDAVPackage).mockResolvedValue({
+      ...mockSnapshots[0],
+      id: "snap-imported",
+      remoteSnapshotId: "snap-1",
+    });
+    localStorage.setItem("locale", "en-US");
+
+    renderWithI18n(<BackupView />);
+
+    await screen.findByText("Snapshot WebDAV");
+    fireEvent.change(screen.getByLabelText("WebDAV URL"), { target: { value: "https://dav.example.com" } });
+    fireEvent.change(screen.getByLabelText("Snapshot package password"), { target: { value: "package-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected snapshot" }));
+
+    await waitFor(() => expect(snapshotWebDAV.uploadSnapshotWebDAVPackage).toHaveBeenCalledWith(expect.anything(), "snap-1", "package-pass"));
+    expect(localStorage.getItem("cs.snapshotWebDAV")).not.toContain("package-pass");
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh remote snapshots" }));
+    expect(await screen.findByText("snap.cssnapshot")).toBeInTheDocument();
+    expect(screen.queryByText("app.csbackup")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import snap.cssnapshot" }));
+
+    await waitFor(() =>
+      expect(snapshotWebDAV.importSnapshotWebDAVPackage).toHaveBeenCalledWith(expect.anything(), "/snapshots/snap.cssnapshot", "package-pass")
+    );
+    expect(vi.mocked(listSnapshots).mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

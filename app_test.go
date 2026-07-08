@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 
 	"confscope/internal/appbackup"
 	"confscope/internal/provider"
+	"confscope/internal/snapshotwebdav"
 	"confscope/internal/updatecheck"
 )
 
@@ -401,5 +404,97 @@ func TestAppDataBackupLocalBindingsEncryptAndReadBack(t *testing.T) {
 	}
 	if decrypted.PlaintextJSON != plaintext {
 		t.Fatalf("PlaintextJSON = %s, want %s", decrypted.PlaintextJSON, plaintext)
+	}
+}
+
+func TestSnapshotWebDAVBindingsUploadListAndImport(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	files := map[string][]byte{}
+	server := newAppIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "MKCOL":
+			if r.URL.Path != "/confscope" && r.URL.Path != "/confscope/snapshots" {
+				t.Fatalf("MKCOL path = %s, want /confscope or /confscope/snapshots", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read upload body: %v", err)
+			}
+			files[r.URL.Path] = body
+			w.WriteHeader(http.StatusCreated)
+		case "PROPFIND":
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(207)
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">`))
+			for remotePath, body := range files {
+				_, _ = w.Write([]byte(`<d:response><d:href>` + remotePath + `</d:href><d:propstat><d:prop><d:getcontentlength>` + strconv.Itoa(len(body)) + `</d:getcontentlength></d:prop></d:propstat></d:response>`))
+			}
+			_, _ = w.Write([]byte(`<d:response><d:href>/confscope/snapshots/app.csbackup</d:href><d:propstat><d:prop><d:getcontentlength>5</d:getcontentlength></d:prop></d:propstat></d:response></d:multistatus>`))
+		case http.MethodGet:
+			body, ok := files[r.URL.Path]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(body)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+
+	app := NewApp()
+	created, err := app.CreateSnapshot(provider.SnapshotSource{
+		Provider:       provider.ProviderNacos,
+		ConnectionID:   "conn-dev",
+		ConnectionName: "dev-nacos",
+		Namespace:      "public",
+		NamespaceID:    "public",
+	}, []provider.ConfigSnapshot{
+		{DataID: "app.yaml", Group: "DEFAULT_GROUP", Content: "password: super-secret\n", ConfigType: "yaml", ContentType: "yaml"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSnapshot returned error: %v", err)
+	}
+
+	target := snapshotwebdav.WebDAVTarget{URL: server.URL, RootPath: "/confscope/snapshots"}
+	remote, err := app.UploadSnapshotWebDAVPackage(target, created.ID, "snapshot-password")
+	if err != nil {
+		t.Fatalf("UploadSnapshotWebDAVPackage returned error: %v", err)
+	}
+	if remote.SnapshotID != created.ID || !strings.HasSuffix(remote.Name, ".cssnapshot") {
+		t.Fatalf("remote = %+v, want uploaded config snapshot package", remote)
+	}
+
+	list, err := app.ListSnapshotWebDAVPackages(target)
+	if err != nil {
+		t.Fatalf("ListSnapshotWebDAVPackages returned error: %v", err)
+	}
+	if len(list) != 1 || list[0].SnapshotID != created.ID {
+		t.Fatalf("list = %+v, want only uploaded .cssnapshot", list)
+	}
+
+	imported, err := app.ImportSnapshotWebDAVPackage(target, remote.Path, "snapshot-password")
+	if err != nil {
+		t.Fatalf("ImportSnapshotWebDAVPackage returned error: %v", err)
+	}
+	if imported.ID == created.ID || imported.RemoteSnapshotID != created.ID {
+		t.Fatalf("imported = %+v, want non-overwriting import with remoteSnapshotId", imported)
+	}
+
+	doc, err := provider.NewLocalProvider().GetConfig(provider.ConnectionProfile{ID: "snapshot-local", Provider: provider.ProviderLocal, BaseURL: imported.Path}, provider.ConfigRef{
+		Provider: provider.ProviderLocal,
+		Group:    "DEFAULT_GROUP",
+		DataID:   "app.yaml",
+	})
+	if err != nil {
+		t.Fatalf("local provider GetConfig returned error: %v", err)
+	}
+	if doc.Content != "password: super-secret\n" {
+		t.Fatalf("imported content = %q, want original config content", doc.Content)
 	}
 }

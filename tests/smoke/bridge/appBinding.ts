@@ -88,6 +88,12 @@ interface Snapshot {
   updatedAt: string;
   source: SnapshotSource;
   configs: ConfigSnapshot[];
+  remoteSnapshotId?: string;
+  importedFrom?: {
+    type: string;
+    remotePath: string;
+    importedAt: string;
+  };
 }
 
 export function createSmokeAppBinding(state: SmokeState): (method: string, args: unknown[]) => Promise<unknown> {
@@ -139,6 +145,14 @@ export function createSmokeAppBinding(state: SmokeState): (method: string, args:
         return uploadAppDataWebDAVBackup(webDAVTargetArg(args, 0), stringArg(args, 1), stringArg(args, 2), appDataPackageMetaArg(args, 3));
       case "DownloadAppDataWebDAVBackup":
         return downloadAppDataWebDAVBackup(webDAVTargetArg(args, 0), stringArg(args, 1), stringArg(args, 2));
+      case "TestSnapshotWebDAV":
+        return testSnapshotWebDAV(webDAVTargetArg(args, 0));
+      case "UploadSnapshotWebDAVPackage":
+        return uploadSnapshotWebDAVPackage(state, webDAVTargetArg(args, 0), stringArg(args, 1), stringArg(args, 2));
+      case "ListSnapshotWebDAVPackages":
+        return listSnapshotWebDAVPackages(webDAVTargetArg(args, 0));
+      case "ImportSnapshotWebDAVPackage":
+        return importSnapshotWebDAVPackage(state, webDAVTargetArg(args, 0), stringArg(args, 1), stringArg(args, 2));
       case "ConfigCenterTestConnection":
         return testConnection(profileArg(args, 0));
       case "ConfigCenterListNamespaces":
@@ -258,6 +272,33 @@ interface RemoteBackup {
   modifiedAt: string;
 }
 
+interface ConfigSnapshotEnvelope {
+  format: string;
+  schemaVersion: number;
+  snapshot: RemoteConfigSnapshot;
+  encryption: {
+    algorithm: string;
+    kdf: string;
+    salt: string;
+    nonce: string;
+  };
+  ciphertext: string;
+}
+
+interface RemoteConfigSnapshot {
+  name: string;
+  path: string;
+  size: number;
+  modifiedAt: string;
+  snapshotId: string;
+  snapshotName: string;
+  provider: string;
+  connectionId: string;
+  connectionName: string;
+  configCount: number;
+  createdAt: string;
+}
+
 function writeAppDataBackupFile(path: string, plaintextJson: string, password: string, meta: AppDataPackageMeta): AppDataPackageSummary {
   const bytes = encryptAppDataPackage(plaintextJson, password, meta);
   mkdirSync(dirname(path), { recursive: true });
@@ -354,6 +395,205 @@ async function downloadAppDataWebDAVBackup(
   return {
     plaintextJson: decryptAppDataPackage(bytes, password),
     summary: packageSummary(bytes),
+  };
+}
+
+async function uploadSnapshotWebDAVPackage(
+  state: SmokeState,
+  target: AppDataWebDAVTarget,
+  snapshotId: string,
+  password: string
+): Promise<RemoteConfigSnapshot> {
+  await testSnapshotWebDAV(target);
+  const snapshot = getSnapshot(state, snapshotId);
+  const bytes = encryptConfigSnapshotPackage(snapshot, password);
+  const name = `confscope-snapshot-${snapshot.id}.cssnapshot`;
+  const remotePath = remoteJoin(target.rootPath, name);
+  const response = await fetch(webDAVURL(target, remotePath), {
+    method: "PUT",
+    headers: webDAVHeaders(target),
+    body: bytes as unknown as BodyInit,
+  });
+  if (!response.ok) {
+    throw new Error(`WebDAV snapshot upload failed: HTTP ${response.status} ${await response.text()}`);
+  }
+  return remoteSnapshotFromSummary(name, remotePath, bytes.length, new Date().toISOString(), readConfigSnapshotPackageSummary(bytes));
+}
+
+async function testSnapshotWebDAV(target: AppDataWebDAVTarget): Promise<void> {
+  for (const remotePath of collectionPaths(target.rootPath)) {
+    const response = await fetch(webDAVURL(target, remotePath), {
+      method: "MKCOL",
+      headers: webDAVHeaders(target),
+    });
+    if (![200, 201, 204, 405, 409].includes(response.status)) {
+      throw new Error(`WebDAV snapshot test failed: HTTP ${response.status} ${await response.text()}`);
+    }
+  }
+}
+
+function collectionPaths(rootPath: string): string[] {
+  const normalized = normalizeRemotePath(rootPath);
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length === 0) return ["/"];
+  const paths: string[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    paths.push(`/${segments.slice(0, i + 1).join("/")}`);
+  }
+  return paths;
+}
+
+async function listSnapshotWebDAVPackages(target: AppDataWebDAVTarget): Promise<RemoteConfigSnapshot[]> {
+  const response = await fetch(webDAVURL(target, target.rootPath), {
+    method: "PROPFIND",
+    headers: { ...webDAVHeaders(target), Depth: "1" },
+  });
+  if (!response.ok && response.status !== 207) {
+    throw new Error(`WebDAV snapshot list failed: HTTP ${response.status} ${await response.text()}`);
+  }
+  const xml = await response.text();
+  const snapshots: RemoteConfigSnapshot[] = [];
+  for (const block of webDAVResponseBlocks(xml)) {
+    const href = webDAVTagText(block, "href");
+    if (!href || href.endsWith("/") || !href.endsWith(".cssnapshot")) continue;
+    const body = await downloadRawWebDAV(target, href);
+    snapshots.push(
+      remoteSnapshotFromSummary(
+        posix.basename(href),
+        href,
+        Number(webDAVTagText(block, "getcontentlength") || body.length),
+        webDAVTagText(block, "getlastmodified"),
+        readConfigSnapshotPackageSummary(body)
+      )
+    );
+  }
+  return snapshots.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
+async function importSnapshotWebDAVPackage(
+  state: SmokeState,
+  target: AppDataWebDAVTarget,
+  remotePath: string,
+  password: string
+): Promise<Snapshot> {
+  const bytes = await downloadRawWebDAV(target, remotePath);
+  const snapshot = decryptConfigSnapshotPackage(bytes, password);
+  const remoteSnapshotId = snapshot.id;
+  const backupRoot = join(state.homeDir, ".confscope", "backups");
+  mkdirSync(backupRoot, { recursive: true });
+  let localId = remoteSnapshotId;
+  if (existsSync(join(backupRoot, localId))) {
+    localId = `snap_${Date.now()}_import`;
+  }
+  const imported: Snapshot = {
+    ...snapshot,
+    id: localId,
+    path: join(backupRoot, localId),
+    remoteSnapshotId,
+    importedFrom: {
+      type: "webdav",
+      remotePath,
+      importedAt: new Date().toISOString(),
+    },
+  };
+  writeSnapshotDirectory(imported);
+  return imported;
+}
+
+async function downloadRawWebDAV(target: AppDataWebDAVTarget, remotePath: string): Promise<Buffer> {
+  const response = await fetch(webDAVURL(target, remotePath), {
+    method: "GET",
+    headers: webDAVHeaders(target),
+  });
+  if (!response.ok) {
+    throw new Error(`WebDAV snapshot download failed: HTTP ${response.status} ${await response.text()}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+function encryptConfigSnapshotPackage(snapshot: Snapshot, password: string): Buffer {
+  if (!password) throw new Error("Snapshot package password is required");
+  const salt = randomBytes(16);
+  const nonce = randomBytes(12);
+  const key = pbkdf2Sync(password, salt, 100_000, 32, "sha256");
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const payload = JSON.stringify({ metadata: snapshot });
+  const encrypted = Buffer.concat([cipher.update(payload, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  const envelope: ConfigSnapshotEnvelope = {
+    format: "confscope.config-snapshot",
+    schemaVersion: 1,
+    snapshot: remoteSnapshotFromSummary("", "", 0, "", {
+      snapshotId: snapshot.id,
+      snapshotName: snapshot.name,
+      provider: snapshot.source.provider,
+      connectionId: snapshot.source.connectionId,
+      connectionName: snapshot.source.connectionName,
+      configCount: snapshot.configs.length,
+      createdAt: snapshot.createdAt,
+    }),
+    encryption: {
+      algorithm: "AES-256-GCM",
+      kdf: "pbkdf2-sha256",
+      salt: salt.toString("base64"),
+      nonce: nonce.toString("base64"),
+    },
+    ciphertext: encrypted.toString("base64"),
+  };
+  return Buffer.from(JSON.stringify(envelope), "utf8");
+}
+
+function decryptConfigSnapshotPackage(bytes: Buffer, password: string): Snapshot {
+  const envelope = JSON.parse(bytes.toString("utf8")) as ConfigSnapshotEnvelope;
+  if (envelope.format !== "confscope.config-snapshot" || envelope.schemaVersion !== 1) {
+    throw new Error("Invalid config snapshot package");
+  }
+  const salt = Buffer.from(envelope.encryption.salt, "base64");
+  const nonce = Buffer.from(envelope.encryption.nonce, "base64");
+  const encrypted = Buffer.from(envelope.ciphertext, "base64");
+  const ciphertext = encrypted.subarray(0, encrypted.length - 16);
+  const tag = encrypted.subarray(encrypted.length - 16);
+  const key = pbkdf2Sync(password, salt, 100_000, 32, "sha256");
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+  decipher.setAuthTag(tag);
+  const payload = JSON.parse(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8")) as { metadata: Snapshot };
+  return payload.metadata;
+}
+
+function readConfigSnapshotPackageSummary(bytes: Buffer): Omit<RemoteConfigSnapshot, "name" | "path" | "size" | "modifiedAt"> {
+  const envelope = JSON.parse(bytes.toString("utf8")) as ConfigSnapshotEnvelope;
+  if (envelope.format !== "confscope.config-snapshot" || envelope.schemaVersion !== 1) {
+    throw new Error("Invalid config snapshot package");
+  }
+  return {
+    snapshotId: envelope.snapshot.snapshotId,
+    snapshotName: envelope.snapshot.snapshotName,
+    provider: envelope.snapshot.provider,
+    connectionId: envelope.snapshot.connectionId,
+    connectionName: envelope.snapshot.connectionName,
+    configCount: envelope.snapshot.configCount,
+    createdAt: envelope.snapshot.createdAt,
+  };
+}
+
+function remoteSnapshotFromSummary(
+  name: string,
+  remotePath: string,
+  size: number,
+  modifiedAt: string,
+  summary: Omit<RemoteConfigSnapshot, "name" | "path" | "size" | "modifiedAt">
+): RemoteConfigSnapshot {
+  return {
+    name,
+    path: remotePath,
+    size,
+    modifiedAt,
+    snapshotId: summary.snapshotId,
+    snapshotName: summary.snapshotName,
+    provider: summary.provider,
+    connectionId: summary.connectionId,
+    connectionName: summary.connectionName,
+    configCount: summary.configCount,
+    createdAt: summary.createdAt,
   };
 }
 
@@ -744,15 +984,19 @@ function createSnapshot(state: SmokeState, source: SnapshotSource, configs: Conf
       contentType: item.contentType || item.configType || typeFromDataId(item.dataId),
     })),
   };
-  mkdirSync(snapshotDir, { recursive: true });
-  writeFileSync(join(snapshotDir, "metadata.json"), JSON.stringify(snapshot, null, 2), "utf8");
+  writeSnapshotDirectory(snapshot);
+  return snapshot;
+}
+
+function writeSnapshotDirectory(snapshot: Snapshot): void {
+  mkdirSync(snapshot.path, { recursive: true });
+  writeFileSync(join(snapshot.path, "metadata.json"), JSON.stringify(snapshot, null, 2), "utf8");
   for (const config of snapshot.configs) {
     const namespace = config.namespace || "public";
-    const groupDir = join(snapshotDir, "configs", namespace || "public", config.group);
+    const groupDir = join(snapshot.path, "configs", namespace || "public", config.group);
     mkdirSync(groupDir, { recursive: true });
     writeFileSync(join(groupDir, ...config.dataId.split("/")), config.content, "utf8");
   }
-  return snapshot;
 }
 
 function getSnapshot(state: SmokeState, id: string): Snapshot {

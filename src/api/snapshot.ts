@@ -3,7 +3,7 @@ import { CreateSnapshot, GetSnapshot, ListSnapshots, DeleteSnapshot, ValidateSna
 
 /** 快照来源。 */
 export interface SnapshotSource {
-  provider?: "nacos" | "local";
+  provider?: "nacos" | "apollo" | "consul" | "local";
   connectionId: string;
   connectionName: string;
   namespace: string;
@@ -33,6 +33,12 @@ export interface Snapshot {
   updatedAt: string;
   source: SnapshotSource;
   configs: ConfigSnapshot[];
+  remoteSnapshotId?: string;
+  importedFrom?: {
+    type: string;
+    remotePath: string;
+    importedAt: string;
+  };
 }
 
 // 创建快照

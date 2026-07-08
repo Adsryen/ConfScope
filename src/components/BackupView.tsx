@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../i18n";
 import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
+import {
+  importSnapshotWebDAVPackage,
+  listSnapshotWebDAVPackages,
+  testSnapshotWebDAV,
+  uploadSnapshotWebDAVPackage,
+  type RemoteSnapshotWebDAVPackage,
+} from "../api/snapshotWebDAV";
 import { getSnapshotStats, formatSnapshotName, formatTime } from "../lib/snapshot";
 import { snapshotConnectionId, snapshotNamespaceForDiff } from "../lib/snapshotConnection";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { recordOperation } from "../store/operationHistory";
+import { loadSnapshotWebDAVState, recordSnapshotWebDAVActivity, updateSnapshotWebDAVSettings } from "../store/snapshotWebDAV";
 import { applyEntryRiskSummary, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
@@ -27,6 +35,7 @@ interface Props {
 }
 
 const DOCUMENT_KEY = "__document";
+type SnapshotWebDAVBusy = "test" | "upload" | "list" | "import" | null;
 
 function snapshotSourceNamespace(snapshot: Pick<Snapshot, "source">): string {
   return snapshot.source.namespace || snapshot.source.namespaceId || "public";
@@ -95,6 +104,12 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [snapshotWebDAV, setSnapshotWebDAV] = useState(() => loadSnapshotWebDAVState().webdav);
+  const [packagePassword, setPackagePassword] = useState("");
+  const [remoteSnapshots, setRemoteSnapshots] = useState<RemoteSnapshotWebDAVPackage[]>([]);
+  const [snapshotWebDAVBusy, setSnapshotWebDAVBusy] = useState<SnapshotWebDAVBusy>(null);
+  const [snapshotWebDAVError, setSnapshotWebDAVError] = useState<string | null>(null);
+  const [snapshotWebDAVStatus, setSnapshotWebDAVStatus] = useState<string | null>(null);
 
   const loadSnapshots = useCallback(async () => {
     setLoading(true);
@@ -165,6 +180,127 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
     },
     [loadSnapshots, selectedSnapshot, snapshots, t]
   );
+
+  const currentSnapshotWebDAVTarget = useCallback(() => {
+    const next = updateSnapshotWebDAVSettings({
+      ...snapshotWebDAV,
+      enabled: true,
+    });
+    setSnapshotWebDAV(next.webdav);
+    return next.webdav;
+  }, [snapshotWebDAV]);
+
+  const saveSnapshotWebDAVTarget = () => {
+    const target = currentSnapshotWebDAVTarget();
+    setSnapshotWebDAVStatus(t("backup.webdavSaved"));
+    setSnapshotWebDAVError(null);
+    toast(t("backup.webdavSaved"), "success");
+    return target;
+  };
+
+  const requireSnapshotWebDAVTarget = () => {
+    const target = currentSnapshotWebDAVTarget();
+    if (!target.url.trim()) {
+      const message = t("backup.webdavUrlRequired");
+      setSnapshotWebDAVError(message);
+      return null;
+    }
+    return target;
+  };
+
+  const requirePackagePassword = () => {
+    if (!packagePassword.trim()) {
+      const message = t("backup.packagePasswordRequired");
+      setSnapshotWebDAVError(message);
+      return false;
+    }
+    return true;
+  };
+
+  const testSnapshotWebDAVTarget = async () => {
+    const target = requireSnapshotWebDAVTarget();
+    if (!target) return;
+    setSnapshotWebDAVBusy("test");
+    setSnapshotWebDAVError(null);
+    try {
+      await testSnapshotWebDAV(target);
+      recordSnapshotWebDAVActivity({ type: "test", status: "success", target: target.url, message: t("backup.webdavTestPassed") });
+      setSnapshotWebDAVStatus(t("backup.webdavTestPassed"));
+      toast(t("backup.webdavTestPassed"), "success");
+    } catch (e) {
+      const message = String(e);
+      recordSnapshotWebDAVActivity({ type: "test", status: "failure", target: target.url, message });
+      setSnapshotWebDAVError(message);
+      reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
+    } finally {
+      setSnapshotWebDAVBusy(null);
+    }
+  };
+
+  const refreshRemoteSnapshots = async () => {
+    const target = requireSnapshotWebDAVTarget();
+    if (!target) return;
+    setSnapshotWebDAVBusy("list");
+    setSnapshotWebDAVError(null);
+    try {
+      const list = await listSnapshotWebDAVPackages(target);
+      const visible = list.filter((item) => item.name.toLowerCase().endsWith(".cssnapshot"));
+      setRemoteSnapshots(visible);
+      recordSnapshotWebDAVActivity({ type: "list", status: "success", target: target.rootPath, message: t("backup.remoteSnapshotsLoaded") });
+      setSnapshotWebDAVStatus(t("backup.remoteSnapshotsLoaded"));
+    } catch (e) {
+      const message = String(e);
+      recordSnapshotWebDAVActivity({ type: "list", status: "failure", target: target.rootPath, message });
+      setSnapshotWebDAVError(message);
+      reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
+    } finally {
+      setSnapshotWebDAVBusy(null);
+    }
+  };
+
+  const uploadSelectedSnapshot = async () => {
+    if (!selectedSnapshot) return;
+    const target = requireSnapshotWebDAVTarget();
+    if (!target || !requirePackagePassword()) return;
+    setSnapshotWebDAVBusy("upload");
+    setSnapshotWebDAVError(null);
+    try {
+      const remote = await uploadSnapshotWebDAVPackage(target, selectedSnapshot.id, packagePassword);
+      setRemoteSnapshots((current) => [remote, ...current.filter((item) => item.path !== remote.path)]);
+      recordSnapshotWebDAVActivity({ type: "upload", status: "success", target: remote.path, message: t("backup.snapshotUploaded") });
+      setSnapshotWebDAVStatus(t("backup.snapshotUploaded"));
+      toast(t("backup.snapshotUploaded"), "success");
+    } catch (e) {
+      const message = String(e);
+      recordSnapshotWebDAVActivity({ type: "upload", status: "failure", target: selectedSnapshot.id, message });
+      setSnapshotWebDAVError(message);
+      reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
+    } finally {
+      setSnapshotWebDAVBusy(null);
+    }
+  };
+
+  const importRemoteSnapshot = async (remote: RemoteSnapshotWebDAVPackage) => {
+    const target = requireSnapshotWebDAVTarget();
+    if (!target || !requirePackagePassword()) return;
+    setSnapshotWebDAVBusy("import");
+    setSnapshotWebDAVError(null);
+    try {
+      const imported = await importSnapshotWebDAVPackage(target, remote.path, packagePassword);
+      recordSnapshotWebDAVActivity({ type: "import", status: "success", target: remote.path, message: t("backup.snapshotImported") });
+      setSnapshotWebDAVStatus(t("backup.snapshotImported"));
+      toast(t("backup.snapshotImported"), "success");
+      await loadSnapshots();
+      setSelectedSnapshot(imported);
+    } catch (e) {
+      const message = String(e);
+      recordSnapshotWebDAVActivity({ type: "import", status: "failure", target: remote.path, message });
+      setSnapshotWebDAVError(message);
+      reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
+    } finally {
+      setSnapshotWebDAVBusy(null);
+    }
+  };
 
   const selectedStats = selectedSnapshot ? getSnapshotStats(selectedSnapshot) : null;
   const jumpToDiff = (snapshot: Snapshot, config: ConfigSnapshot) => {
@@ -286,6 +422,131 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                 <div className="info-row">
                   <span className="info-label">{t("backup.configTotal")}:</span>
                   <span className="info-value">{selectedStats?.totalConfigs ?? selectedSnapshot.configs.length}</span>
+                </div>
+              </div>
+
+              <div className="backup-webdav-panel" aria-labelledby="backup-webdav-title">
+                <div className="data-section-head backup-webdav-head">
+                  <div>
+                    <h4 id="backup-webdav-title">{t("backup.webdavTitle")}</h4>
+                    <span>{t("backup.webdavHint")}</span>
+                  </div>
+                  {snapshotWebDAVStatus && <span className="backup-webdav-status">{snapshotWebDAVStatus}</span>}
+                </div>
+
+                {snapshotWebDAVError && (
+                  <div className="inline-error backup-webdav-error" role="alert">
+                    <div className="inline-error-head">
+                      <span className="inline-error-title">{t("backup.webdavOperationFailed")}</span>
+                      <CopyButton text={snapshotWebDAVError} label={t("common.copyError")} />
+                    </div>
+                    <pre className="inline-error-body">{snapshotWebDAVError}</pre>
+                  </div>
+                )}
+
+                <div className="backup-webdav-grid">
+                  <label className="field">
+                    <span>{t("backup.webdavUrl")}</span>
+                    <input
+                      className="search-input"
+                      value={snapshotWebDAV.url}
+                      onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, url: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("backup.webdavUsername")}</span>
+                    <input
+                      className="search-input"
+                      value={snapshotWebDAV.username}
+                      onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, username: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("backup.webdavPassword")}</span>
+                    <input
+                      className="search-input"
+                      type="password"
+                      value={snapshotWebDAV.password}
+                      onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, password: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t("backup.remoteFolder")}</span>
+                    <input
+                      className="search-input"
+                      value={snapshotWebDAV.rootPath}
+                      onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, rootPath: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field backup-webdav-package-password">
+                    <span>{t("backup.packagePassword")}</span>
+                    <input
+                      className="search-input"
+                      type="password"
+                      value={packagePassword}
+                      onChange={(e) => setPackagePassword(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="backup-webdav-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={saveSnapshotWebDAVTarget}>
+                    {t("backup.saveWebdavTarget")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void testSnapshotWebDAVTarget()}
+                    disabled={snapshotWebDAVBusy === "test"}
+                  >
+                    {snapshotWebDAVBusy === "test" ? t("backup.testingWebdav") : t("backup.testWebdav")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void uploadSelectedSnapshot()}
+                    disabled={snapshotWebDAVBusy === "upload"}
+                  >
+                    {snapshotWebDAVBusy === "upload" ? t("backup.uploadingSnapshot") : t("backup.uploadSelectedSnapshot")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void refreshRemoteSnapshots()}
+                    disabled={snapshotWebDAVBusy === "list"}
+                  >
+                    {snapshotWebDAVBusy === "list" ? t("backup.refreshingRemote") : t("backup.refreshRemoteSnapshots")}
+                  </button>
+                </div>
+
+                <div className="backup-remote-list">
+                  {remoteSnapshots.length === 0 ? (
+                    <div className="settings-empty">{t("backup.noRemoteSnapshots")}</div>
+                  ) : (
+                    remoteSnapshots.map((remote) => (
+                      <div key={remote.path} className="backup-remote-item">
+                        <div className="backup-remote-main">
+                          <strong>{remote.name}</strong>
+                          <span>
+                            {t("backup.remoteSnapshotMeta", {
+                              provider: remote.provider || "-",
+                              configCount: remote.configCount,
+                              size: remote.size,
+                              modifiedAt: remote.modifiedAt || "-",
+                            })}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void importRemoteSnapshot(remote)}
+                          disabled={snapshotWebDAVBusy === "import"}
+                        >
+                          {t("backup.importRemoteSnapshot", { name: remote.name })}
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 

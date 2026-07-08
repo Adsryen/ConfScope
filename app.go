@@ -11,6 +11,7 @@ import (
 	"confscope/internal/appbackup"
 	"confscope/internal/nacos"
 	"confscope/internal/provider"
+	"confscope/internal/snapshotwebdav"
 	"confscope/internal/ssh"
 	"confscope/internal/updatecheck"
 
@@ -540,6 +541,47 @@ func (a *App) DeleteSnapshot(id string) error {
 	return mgr.DeleteSnapshot(id)
 }
 
+// TestSnapshotWebDAV 测试配置中心快照 WebDAV 目标。
+func (a *App) TestSnapshotWebDAV(target snapshotwebdav.WebDAVTarget) error {
+	return snapshotwebdav.NewWebDAVClient().Test(target)
+}
+
+// UploadSnapshotWebDAVPackage 加密并上传本地配置中心快照包到 WebDAV。
+func (a *App) UploadSnapshotWebDAVPackage(target snapshotwebdav.WebDAVTarget, snapshotID string, password string) (snapshotwebdav.RemoteSnapshot, error) {
+	snapshotDir, err := snapshotStorageDir()
+	if err != nil {
+		return snapshotwebdav.RemoteSnapshot{}, err
+	}
+	mgr := provider.NewSnapshotManager(snapshotDir)
+	snapshot, err := mgr.GetSnapshot(snapshotID)
+	if err != nil {
+		return snapshotwebdav.RemoteSnapshot{}, err
+	}
+	packageBytes, _, err := snapshotwebdav.EncryptPackage(*snapshot, password)
+	if err != nil {
+		return snapshotwebdav.RemoteSnapshot{}, err
+	}
+	return snapshotwebdav.NewWebDAVClient().Upload(target, snapshotwebdav.DefaultPackageFileName(*snapshot), packageBytes)
+}
+
+// ListSnapshotWebDAVPackages 列出 WebDAV 远端配置中心快照包。
+func (a *App) ListSnapshotWebDAVPackages(target snapshotwebdav.WebDAVTarget) ([]snapshotwebdav.RemoteSnapshot, error) {
+	return snapshotwebdav.NewWebDAVClient().List(target)
+}
+
+// ImportSnapshotWebDAVPackage 下载并导入 WebDAV 配置中心快照包为本地快照。
+func (a *App) ImportSnapshotWebDAVPackage(target snapshotwebdav.WebDAVTarget, remotePath string, password string) (*provider.Snapshot, error) {
+	snapshotDir, err := snapshotStorageDir()
+	if err != nil {
+		return nil, err
+	}
+	packageBytes, err := snapshotwebdav.NewWebDAVClient().Download(target, remotePath)
+	if err != nil {
+		return nil, err
+	}
+	return snapshotwebdav.ImportPackage(snapshotDir, packageBytes, password, snapshotwebdav.ImportedFrom{RemotePath: remotePath})
+}
+
 // ValidateSnapshot 校验快照目录。
 func (a *App) ValidateSnapshot(path string) error {
 	homeDir, err := os.UserHomeDir()
@@ -550,4 +592,16 @@ func (a *App) ValidateSnapshot(path string) error {
 
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.ValidateSnapshot(path)
+}
+
+func snapshotStorageDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
+	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+		return "", fmt.Errorf("创建快照目录失败: %w", err)
+	}
+	return snapshotDir, nil
 }
