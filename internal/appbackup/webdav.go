@@ -108,6 +108,7 @@ func (c *WebDAVClient) List(target WebDAVTarget) ([]RemoteBackup, error) {
 	if err != nil {
 		return nil, err
 	}
+	ensureCollectionURL(rootURL)
 	req, err := http.NewRequest("PROPFIND", rootURL.String(), strings.NewReader(`<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getcontentlength/><getlastmodified/></prop></propfind>`))
 	if err != nil {
 		return nil, fmt.Errorf("创建 WebDAV 列表请求失败: %w", err)
@@ -127,7 +128,7 @@ func (c *WebDAVClient) List(target WebDAVTarget) ([]RemoteBackup, error) {
 	if err := xml.NewDecoder(resp.Body).Decode(&multi); err != nil {
 		return nil, fmt.Errorf("解析 WebDAV 列表失败: %w", err)
 	}
-	var out []RemoteBackup
+	out := make([]RemoteBackup, 0)
 	for _, item := range multi.Responses {
 		remotePath := item.Href
 		if !strings.HasSuffix(remotePath, ".csbackup") {
@@ -149,7 +150,7 @@ type webDAVMultiStatus struct {
 }
 
 type webDAVResponse struct {
-	Href      string             `xml:"href"`
+	Href     string             `xml:"href"`
 	Propstat []webDAVPropStatus `xml:"propstat"`
 }
 
@@ -211,6 +212,16 @@ func targetRemoteURL(target WebDAVTarget, remotePath string) (*url.URL, error) {
 	}
 	baseURL.Path = cleanPath
 	return baseURL, nil
+}
+
+func ensureCollectionURL(value *url.URL) {
+	if value.Path == "" {
+		value.Path = "/"
+		return
+	}
+	if !strings.HasSuffix(value.Path, "/") {
+		value.Path += "/"
+	}
 }
 
 func setBasicAuth(req *http.Request, target WebDAVTarget) {

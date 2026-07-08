@@ -27,6 +27,10 @@ describe("createSmokeWorkspace", () => {
     expect(workspace.consul.baseUrl).toBe("http://127.0.0.1:18863");
     expect(workspace.consul.datacenter).toBe("dc1");
     expect(workspace.consul.keyPrefix).toBe("apps/order/");
+    expect(workspace.ssh.host).toBe("127.0.0.1");
+    expect(workspace.ssh.hostPort).toBe(18864);
+    expect(workspace.ssh.username).toBe("smoke");
+    expect(workspace.ssh.password).toBe("smoke-pass");
     expect(workspace.webdav.baseUrl).toBe("http://127.0.0.1:18861");
     expect(workspace.webdav.username).toBe("smoke");
     expect(workspace.webdav.password).toBe("smoke-pass");

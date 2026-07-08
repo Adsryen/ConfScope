@@ -36,6 +36,8 @@ export function recordCase(workspace: SmokeWorkspace, result: SmokeCaseResult): 
 export function writeFinalReport(workspace: SmokeWorkspace): void {
   const casesPath = join(workspace.reportsDir, "cases.json");
   const cases = existsSync(casesPath) ? (JSON.parse(readFileSync(casesPath, "utf8")) as SmokeCaseResult[]) : [];
+  const tested = cases.filter((item) => item.status === "PASS" || item.status === "FAIL_PRODUCT_BUG" || item.status === "FAIL_TEST_SETUP");
+  const notTested = cases.filter((item) => item.status.startsWith("NOT_RUN_"));
   const statuses: SmokeCaseStatus[] = [
     "PASS",
     "FAIL_PRODUCT_BUG",
@@ -58,12 +60,26 @@ export function writeFinalReport(workspace: SmokeWorkspace): void {
     "",
     "## Tested",
     "",
-    "| ID | Area | Status | Evidence | Notes |",
-    "| --- | --- | --- | --- | --- |",
-    ...cases.map((item) => `| ${item.id} | ${item.area} | ${item.status} | ${escapeCell(item.evidence)} | ${escapeCell(item.notes)} |`),
+    ...renderCaseTable(tested),
+    "",
+    "## Not Tested / Why",
+    "",
+    ...renderCaseTable(notTested),
+    "",
+    "## All Cases",
+    "",
+    ...renderCaseTable(cases),
     "",
   ];
   writeFileSync(join(workspace.reportsDir, "result.md"), `${lines.join("\n")}\n`, "utf8");
+}
+
+function renderCaseTable(cases: SmokeCaseResult[]): string[] {
+  return [
+    "| ID | Area | Status | Evidence | Notes |",
+    "| --- | --- | --- | --- | --- |",
+    ...cases.map((item) => `| ${item.id} | ${item.area} | ${item.status} | ${escapeCell(item.evidence)} | ${escapeCell(item.notes)} |`),
+  ];
 }
 
 function escapeCell(value: string): string {

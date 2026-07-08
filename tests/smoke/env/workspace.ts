@@ -36,6 +36,14 @@ export interface SmokeConsulEndpoint {
   keyPrefix: string;
 }
 
+export interface SmokeSSHEndpoint {
+  containerName: string;
+  host: string;
+  hostPort: number;
+  username: string;
+  password: string;
+}
+
 export interface SmokeWorkspace {
   runId: string;
   projectRoot: string;
@@ -54,6 +62,7 @@ export interface SmokeWorkspace {
   };
   apollo: SmokeApolloEndpoint;
   consul: SmokeConsulEndpoint;
+  ssh: SmokeSSHEndpoint;
   webdav: SmokeWebDAVEndpoint;
 }
 
@@ -113,6 +122,7 @@ export function createSmokeWorkspace(options: CreateSmokeWorkspaceOptions = {}):
     },
     apollo: apolloEndpoint(),
     consul: consulEndpoint(),
+    ssh: sshEndpoint(),
     webdav: webDAVEndpoint(),
   };
 }
@@ -172,6 +182,16 @@ function consulEndpoint(): SmokeConsulEndpoint {
     baseUrl: "http://127.0.0.1:18863",
     datacenter: "dc1",
     keyPrefix: "apps/order/",
+  };
+}
+
+function sshEndpoint(): SmokeSSHEndpoint {
+  return {
+    containerName: "confscope-smoke-sshd",
+    host: "127.0.0.1",
+    hostPort: 18864,
+    username: "smoke",
+    password: "smoke-pass",
   };
 }
 

@@ -115,6 +115,7 @@ func (c *WebDAVClient) List(target WebDAVTarget) ([]RemoteSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	ensureCollectionURL(rootURL)
 	req, err := http.NewRequest("PROPFIND", rootURL.String(), strings.NewReader(`<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getcontentlength/><getlastmodified/></prop></propfind>`))
 	if err != nil {
 		return nil, fmt.Errorf("创建 WebDAV 列表请求失败: %w", err)
@@ -134,7 +135,7 @@ func (c *WebDAVClient) List(target WebDAVTarget) ([]RemoteSnapshot, error) {
 	if err := xml.NewDecoder(resp.Body).Decode(&multi); err != nil {
 		return nil, fmt.Errorf("解析 WebDAV 列表失败: %w", err)
 	}
-	var out []RemoteSnapshot
+	out := make([]RemoteSnapshot, 0)
 	for _, item := range multi.Responses {
 		remotePath := decodeURLPath(item.Href)
 		if strings.HasSuffix(remotePath, "/") || !strings.HasSuffix(strings.ToLower(remotePath), PackageExtension) {
@@ -258,6 +259,16 @@ func targetRemoteURL(target WebDAVTarget, remotePath string) (*url.URL, error) {
 	}
 	baseURL.Path = cleanPath
 	return baseURL, nil
+}
+
+func ensureCollectionURL(value *url.URL) {
+	if value.Path == "" {
+		value.Path = "/"
+		return
+	}
+	if !strings.HasSuffix(value.Path, "/") {
+		value.Path += "/"
+	}
 }
 
 func setBasicAuth(req *http.Request, target WebDAVTarget) {

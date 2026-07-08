@@ -1,9 +1,18 @@
 /**
  * @vitest-environment node
  */
-import { describe, expect, it } from "vitest";
-import { apolloContainerOptions, consulContainerOptions, webDAVContainerOptions } from "./docker";
-import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { apolloContainerOptions, consulContainerOptions, sshContainerOptions, waitForSSH, webDAVContainerOptions } from "./docker";
+import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeSSHEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+
+const closers: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  await Promise.all(closers.splice(0).map((close) => close()));
+});
 
 describe("webDAVContainerOptions", () => {
   it("builds a loopback generic WebDAV container with mounted smoke storage and basic auth", () => {
@@ -101,5 +110,69 @@ describe("consulContainerOptions", () => {
       expect.arrayContaining(["--network", "confscope-smoke", "-p", "127.0.0.1:18863:8500"])
     );
     expect(options.command).toEqual(["agent", "-dev", "-client=0.0.0.0", "-datacenter=dc1"]);
+  });
+});
+
+describe("sshContainerOptions", () => {
+  it("builds a loopback SSH server container with password auth on the smoke network", () => {
+    const endpoint: SmokeSSHEndpoint = {
+      containerName: "confscope-smoke-sshd",
+      host: "127.0.0.1",
+      hostPort: 18864,
+      username: "smoke",
+      password: "smoke-pass",
+    };
+
+    const configFile = "C:/repo/ConfScope/tests/smoke/fixtures/ssh/sshd_config";
+    const options = sshContainerOptions(endpoint, configFile);
+
+    expect(options.name).toBe("confscope-smoke-sshd");
+    expect(options.image).toBe("lscr.io/linuxserver/openssh-server:latest");
+    expect(options.args).toEqual(
+      expect.arrayContaining([
+        "--network",
+        "confscope-smoke",
+        "-p",
+        "127.0.0.1:18864:2222",
+        "-v",
+        `${configFile}:/config/sshd/sshd_config`,
+        "-e",
+        "USER_NAME=smoke",
+        "-e",
+        "USER_PASSWORD=smoke-pass",
+        "-e",
+        "PASSWORD_ACCESS=true",
+      ])
+    );
+  });
+
+  it("pins an sshd_config fixture that allows direct TCP forwarding for tunnels", () => {
+    const config = readFileSync("tests/smoke/fixtures/ssh/sshd_config", "utf8");
+
+    expect(config).toContain("AllowTcpForwarding yes");
+    expect(config).toContain("GatewayPorts no");
+  });
+
+  it("waits for an SSH protocol banner instead of only checking the port", async () => {
+    const server = createServer((socket) => {
+      socket.write("SSH-2.0-confscope-smoke-test\r\n");
+      socket.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    closers.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const address = server.address() as AddressInfo;
+
+    await expect(
+      waitForSSH(
+        {
+          containerName: "ssh-test",
+          host: "127.0.0.1",
+          hostPort: address.port,
+          username: "smoke",
+          password: "smoke-pass",
+        },
+        1_000
+      )
+    ).resolves.toBeUndefined();
   });
 });

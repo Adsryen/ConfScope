@@ -71,8 +71,9 @@ export function testAppDataWebDAV(target: AppDataWebDAVSettings): Promise<void> 
   return TestAppDataWebDAV(target);
 }
 
-export function listAppDataWebDAVBackups(target: AppDataWebDAVSettings): Promise<RemoteAppDataBackup[]> {
-  return ListAppDataWebDAVBackups(target) as Promise<RemoteAppDataBackup[]>;
+export async function listAppDataWebDAVBackups(target: AppDataWebDAVSettings): Promise<RemoteAppDataBackup[]> {
+  const result: unknown = await ListAppDataWebDAVBackups(target);
+  return Array.isArray(result) ? (result as RemoteAppDataBackup[]) : [];
 }
 
 export function uploadAppDataWebDAVBackup(

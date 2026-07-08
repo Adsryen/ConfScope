@@ -38,21 +38,6 @@ export function recordKnownNativeGaps(state: SmokeState): void {
   for (const item of [
     ["GAP-NATIVE-MACOS", "Native Desktop", "macOS native automation is not covered by the Windows-first smoke."],
     ["GAP-NATIVE-LINUX", "Native Desktop", "Linux native automation is not covered by the Windows-first smoke."],
-    [
-      "GAP-NATIVE-APOLLO",
-      "Apollo provider",
-      "Apollo is covered by Vite + Docker OpenAPI smoke; native Wails form/browser/diff/audit automation is not covered yet.",
-    ],
-    [
-      "GAP-NATIVE-CONSUL",
-      "Consul provider",
-      "Consul is covered by Vite + Docker Consul smoke; native Wails form/browser/diff/audit automation is not covered yet.",
-    ],
-    [
-      "GAP-NATIVE-APPDATA-WEBDAV-LIST",
-      "App Data Backup",
-      "Native smoke verifies WebDAV upload/download/restore through real Wails bindings; explicit refresh/list assertion remains covered outside native automation.",
-    ],
   ] as const) {
     recordCase(state, {
       id: item[0],

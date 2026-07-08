@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeNacosEndpoint, SmokeWebDAVEndpoint } from "./workspace";
+import { connect } from "node:net";
+import type { SmokeApolloEndpoint, SmokeConsulEndpoint, SmokeNacosEndpoint, SmokeSSHEndpoint, SmokeWebDAVEndpoint } from "./workspace";
 
 export interface DockerRunOptions {
   image: string;
@@ -101,6 +102,39 @@ export function startConsulContainer(endpoint: SmokeConsulEndpoint): void {
   runDetachedContainer(consulContainerOptions(endpoint));
 }
 
+export function sshContainerOptions(endpoint: SmokeSSHEndpoint, configFile: string): DockerRunOptions {
+  return {
+    name: endpoint.containerName,
+    image: "lscr.io/linuxserver/openssh-server:latest",
+    args: [
+      "--network",
+      "confscope-smoke",
+      "-p",
+      `127.0.0.1:${endpoint.hostPort}:2222`,
+      "-v",
+      `${configFile}:/config/sshd/sshd_config`,
+      "-e",
+      "PUID=1000",
+      "-e",
+      "PGID=1000",
+      "-e",
+      "TZ=Etc/UTC",
+      "-e",
+      `USER_NAME=${endpoint.username}`,
+      "-e",
+      `USER_PASSWORD=${endpoint.password}`,
+      "-e",
+      "PASSWORD_ACCESS=true",
+      "-e",
+      "SUDO_ACCESS=false",
+    ],
+  };
+}
+
+export function startSSHContainer(endpoint: SmokeSSHEndpoint, configFile: string): void {
+  runDetachedContainer(sshContainerOptions(endpoint, configFile));
+}
+
 export function webDAVContainerOptions(endpoint: SmokeWebDAVEndpoint, dataDir: string): DockerRunOptions {
   return {
     name: endpoint.containerName,
@@ -127,6 +161,41 @@ export function webDAVContainerOptions(endpoint: SmokeWebDAVEndpoint, dataDir: s
 export function startWebDAVContainer(endpoint: SmokeWebDAVEndpoint, dataDir: string): void {
   mkdirSync(dataDir, { recursive: true });
   runDetachedContainer(webDAVContainerOptions(endpoint, dataDir));
+}
+
+export async function waitForSSH(endpoint: SmokeSSHEndpoint, timeoutMs = 60_000): Promise<void> {
+  const started = Date.now();
+  let lastError = "";
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const banner = await readSSHBanner(endpoint, 3_000);
+      if (banner.startsWith("SSH-")) return;
+      lastError = `unexpected banner: ${banner}`;
+    } catch (error) {
+      lastError = String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Timed out waiting for SSH smoke container at ${endpoint.host}:${endpoint.hostPort}; lastError=${lastError}`);
+}
+
+function readSSHBanner(endpoint: SmokeSSHEndpoint, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(endpoint.hostPort, endpoint.host);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("SSH banner timeout"));
+    }, timeoutMs);
+    socket.once("data", (chunk: Buffer) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(chunk.toString("utf8").trim());
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 export async function waitForWebDAV(endpoint: SmokeWebDAVEndpoint, timeoutMs = 60_000): Promise<void> {
