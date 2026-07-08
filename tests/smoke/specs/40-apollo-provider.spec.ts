@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test";
+import { downloadAuditJSON } from "./auditExport";
 import { expect, pass, test } from "./smokeTest";
 
 test("creates and reads an Apollo OpenAPI connection through the UI", async ({ page, smoke }) => {
@@ -38,11 +39,17 @@ test("creates and reads an Apollo OpenAPI connection through the UI", async ({ p
   await page.getByRole("button", { name: "Run Audit" }).click();
   await expect(page.locator(".audit-matrix")).toContainText(smoke.apollo.namespaceName, { timeout: 30_000 });
   await expect(page.locator(".audit-matrix")).toContainText("server.port", { timeout: 30_000 });
+  const auditJson = await downloadAuditJSON(page);
+  expect(auditJson.metadata).toMatchObject({ schemaVersion: 2, sanitized: true });
+  expect(auditJson.sources.some((source) => source.provider === "apollo" && source.connectionName === "Apollo OpenAPI")).toBe(true);
+  expect(auditJson.rows.some((row) => row.providerType === "apollo" && row.dataId === smoke.apollo.namespaceName)).toBe(true);
+  expect(JSON.stringify(auditJson)).not.toContain(smoke.apollo.token);
 
   pass(smoke, "FS-APOLLO-CONN-01", "Apollo provider", "Created Apollo OpenAPI connection through Connection Manager form and tested it");
   pass(smoke, "FS-APOLLO-BROWSE-01", "Apollo provider", "Browsed and opened Apollo namespace content from Docker OpenAPI fixture");
   pass(smoke, "FS-APOLLO-DIFF-01", "Apollo provider", "Compared Apollo namespace through Config Compare");
   pass(smoke, "FS-APOLLO-AUDIT-01", "Apollo provider", "Included Apollo namespace in Config Matrix audit");
+  pass(smoke, "FS-APOLLO-AUDIT-EXPORT-01", "Apollo provider", "Exported Apollo audit JSON through the visible Config Matrix UI with provider/source metadata");
 });
 
 async function pickApolloDiffSource(sourcePicker: Locator, namespaceName: string): Promise<void> {
