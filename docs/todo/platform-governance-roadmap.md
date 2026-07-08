@@ -125,18 +125,26 @@
 
 - 2026-07-08：接受“`v1.x` 小步增强 + `v2.0.0` 平台化重构”路线。
 - 2026-07-08：配置快照 WebDAV 已作为 `v1.6.0` 完成，不再作为未完成候选项。
+- 2026-07-08：确认下一项 `v1.x` P0 任务为 `audit-export-provider-hardening`，并创建 Trellis 任务 `07-08-audit-export-provider-hardening`。
 
-## 下一步待确认
+## 当前执行任务
 
-下一项 `v1.x` 优先任务建议选择 `audit-export-provider-hardening`。
+当前优先任务：`audit-export-provider-hardening`
 
-理由：
+目标：
 
-- 用户价值直接：审计结果能交付、归档、审阅。
-- 技术风险低：主要复用现有 AuditView/export/provider refs。
-- 能为 v2.0 治理报告和跨 provider 矩阵提前稳定导出合同。
+- 补齐 Nacos/Apollo/Consul/local 审计导出字段一致性。
+- 默认脱敏导出 password、token、AK/SK、privateKey、passphrase、WebDAV password 等敏感值。
+- 在 CSV/JSON 中保留 provider、connection/source、namespace/group/dataId/key、status、updatedAt、originalDataIds。
+- 通过 Apollo/Consul Docker smoke 从真实 UI 下载审计导出文件并断言内容。
 
-备选：
+计划文件：
 
-- 如果更担心后续迁移风险，先做 `local-data-migration-guardrails`。
-- 如果更担心凭据明文风险，先做 `credential-security-discovery`。
+- `docs/todo/audit-export-provider-hardening-plan.md`
+- `docs/superpowers/plans/2026-07-08-audit-export-provider-hardening.md` 是本机执行技能使用的 ignored 计划镜像。
+
+后续顺序：
+
+1. 完成 `audit-export-provider-hardening`。
+2. 再确认是否进入 `local-data-migration-guardrails`。
+3. 再确认 `credential-security-discovery`。
