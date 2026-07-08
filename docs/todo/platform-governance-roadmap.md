@@ -17,6 +17,7 @@
 - 配置中心快照 WebDAV 同步，使用 `.cssnapshot`，已发布 `v1.6.0`。
 - 全量真实 smoke：Docker Nacos、Apollo fixture、Consul、WebDAV。
 - 审计导出 provider 字段与脱敏增强，已发布 `v1.6.1`。
+- 本地数据迁移兼容护栏，覆盖旧 localStorage fixture、schema v1 `.csbackup` 恢复和 loader normalize。
 
 ## v1.x 小步增强
 
@@ -129,24 +130,29 @@
 - 2026-07-08：确认下一项 `v1.x` P0 任务为 `audit-export-provider-hardening`，并创建 Trellis 任务 `07-08-audit-export-provider-hardening`。
 - 2026-07-08：`audit-export-provider-hardening` 已完成并发布 `v1.6.1`。
 - 2026-07-08：确认下一项 `v1.x` P0 任务为 `local-data-migration-guardrails`，并创建 Trellis 任务 `07-08-local-data-migration-guardrails`。
+- 2026-07-08：`local-data-migration-guardrails` 已完成，新增兼容 fixture 和自动化护栏测试。
+- 2026-07-08：确认下一项 `v1.x` P1 任务为 `credential-security-discovery`，包含 Windows Credential Manager 最小 PoC 设计，但不迁移真实凭据数据。
 
 ## 当前执行任务
 
-当前优先任务：`local-data-migration-guardrails`
+当前优先任务：`credential-security-discovery`
 
 目标：
 
-- 建立旧 localStorage 数据 fixture，覆盖连接、settings、SSH profiles、operation history、apply plans、apply verifications、app data backup state、UI 和 locale。
-- 验证旧数据直接加载和 `.csbackup` schema v1 恢复后，经当前 loader normalize 仍可被产品使用。
-- 只修补测试证明的 normalize 兼容缺口，不引入 v2 数据模型、数据库或账号体系。
+- 盘点当前明文凭据字段、存储位置、备份/导出/日志暴露面。
+- 对比 Windows Credential Manager、macOS Keychain、Linux Secret Service、master password 加密和企业 KMS/STS。
+- 设计 Windows Credential Manager 最小 PoC，验证写入、读取、删除、错误分类和 native smoke 可调用。
+- 输出后续真实凭据迁移、备份恢复和跨平台降级策略。
 
 计划文件：
 
-- `docs/todo/local-data-migration-guardrails-plan.md`
-- `docs/superpowers/plans/2026-07-08-local-data-migration-guardrails.md` 是本机执行技能使用的 ignored 计划镜像。
+- `docs/todo/credential-security-discovery-plan.md`
+- `.trellis/tasks/07-08-credential-security-discovery/prd.md`
+- `.trellis/tasks/07-08-credential-security-discovery/design.md`
+- `.trellis/tasks/07-08-credential-security-discovery/implement.md`
 
 后续顺序：
 
-1. 完成 `local-data-migration-guardrails`。
-2. 再确认 `credential-security-discovery`。
+1. 完成 `credential-security-discovery`。
+2. 根据 PoC 结论决定是否拆出真实凭据迁移任务。
 3. 再评估是否进入 v2 平台化数据模型迁移。
