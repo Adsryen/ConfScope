@@ -1,21 +1,26 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"confscope/internal/appbackup"
 	"confscope/internal/provider"
+	"confscope/internal/securestore"
 	"confscope/internal/snapshotwebdav"
 	"confscope/internal/updatecheck"
 )
@@ -405,6 +410,71 @@ func TestAppDataBackupLocalBindingsEncryptAndReadBack(t *testing.T) {
 	if decrypted.PlaintextJSON != plaintext {
 		t.Fatalf("PlaintextJSON = %s, want %s", decrypted.PlaintextJSON, plaintext)
 	}
+}
+
+func TestRunCredentialStorePoCRejectsInvalidRunID(t *testing.T) {
+	_, err := NewApp().RunCredentialStorePoC("bad/run")
+	if !errors.Is(err, securestore.ErrInvalidSecretRef) {
+		t.Fatalf("RunCredentialStorePoC error = %v, want ErrInvalidSecretRef", err)
+	}
+}
+
+func TestRunCredentialStorePoCRoundTrip(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows Credential Manager PoC is Windows-only")
+	}
+
+	runID := "app-test-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	result, err := NewApp().RunCredentialStorePoC(runID)
+	if err != nil {
+		t.Fatalf("RunCredentialStorePoC returned error: %v", err)
+	}
+	if !result.OK || !result.ReadBackOK || !result.Deleted {
+		t.Fatalf("result = %+v, want ok/readBack/deleted", result)
+	}
+	if got, want := result.TargetName, "ConfScope/poc/"+runID; got != want {
+		t.Fatalf("TargetName = %q, want %q", got, want)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", result), "secret-") {
+		t.Fatalf("result leaks secret material: %+v", result)
+	}
+}
+
+func TestRunCredentialStorePoCReportsReadBackMismatch(t *testing.T) {
+	store := &credentialPoCFakeStore{getValue: []byte("different-secret")}
+
+	result, err := runCredentialStorePoC(context.Background(), store, "mismatch-test")
+
+	if !errors.Is(err, securestore.ErrSecretVerifyFailed) {
+		t.Fatalf("runCredentialStorePoC error = %v, want ErrSecretVerifyFailed", err)
+	}
+	if result.OK || result.ReadBackOK || result.Deleted {
+		t.Fatalf("result = %+v, want failed verification without success flags", result)
+	}
+	if store.deleteCount == 0 {
+		t.Fatal("runCredentialStorePoC did not clean up after read-back mismatch")
+	}
+	if strings.Contains(fmt.Sprintf("%+v", result), "different-secret") {
+		t.Fatalf("result leaks fake secret material: %+v", result)
+	}
+}
+
+type credentialPoCFakeStore struct {
+	getValue    []byte
+	deleteCount int
+}
+
+func (s *credentialPoCFakeStore) Put(context.Context, securestore.SecretRef, []byte) error {
+	return nil
+}
+
+func (s *credentialPoCFakeStore) Get(context.Context, securestore.SecretRef) ([]byte, error) {
+	return append([]byte(nil), s.getValue...), nil
+}
+
+func (s *credentialPoCFakeStore) Delete(context.Context, securestore.SecretRef) error {
+	s.deleteCount++
+	return nil
 }
 
 func TestSnapshotWebDAVBindingsUploadListAndImport(t *testing.T) {

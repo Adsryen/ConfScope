@@ -66,6 +66,14 @@ Windows PoC 只验证：
 - 测试结束后清理 `ConfScope/poc/<run-id>` target。
 - 小 payload，不覆盖 SSH private key 大 secret。
 
+## PoC 实现结论
+
+- 已新增 `internal/securestore` PoC 接口和 Windows WinCred 实现。
+- 已新增 `RunCredentialStorePoC(runID)` Wails 绑定，只写入 `ConfScope/poc/<run-id>` 测试凭据。
+- PoC 返回值仅包含 target 名称、读回/删除状态和值大小，不返回 secret 值。
+- native smoke 新增 `NATIVE-CREDENTIAL-STORE-POC-01`，用于真实 Windows 原生包验证。
+- 真实凭据迁移、macOS Keychain、Linux Secret Service、SSH privateKey 大 secret 仍是后续任务。
+
 ## Trellis artifacts
 
 - `.trellis/tasks/07-08-credential-security-discovery/prd.md`
