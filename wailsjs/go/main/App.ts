@@ -5,6 +5,7 @@ type GoApp = {
   GetDownloadProgress(): Promise<any>;
   InstallAndRestart(downloadedFile: string): Promise<void>;
   GetCurrentPlatform(): Promise<string>;
+  RunCredentialStorePoC(runID: string): Promise<CredentialStorePoCResult>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   ConfigCenterListNamespaces(profile: any): Promise<any>;
@@ -119,6 +120,14 @@ type GoApp = {
   ImportSnapshotWebDAVPackage(target: any, remotePath: string, password: string): Promise<any>;
 };
 
+export interface CredentialStorePoCResult {
+  ok: boolean;
+  targetName: string;
+  readBackOk: boolean;
+  deleted: boolean;
+  valueSize: number;
+}
+
 declare global {
   interface Window {
     go: {
@@ -142,6 +151,8 @@ export const GetDownloadProgress = () => app().GetDownloadProgress();
 export const InstallAndRestart = (downloadedFile: string) => app().InstallAndRestart(downloadedFile);
 
 export const GetCurrentPlatform = () => app().GetCurrentPlatform();
+
+export const RunCredentialStorePoC = (runID: string) => app().RunCredentialStorePoC(runID);
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 

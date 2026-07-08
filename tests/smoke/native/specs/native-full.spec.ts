@@ -22,6 +22,14 @@ interface PageResult {
   marker: string;
 }
 
+interface CredentialStorePoCResult {
+  ok: boolean;
+  targetName: string;
+  readBackOk: boolean;
+  deleted: boolean;
+  valueSize: number;
+}
+
 interface NativePollResult<T> {
   done: boolean;
   value?: T;
@@ -38,6 +46,8 @@ test("creates a Nacos connection through the native Wails UI and browses real co
   expect(shell.hasShell).toBe(true);
   expect(shell.hasConnectionManager).toBe(true);
   pass(smoke, "NATIVE-SHELL-01", "Native Desktop", "Real Wails WebView shell loaded through native smoke control");
+
+  await verifyCredentialStorePoC(native, smoke);
 
   const connection = await createNacosConnection(native, smoke);
   expect(connection.sourceName).toBe("Native Dev Nacos");
@@ -69,6 +79,30 @@ async function prepareEnglishUi(native: NativeControlClient): Promise<void> {
     setTimeout(() => window.location.reload(), 500);
     return true;
   `);
+}
+
+async function verifyCredentialStorePoC(native: NativeControlClient, smoke: SmokeState): Promise<void> {
+  const result = await native.eval<CredentialStorePoCResult>(
+    `
+    const app = window.go && window.go.main && window.go.main.App;
+    if (!app || typeof app.RunCredentialStorePoC !== "function") {
+      throw new Error("RunCredentialStorePoC binding not found");
+    }
+    const result = await app.RunCredentialStorePoC("native-" + Date.now());
+    if (JSON.stringify(result).includes("secret-")) {
+      throw new Error("Credential store PoC result leaked secret material");
+    }
+    return result;
+  `,
+    30_000
+  );
+
+  expect(result.ok).toBe(true);
+  expect(result.readBackOk).toBe(true);
+  expect(result.deleted).toBe(true);
+  expect(result.targetName.startsWith("ConfScope/poc/native-")).toBe(true);
+  expect(result.valueSize).toBeGreaterThan(0);
+  pass(smoke, "NATIVE-CREDENTIAL-STORE-POC-01", "Security", "Windows Credential Manager PoC wrote, read, and deleted a test credential");
 }
 
 function sleep(ms: number): Promise<void> {

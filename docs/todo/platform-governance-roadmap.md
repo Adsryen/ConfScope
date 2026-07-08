@@ -18,6 +18,7 @@
 - 全量真实 smoke：Docker Nacos、Apollo fixture、Consul、WebDAV。
 - 审计导出 provider 字段与脱敏增强，已发布 `v1.6.1`。
 - 本地数据迁移兼容护栏，覆盖旧 localStorage fixture、schema v1 `.csbackup` 恢复和 loader normalize。
+- 凭据安全路线调研与 Windows Credential Manager 最小 PoC，覆盖 WinCred 写入/读取/删除和 native smoke。
 
 ## v1.x 小步增强
 
@@ -53,6 +54,8 @@
 - 不做账号体系或远端同步服务端。
 
 ### 3. credential-security-discovery
+
+状态：已完成。
 
 目标：确认凭据安全增强路线，不直接一次性替换所有存储。
 
@@ -132,17 +135,15 @@
 - 2026-07-08：确认下一项 `v1.x` P0 任务为 `local-data-migration-guardrails`，并创建 Trellis 任务 `07-08-local-data-migration-guardrails`。
 - 2026-07-08：`local-data-migration-guardrails` 已完成，新增兼容 fixture 和自动化护栏测试。
 - 2026-07-08：确认下一项 `v1.x` P1 任务为 `credential-security-discovery`，包含 Windows Credential Manager 最小 PoC 设计，但不迁移真实凭据数据。
+- 2026-07-08：`credential-security-discovery` 已完成，新增 Windows Credential Manager PoC、Go 测试和 native smoke 验证；真实凭据迁移与跨平台 Keychain/Secret Service 进入后续任务。
 
 ## 当前执行任务
 
-当前优先任务：`credential-security-discovery`
+当前优先任务：待确认下一条任务线。
 
-目标：
+刚完成任务参考：
 
-- 盘点当前明文凭据字段、存储位置、备份/导出/日志暴露面。
-- 对比 Windows Credential Manager、macOS Keychain、Linux Secret Service、master password 加密和企业 KMS/STS。
-- 设计 Windows Credential Manager 最小 PoC，验证写入、读取、删除、错误分类和 native smoke 可调用。
-- 输出后续真实凭据迁移、备份恢复和跨平台降级策略。
+- `credential-security-discovery` 已完成凭据盘点、方案对比、Windows Credential Manager PoC、native smoke 和后续迁移边界。
 
 计划文件：
 
@@ -153,6 +154,6 @@
 
 后续顺序：
 
-1. 完成 `credential-security-discovery`。
-2. 根据 PoC 结论决定是否拆出真实凭据迁移任务。
+1. 确认是否拆出真实凭据迁移任务，先覆盖小凭据 `secretRef` 迁移与 `.csbackup` 导出兼容。
+2. 单独评估 Windows 大 secret（SSH privateKey）DPAPI 加密文件方案。
 3. 再评估是否进入 v2 平台化数据模型迁移。
