@@ -82,4 +82,11 @@ describe("appDataBackup api", () => {
     expect(goApp.UploadAppDataWebDAVBackup).toHaveBeenCalledWith(target, "{\"ok\":true}", "pass", meta);
     expect(goApp.DownloadAppDataWebDAVBackup).toHaveBeenCalledWith(target, "/confscope/app.csbackup", "pass");
   });
+
+  it("normalizes a null WebDAV backup list from native bindings to an empty array", async () => {
+    const target = { enabled: true, url: "https://dav.example.com", username: "ops", password: "secret", rootPath: "/confscope" };
+    goApp.ListAppDataWebDAVBackups.mockResolvedValue(null);
+
+    await expect(listAppDataWebDAVBackups(target)).resolves.toEqual([]);
+  });
 });

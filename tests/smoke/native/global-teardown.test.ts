@@ -15,7 +15,7 @@ describe("native smoke global teardown", () => {
     }
   });
 
-  it("records Apollo native provider coverage as an automation gap", () => {
+  it("keeps platform and OS-risk gaps without re-adding native coverage gaps", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "confscope-native-gaps-"));
     tempRoots.push(projectRoot);
     const state: SmokeState = {
@@ -27,19 +27,11 @@ describe("native smoke global teardown", () => {
     recordKnownNativeGaps(state);
 
     const cases = JSON.parse(readFileSync(join(state.reportsDir, "cases.json"), "utf8")) as SmokeCaseResult[];
-    expect(cases).toContainEqual(
-      expect.objectContaining({
-        id: "GAP-NATIVE-APOLLO",
-        area: "Apollo provider",
-        status: "NOT_RUN_AUTOMATION_GAP",
-      })
-    );
-    expect(cases).toContainEqual(
-      expect.objectContaining({
-        id: "GAP-NATIVE-APPDATA-WEBDAV-LIST",
-        area: "App Data Backup",
-        status: "NOT_RUN_AUTOMATION_GAP",
-      })
-    );
+    expect(cases).toContainEqual(expect.objectContaining({ id: "GAP-NATIVE-MACOS", status: "NOT_RUN_AUTOMATION_GAP" }));
+    expect(cases).toContainEqual(expect.objectContaining({ id: "GAP-NATIVE-LINUX", status: "NOT_RUN_AUTOMATION_GAP" }));
+    expect(cases).toContainEqual(expect.objectContaining({ id: "GAP-OS-DIALOGS", status: "NOT_RUN_RISK_ACCEPTANCE" }));
+    expect(cases.map((item) => item.id)).not.toContain("GAP-NATIVE-APOLLO");
+    expect(cases.map((item) => item.id)).not.toContain("GAP-NATIVE-CONSUL");
+    expect(cases.map((item) => item.id)).not.toContain("GAP-NATIVE-APPDATA-WEBDAV-LIST");
   });
 });

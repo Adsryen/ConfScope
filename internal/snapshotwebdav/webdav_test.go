@@ -39,6 +39,13 @@ func TestWebDAVClientUploadListDownloadFiltersConfigSnapshotPackages(t *testing.
 			files[r.URL.Path] = body
 			w.WriteHeader(http.StatusCreated)
 		case "PROPFIND":
+			if r.URL.Path == "/confscope/snapshots" {
+				http.Redirect(w, r, "/confscope/snapshots/", http.StatusMovedPermanently)
+				return
+			}
+			if r.URL.Path != "/confscope/snapshots/" {
+				t.Fatalf("PROPFIND path = %s, want /confscope/snapshots/", r.URL.Path)
+			}
 			w.Header().Set("Content-Type", "application/xml")
 			w.WriteHeader(207)
 			_, _ = w.Write([]byte(`<?xml version="1.0"?>
