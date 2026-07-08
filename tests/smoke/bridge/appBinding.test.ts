@@ -98,6 +98,69 @@ describe("createSmokeAppBinding app data backup methods", () => {
     ]);
   });
 
+  it("uploads lists and imports encrypted config snapshot packages through WebDAV", async () => {
+    const state = smokeState();
+    const invoke = createSmokeAppBinding(state);
+    const remoteFiles = new Map<string, Buffer>();
+    remoteFiles.set("/confscope/snapshots/app.csbackup", Buffer.from("app backup"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        if (method === "MKCOL") {
+          return new Response("", { status: 201 });
+        }
+        if (method === "PUT") {
+          remoteFiles.set(url.pathname, Buffer.from(await new Response(init?.body).arrayBuffer()));
+          return new Response("", { status: 201 });
+        }
+        if (method === "GET") {
+          const body = remoteFiles.get(url.pathname);
+          return body ? new Response(body) : new Response("not found", { status: 404 });
+        }
+        if (method === "PROPFIND") {
+          const responses = [...remoteFiles.entries()]
+            .map(
+              ([remotePath, body]) =>
+                `<D:response><D:href>${remotePath}</D:href><D:propstat><D:prop><D:getcontentlength>${body.length}</D:getcontentlength><D:getlastmodified>Wed, 08 Jul 2026 08:00:00 GMT</D:getlastmodified></D:prop></D:propstat></D:response>`
+            )
+            .join("");
+          return new Response(`<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">${responses}</D:multistatus>`, { status: 207 });
+        }
+        return new Response("bad method", { status: 405 });
+      })
+    );
+    const target = {
+      enabled: true,
+      url: state.webdav.baseUrl,
+      username: state.webdav.username,
+      password: state.webdav.password,
+      rootPath: "/confscope/snapshots",
+    };
+    const snapshot = await invoke("CreateSnapshot", [
+      { provider: "nacos", connectionId: "conn-dev", connectionName: "dev-nacos", namespace: "public", namespaceId: "public" },
+      [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", content: "password: super-secret\n", configType: "yaml" }],
+    ]);
+
+    const remote = await invoke("UploadSnapshotWebDAVPackage", [target, (snapshot as { id: string }).id, "snapshot-pass"]);
+
+    expect(remote).toMatchObject({ name: expect.stringMatching(/\.cssnapshot$/), snapshotId: (snapshot as { id: string }).id });
+    const uploaded = remoteFiles.get((remote as { path: string }).path)?.toString("utf8") ?? "";
+    expect(uploaded).not.toContain("super-secret");
+    expect(uploaded).toContain("confscope.config-snapshot");
+
+    await expect(invoke("ListSnapshotWebDAVPackages", [target])).resolves.toEqual([
+      expect.objectContaining({ name: (remote as { name: string }).name, snapshotId: (snapshot as { id: string }).id }),
+    ]);
+
+    const imported = await invoke("ImportSnapshotWebDAVPackage", [target, (remote as { path: string }).path, "snapshot-pass"]);
+
+    expect(imported).toMatchObject({ remoteSnapshotId: (snapshot as { id: string }).id, importedFrom: { remotePath: (remote as { path: string }).path } });
+    expect((imported as { id: string }).id).not.toBe((snapshot as { id: string }).id);
+    await expect(invoke("ImportSnapshotWebDAVPackage", [target, (remote as { path: string }).path, "wrong-pass"])).rejects.toThrow();
+  });
+
   it("routes Apollo ConfigCenter bridge calls through Apollo OpenAPI", async () => {
     const state = smokeState();
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {

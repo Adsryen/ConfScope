@@ -1,4 +1,4 @@
 # Known Unimplemented Features
 
 - Native Wails WebView automation
-- Config-center snapshot WebDAV sync is not covered by the app-data backup feature
+- Native Wails WebView automation for config-center snapshot WebDAV sync; Vite smoke covers Docker WebDAV upload/list/import/diff

@@ -161,18 +161,27 @@ type ConfigSnapshot struct {
 	UpdateTime  string `json:"updateTime"`
 }
 
+// SnapshotImportedFrom 记录远端导入来源。
+type SnapshotImportedFrom struct {
+	Type       string `json:"type"`
+	RemotePath string `json:"remotePath"`
+	ImportedAt string `json:"importedAt"`
+}
+
 // Snapshot 快照。
 type Snapshot struct {
-	SchemaVersion int              `json:"schemaVersion"`
-	ToolVersion   string           `json:"toolVersion"`
-	ID            string           `json:"id"`
-	Path          string           `json:"path"`
-	Name          string           `json:"name"`
-	Description   string           `json:"description"`
-	CreatedAt     string           `json:"createdAt"`
-	UpdatedAt     string           `json:"updatedAt"`
-	Source        SnapshotSource   `json:"source"`
-	Configs       []ConfigSnapshot `json:"configs"`
+	SchemaVersion    int                   `json:"schemaVersion"`
+	ToolVersion      string                `json:"toolVersion"`
+	ID               string                `json:"id"`
+	Path             string                `json:"path"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description"`
+	CreatedAt        string                `json:"createdAt"`
+	UpdatedAt        string                `json:"updatedAt"`
+	Source           SnapshotSource        `json:"source"`
+	Configs          []ConfigSnapshot      `json:"configs"`
+	RemoteSnapshotID string                `json:"remoteSnapshotId,omitempty"`
+	ImportedFrom     *SnapshotImportedFrom `json:"importedFrom,omitempty"`
 }
 
 // LocalSnapshotValidation 是本地快照目录校验结果。

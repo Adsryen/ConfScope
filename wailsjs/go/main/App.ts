@@ -113,6 +113,10 @@ type GoApp = {
   ListAppDataWebDAVBackups(target: any): Promise<any[]>;
   UploadAppDataWebDAVBackup(target: any, plaintextJson: string, password: string, meta: any): Promise<any>;
   DownloadAppDataWebDAVBackup(target: any, remotePath: string, password: string): Promise<any>;
+  TestSnapshotWebDAV(target: any): Promise<void>;
+  ListSnapshotWebDAVPackages(target: any): Promise<any[]>;
+  UploadSnapshotWebDAVPackage(target: any, snapshotId: string, password: string): Promise<any>;
+  ImportSnapshotWebDAVPackage(target: any, remotePath: string, password: string): Promise<any>;
 };
 
 declare global {
@@ -295,5 +299,15 @@ export const UploadAppDataWebDAVBackup = (target: any, plaintextJson: string, pa
 
 export const DownloadAppDataWebDAVBackup = (target: any, remotePath: string, password: string) =>
   app().DownloadAppDataWebDAVBackup(target, remotePath, password);
+
+export const TestSnapshotWebDAV = (target: any) => app().TestSnapshotWebDAV(target);
+
+export const ListSnapshotWebDAVPackages = (target: any) => app().ListSnapshotWebDAVPackages(target);
+
+export const UploadSnapshotWebDAVPackage = (target: any, snapshotId: string, password: string) =>
+  app().UploadSnapshotWebDAVPackage(target, snapshotId, password);
+
+export const ImportSnapshotWebDAVPackage = (target: any, remotePath: string, password: string) =>
+  app().ImportSnapshotWebDAVPackage(target, remotePath, password);
 
 export {};

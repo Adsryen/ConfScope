@@ -52,6 +52,10 @@ const WAILS_METHODS = [
   "ListAppDataWebDAVBackups",
   "UploadAppDataWebDAVBackup",
   "DownloadAppDataWebDAVBackup",
+  "TestSnapshotWebDAV",
+  "ListSnapshotWebDAVPackages",
+  "UploadSnapshotWebDAVPackage",
+  "ImportSnapshotWebDAVPackage",
 ] as const;
 
 export async function installWailsBridge(page: Page, state: SmokeState): Promise<void> {
