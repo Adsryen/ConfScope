@@ -793,25 +793,14 @@
 ### 3.5 平台与发布
 
 - 当前支持：
-  - Windows amd64。
-  - Linux amd64。
-- macOS 暂停：
-  - macOS amd64。
-  - macOS arm64。
-- macOS 已知问题：
-
-```text
-dyld[1744]: missing LC_UUID load command in /Users/runner/go/bin/wails
-dyld[1744]: missing LC_UUID load command
-Abort trap: 6
-```
-
-- 恢复 macOS 前需要：
-  - 跟踪 Wails CLI v2.12.0 在 macOS GitHub Actions runner 上的问题。
-  - 尝试固定 Go 版本。
-  - 尝试固定或降级 Wails CLI。
-  - 尝试 macOS 本机 runner。
-  - 保证 CI 可重复。
+  - Windows amd64（`ConfScope.exe`）。
+  - Linux amd64（tar.gz / deb / rpm）。
+  - macOS arm64 + amd64（`.dmg`，GitHub Actions `macos-14`）。
+- macOS CI 说明：
+  - 历史失败：`dyld: missing LC_UUID load command` 导致 `go install` 出的 Wails CLI 无法启动。
+  - 当前策略：CI Go 1.24.x；macOS 上 `go install -ldflags="-linkmode=external"` 安装 Wails CLI，并以 `wails version` 做门禁。
+  - 产物未签名、未公证；用户首次打开可能需「右键 → 打开」绕过 Gatekeeper。
+  - 支持 `workflow_dispatch` 手动试跑（只构建与上传 artifact，不创建正式 Release）。
 
 ---
 

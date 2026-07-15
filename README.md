@@ -107,6 +107,21 @@ pnpm build      # 打包当前系统桌面应用
 pnpm build:win  # Windows 下打包 NSIS 安装包
 ```
 
+### 发布产物（GitHub Actions）
+
+推送 `v*` tag 后，Release workflow 会构建并上传：
+
+| 平台 | 产物 |
+| --- | --- |
+| Windows amd64 | `ConfScope.exe` |
+| Linux amd64 | `confscope-linux-amd64.tar.gz` / `.deb` / `.rpm` |
+| macOS arm64 | `ConfScope-darwin-arm64.dmg` |
+| macOS amd64 | `ConfScope-darwin-amd64.dmg` |
+
+也可在 Actions 中用 **workflow_dispatch** 手动试跑构建（只上传 artifact，不创建正式 Release）。
+
+> macOS DMG 当前未做 Apple 代码签名与公证。首次打开若被 Gatekeeper 拦截，可在 Finder 中对应用「右键 → 打开」确认一次。
+
 ### 测试
 
 ```bash
