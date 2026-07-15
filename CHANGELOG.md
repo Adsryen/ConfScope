@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-07-15
+
+### Added
+- 恢复 macOS 发布产物：GitHub Actions 自动构建 `ConfScope-darwin-arm64.dmg` 与 `ConfScope-darwin-amd64.dmg`。
+- `update.json` 增加 `darwin-arm64` / `darwin-amd64` 下载条目。
+- Release workflow 支持 `workflow_dispatch` 手动试跑（只构建上传 artifact，不创建正式 Release）。
+
+### Fixed
+- 修复 macOS runner 上 Wails CLI 因缺少 `LC_UUID` 无法启动的问题（CI Go 1.24.x + darwin external link 安装 CLI）。
+
+### Engineering
+- DMG 打包改为动态定位 `.app`，`create-dmg` 失败时回退 `hdiutil`，失败不再被 `|| true` 吞掉。
+
 ## [1.5.0] - 2026-07-07
 
 ### Added
