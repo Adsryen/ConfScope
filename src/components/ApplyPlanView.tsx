@@ -17,6 +17,7 @@ import { recordOperation } from "../store/operationHistory";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import CopyButton from "./CopyButton";
+import DiffPanel from "./DiffPanel";
 
 interface Props {
   entry: ApplyEntryPayload | null;
@@ -29,8 +30,18 @@ type DraftState =
   | { status: "ready"; plan: ApplyPlan; sourceConnection: Connection; targetConnection: Connection }
   | { status: "error"; detail: string };
 
+type ExecutionMode = "apply" | "dry-run";
+
 function firstSelectableItem(plan: ApplyPlan): string {
   return plan.items[0]?.id ?? "";
+}
+
+function isSelectableApplyItem(item: ApplyPlanItem): boolean {
+  return !item.blocked && item.action !== "skip" && item.action !== "parse_error";
+}
+
+function defaultSelectedItemIds(plan: ApplyPlan): Set<string> {
+  return new Set(plan.items.filter(isSelectableApplyItem).map((item) => item.id));
 }
 
 function appendConnection(connections: Connection[], connection: Connection): Connection[] {
@@ -87,25 +98,62 @@ function PlanLedger({ plan }: { plan: ApplyPlan }) {
   );
 }
 
-function PlanItemList({ plan, selectedId, onSelect }: { plan: ApplyPlan; selectedId: string; onSelect: (id: string) => void }) {
+function PlanItemList({
+  plan,
+  selectedId,
+  selectedIds,
+  onSelect,
+  onToggleSelected,
+  onSelectAll,
+  onSelectNone,
+}: {
+  plan: ApplyPlan;
+  selectedId: string;
+  selectedIds: Set<string>;
+  onSelect: (id: string) => void;
+  onToggleSelected: (id: string) => void;
+  onSelectAll: () => void;
+  onSelectNone: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="apply-item-list">
-      {plan.items.map((item) => (
-        <button
-          type="button"
-          key={item.id}
-          className={`apply-item-row${item.id === selectedId ? " selected" : ""}${item.blocked ? " blocked" : ""}`}
-          onClick={() => onSelect(item.id)}
-        >
-          <span className="apply-item-main">
-            <span className="mono">{item.ref.dataId}</span>
-            <span className="apply-item-key mono">{item.ref.key}</span>
-          </span>
-          <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
-          {item.blocked && <span className="apply-blocked">{t("apply.blocked")}</span>}
-        </button>
-      ))}
+      <div className="apply-item-toolbar">
+        <span>{t("apply.selectionCount", { count: selectedIds.size })}</span>
+        <div className="apply-item-toolbar-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onSelectAll}>
+            {t("apply.selectAll")}
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onSelectNone}>
+            {t("apply.selectNone")}
+          </button>
+        </div>
+      </div>
+      {plan.items.map((item) => {
+        const selectable = isSelectableApplyItem(item);
+        const checked = selectedIds.has(item.id);
+        return (
+          <label
+            key={item.id}
+            className={`apply-item-row${item.id === selectedId ? " selected" : ""}${item.blocked ? " blocked" : ""}${checked ? " checked" : ""}`}
+            onClick={() => onSelect(item.id)}
+          >
+            <input
+              className="apply-item-check"
+              type="checkbox"
+              checked={checked}
+              disabled={!selectable}
+              onChange={() => onToggleSelected(item.id)}
+            />
+            <span className="apply-item-main">
+              <span className="mono">{item.ref.dataId}</span>
+              <span className="apply-item-key mono">{item.ref.key}</span>
+            </span>
+            <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
+            {item.blocked && <span className="apply-blocked">{t("apply.blocked")}</span>}
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -123,6 +171,8 @@ function ValueBlock({ title, value }: { title: string; value: ApplyPlanValueSnap
 
 function ItemDetail({ item }: { item: ApplyPlanItem }) {
   const { t } = useTranslation();
+  const missingLabel = t("apply.valueMissing");
+  const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
   return (
     <div className="apply-detail">
       <div className="apply-detail-head">
@@ -138,6 +188,16 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
         <span>{t("apply.actionLine", { action: item.action })}</span>
         {item.blockReason && <span>{t("apply.blockReasonLine", { reason: item.blockReason })}</span>}
       </div>
+      <div className="apply-diff-preview">
+        <DiffPanel
+          leftLabel={t("apply.targetValue")}
+          rightLabel={t("apply.afterValue")}
+          leftText={valueText(item.targetValue, missingLabel)}
+          rightText={valueText(item.afterValue, missingLabel)}
+          format={diffFormat}
+          hideOnlyChangesToggle
+        />
+      </div>
       <div className="apply-value-grid">
         <ValueBlock title={t("apply.sourceValue")} value={item.sourceValue} />
         <ValueBlock title={t("apply.targetValue")} value={item.targetValue} />
@@ -149,29 +209,47 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
 
 function ConfirmationPanel({
   plan,
+  selectedCount,
   protectedTarget,
   confirmed,
   confirmationText,
-  executing,
+  executionMode,
   executeError,
+  executeNotice,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
+  onDryRun,
 }: {
   plan: ApplyPlan;
+  selectedCount: number;
   protectedTarget: boolean;
   confirmed: boolean;
   confirmationText: string;
-  executing: boolean;
+  executionMode: ExecutionMode | null;
   executeError: string | null;
+  executeNotice: string | null;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
+  onDryRun: () => void;
 }) {
   const { t } = useTranslation();
   const requiredText = applyConfirmationText(plan);
   const ready = protectedTarget ? confirmationText === requiredText : confirmed;
-  const disabled = !ready || executing || plan.summary.blocked > 0;
+  const anyRunning = executionMode !== null;
+  const dryRunDisabled = anyRunning || selectedCount === 0;
+  const executeDisabled = !ready || anyRunning || plan.summary.blocked > 0 || selectedCount === 0;
+  const executeLabel = executionMode === "apply"
+    ? t("apply.executing")
+    : selectedCount === plan.items.length
+      ? t("apply.execute")
+      : t("apply.executeSelected", { count: selectedCount });
+  const dryRunLabel = executionMode === "dry-run"
+    ? t("apply.dryRunExecuting")
+    : selectedCount === plan.items.length
+      ? t("apply.dryRun")
+      : t("apply.dryRunSelected", { count: selectedCount });
 
   return (
     <div className="apply-confirmation" aria-label={t("apply.confirmationLabel")}>
@@ -179,6 +257,7 @@ function ConfirmationPanel({
         <h4>{t("apply.confirmationTitle")}</h4>
         <span>{protectedTarget ? t("apply.protectedNotice") : t("apply.normalNotice")}</span>
       </div>
+      <div className="apply-selection-note">{t("apply.selectionCount", { count: selectedCount })}</div>
       {protectedTarget ? (
         <div className="field">
           <label className="field-label" htmlFor="apply-confirmation-text">
@@ -199,9 +278,15 @@ function ConfirmationPanel({
           <span>{t("apply.confirmNormal")}</span>
         </label>
       )}
-      <button className="btn btn-primary" type="button" disabled={disabled} onClick={onExecute}>
-        {executing ? t("apply.executing") : t("apply.execute")}
-      </button>
+      <div className="apply-confirmation-actions">
+        <button className="btn btn-ghost" type="button" disabled={dryRunDisabled} onClick={onDryRun}>
+          {dryRunLabel}
+        </button>
+        <button className="btn btn-primary" type="button" disabled={executeDisabled} onClick={onExecute}>
+          {executeLabel}
+        </button>
+      </div>
+      {executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
       {executeError && (
         <div className="inline-error" role="alert">
           <div className="inline-error-head">
@@ -221,25 +306,30 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const { t } = useTranslation();
   const [draftState, setDraftState] = useState<DraftState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmed, setConfirmed] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
-  const [executing, setExecuting] = useState(false);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
+  const [executeNotice, setExecuteNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setConfirmed(false);
     setConfirmationText("");
-    setExecuting(false);
+    setExecutionMode(null);
     setExecuteError(null);
+    setExecuteNotice(null);
     if (!entry) {
       setDraftState({ status: "idle" });
       setSelectedId("");
+      setSelectedIds(new Set());
       return;
     }
 
     let alive = true;
     setDraftState({ status: "loading" });
     setSelectedId("");
+    setSelectedIds(new Set());
     buildApplyPlanFromEntry(entry, {
       connections,
       getSnapshot,
@@ -254,6 +344,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         const savedPlan = saveApplyPlan(result.plan);
         setDraftState({ status: "ready", plan: savedPlan, sourceConnection: result.sourceConnection, targetConnection: result.targetConnection });
         setSelectedId(firstSelectableItem(savedPlan));
+        setSelectedIds(defaultSelectedItemIds(savedPlan));
       })
       .catch((error) => {
         if (!alive) return;
@@ -270,43 +361,85 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const targetConnection = draftState.status === "ready" ? draftState.targetConnection : null;
   const selectedItem = plan?.items.find((item) => item.id === selectedId) ?? plan?.items[0] ?? null;
   const protectedTarget = plan ? isProtectedApplyTarget(targetConnection, plan.target) : false;
+  const selectedCount = selectedIds.size;
 
-  const runExecute = async () => {
-    if (!plan || executing) return;
-    setExecuting(true);
+  const selectAllItems = () => {
+    if (!plan) return;
+    setSelectedIds(defaultSelectedItemIds(plan));
+  };
+
+  const selectNoItems = () => setSelectedIds(new Set());
+
+  const toggleSelectedItem = (id: string) => {
+    if (!plan) return;
+    const item = plan.items.find((candidate) => candidate.id === id);
+    if (!item || !isSelectableApplyItem(item)) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const runPlan = async (dryRun: boolean) => {
+    if (!plan || executionMode) return;
+    const selectedItemIds = Array.from(selectedIds);
+    if (selectedItemIds.length === 0) {
+      setExecuteNotice(null);
+      setExecuteError(t("apply.noSelectedItems"));
+      return;
+    }
+    setExecutionMode(dryRun ? "dry-run" : "apply");
     setExecuteError(null);
+    setExecuteNotice(null);
     try {
-      const result = await executeApplyPlan(plan, {
-        connections:
-          sourceConnection && targetConnection
-            ? applyExecutionConnections(connections, sourceConnection, targetConnection)
-            : connections,
-        getConfigDocument,
-        publishConfig: publishConfigFromApplyPlan,
-        deleteConfig: deleteConfigFromApplyPlan,
-        publishConfigRef: publishConfigRefFromApplyPlan,
-        deleteConfigRef: deleteConfigRefFromApplyPlan,
-        createBackupSnapshot: async (configs) => {
-          const snapshot = await createSnapshot(
-            {
-              provider: "nacos",
-              connectionId: plan.target.connectionId,
-              connectionName: targetConnection?.name ?? plan.target.connectionName,
-              namespace: plan.target.namespace || "public",
-              namespaceId: plan.target.namespace || "public",
-            },
-            configs
-          );
-          return { id: snapshot.id, name: snapshot.name };
+      const result = await executeApplyPlan(
+        plan,
+        {
+          connections:
+            sourceConnection && targetConnection
+              ? applyExecutionConnections(connections, sourceConnection, targetConnection)
+              : connections,
+          getConfigDocument,
+          publishConfig: publishConfigFromApplyPlan,
+          deleteConfig: deleteConfigFromApplyPlan,
+          publishConfigRef: publishConfigRefFromApplyPlan,
+          deleteConfigRef: deleteConfigRefFromApplyPlan,
+          createBackupSnapshot: async (configs) => {
+            const snapshot = await createSnapshot(
+              {
+                provider: "nacos",
+                connectionId: plan.target.connectionId,
+                connectionName: targetConnection?.name ?? plan.target.connectionName,
+                namespace: plan.target.namespace || "public",
+                namespaceId: plan.target.namespace || "public",
+              },
+              configs
+            );
+            return { id: snapshot.id, name: snapshot.name };
+          },
+          recordOperation,
+          taskManager: getTaskManager(),
         },
-        recordOperation,
-        taskManager: getTaskManager(),
-      });
-      if (!result.ok) setExecuteError(result.error);
+        {
+          selectedItemIds,
+          ...(dryRun ? { dryRun: true } : {}),
+        }
+      );
+      if (!result.ok) {
+        setExecuteError(result.error);
+        return;
+      }
+      if ("dryRun" in result && result.dryRun) {
+        setExecuteNotice(t("apply.dryRunCompleted", { count: result.plannedWrites }));
+      } else {
+        setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
+      }
     } catch (error) {
       setExecuteError(error instanceof Error ? error.message : String(error));
     } finally {
-      setExecuting(false);
+      setExecutionMode(null);
     }
   };
 
@@ -374,19 +507,30 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           </div>
 
           <div className="apply-workbench">
-            <PlanItemList plan={plan} selectedId={selectedItem?.id ?? ""} onSelect={setSelectedId} />
+            <PlanItemList
+              plan={plan}
+              selectedId={selectedItem?.id ?? ""}
+              selectedIds={selectedIds}
+              onSelect={setSelectedId}
+              onToggleSelected={toggleSelectedItem}
+              onSelectAll={selectAllItems}
+              onSelectNone={selectNoItems}
+            />
             {selectedItem ? <ItemDetail item={selectedItem} /> : <div className="data-empty-state detail-empty">{t("apply.noItems")}</div>}
           </div>
           <ConfirmationPanel
             plan={plan}
+            selectedCount={selectedCount}
             protectedTarget={protectedTarget}
             confirmed={confirmed}
             confirmationText={confirmationText}
-            executing={executing}
+            executionMode={executionMode}
             executeError={executeError}
+            executeNotice={executeNotice}
             onConfirmedChange={setConfirmed}
             onConfirmationTextChange={setConfirmationText}
-            onExecute={runExecute}
+            onExecute={() => runPlan(false)}
+            onDryRun={() => runPlan(true)}
           />
         </>
       )}

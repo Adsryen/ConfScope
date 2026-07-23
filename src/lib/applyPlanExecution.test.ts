@@ -98,6 +98,8 @@ describe("apply plan execution confirmation helpers", () => {
 
     expect(applyConfirmationText(plan)).toBe("APPLY plan-confirm-1 TO Prod / public");
   });
+
+
 });
 
 function planEndpoint(connection: Connection, label: string): ApplyPlanEndpoint {
@@ -675,5 +677,61 @@ describe("executeApplyPlan", () => {
       })
     );
     expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", false, "publish denied");
+  });
+  it("executes only the selected subset when item ids are provided", async () => {
+    const plan = applyPlan([
+      { ref: ref("changed.yaml"), sourceValue: documentValue("next changed"), targetValue: documentValue("old changed") },
+      { ref: ref("removed.yaml"), sourceValue: absentValue(), targetValue: documentValue("old removed") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:changed.yaml": doc("next changed"),
+      "conn-prod:changed.yaml": doc("old changed"),
+      "conn-dev:removed.yaml": null,
+      "conn-prod:removed.yaml": doc("old removed"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { selectedItemIds: [plan.items[0].id] });
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
+    expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+    expect(runDeps.createBackupSnapshot).toHaveBeenCalledTimes(1);
+    expect(runDeps.recordOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "apply",
+        result: "success",
+        planId: "plan-1",
+      })
+    );
+  });
+
+  it("supports dry-run without writing, backup snapshots or history records", async () => {
+    const plan = applyPlan([
+      { ref: ref("changed.yaml"), sourceValue: documentValue("next changed"), targetValue: documentValue("old changed") },
+      { ref: ref("created.yaml"), sourceValue: documentValue("new file"), targetValue: absentValue() },
+      { ref: ref("removed.yaml"), sourceValue: absentValue(), targetValue: documentValue("old removed") },
+      { ref: ref("same.yaml"), sourceValue: documentValue("same"), targetValue: documentValue("same") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:changed.yaml": doc("next changed"),
+      "conn-prod:changed.yaml": doc("old changed"),
+      "conn-dev:created.yaml": doc("new file"),
+      "conn-prod:created.yaml": null,
+      "conn-dev:removed.yaml": null,
+      "conn-prod:removed.yaml": doc("old removed"),
+      "conn-dev:same.yaml": doc("same"),
+      "conn-prod:same.yaml": doc("same"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { dryRun: true });
+
+    expect(result).toEqual({ ok: true, dryRun: true, taskId: "task-apply-1", plannedWrites: 3 });
+    expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+    expect(runDeps.publishConfigRef).not.toHaveBeenCalled();
+    expect(runDeps.deleteConfigRef).not.toHaveBeenCalled();
+    expect(runDeps.recordOperation).not.toHaveBeenCalled();
+    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", true);
   });
 });

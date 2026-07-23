@@ -37,8 +37,14 @@ export interface ExecuteApplyPlanDeps {
   taskManager: TaskManager;
 }
 
+export interface ExecuteApplyPlanOptions {
+  selectedItemIds?: string[];
+  dryRun?: boolean;
+}
+
 export type ExecuteApplyPlanResult =
   | { ok: true; taskId: string; historyId: string }
+  | { ok: true; dryRun: true; taskId: string; plannedWrites: number }
   | { ok: false; taskId?: string; historyId?: string; error: string };
 
 function targetSearchText(connection: Connection | null | undefined, endpoint: ApplyPlanEndpoint): string {
@@ -75,6 +81,38 @@ function isMissingConfigError(error: unknown): boolean {
 
 function findConnection(deps: ExecuteApplyPlanDeps, connectionId: string): Connection | string {
   return deps.connections.find((conn) => conn.id === connectionId) ?? `Missing connection ${connectionId}`;
+}
+
+function summarizeItems(items: ApplyPlanItem[]): ApplyPlan["summary"] {
+  const summary: ApplyPlan["summary"] = {
+    total: items.length,
+    create: 0,
+    overwrite: 0,
+    delete: 0,
+    skip: 0,
+    parse_error: 0,
+    blocked: 0,
+  };
+  for (const item of items) {
+    summary[item.action] += 1;
+    if (item.blocked) summary.blocked += 1;
+  }
+  return summary;
+}
+
+function selectPlanItems(plan: ApplyPlan, selectedItemIds?: string[]): ApplyPlan {
+  if (!selectedItemIds) return plan;
+  const selected = new Set(selectedItemIds);
+  const items = plan.items.filter((item) => selected.has(item.id));
+  return {
+    ...plan,
+    items,
+    inputSummary: {
+      ...plan.inputSummary,
+      selectedCount: items.length,
+    },
+    summary: summarizeItems(items),
+  };
 }
 
 function sourceRef(item: ApplyPlanItem) {
@@ -338,40 +376,60 @@ function recordFailure(
   deps: ExecuteApplyPlanDeps,
   taskId: string,
   error: string,
-  backup: ApplyBackupSummary = emptyBackup()
+  backup: ApplyBackupSummary = emptyBackup(),
+  recordHistory = true
 ): ExecuteApplyPlanResult {
-  const history = deps.recordOperation(
-    buildApplyOperationHistoryInput(plan, {
-      result: "failure",
-      backup,
-      taskId,
-      error,
-    })
-  );
+  let historyId = "";
+  if (recordHistory) {
+    const history = deps.recordOperation(
+      buildApplyOperationHistoryInput(plan, {
+        result: "failure",
+        backup,
+        taskId,
+        error,
+      })
+    );
+    historyId = history.id;
+  }
   deps.taskManager.completeTask(taskId, false, error);
-  return { ok: false, taskId, historyId: history.id, error };
+  return recordHistory ? { ok: false, taskId, historyId, error } : { ok: false, taskId, error };
 }
 
-export async function executeApplyPlan(plan: ApplyPlan, deps: ExecuteApplyPlanDeps): Promise<ExecuteApplyPlanResult> {
-  const taskId = createTask(plan, deps);
-  const sourceConnection = findConnection(deps, plan.source.connectionId);
-  if (typeof sourceConnection === "string") return recordFailure(plan, deps, taskId, sourceConnection);
-  const targetConnection = findConnection(deps, plan.target.connectionId);
-  if (typeof targetConnection === "string") return recordFailure(plan, deps, taskId, targetConnection);
+export async function executeApplyPlan(
+  plan: ApplyPlan,
+  deps: ExecuteApplyPlanDeps,
+  options: ExecuteApplyPlanOptions = {}
+): Promise<ExecuteApplyPlanResult> {
+  const workingPlan = selectPlanItems(plan, options.selectedItemIds);
+  if (options.selectedItemIds && workingPlan.items.length === 0) {
+    return { ok: false, error: "No apply plan items selected." };
+  }
+
+  const taskId = createTask(workingPlan, deps);
+  const sourceConnection = findConnection(deps, workingPlan.source.connectionId);
+  if (typeof sourceConnection === "string") return recordFailure(workingPlan, deps, taskId, sourceConnection, emptyBackup(), !options.dryRun);
+  const targetConnection = findConnection(deps, workingPlan.target.connectionId);
+  if (typeof targetConnection === "string") return recordFailure(workingPlan, deps, taskId, targetConnection, emptyBackup(), !options.dryRun);
 
   try {
-    const currentSnapshots = await freshnessSnapshots(plan, sourceConnection, targetConnection, deps);
-    const freshness = validateApplyPlanFreshness(plan, currentSnapshots);
+    const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
+    const freshness = validateApplyPlanFreshness(workingPlan, currentSnapshots);
     if (!freshness.ok) {
       const error = `Apply plan is stale: ${freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ")}`;
-      return recordFailure(plan, deps, taskId, error);
+      return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), !options.dryRun);
     }
 
-    const writes = planWrites(plan);
-    if (typeof writes === "string") return recordFailure(plan, deps, taskId, writes);
+    const writes = planWrites(workingPlan);
+    if (typeof writes === "string") return recordFailure(workingPlan, deps, taskId, writes, emptyBackup(), !options.dryRun);
 
-    const before = await beforeSnapshots(plan, targetConnection, deps);
-    const safety = await prepareApplyExecutionSafety(plan, before, {
+    if (options.dryRun) {
+      deps.taskManager.updateProgress(taskId, writes.length, writes.length, writes.length);
+      deps.taskManager.completeTask(taskId, true);
+      return { ok: true, dryRun: true, taskId, plannedWrites: writes.length };
+    }
+
+    const before = await beforeSnapshots(workingPlan, targetConnection, deps);
+    const safety = await prepareApplyExecutionSafety(workingPlan, before, {
       createBackupSnapshot: deps.createBackupSnapshot,
       taskId,
     });
@@ -411,13 +469,13 @@ export async function executeApplyPlan(plan: ApplyPlan, deps: ExecuteApplyPlanDe
         deps.taskManager.updateProgress(taskId, completed, 0, writes.length);
       }
     } catch (error) {
-      return recordFailure(plan, deps, taskId, errorMessage(error), safety.backup);
+      return recordFailure(workingPlan, deps, taskId, errorMessage(error), safety.backup);
     }
 
     const history = deps.recordOperation(safety.historyInput);
     deps.taskManager.completeTask(taskId, true);
     return { ok: true, taskId, historyId: history.id };
   } catch (error) {
-    return recordFailure(plan, deps, taskId, errorMessage(error));
+    return recordFailure(workingPlan, deps, taskId, errorMessage(error), emptyBackup(), !options.dryRun);
   }
 }

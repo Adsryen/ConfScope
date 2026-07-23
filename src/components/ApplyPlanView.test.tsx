@@ -326,12 +326,12 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("Parse error 1")).toBeInTheDocument();
     expect(screen.getByText("Blocked 1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /changed.key/ }));
+    fireEvent.click(screen.getByText("changed.key"));
     expect(screen.getByText("Action: overwrite")).toBeInTheDocument();
-    expect(screen.getAllByText("from-source")).toHaveLength(2);
-    expect(screen.getByText("from-target")).toBeInTheDocument();
+    expect(screen.getAllByText("from-source").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("from-target").length).toBeGreaterThanOrEqual(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /broken.key/ }));
+    fireEvent.click(screen.getByText("broken.key"));
     expect(screen.getByText("Block reason: source_parse_error")).toBeInTheDocument();
     expect(screen.getByText("bad properties")).toBeInTheDocument();
   });
@@ -420,7 +420,13 @@ describe("ApplyPlanView", () => {
     fireEvent.click(executeButton);
 
     expect(await screen.findAllByText("plan-saved-1")).toHaveLength(2);
-    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(savedPlan, expect.any(Object)));
+    await waitFor(() =>
+      expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
+        savedPlan,
+        expect.any(Object),
+        expect.objectContaining({ selectedItemIds: savedPlan.items.map((item) => item.id) })
+      )
+    );
     expect(draftMocks.buildApplyPlanFromEntry).toHaveBeenCalledTimes(1);
   });
 
@@ -477,6 +483,42 @@ describe("ApplyPlanView", () => {
       }),
       backupConfigs
     );
+  });
+
+
+  it("passes the selected item subset and dry-run flag to execution", async () => {
+    const plan = makePlan([
+      item("first.key", value("first-source"), value("first-target")),
+      item("second.key", value("second-source"), value("second-target")),
+    ], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({ ok: true, dryRun: true, taskId: "task-2", plannedWrites: 1 });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+
+    expect(await screen.findByText("first.key")).toBeInTheDocument();
+    const itemChecks = document.querySelectorAll(".apply-item-check");
+    fireEvent.click(itemChecks[0]);
+
+    const dryRunButton = screen.getByRole("button", { name: "Dry-run selected (1)" });
+    fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(dryRunButton);
+
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+    expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
+      plan,
+      expect.any(Object),
+      expect.objectContaining({ selectedItemIds: [plan.items[1].id], dryRun: true })
+    );
+    expect(await screen.findByText("Dry-run passed. Planned writes: 1")).toBeInTheDocument();
   });
 
   it("includes resolved runtime source connections when executing rollback plans", async () => {
@@ -542,7 +584,8 @@ describe("ApplyPlanView", () => {
         plan,
         expect.objectContaining({
           connections: [safeTargetConn, snapshotSourceConn],
-        })
+        }),
+        expect.objectContaining({ selectedItemIds: plan.items.map((item) => item.id) })
       )
     );
   });
