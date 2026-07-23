@@ -12,6 +12,7 @@ import {
   updateConnection,
 } from "../store/connections";
 import { loadSettings } from "../store/settings";
+import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
 import { useTranslation } from "../i18n";
 import { exportDiff, type DiffItem } from "../lib/export";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryItem, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
@@ -53,10 +54,13 @@ interface Loaded {
   format: Format;
 }
 
+type MatchPresence = "both" | "left-only" | "right-only";
+
 interface MatchResult {
   dataId: string;
   leftGroup: string;
   rightGroup: string;
+  presence: MatchPresence;
 }
 interface BatchResult {
   dataId: string;
@@ -65,6 +69,7 @@ interface BatchResult {
   leftText: string;
   rightText: string;
   format: Format;
+  presence: MatchPresence;
 }
 
 const DOCUMENT_KEY = "__document";
@@ -218,6 +223,62 @@ function sourceOptionLabel(conn: Connection): string {
 function chooseDefaultConnection(connections: Connection[], environment?: string): Connection | undefined {
   const candidates = environment ? connections.filter((conn) => connectionEnvironmentName(conn) === environment) : connections;
   return candidates.find((conn) => conn.isDefaultSource) ?? candidates[0] ?? connections[0];
+}
+
+interface InitialDiffState {
+  selectedProject: string;
+  left: Source;
+  right: Source;
+  mode: DiffMode;
+}
+
+function isDiffMode(value: unknown): value is DiffMode {
+  return value === "text" || value === "key" || value === "lines";
+}
+
+function sourceFromPreference(source: DiffViewSourcePreference, connections: Connection[]): Source | null {
+  const conn = connections.find((item) => item.id === source.connId);
+  if (!conn) return null;
+  const usesDefaultNamespace = source.usesDefaultNamespace;
+  return {
+    connId: conn.id,
+    tenant: usesDefaultNamespace ? conn.defaultNamespace ?? "" : source.tenant,
+    dataId: source.dataId,
+    group: source.group.trim() || "DEFAULT_GROUP",
+    usesDefaultNamespace,
+  };
+}
+
+function defaultInitialDiffState(connections: Connection[]): InitialDiffState {
+  const firstId = connections[0]?.id ?? "";
+  const firstProject = connections[0] ? connectionProjectName(connections[0]) : "";
+  return {
+    selectedProject: firstProject,
+    left: emptySource(firstId, connections),
+    right: emptySource(firstId, connections),
+    mode: "text",
+  };
+}
+
+function initialDiffStateFromPreferences(connections: Connection[]): InitialDiffState {
+  const fallback = defaultInitialDiffState(connections);
+  if (connections.length === 0) return fallback;
+  const preferences = loadDiffViewPreferences();
+  const left = sourceFromPreference(preferences.left, connections);
+  const right = sourceFromPreference(preferences.right, connections);
+  if (!left || !right) return fallback;
+  const leftConn = connections.find((item) => item.id === left.connId);
+  const rightConn = connections.find((item) => item.id === right.connId);
+  if (!leftConn || !rightConn) return fallback;
+  const leftProject = connectionProjectName(leftConn);
+  const rightProject = connectionProjectName(rightConn);
+  if (!leftProject || leftProject !== rightProject) return fallback;
+  return {
+    selectedProject: leftProject,
+    left,
+    right,
+    mode: isDiffMode(preferences.mode) ? preferences.mode : "text",
+  };
 }
 
 function SourcePicker({
@@ -479,18 +540,18 @@ function SourcePicker({
 export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
-  const firstId = connections[0]?.id ?? "";
-  const firstProject = connections[0] ? connectionProjectName(connections[0]) : "";
-  const [selectedProject, setSelectedProject] = useState(firstProject);
-  const [left, setLeft] = useState<Source>(emptySource(firstId, connections));
-  const [right, setRight] = useState<Source>(emptySource(firstId, connections));
+  const initialDiffStateRef = useRef<InitialDiffState | null>(null);
+  if (!initialDiffStateRef.current) initialDiffStateRef.current = initialDiffStateFromPreferences(connections);
+  const [selectedProject, setSelectedProject] = useState(initialDiffStateRef.current.selectedProject);
+  const [left, setLeft] = useState<Source>(initialDiffStateRef.current.left);
+  const [right, setRight] = useState<Source>(initialDiffStateRef.current.right);
   const [leftLoaded, setLeftLoaded] = useState<Loaded | null>(null);
   const [rightLoaded, setRightLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [leftFailed, setLeftFailed] = useState(false);
   const [rightFailed, setRightFailed] = useState(false);
-  const [mode, setMode] = useState<DiffMode>("text");
+  const [mode, setMode] = useState<DiffMode>(initialDiffStateRef.current.mode);
   const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -514,6 +575,20 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     [connections, activeProject]
   );
   const projectOptions = useMemo(() => projectNames.map((value) => ({ value, label: value })), [projectNames]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const leftConn = connections.find((item) => item.id === left.connId);
+    const rightConn = connections.find((item) => item.id === right.connId);
+    if (!leftConn || !rightConn) return;
+    if (connectionProjectName(leftConn) !== activeProject || connectionProjectName(rightConn) !== activeProject) return;
+    saveDiffViewPreferences({
+      selectedProject: activeProject,
+      left,
+      right,
+      mode,
+    });
+  }, [activeProject, connections, left, mode, right]);
 
   const resetComparisonState = useCallback(() => {
     setMatchResults(null);
@@ -657,6 +732,18 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     return loadOne(source, dataId, group);
   };
 
+  const missingLoaded = (group: string): Loaded => ({
+    label: `(${t("diff.missingConfig")} / ${group})`,
+    content: "",
+    format: "TEXT" as Format,
+  });
+
+  const matchPresenceLabel = (presence: MatchPresence): string => {
+    if (presence === "left-only") return t("diff.leftOnly");
+    if (presence === "right-only") return t("diff.rightOnly");
+    return t("diff.presentBoth");
+  };
+
   const needMatch = !left.dataId.trim() || !right.dataId.trim();
 
   const doMatch = async () => {
@@ -708,36 +795,51 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       const leftPage = leftResult.status === "fulfilled" ? leftResult.value : null;
       const rightPage = rightResult.status === "fulfilled" ? rightResult.value : null;
 
-      const leftIds = leftPage ? new Set(leftPage.pageItems.map((item) => item.dataId)) : null;
-      const rightIds = rightPage ? new Set(rightPage.pageItems.map((item) => item.dataId)) : null;
+      const leftItems = leftPage?.pageItems ?? [];
+      const rightItems = rightPage?.pageItems ?? [];
+      const leftMap = new Map(leftItems.map((item) => [item.dataId, item]));
+      const rightMap = new Map(rightItems.map((item) => [item.dataId, item]));
+      const leftIds = leftPage ? new Set(leftItems.map((item) => item.dataId)) : null;
+      const rightIds = rightPage ? new Set(rightItems.map((item) => item.dataId)) : null;
       const leftId = left.dataId.trim();
       const rightId = right.dataId.trim();
-      let common: string[];
+      let matches: MatchResult[];
+
+      const createMatch = (dataId: string): MatchResult => {
+        const hasLeft = leftOk ? !!leftIds?.has(dataId) : true;
+        const hasRight = rightOk ? !!rightIds?.has(dataId) : true;
+        const presence: MatchPresence = hasLeft && hasRight ? "both" : hasLeft ? "left-only" : "right-only";
+        return {
+          dataId,
+          leftGroup: leftMap.get(dataId)?.group ?? leftGroup,
+          rightGroup: rightMap.get(dataId)?.group ?? rightGroup,
+          presence,
+        };
+      };
 
       if (leftId && rightId) {
-        common = [leftId];
+        matches = [createMatch(leftId)];
       } else if (leftId) {
-        if (rightOk) common = rightIds!.has(leftId) ? [leftId] : [];
-        else common = [leftId]; // 右侧不可用，用左侧指定 dataId
+        matches = leftOk || rightOk ? [createMatch(leftId)] : [];
       } else if (rightId) {
-        if (leftOk) common = leftIds!.has(rightId) ? [rightId] : [];
-        else common = [rightId]; // 左侧不可用，用右侧指定 dataId
+        matches = leftOk || rightOk ? [createMatch(rightId)] : [];
       } else if (leftOk && rightOk) {
-        common = [...leftIds!].filter((id) => rightIds!.has(id)).sort();
+        const allIds = Array.from(new Set([...leftIds!, ...rightIds!])).sort(compareText);
+        matches = allIds.map(createMatch);
       } else {
-        // 单侧可用 → 用可用侧全部配置
+        // 单侧可用 → 用可用侧全部配置，另一侧显示为不可用占位。
         const ids = leftOk ? leftIds! : rightIds!;
-        common = [...ids].sort();
+        matches = [...ids].sort(compareText).map(createMatch);
       }
 
-      if (common.length === 0) {
+      if (matches.length === 0) {
         setSourcesCollapsed(false);
         setError(t("diff.noMatchedDataId"));
         return;
       }
 
-      setMatchResults(common.map((dataId) => ({ dataId, leftGroup, rightGroup })));
-      setSelectedIds(new Set(common));
+      setMatchResults(matches);
+      setSelectedIds(new Set(matches.map((item) => item.dataId)));
       setSourcesCollapsed(true);
     } catch (e) {
       const message = errorText(e);
@@ -835,16 +937,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       const settled = await Promise.allSettled(
         chunk.map(async (item) => {
           const [leftItem, rightItem] = await Promise.all([
-            loadSideSafe(left, item.dataId, item.leftGroup, leftFailed),
-            loadSideSafe(right, item.dataId, item.rightGroup, rightFailed),
+            item.presence === "right-only" ? Promise.resolve(missingLoaded(item.leftGroup)) : loadSideSafe(left, item.dataId, item.leftGroup, leftFailed),
+            item.presence === "left-only" ? Promise.resolve(missingLoaded(item.rightGroup)) : loadSideSafe(right, item.dataId, item.rightGroup, rightFailed),
           ]);
+          const hasLeftContent = !leftFailed && item.presence !== "right-only";
+          const hasRightContent = !rightFailed && item.presence !== "left-only";
           return {
             dataId: item.dataId,
             leftLabel: leftItem.label,
             rightLabel: rightItem.label,
-            leftText: leftFailed ? "" : prepareText(leftItem),
-            rightText: rightFailed ? "" : prepareText(rightItem),
-            format: (mode === "key" ? "TEXT" : !leftFailed && leftItem.format !== "TEXT" ? leftItem.format : rightItem.format) as Format,
+            leftText: hasLeftContent ? prepareText(leftItem) : "",
+            rightText: hasRightContent ? prepareText(rightItem) : "",
+            format: (mode === "key" ? "TEXT" : hasLeftContent && leftItem.format !== "TEXT" ? leftItem.format : rightItem.format) as Format,
+            presence: item.presence,
           };
         })
       );
@@ -1172,6 +1277,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <label className="match-item" key={item.dataId}>
                   <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
                   <span className="match-dataid">{item.dataId}</span>
+                  <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
                   <span className="match-group">
                     {item.leftGroup === item.rightGroup ? item.leftGroup : `${item.leftGroup} / ${item.rightGroup}`}
                   </span>
@@ -1257,6 +1363,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <div className="batch-diff-header" onClick={() => toggleCollapse(item.dataId)}>
                   <span className="batch-diff-toggle">{collapsed.has(item.dataId) ? ">" : "v"}</span>
                   <span className="batch-diff-title">{item.dataId}</span>
+                  <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
                 </div>
                 {!collapsed.has(item.dataId) && (
                   <DiffPanel

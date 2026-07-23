@@ -38,4 +38,15 @@ describe("Select", () => {
 
     expect(screen.queryByText("YAML")).not.toBeInTheDocument();
   });
+  it("renders the options menu in a body portal so it is not clipped by parent overflow", () => {
+    render(<Select value="json" options={options} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button"));
+
+    const menu = document.querySelector(".sel-menu-portal") as HTMLElement;
+    expect(menu).toBeInTheDocument();
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu).toHaveStyle({ position: "fixed" });
+  });
+
 });

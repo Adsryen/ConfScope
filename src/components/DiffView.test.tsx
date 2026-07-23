@@ -115,11 +115,50 @@ describe("DiffView", () => {
     });
   });
 
+
+  it("restores the last compared sources and mode from localStorage", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        selectedProject: "订单系统",
+        left: { connId: "prod-nacos", tenant: "prod-tenant", dataId: "app.yaml", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        right: { connId: "dev-nacos", tenant: "dev-tenant", dataId: "app.yaml", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        mode: "key",
+      })
+    );
+
+    renderDiff([nacosConn, prodConn]);
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(prodConn, "prod-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
+    });
+    expect(screen.getAllByDisplayValue("app.yaml").length).toBeGreaterThanOrEqual(2);
+
+  });
+
   it("uses the connection default namespace when loading config candidates", async () => {
     renderDiff([nacosConn]);
 
     await waitFor(() => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
+    });
+  });
+
+
+  it("persists the changed compare sources back to localStorage", async () => {
+    renderDiff([nacosConn, prodConn]);
+
+    await screen.findAllByText("开发");
+    const environmentButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发"));
+    fireEvent.click(environmentButtons[0]);
+    fireEvent.mouseDown(await screen.findByText("生产"));
+
+    await waitFor(() => {
+      const preferences = JSON.parse(localStorage.getItem("cs.diffViewPreferences") || "{}");
+      expect(preferences.selectedProject).toBe("订单系统");
+      expect(preferences.left.connId).toBe("prod-nacos");
+      expect(preferences.left.tenant).toBe("prod-tenant");
     });
   });
 
@@ -280,7 +319,7 @@ describe("DiffView", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
 
-    expect(await screen.findByText("找到 2 个同名 dataId，已选 2 个")).toBeInTheDocument();
+    expect(await screen.findByText("找到 2 个 dataId，已选 2 个")).toBeInTheDocument();
     expect(document.querySelector(".diff-sources")).toHaveAttribute("aria-hidden", "true");
     expect(document.querySelector(".diff-sources")).not.toHaveAttribute("hidden");
     expect(screen.getByRole("button", { name: "展开来源" })).toBeInTheDocument();
@@ -292,7 +331,7 @@ describe("DiffView", () => {
   });
 
 
-  it("allows retrying after no matching dataId when namespace changes", async () => {
+  it("lists disjoint dataIds instead of hiding them", async () => {
     apiMocks.listNamespaces.mockResolvedValue([
       { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 },
       { namespace: "prod-tenant", namespaceShowName: "生产命名空间", configCount: 1, kind: 0 },
@@ -308,17 +347,61 @@ describe("DiffView", () => {
     const compareButton = await screen.findByRole("button", { name: "加载并对比" });
     fireEvent.click(compareButton);
 
-    expect(await screen.findByText("两侧命名空间和 group 下没有找到同名 dataId")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "加载并对比" })).not.toBeDisabled();
+    expect(await screen.findByText("找到 2 个 dataId，已选 2 个")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "对比选中（2）" })).not.toBeDisabled();
 
-    const namespaceButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发命名空间"));
-    fireEvent.click(namespaceButtons[0]);
-    fireEvent.mouseDown(await screen.findByText("生产命名空间"));
+  });
 
-    expect(screen.getByRole("button", { name: "加载并对比" })).not.toBeDisabled();
-    await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
-    });
+  it("lists left-only and right-only files when batch matching configs", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        selectedProject: "Order",
+        left: { connId: "left-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        right: { connId: "right-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        mode: "text",
+      })
+    );
+    apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems:
+        conn.id === "left-nacos"
+          ? [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "left-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ]
+          : [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "right-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ],
+    }));
+    apiMocks.getConfig.mockImplementation(async (conn: Connection, _tenant: string, dataId: string) => `${conn.id}:${dataId}`);
+
+    renderDiff([leftApplyConn, rightApplyConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+
+    expect(await screen.findByText("找到 3 个 dataId，已选 3 个")).toBeInTheDocument();
+    expect(screen.getByText("same.yaml")).toBeInTheDocument();
+    expect(screen.getByText("left-only.yaml")).toBeInTheDocument();
+    expect(screen.getByText("right-only.yaml")).toBeInTheDocument();
+    expect(screen.getByText("仅左侧存在")).toBeInTheDocument();
+    expect(screen.getByText("仅右侧存在")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
+
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
+    expect(apiMocks.getConfig).toHaveBeenCalledWith(leftApplyConn, "shared", "same.yaml", "DEFAULT_GROUP");
+    expect(apiMocks.getConfig).toHaveBeenCalledWith(rightApplyConn, "shared", "same.yaml", "DEFAULT_GROUP");
+    expect(apiMocks.getConfig).toHaveBeenCalledWith(leftApplyConn, "shared", "left-only.yaml", "DEFAULT_GROUP");
+    expect(apiMocks.getConfig).toHaveBeenCalledWith(rightApplyConn, "shared", "right-only.yaml", "DEFAULT_GROUP");
+    expect(apiMocks.getConfig).not.toHaveBeenCalledWith(rightApplyConn, "shared", "left-only.yaml", "DEFAULT_GROUP");
+    expect(apiMocks.getConfig).not.toHaveBeenCalledWith(leftApplyConn, "shared", "right-only.yaml", "DEFAULT_GROUP");
+    expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
+    expect(screen.getAllByText("仅左侧存在").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
   });
 
   it("applies the only-changes toggle to all batch diff files", async () => {
