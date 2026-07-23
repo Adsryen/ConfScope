@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
@@ -56,12 +56,32 @@ function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineE
   );
 }
 
+type BrowserToolIconName = "refresh" | "add" | "download";
+
+const browserToolIconPath: Record<BrowserToolIconName, string[]> = {
+  refresh: ["M19 7v5h-5", "M18 12a6 6 0 10-1.8 4.2", "M19 12l-3.5-3.5"],
+  add: ["M12 5v14", "M5 12h14"],
+  download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
+};
+
+function BrowserToolIcon({ name }: { name: BrowserToolIconName }) {
+  return (
+    <svg className="browser-tool-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {browserToolIconPath[name].map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
 /** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
 export default function ConfigBrowser({ conn, tenant }: Props) {
   const { t } = useTranslation();
   const taskManager = useTaskManager();
   const [search, setSearch] = useState("");
   const [appliedTerm, setAppliedTerm] = useState(""); // 已生效的搜索词（翻页时复用）
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [knownGroups, setKnownGroups] = useState<string[]>([]);
   const [items, setItems] = useState<ConfigItem[]>([]);
   const [total, setTotal] = useState(0);
   const [pageNo, setPageNo] = useState(1);
@@ -110,12 +130,31 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     if (dirty) setPending(() => action);
     else action();
   };
+  const rememberGroups = (list: ConfigItem[], fallbackGroup?: string) => {
+    const extraGroup = fallbackGroup?.trim();
+    setKnownGroups((prev) => {
+      const next = new Set(prev);
+      for (const item of list) {
+        const group = item.group.trim();
+        if (group) next.add(group);
+      }
+      if (extraGroup) next.add(extraGroup);
+      const sorted = [...next].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { numeric: true, sensitivity: "base" }));
+      if (sorted.length === prev.length && sorted.every((value, index) => value === prev[index])) return prev;
+      return sorted;
+    });
+  };
+  const groupOptions = useMemo(() => {
+    const groups = selectedGroup.trim() && !knownGroups.includes(selectedGroup) ? [selectedGroup, ...knownGroups] : knownGroups;
+    return [{ value: "", label: t("config.allGroups") }, ...groups.map((group) => ({ value: group, label: group }))];
+  }, [knownGroups, selectedGroup, t]);
 
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
 
-  const fetchList = async (term: string, page: number) => {
+  const fetchList = async (term: string, page: number, groupFilter = selectedGroup) => {
     const my = ++listReqId.current;
+    const group = groupFilter.trim();
     setListLoading(true);
     setListError(null);
     setAppliedTerm(term);
@@ -123,9 +162,10 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     try {
       // blur 搜索：用 *term* 模糊匹配 dataId；term 为空则列全部
       const dataId = term.trim() ? `*${term.trim()}*` : "";
-      const res = await listConfigs(conn, tenant, dataId, "", page, PAGE_SIZE);
+      const res = await listConfigs(conn, tenant, dataId, group, page, PAGE_SIZE);
       if (my !== listReqId.current) return;
       setItems(res.pageItems);
+      rememberGroups(res.pageItems, group);
       setTotal(res.totalCount);
       setPages(Math.max(res.pagesAvailable || 1, 1));
     } catch (e) {
@@ -141,7 +181,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
         message,
         detail: message,
         actionLabel: t("common.retry"),
-        onAction: () => fetchList(term, page),
+        onAction: () => fetchList(term, page, group),
       });
     } finally {
       if (my === listReqId.current) setListLoading(false);
@@ -153,13 +193,24 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const onSearchChange = (v: string) => {
     setSearch(v);
     window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => fetchList(v, 1), 400);
+    searchTimer.current = window.setTimeout(() => fetchList(v, 1, selectedGroup), 400);
   };
   const searchNow = () => {
     window.clearTimeout(searchTimer.current);
-    fetchList(search, 1);
+    fetchList(search, 1, selectedGroup);
   };
   useEffect(() => () => window.clearTimeout(searchTimer.current), []);
+  const onGroupChange = (group: string) => {
+    guardNav(() => {
+      window.clearTimeout(searchTimer.current);
+      setSelectedGroup(group);
+      setSelected(null);
+      setContent("");
+      setMetadata(null);
+      setTab("content");
+      fetchList(search, 1, group);
+    });
+  };
 
   // 键盘上下键在列表中移动选中(从搜索框或列表触发)
   const moveSelection = (delta: number) => {
@@ -178,12 +229,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   // 切换连接 / 命名空间时重置并重新拉列表
   useEffect(() => {
     setSearch("");
+    setSelectedGroup("");
+    setKnownGroups([]);
     setSelected(null);
     setContent("");
     setMetadata(null);
     setTab("content");
     setShowNew(false);
-    fetchList("", 1);
+    fetchList("", 1, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
 
@@ -459,53 +512,75 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     <div className="browser">
       <div className="browser-list">
         <div className="browser-search">
-          <input
-            className="search-input wide"
-            placeholder={t("config.searchPlaceholder")}
-            value={search}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            onChange={(e) => onSearchChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") searchNow();
-              else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                moveSelection(1);
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                moveSelection(-1);
-              }
-            }}
-          />
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => fetchList(appliedTerm, pageNo)}
-            title={t("config.refresh")}
-            disabled={listLoading}
-          >
-            ⟳
-          </button>
-          {!isLocalSnapshot && (
-            <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)} title={t("config.newConfig")}>
-              ＋
+          <div className="browser-search-row">
+            <input
+              className="search-input wide"
+              placeholder={t("config.searchPlaceholder")}
+              value={search}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") searchNow();
+                else if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  moveSelection(1);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  moveSelection(-1);
+                }
+              }}
+            />
+            <button
+              className="btn btn-ghost btn-sm browser-icon-btn"
+              onClick={() => fetchList(appliedTerm, pageNo, selectedGroup)}
+              title={t("config.refresh")}
+              aria-label={t("config.refresh")}
+              disabled={listLoading}
+            >
+              <BrowserToolIcon name="refresh" />
             </button>
-          )}
-          {items.length > 0 && (
-            <button className="btn btn-ghost btn-sm" title={t("config.exportCurrentList")} onClick={exportCurrentList}>
-              ↓
-            </button>
-          )}
-          {!isLocalSnapshot && items.length > 0 && (
-            <button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading}>
-              {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
-            </button>
-          )}
+            {!isLocalSnapshot && (
+              <button
+                className="btn btn-primary btn-sm browser-icon-btn"
+                onClick={() => setShowNew(true)}
+                title={t("config.newConfig")}
+                aria-label={t("config.newConfig")}
+              >
+                <BrowserToolIcon name="add" />
+              </button>
+            )}
+          </div>
+          <div className="browser-action-row">
+            <Select
+              className="browser-group-select"
+              value={selectedGroup}
+              options={groupOptions}
+              onChange={onGroupChange}
+              title={t("config.groupFilter")}
+            />
+            {items.length > 0 && (
+              <button
+                className="btn btn-ghost btn-sm browser-icon-btn"
+                title={t("config.exportCurrentList")}
+                aria-label={t("config.exportCurrentList")}
+                onClick={exportCurrentList}
+              >
+                <BrowserToolIcon name="download" />
+              </button>
+            )}
+            {!isLocalSnapshot && items.length > 0 && (
+              <button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading}>
+                {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
+              </button>
+            )}
+          </div>
         </div>
         <div className="browser-count">{t("config.total", { count: total })}</div>
         <div className="browser-items">
           {listLoading && <div className="pad-msg">{t("config.loading")}</div>}
-          {listError && <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo)} />}
+          {listError && <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />}
           {!listLoading && !listError && items.length === 0 && <div className="pad-msg">{t("config.empty")}</div>}
           {items.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
@@ -526,7 +601,7 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             );
           })}
         </div>
-        <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p)} />
+        <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p, selectedGroup)} />
       </div>
 
       <div className="browser-detail">
@@ -658,10 +733,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
           namespace={tenant}
           onClose={() => setShowNew(false)}
           onSaved={(dataId, group) => {
+            const nextGroup = group.trim() || "DEFAULT_GROUP";
             setShowNew(false);
             setTab("content");
-            fetchList(appliedTerm, pageNo);
-            openConfig({ dataId, group, content: "", configType: "" });
+            setSearch("");
+            setSelectedGroup(nextGroup);
+            rememberGroups([], nextGroup);
+            fetchList("", 1, nextGroup);
+            openConfig({ dataId, group: nextGroup, content: "", configType: "" });
           }}
         />
       )}

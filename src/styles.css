@@ -504,7 +504,7 @@ button,
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-width: 120px;
+  min-width: 0;
   padding: 6px 10px;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -563,6 +563,12 @@ button,
 .sel-option.active {
   background: var(--bg-active);
   color: var(--text-hi);
+}
+
+.sel-menu-portal,
+.combo-menu-portal {
+  right: auto;
+  min-width: 0;
 }
 
 /* ── 可输入模糊匹配下拉(combobox) ── */
@@ -1496,7 +1502,8 @@ button,
 }
 
 .browser-list {
-  width: 300px;
+  width: clamp(312px, 30vw, 360px);
+  min-width: 0;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg2);
@@ -1505,18 +1512,61 @@ button,
 }
 .browser-search {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
   padding: 10px;
   border-bottom: 1px solid var(--border);
 }
 
+.browser-search-row,
+.browser-action-row {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+}
+
 .browser-search .search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browser-icon-btn {
+  width: 32px;
+  min-width: 32px;
+  padding-left: 0;
+  padding-right: 0;
+  flex: 0 0 auto;
+}
+
+.browser-tool-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.browser-group-select {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.browser-group-select .sel-trigger {
   min-width: 0;
 }
 
 .snapshot-action-btn {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  max-width: 118px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .browser-count {
   padding: 6px 12px;
@@ -2593,6 +2643,32 @@ button,
   font-size: 11px;
   color: var(--text-dim);
   flex-shrink: 0;
+}
+
+.match-presence,
+.batch-diff-presence {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-dim);
+  background: var(--bg3);
+}
+
+.match-presence.left-only,
+.batch-diff-presence.left-only {
+  color: #9ad7ff;
+  border-color: rgba(77, 163, 255, 0.45);
+  background: rgba(77, 163, 255, 0.12);
+}
+
+.match-presence.right-only,
+.batch-diff-presence.right-only {
+  color: #ffcf87;
+  border-color: rgba(255, 177, 73, 0.45);
+  background: rgba(255, 177, 73, 0.12);
 }
 
 .batch-diff {
@@ -5417,10 +5493,30 @@ button,
   background: rgba(255, 255, 255, 0.015);
 }
 
+.apply-item-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.apply-item-toolbar-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
 .apply-item-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   padding: 9px 12px;
@@ -5430,11 +5526,21 @@ button,
   border: 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  user-select: none;
 }
 
 .apply-item-row:hover,
 .apply-item-row.selected {
   background: var(--bg-hover);
+}
+
+.apply-item-row.checked:not(.selected) {
+  background: rgba(78, 201, 176, 0.05);
+}
+
+.apply-item-check {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .apply-item-row.blocked {
@@ -5516,6 +5622,14 @@ button,
   padding: 10px 0;
 }
 
+.apply-diff-preview {
+  margin-bottom: 12px;
+}
+
+.apply-diff-preview .diff-panel {
+  max-height: 360px;
+}
+
 .apply-value-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5590,6 +5704,26 @@ button,
   gap: 8px;
   color: var(--text);
   font-size: 13px;
+}
+
+.apply-selection-note {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.apply-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.apply-execution-notice {
+  padding: 8px 10px;
+  color: var(--green);
+  border: 1px solid rgba(78, 201, 176, 0.28);
+  border-radius: 4px;
+  background: rgba(78, 201, 176, 0.08);
+  font-size: 12px;
 }
 
 .apply-confirmation-code {
