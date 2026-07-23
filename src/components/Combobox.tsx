@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface ComboOption {
   value: string;
-  /** 次要说明（如 group），用于展示与匹配。 */
+  /** ?????? group?????????? */
   sub?: string;
 }
 
 interface Props {
   value: string;
   onChange: (v: string) => void;
-  /** 从下拉中选中某项时触发（可拿到完整 option，用于联动 group 等）。 */
+  /** ????????????????? option????? group ??? */
   onPick?: (o: ComboOption) => void;
   options: ComboOption[];
   placeholder?: string;
   disabled?: boolean;
 }
 
-/** 模糊匹配:子序列匹配(字符按序出现即可),子串命中优先。 */
+/** ????:?????(????????),??????? */
 function fuzzy(query: string, text: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -29,23 +30,60 @@ function fuzzy(query: string, text: string): boolean {
   return i === q.length;
 }
 
-/** 可输入 + 模糊匹配下拉(combobox):既能从列表选,也能自由输入。 */
+/** ??? + ??????(combobox):??????,??????? */
 export default function Combobox({ value, onChange, onPick, options, placeholder, disabled }: Props) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const filtered = options
     .filter((o) => fuzzy(value, o.value) || (o.sub ? fuzzy(value, o.sub) : false))
     .slice(0, 50);
 
+  const updateMenuPosition = useCallback(() => {
+    const trigger = ref.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    const desiredHeight = 260;
+    const openAbove = spaceBelow < 160 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(120, Math.min(desiredHeight, openAbove ? spaceAbove : spaceBelow));
+    const top = openAbove ? Math.max(8, rect.top - 4 - maxHeight) : rect.bottom + 4;
+    setMenuStyle({
+      position: "fixed",
+      top,
+      left: rect.left,
+      right: "auto",
+      width: rect.width,
+      maxHeight,
+      zIndex: 10000,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open || filtered.length === 0) return;
+    updateMenuPosition();
+  }, [filtered.length, open, updateMenuPosition]);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
+    const onResize = () => updateMenuPosition();
     window.addEventListener("mousedown", onDoc);
-    return () => window.removeEventListener("mousedown", onDoc);
-  }, [open]);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
+  }, [open, updateMenuPosition]);
 
   return (
     <div className="combo" ref={ref}>
@@ -64,25 +102,29 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
       />
-      {open && filtered.length > 0 && (
-        <div className="combo-menu">
-          {filtered.map((o, i) => (
-            <div
-              key={`${o.value}/${o.sub ?? ""}/${i}`}
-              className={`combo-option${o.value === value ? " active" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault(); // 避免 input 先失焦导致点击丢失
-                onChange(o.value);
-                onPick?.(o);
-                setOpen(false);
-              }}
-            >
-              <span className="combo-val">{o.value}</span>
-              {o.sub && <span className="combo-sub">{o.sub}</span>}
-            </div>
-          ))}
-        </div>
-      )}
+      {open &&
+        filtered.length > 0 &&
+        createPortal(
+          <div ref={menuRef} className="combo-menu combo-menu-portal" style={menuStyle}>
+            {filtered.map((o, i) => (
+              <div
+                key={`${o.value}/${o.sub ?? ""}/${i}`}
+                className={`combo-option${o.value === value ? " active" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // ?? input ?????????
+                  e.stopPropagation();
+                  onChange(o.value);
+                  onPick?.(o);
+                  setOpen(false);
+                }}
+              >
+                <span className="combo-val">{o.value}</span>
+                {o.sub && <span className="combo-sub">{o.sub}</span>}
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
