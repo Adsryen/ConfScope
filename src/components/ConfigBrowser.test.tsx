@@ -219,6 +219,38 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
   });
 
+  it("filters the config list by selected group", async () => {
+    apiMocks.listConfigs.mockImplementation(async (_conn: Connection, _tenant: string, _dataId: string, group: string) => {
+      const allItems = [
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "gateway.yaml", group: "DEV_GROUP", content: "", configType: "yaml" },
+      ];
+      const items = group ? allItems.filter((item) => item.group === group) : allItems;
+      return configPage(items);
+    });
+
+    renderBrowser();
+
+    expect(await screen.findByText("app.json")).toBeInTheDocument();
+    expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByTitle("分组")).getByRole("button"));
+    fireEvent.mouseDown(await screen.findByText("DEV_GROUP"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "", "DEV_GROUP", 1, 50);
+    });
+    expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
+    expect(screen.queryByText("app.json")).not.toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByTitle("分组")).getByRole("button"));
+    fireEvent.mouseDown(await screen.findByText("全部分组"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "", "", 1, 50);
+    });
+  });
+
   it("debounces search input and uses wildcard dataId query", async () => {
     renderBrowser();
     await screen.findByText("app.json");
