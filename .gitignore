@@ -66,3 +66,9 @@ docs/superpowers/
 .trae/
 .trellis/
 AGENTS.MD
+
+# ConfScope 本机运行数据与便携程序
+/portable/
+/local-backups/
+/ConfScopeData/
+
