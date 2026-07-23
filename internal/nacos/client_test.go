@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func newIPv4Server(t *testing.T, handler http.Handler) *httptest.Server {
@@ -246,6 +248,46 @@ func TestGetConfigUsesV1TextResponseAndTokenQuery(t *testing.T) {
 	}
 	if content != "plain: true" {
 		t.Fatalf("content = %q", content)
+	}
+}
+
+func TestGetConfigDecodesGBKTextResponse(t *testing.T) {
+	want := "app:\n  title: \u85aa\u706b\u5c31\u4e1a"
+	gbk, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(want))
+	if err != nil {
+		t.Fatalf("encode gbk: %v", err)
+	}
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=GBK")
+		_, _ = w.Write(gbk)
+	}))
+
+	content, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
+	if err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if content != want {
+		t.Fatalf("content = %q, want %q", content, want)
+	}
+}
+
+func TestGetConfigFallsBackToGB18030WithoutCharset(t *testing.T) {
+	want := "message: \u4e2d\u6587\u914d\u7f6e"
+	gb18030, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(want))
+	if err != nil {
+		t.Fatalf("encode gb18030: %v", err)
+	}
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write(gb18030)
+	}))
+
+	content, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
+	if err != nil {
+		t.Fatalf("GetConfig returned error: %v", err)
+	}
+	if content != want {
+		t.Fatalf("content = %q, want %q", content, want)
 	}
 }
 

@@ -66,7 +66,7 @@ func (t *Tunnel) Start() (int, error) {
 	}
 	t.sshClient = sshClient
 
-	localAddr := net.JoinHostPort("localhost", strconv.Itoa(t.config.LocalPort))
+	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(t.config.LocalPort))
 	listener, err := net.Listen("tcp", localAddr)
 	if err != nil {
 		sshClient.Close()

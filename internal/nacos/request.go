@@ -6,11 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 func base(baseURL string) string {
@@ -211,7 +217,44 @@ func readBody(resp *http.Response) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+	return decodeResponseBody(body, resp.Header.Get("Content-Type"))
+}
+
+func decodeResponseBody(body []byte, contentType string) (string, error) {
+	if len(body) == 0 {
+		return "", nil
+	}
+	if label := responseCharset(contentType); label != "" {
+		reader, err := charset.NewReaderLabel(label, bytes.NewReader(body))
+		if err != nil {
+			return "", fmt.Errorf("??????? %q ??: %w", label, err)
+		}
+		decoded, err := io.ReadAll(reader)
+		if err != nil {
+			return "", err
+		}
+		return string(decoded), nil
+	}
+	if utf8.Valid(body) {
+		return string(body), nil
+	}
+
+	decoded, _, err := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), body)
+	if err != nil {
+		return "", fmt.Errorf("? UTF-8/GB18030 ??????: %w", err)
+	}
+	return string(decoded), nil
+}
+
+func responseCharset(contentType string) string {
+	if contentType == "" {
+		return ""
+	}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(params["charset"])
 }
 
 func requestNamespace(query url.Values, form url.Values) string {

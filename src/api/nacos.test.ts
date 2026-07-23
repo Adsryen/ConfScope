@@ -42,6 +42,7 @@ const goApp = {
   NacosPublishConfigFromApplyPlan: vi.fn(),
   NacosDeleteConfigFromApplyPlan: vi.fn(),
   CreateSSHTunnel: vi.fn(),
+  GetSSHTunnelLocalPort: vi.fn(),
   StopSSHTunnel: vi.fn(),
   ReadSecureSecret: vi.fn(),
 };
@@ -887,9 +888,115 @@ describe("nacos api compatibility bridge", () => {
         remotePort: 8845,
       })
     );
-    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://localhost:12875/nacos" }));
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:12875/nacos" }));
   });
 
+  it("rebuilds cached SSH tunnels and retries namespace reads after local tunnel transport errors", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-reconnect"),
+      baseUrl: "http://nacos.internal:8848/nacos",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        password: "ssh-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValueOnce(5972).mockResolvedValueOnce(6001);
+    goApp.ConfigCenterListNamespaces
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(
+        new Error(
+          '无法连接到服务器: Get "http://localhost:5972/nacos/v3/console/core/namespace/list": dial tcp [::1]:5972: connectex: No connection could be made because the target machine actively refused it.'
+        )
+      )
+      .mockResolvedValueOnce([{ id: "public", name: "Public", configCount: 1, kind: 2 }]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+    await expect(listNamespaces(conn)).resolves.toEqual([{ namespace: "public", namespaceShowName: "Public", configCount: 1, kind: 2 }]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledTimes(2);
+    expect(goApp.StopSSHTunnel).toHaveBeenCalledWith(conn.id);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenLastCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:6001/nacos" }));
+  });
+
+
+  it("adopts backend current SSH tunnel port when frontend cache is stale", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-stale-cache"),
+      baseUrl: "http://nacos.internal:8848/nacos",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        password: "ssh-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValueOnce(9673);
+    goApp.GetSSHTunnelLocalPort.mockResolvedValueOnce(9673).mockResolvedValue(9677);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledTimes(1);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenLastCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:9677/nacos" }));
+  });
+
+  it("deduplicates concurrent SSH tunnel creation for the same connection", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-concurrent-create"),
+      baseUrl: "http://nacos.internal:8848/nacos",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        password: "ssh-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValueOnce(9682);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(Promise.all([listNamespaces(conn), listNamespaces(conn)])).resolves.toEqual([[], []]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledTimes(1);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledTimes(2);
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(1, expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" }));
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(2, expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" }));
+  });
+
+  it("rebuilds SSH tunnels and retries when login response is cut off", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-eof-reconnect"),
+      baseUrl: "http://nacos.internal:8848/nacos",
+      username: "nacos",
+      password: "secret",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        password: "ssh-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValueOnce(4663).mockResolvedValueOnce(4664);
+    goApp.NacosDetectVersion.mockResolvedValue("v1");
+    goApp.NacosLogin.mockRejectedValueOnce(new Error("读取登录响应失败: unexpected EOF")).mockResolvedValueOnce({
+      accessToken: "fresh-token",
+      tokenTtl: 18000,
+      globalAdmin: false,
+    });
+    goApp.ConfigCenterListNamespaces.mockResolvedValueOnce([{ id: "public", name: "Public", configCount: 1, kind: 2 }]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([{ namespace: "public", namespaceShowName: "Public", configCount: 1, kind: 2 }]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledTimes(2);
+    expect(goApp.StopSSHTunnel).toHaveBeenCalledWith(conn.id);
+    expect(goApp.NacosLogin).toHaveBeenLastCalledWith("http://127.0.0.1:4664/nacos", "nacos", "secret", "v1");
+  });
   it("uses reusable SSH profiles when resolving tunnels", async () => {
     localStorage.setItem(
       "cs.sshProfiles",
@@ -969,6 +1076,6 @@ describe("nacos api compatibility bridge", () => {
         remotePort: 8848,
       })
     );
-    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://localhost:13380/nacos" }));
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:13380/nacos" }));
   });
 });

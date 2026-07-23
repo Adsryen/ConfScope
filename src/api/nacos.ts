@@ -4,6 +4,7 @@ import {
   NacosLogin,
   NacosPublishConfigFromApplyPlan,
   CreateSSHTunnel,
+  GetSSHTunnelLocalPort,
   StopSSHTunnel,
 } from "../../wailsjs/go/main/App";
 import {
@@ -31,6 +32,7 @@ import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
+const tunnelCreationCache = new Map<string, Promise<string>>();
 
 function normalizeNacosBaseUrl(baseUrl: string): string {
   const value = baseUrl.trim();
@@ -39,19 +41,36 @@ function normalizeNacosBaseUrl(baseUrl: string): string {
   return `http://${value}`;
 }
 
-/** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
-export async function resolveBaseUrl(conn: Connection): Promise<string> {
-  if (conn.sourceType === "local-snapshot") return conn.localPath || conn.baseUrl;
-  const originalBaseUrl = normalizeNacosBaseUrl(conn.baseUrl);
+function tunnelUrlFor(originalBaseUrl: string, localPort: number): string {
+  const url = new URL(originalBaseUrl);
+  return `${url.protocol}//127.0.0.1:${localPort}${url.pathname}`;
+}
+
+async function cachedTunnelUrl(conn: Connection, originalBaseUrl: string): Promise<string | null> {
+  const cached = tunnelUrlCache.get(conn.id);
+  if (!cached) return null;
+  try {
+    const currentPort = await GetSSHTunnelLocalPort(conn.id);
+    if (currentPort > 0) {
+      const currentUrl = tunnelUrlFor(originalBaseUrl, currentPort);
+      if (currentUrl !== cached) {
+        tunnelUrlCache.set(conn.id, currentUrl);
+      }
+      return currentUrl;
+    }
+    return cached;
+  } catch {
+    tunnelUrlCache.delete(conn.id);
+    return null;
+  }
+}
+
+async function createTunnelUrl(conn: Connection, originalBaseUrl: string): Promise<string> {
   const sshConfig = connectionSSHConfig(conn);
   if (!sshConfig) return originalBaseUrl;
 
-  const cached = tunnelUrlCache.get(conn.id);
-  if (cached) return cached;
-
   // 解析原始 baseUrl，提取 context-path 和协议
   const url = new URL(originalBaseUrl);
-  const contextPath = url.pathname;
   const remotePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
 
   // 创建 SSH 隧道
@@ -68,16 +87,93 @@ export async function resolveBaseUrl(conn: Connection): Promise<string> {
     remoteHost: url.hostname,
   });
 
-  // 用本地隧道端口替换原始 URL 的端口
-  const tunnelUrl = `${url.protocol}//localhost:${localPort}${contextPath}`;
+  // 用本地隧道端口替换原始 URL 的端口；固定使用 IPv4，避免 Windows localhost 解析到 ::1。
+  const tunnelUrl = tunnelUrlFor(originalBaseUrl, localPort);
   tunnelUrlCache.set(conn.id, tunnelUrl);
   return tunnelUrl;
+}
+
+/** 解析连接的有效 baseUrl：如果有 SSH 隧道配置则通过隧道访问。 */
+export async function resolveBaseUrl(conn: Connection): Promise<string> {
+  if (conn.sourceType === "local-snapshot") return conn.localPath || conn.baseUrl;
+  const originalBaseUrl = normalizeNacosBaseUrl(conn.baseUrl);
+  const sshConfig = connectionSSHConfig(conn);
+  if (!sshConfig) return originalBaseUrl;
+
+  const cached = await cachedTunnelUrl(conn, originalBaseUrl);
+  if (cached) return cached;
+
+  const creating = tunnelCreationCache.get(conn.id);
+  if (creating) return creating;
+
+  const next = createTunnelUrl(conn, originalBaseUrl);
+  tunnelCreationCache.set(conn.id, next);
+  try {
+    return await next;
+  } finally {
+    if (tunnelCreationCache.get(conn.id) === next) {
+      tunnelCreationCache.delete(conn.id);
+    }
+  }
 }
 
 /** 清除某连接的 SSH 隧道。 */
 export function closeTunnel(connId: string) {
   tunnelUrlCache.delete(connId);
+  tunnelCreationCache.delete(connId);
   StopSSHTunnel(connId);
+}
+
+
+function hasSSHConfig(conn: Connection): boolean {
+  return !!connectionSSHConfig(conn);
+}
+
+function isLocalTunnelTransportError(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  const transportMarkers = [
+    "wsarecv",
+    "forcibly closed",
+    "actively refused",
+    "connection refused",
+    "connectex",
+    "dial tcp",
+    "read tcp",
+    "unexpected eof",
+    "eof",
+    "reset by peer",
+    "broken pipe",
+    "no connection could be made",
+  ];
+  const hasTransportMarker = transportMarkers.some((marker) => message.includes(marker));
+  if (!hasTransportMarker) return false;
+
+  const targetsLocalTunnel =
+    message.includes("localhost") || message.includes("127.0.0.1") || message.includes("[::1]") || message.includes("::1");
+  const lostLoginResponse = message.includes("读取登录响应失败") || message.includes("login response") || message.includes("登录请求失败");
+  return targetsLocalTunnel || lostLoginResponse;
+}
+
+async function resetTunnelState(conn: Connection) {
+  tokenCache.delete(conn.id);
+  versionCache.delete(conn.baseUrl);
+  tunnelUrlCache.delete(conn.id);
+  tunnelCreationCache.delete(conn.id);
+  try {
+    await StopSSHTunnel(conn.id);
+  } catch {
+    // Ignore stop failures: the tunnel is already unhealthy; the retry should attempt a fresh tunnel.
+  }
+}
+
+async function withTunnelReconnect<T>(conn: Connection, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!hasSSHConfig(conn) || !isLocalTunnelTransportError(error)) throw error;
+    await resetTunnelState(conn);
+    return operation();
+  }
 }
 
 // ── 与 Go 端对应的返回类型 ──
@@ -196,47 +292,52 @@ export function clearToken(connId: string, baseUrl?: string) {
 
 /** 包一层「403 自动重登重试」+ 自动注入 apiVersion。 */
 async function withAuth<T>(conn: Connection, call: (token: string, apiVersion: ApiVersion) => Promise<T>): Promise<T> {
-  const apiVersion = await getVersion(conn);
-  const token = await getToken(conn);
-  try {
-    return await call(token, apiVersion);
-  } catch (e) {
-    const msg = String(e);
-    if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
-      const fresh = await getToken(conn, true);
-      return await call(fresh, apiVersion);
+  return withTunnelReconnect(conn, async () => {
+    const apiVersion = await getVersion(conn);
+    const token = await getToken(conn);
+    try {
+      return await call(token, apiVersion);
+    } catch (e) {
+      const msg = String(e);
+      if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
+        const fresh = await getToken(conn, true);
+        return await call(fresh, apiVersion);
+      }
+      throw e;
     }
-    throw e;
-  }
+  });
 }
 
+
 async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfile) => Promise<T>): Promise<T> {
-  const credentialConn = await hydrateConnectionSecrets(conn);
-  if (conn.sourceType === "local-snapshot") {
-    const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
-  }
-  if ((conn.provider ?? "nacos") === "apollo") {
-    const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
-  }
-  if ((conn.provider ?? "nacos") === "consul") {
-    const baseUrl = await resolveBaseUrl(conn);
-    return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
-  }
-  const apiVersion = await getVersion(conn);
-  const accessToken = await getToken(conn);
-  const baseUrl = await resolveBaseUrl(conn);
-  try {
-    return await call(toConnectionProfile(credentialConn, baseUrl, accessToken, apiVersion));
-  } catch (e) {
-    const msg = String(e);
-    if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
-      const fresh = await getToken(conn, true);
-      return await call(toConnectionProfile(credentialConn, baseUrl, fresh, apiVersion));
+  return withTunnelReconnect(conn, async () => {
+    const credentialConn = await hydrateConnectionSecrets(conn);
+    if (conn.sourceType === "local-snapshot") {
+      const baseUrl = await resolveBaseUrl(conn);
+      return call(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
     }
-    throw e;
-  }
+    if ((conn.provider ?? "nacos") === "apollo") {
+      const baseUrl = await resolveBaseUrl(conn);
+      return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
+    }
+    if ((conn.provider ?? "nacos") === "consul") {
+      const baseUrl = await resolveBaseUrl(conn);
+      return call(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
+    }
+    const apiVersion = await getVersion(conn);
+    const accessToken = await getToken(conn);
+    const baseUrl = await resolveBaseUrl(conn);
+    try {
+      return await call(toConnectionProfile(credentialConn, baseUrl, accessToken, apiVersion));
+    } catch (e) {
+      const msg = String(e);
+      if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
+        const fresh = await getToken(conn, true);
+        return await call(toConnectionProfile(credentialConn, baseUrl, fresh, apiVersion));
+      }
+      throw e;
+    }
+  });
 }
 
 function providerForConnection(conn: Connection): ProviderType {
@@ -371,32 +472,35 @@ function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): Histo
 
 // ── 业务接口封装 ──
 export async function testConnection(conn: Connection): Promise<LoginResult> {
-  const credentialConn = await hydrateConnectionSecrets(conn);
-  if (conn.sourceType === "local-snapshot") {
-    const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
-    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
-  }
-  if ((conn.provider ?? "nacos") === "apollo") {
-    const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
-    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
-  }
-  if ((conn.provider ?? "nacos") === "consul") {
-    const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
-    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
-  }
-  if (conn.authType === "aliyun-aksk") {
+  return withTunnelReconnect(conn, async () => {
+    const credentialConn = await hydrateConnectionSecrets(conn);
+    if (conn.sourceType === "local-snapshot") {
+      const baseUrl = await resolveBaseUrl(conn);
+      await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", "v1"));
+      return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+    }
+    if ((conn.provider ?? "nacos") === "apollo") {
+      const baseUrl = await resolveBaseUrl(conn);
+      await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.apolloToken ?? "", ""));
+      return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+    }
+    if ((conn.provider ?? "nacos") === "consul") {
+      const baseUrl = await resolveBaseUrl(conn);
+      await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
+      return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+    }
+    if (conn.authType === "aliyun-aksk") {
+      const apiVersion = await getVersion(conn);
+      const baseUrl = await resolveBaseUrl(conn);
+      await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", apiVersion));
+      return { accessToken: "", tokenTtl: 0, globalAdmin: false };
+    }
     const apiVersion = await getVersion(conn);
     const baseUrl = await resolveBaseUrl(conn);
-    await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", apiVersion));
-    return { accessToken: "", tokenTtl: 0, globalAdmin: false };
-  }
-  const apiVersion = await getVersion(conn);
-  const baseUrl = await resolveBaseUrl(conn);
-  return NacosLogin(baseUrl, credentialConn.username, credentialConn.password, apiVersion);
+    return NacosLogin(baseUrl, credentialConn.username, credentialConn.password, apiVersion);
+  });
 }
+
 
 export async function listNamespaces(conn: Connection): Promise<Namespace[]> {
   return withProfile(conn, async (profile) => {
@@ -482,10 +586,10 @@ export async function publishConfigFromApplyPlan(
       })
     );
   }
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType)
-  );
+  return withAuth(conn, async (accessToken, apiVersion) => {
+    const baseUrl = await resolveBaseUrl(conn);
+    return NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
+  });
 }
 
 export async function publishConfigRefFromApplyPlan(
@@ -525,10 +629,10 @@ export async function deleteConfigFromApplyPlan(conn: Connection, namespace: str
   if ((conn.provider ?? "nacos") !== "nacos") {
     return withProfile(conn, (profile) => configCenterDeleteConfigFromApplyPlan(profile, toConfigRef(conn, namespace, dataId, group)));
   }
-  const baseUrl = await resolveBaseUrl(conn);
-  return withAuth(conn, (accessToken, apiVersion) =>
-    NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group)
-  );
+  return withAuth(conn, async (accessToken, apiVersion) => {
+    const baseUrl = await resolveBaseUrl(conn);
+    return NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group);
+  });
 }
 
 export async function deleteConfigRefFromApplyPlan(conn: Connection, ref: ConfigRef): Promise<void> {

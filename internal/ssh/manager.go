@@ -28,9 +28,12 @@ func (m *Manager) CreateTunnel(connectionId string, config Config) (int, error) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 检查是否已存在隧道
+	// 检查是否已存在隧道。同一连接的并发请求可能同时要求创建隧道，
+	// 如果配置没有变化，直接复用已有监听端口，避免后一个请求把前一个请求刚拿到的端口关闭。
 	if existingTunnel, exists := m.tunnels[connectionId]; exists {
-		// 如果已存在，先停止旧隧道
+		if existingTunnel.config == config && existingTunnel.GetLocalPort() > 0 {
+			return existingTunnel.GetLocalPort(), nil
+		}
 		existingTunnel.Stop()
 		delete(m.tunnels, connectionId)
 	}
