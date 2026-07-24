@@ -697,8 +697,34 @@ button,
   min-width: 0;
 }
 
-.browse-header .sel-trigger {
-  min-width: 180px;
+.browse-scope-bar {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.browse-scope-field {
+  min-width: 136px;
+  flex: 0 1 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.browse-scope-field.namespace {
+  flex-basis: 190px;
+}
+
+.browse-scope-field > span {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.browse-scope-field .sel,
+.browse-scope-field .sel-trigger {
+  width: 100%;
+  min-width: 0;
 }
 
 .page-subtitle {
@@ -5884,6 +5910,11 @@ button,
   .page-actions {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .browse-scope-field,
+  .browse-scope-field.namespace {
+    flex: 1 1 150px;
   }
 
   .data-split,

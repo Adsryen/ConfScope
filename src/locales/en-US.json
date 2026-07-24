@@ -59,6 +59,7 @@
     "title": "Config Browser",
     "diff": "Config Compare",
     "connection": "Connection",
+    "source": "Source",
     "namespace": "Namespace",
     "namespaceLoading": "Loading namespaces…",
     "namespaceDefault": "public (default)",

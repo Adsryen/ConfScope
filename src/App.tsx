@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Connection, connectionDisplayLabel, loadConnections } from "./store/connections";
+import {
+  Connection,
+  connectionDisplayLabel,
+  connectionEnvironmentName,
+  connectionProjectName,
+  connectionSourceName,
+  loadConnections,
+} from "./store/connections";
 import { listNamespaces, Namespace } from "./api/nacos";
 import { useTranslation } from "./i18n";
 import ConnectionManager from "./components/ConnectionManager";
@@ -61,13 +68,47 @@ function NavIcon({ mode }: { mode: NavigableMode }) {
   );
 }
 
+interface UIState {
+  connId?: string;
+  mode?: string;
+  sidebarCollapsed?: boolean;
+  browseProject?: string;
+  browseEnvironment?: string;
+  browseSourceId?: string;
+}
+
 const UI_KEY = "cs.ui";
-function loadUI(): { connId?: string; mode?: string; sidebarCollapsed?: boolean } {
+function loadUI(): UIState {
   try {
     return JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   } catch {
     return {};
   }
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort(compareText);
+}
+
+function preferredConnection(connections: Connection[], ui: UIState): Connection | undefined {
+  const sourceId = ui.browseSourceId || ui.connId || "";
+  const direct = connections.find((conn) => conn.id === sourceId);
+  if (direct) return direct;
+  const project = ui.browseProject?.trim();
+  const environment = ui.browseEnvironment?.trim();
+  if (project && environment) {
+    return connections.find((conn) => connectionProjectName(conn) === project && connectionEnvironmentName(conn) === environment);
+  }
+  if (project) return connections.find((conn) => connectionProjectName(conn) === project);
+  return connections[0];
+}
+
+function preferredSource(connections: Connection[]): Connection | undefined {
+  return connections.find((conn) => conn.isDefaultSource) ?? connections[0];
 }
 
 function isNavigableMode(mode: string | undefined): mode is NavigableMode {
@@ -105,9 +146,7 @@ export default function App() {
   const { t } = useTranslation();
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
   const ui0 = loadUI();
-  const [activeConnId, setActiveConnId] = useState<string>(
-    connections.some((c) => c.id === ui0.connId) ? ui0.connId! : (connections[0]?.id ?? "")
-  );
+  const [activeConnId, setActiveConnId] = useState<string>(preferredConnection(connections, ui0)?.id ?? "");
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
@@ -155,11 +194,22 @@ export default function App() {
     };
   }, []);
 
-  // 记住上次的连接与模式
+  // 记住上次的连接、浏览筛选与模式。
   useEffect(() => {
     const persistedMode = mode === "apply" ? (pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse") : mode;
-    localStorage.setItem(UI_KEY, JSON.stringify({ connId: activeConnId, mode: persistedMode, sidebarCollapsed }));
-  }, [activeConnId, mode, pendingApplyEntry, sidebarCollapsed]);
+    const activeConnection = connections.find((conn) => conn.id === activeConnId);
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({
+        connId: activeConnId,
+        mode: persistedMode,
+        sidebarCollapsed,
+        browseProject: activeConnection ? connectionProjectName(activeConnection) : "",
+        browseEnvironment: activeConnection ? connectionEnvironmentName(activeConnection) : "",
+        browseSourceId: activeConnection?.id ?? "",
+      })
+    );
+  }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed]);
 
   // 启动后低频后台检查更新（延迟 5 分钟，仅一次）
   useEffect(() => {
@@ -204,7 +254,7 @@ export default function App() {
     if (connections.length === 0) {
       setActiveConnId("");
     } else if (!connections.some((c) => c.id === activeConnId)) {
-      setActiveConnId(connections[0].id);
+      setActiveConnId(preferredConnection(connections, loadUI())?.id ?? connections[0].id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connections]);
@@ -356,6 +406,40 @@ export default function App() {
     setStartupDialog(null);
   };
 
+  const browseProjects = uniqueSorted(connections.map((conn) => connectionProjectName(conn)));
+  const activeProject = activeConn ? connectionProjectName(activeConn) : (browseProjects[0] ?? "");
+  const browseProjectConnections = connections.filter((conn) => connectionProjectName(conn) === activeProject);
+  const browseEnvironments = uniqueSorted(browseProjectConnections.map((conn) => connectionEnvironmentName(conn)));
+  const activeEnvironment =
+    activeConn && connectionProjectName(activeConn) === activeProject ? connectionEnvironmentName(activeConn) : (browseEnvironments[0] ?? "");
+  const browseEnvironmentConnections = browseProjectConnections.filter((conn) => connectionEnvironmentName(conn) === activeEnvironment);
+  const activeSourceId = browseEnvironmentConnections.some((conn) => conn.id === activeConnId)
+    ? activeConnId
+    : (preferredSource(browseEnvironmentConnections)?.id ?? "");
+  const sourceNameCounts = browseEnvironmentConnections.reduce<Record<string, number>>((acc, conn) => {
+    const name = connectionSourceName(conn);
+    acc[name] = (acc[name] ?? 0) + 1;
+    return acc;
+  }, {});
+  const browseSourceOptions = browseEnvironmentConnections.map((conn) => {
+    const sourceName = connectionSourceName(conn);
+    const duplicated = sourceNameCounts[sourceName] > 1;
+    return {
+      value: conn.id,
+      label: duplicated ? `${sourceName} · ${conn.name}` : sourceName,
+    };
+  });
+  const selectBrowseProject = (project: string) => {
+    const nextConnections = connections.filter((conn) => connectionProjectName(conn) === project);
+    const next = preferredSource(nextConnections);
+    if (next) setActiveConnId(next.id);
+  };
+  const selectBrowseEnvironment = (environment: string) => {
+    const nextConnections = browseProjectConnections.filter((conn) => connectionEnvironmentName(conn) === environment);
+    const next = preferredSource(nextConnections);
+    if (next) setActiveConnId(next.id);
+  };
+
   const browsePage = (
     <div className="page-surface browse-page">
       <div className="page-header browse-header">
@@ -363,32 +447,58 @@ export default function App() {
           <h3>{t("app.title")}</h3>
           <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t("app.selectConnection")}</div>
         </div>
-        <div className="page-actions">
-          <Select
-            value={activeConnId}
-            disabled={connections.length === 0}
-            title={t("app.connection")}
-            options={connections.map((c) => ({ value: c.id, label: connectionDisplayLabel(c) }))}
-            onChange={setActiveConnId}
-          />
-          <Select
-            value={tenant}
-            disabled={!activeConn || nsLoading}
-            title={t("app.namespace")}
-            options={[
-              { value: "", label: nsLoading ? t("app.namespaceLoading") : t("app.namespaceDefault") },
-              ...namespaces
-                .filter((n) => n.namespace)
-                .map((n) => ({
-                  value: n.namespace,
-                  label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
-                })),
-            ]}
-            onChange={(value) => {
-              setTenant(value);
-              setTenantFollowsDefault(false);
-            }}
-          />
+        <div className="page-actions browse-scope-bar">
+          <div className="browse-scope-field">
+            <span>{t("connection.project")}</span>
+            <Select
+              value={activeProject}
+              disabled={connections.length === 0}
+              title={t("connection.project")}
+              options={browseProjects.map((project) => ({ value: project, label: project }))}
+              onChange={selectBrowseProject}
+            />
+          </div>
+          <div className="browse-scope-field">
+            <span>{t("connection.environment")}</span>
+            <Select
+              value={activeEnvironment}
+              disabled={browseProjectConnections.length === 0}
+              title={t("connection.environment")}
+              options={browseEnvironments.map((environment) => ({ value: environment, label: environment }))}
+              onChange={selectBrowseEnvironment}
+            />
+          </div>
+          <div className="browse-scope-field">
+            <span>{t("app.source")}</span>
+            <Select
+              value={activeSourceId}
+              disabled={browseEnvironmentConnections.length === 0}
+              title={t("app.source")}
+              options={browseSourceOptions}
+              onChange={setActiveConnId}
+            />
+          </div>
+          <div className="browse-scope-field namespace">
+            <span>{t("app.namespace")}</span>
+            <Select
+              value={tenant}
+              disabled={!activeConn || nsLoading}
+              title={t("app.namespace")}
+              options={[
+                { value: "", label: nsLoading ? t("app.namespaceLoading") : t("app.namespaceDefault") },
+                ...namespaces
+                  .filter((n) => n.namespace)
+                  .map((n) => ({
+                    value: n.namespace,
+                    label: `${n.namespaceShowName || n.namespace}（${n.configCount}）`,
+                  })),
+              ]}
+              onChange={(value) => {
+                setTenant(value);
+                setTenantFollowsDefault(false);
+              }}
+            />
+          </div>
         </div>
       </div>
       {!activeConn ? (

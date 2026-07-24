@@ -29,6 +29,10 @@ const viewMocks = vi.hoisted(() => ({
     entry: ApplyEntryPayload | null;
     connections: Connection[];
   }>,
+  browserProps: [] as Array<{
+    conn: Connection;
+    tenant: string;
+  }>,
   makeApplyPayload: (mode: "audit" | "diff" | "backup"): ApplyEntryPayload => ({
     sourceType: mode,
     scope: mode === "audit" ? "key" : "config",
@@ -93,7 +97,12 @@ vi.mock("./lib/toast", () => ({
 }));
 
 vi.mock("./components/ConnectionManager", () => ({ default: () => <div data-testid="connection-manager" /> }));
-vi.mock("./components/ConfigBrowser", () => ({ default: () => <div data-testid="config-browser" /> }));
+vi.mock("./components/ConfigBrowser", () => ({
+  default: ({ conn, tenant }: { conn: Connection; tenant: string }) => {
+    viewMocks.browserProps.push({ conn, tenant });
+    return <div data-testid="config-browser" />;
+  },
+}));
 vi.mock("./components/About", () => ({ default: () => <div data-testid="about" /> }));
 vi.mock("./components/SettingsView", () => ({ default: () => <div data-testid="settings" /> }));
 vi.mock("./components/SSHManagerView", () => ({ default: () => <div data-testid="ssh" /> }));
@@ -300,6 +309,7 @@ describe("App", () => {
     );
     viewMocks.diffProps.length = 0;
     viewMocks.applyProps.length = 0;
+    viewMocks.browserProps.length = 0;
     apiMocks.listNamespaces.mockResolvedValue([]);
     apiMocks.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.3.0", updateSources: [] });
     apiMocks.checkForUpdates.mockResolvedValue({ hasUpdate: false, latestVersion: "", releaseNotes: "" });
@@ -447,6 +457,104 @@ describe("App", () => {
 
     expect(screen.getByTestId("about")).toBeInTheDocument();
     expect(screen.queryByText("No Nacos connections yet")).not.toBeInTheDocument();
+  });
+
+  it("restores the last used browse project environment and source", async () => {
+    const connections: Connection[] = [
+      sourceConnection,
+      {
+        ...sourceConnection,
+        id: "conn-billing-prod-private",
+        name: "billing-prod-private",
+        projectName: "Billing",
+        environmentName: "Production",
+        sourceName: "Private",
+        baseUrl: "http://billing.example.com/nacos",
+      },
+    ];
+    localStorage.setItem("cs.connections", JSON.stringify(connections));
+    localStorage.setItem(
+      "cs.ui",
+      JSON.stringify({
+        mode: "browse",
+        browseProject: "Billing",
+        browseEnvironment: "Production",
+        browseSourceId: "conn-billing-prod-private",
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("config-browser");
+
+    expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].conn.id).toBe("conn-billing-prod-private");
+    expect(JSON.parse(localStorage.getItem("cs.ui") || "{}")).toMatchObject({
+      browseProject: "Billing",
+      browseEnvironment: "Production",
+      browseSourceId: "conn-billing-prod-private",
+    });
+  });
+
+  it("updates and remembers browse filters when switching environment and source", async () => {
+    const connections: Connection[] = [
+      sourceConnection,
+      {
+        ...sourceConnection,
+        id: "conn-order-test-private",
+        name: "order-test-private",
+        environmentName: "Test",
+        sourceName: "Private",
+        isDefaultSource: true,
+        baseUrl: "http://order-test-private.example.com/nacos",
+      },
+      {
+        ...sourceConnection,
+        id: "conn-order-test-cloud",
+        name: "order-test-cloud",
+        environmentName: "Test",
+        sourceName: "Cloud",
+        baseUrl: "http://order-test-cloud.example.com/nacos",
+      },
+    ];
+    localStorage.setItem("cs.connections", JSON.stringify(connections));
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("config-browser");
+    const filterButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".browse-scope-field .sel-trigger"));
+    const pickOption = (label: string) => {
+      const option = Array.from(document.querySelectorAll<HTMLElement>(".sel-option")).find((item) => item.textContent === label);
+      if (!option) throw new Error(`Option not found: ${label}`);
+      fireEvent.mouseDown(option);
+    };
+
+    fireEvent.click(filterButtons()[1]);
+    pickOption("Test");
+
+    await waitFor(() => {
+      expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].conn.id).toBe("conn-order-test-private");
+    });
+
+    fireEvent.click(filterButtons()[2]);
+    pickOption("Cloud");
+
+    await waitFor(() => {
+      expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].conn.id).toBe("conn-order-test-cloud");
+    });
+    expect(JSON.parse(localStorage.getItem("cs.ui") || "{}")).toMatchObject({
+      browseProject: "Order",
+      browseEnvironment: "Test",
+      browseSourceId: "conn-order-test-cloud",
+    });
   });
 
   it("opens DiffView with a runtime local snapshot source from BackupView", async () => {

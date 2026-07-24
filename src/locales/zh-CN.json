@@ -59,6 +59,7 @@
     "title": "配置浏览",
     "diff": "配置对比",
     "connection": "连接",
+    "source": "来源",
     "namespace": "命名空间",
     "namespaceLoading": "命名空间加载中…",
     "namespaceDefault": "public（默认）",
