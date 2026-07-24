@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearOperationHistory } from "../store/operationHistory";
@@ -20,6 +20,7 @@ export default function SettingsView() {
   const [credentialError, setCredentialError] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
   const panelsRef = useRef<HTMLDivElement | null>(null);
+  const savedTimerRef = useRef<number | null>(null);
 
   const sectionLinks = [
     { id: "settings-general", label: t("settings.groupBasic") },
@@ -40,8 +41,21 @@ export default function SettingsView() {
     setSettings(next);
     saveSettings(next);
     setSaved(true);
-    window.setTimeout(() => setSaved(false), 1200);
+    if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = window.setTimeout(() => {
+      setSaved(false);
+      savedTimerRef.current = null;
+    }, 1200);
   };
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const scrollToSection = (id: string) => {
     const container = panelsRef.current;

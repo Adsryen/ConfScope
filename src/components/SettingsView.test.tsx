@@ -106,6 +106,20 @@ describe("SettingsView", () => {
     );
   });
 
+  it("clears the saved indicator timeout when unmounted", () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+    const { unmount } = renderSettings("en-US");
+
+    fireEvent.click(screen.getByLabelText("Sort connection dropdowns by name"));
+    expect(screen.getByText("Settings saved")).toBeInTheDocument();
+
+    unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it("scrolls the settings panel container from rail navigation", () => {
     renderSettings("en-US");
     const panels = document.querySelector(".settings-panels") as HTMLDivElement;
