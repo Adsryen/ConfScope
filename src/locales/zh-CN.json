@@ -696,6 +696,7 @@
     "batchFailureHeader": "加载失败 ({count})",
     "retryAll": "全部重试",
     "batchGenerated": "已生成 {count} 个文件对比",
+    "backToMatchList": "返回文件选择",
     "batchOnlyChanges": "全部仅显示变更",
     "exportDiff": "导出差异",
     "startApply": "生成应用计划",

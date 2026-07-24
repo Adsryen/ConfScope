@@ -2638,20 +2638,56 @@ button,
 .match-count {
   font-size: 11.5px;
 }
-.match-items {
+.match-side-by-side {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  overflow: auto;
 }
-.match-item {
+
+.match-side-list {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+
+.match-side-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 10px;
+  color: var(--text-dim);
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.match-side-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 14px;
+  min-height: 34px;
+  padding: 7px 10px;
   font-size: 12.5px;
-  cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
-.match-item:hover {
+
+.match-side-row:last-child {
+  border-bottom: 0;
+}
+
+.match-item {
+  cursor: pointer;
+}
+
+.match-item:hover,
+.match-counterpart:hover {
   background: var(--bg-hover);
 }
 .match-item input {
@@ -2664,6 +2700,10 @@ button,
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+}
+.match-dataid.missing {
+  color: var(--text-dim);
+  font-style: italic;
 }
 .match-group {
   font-size: 11px;

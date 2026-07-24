@@ -696,6 +696,7 @@
     "batchFailureHeader": "Load failed ({count})",
     "retryAll": "Retry All",
     "batchGenerated": "Generated {count} file comparisons",
+    "backToMatchList": "Back to file selection",
     "batchOnlyChanges": "Only show changes for all",
     "exportDiff": "Export Diff",
     "startApply": "Generate Apply Plan",
