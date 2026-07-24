@@ -1055,6 +1055,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
+  const returnToMatchList = () => {
+    setBatchResults([]);
+    setFailedItems([]);
+    setBatchOnlyChanges(new Set());
+    setCollapsed(new Set());
+  };
+
   const retryCurrentCompare = () => {
     if (leftFailed || rightFailed) {
       setLeftFailed(false);
@@ -1272,17 +1279,32 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 ⟳
               </button>
             </div>
-            <div className="match-items">
-              {matchResults.map((item) => (
-                <label className="match-item" key={item.dataId}>
-                  <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
-                  <span className="match-dataid">{item.dataId}</span>
-                  <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                  <span className="match-group">
-                    {item.leftGroup === item.rightGroup ? item.leftGroup : `${item.leftGroup} / ${item.rightGroup}`}
-                  </span>
-                </label>
-              ))}
+            <div className="match-side-by-side">
+              <div className="match-side-list left">
+                <div className="match-side-title">{t("diff.sourceA")}</div>
+                {matchResults.map((item) => (
+                  <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
+                    <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
+                    <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
+                      {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
+                    </span>
+                    <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                    <span className="match-group">{item.leftGroup}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="match-side-list right">
+                <div className="match-side-title">{t("diff.sourceB")}</div>
+                {matchResults.map((item) => (
+                  <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
+                    <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
+                      {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
+                    </span>
+                    <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                    <span className="match-group">{item.rightGroup}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -1329,6 +1351,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               </div>
             )}
             <div className="batch-diff-toolbar">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={returnToMatchList} disabled={batchLoading}>
+                {t("diff.backToMatchList")}
+              </button>
               <span className="batch-diff-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
               <span className="fmt-spacer" />
               <label className="diff-toggle">

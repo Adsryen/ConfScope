@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
@@ -384,11 +384,11 @@ describe("DiffView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
 
     expect(await screen.findByText("找到 3 个 dataId，已选 3 个")).toBeInTheDocument();
-    expect(screen.getByText("same.yaml")).toBeInTheDocument();
+    expect(screen.getAllByText("same.yaml")).toHaveLength(2);
     expect(screen.getByText("left-only.yaml")).toBeInTheDocument();
     expect(screen.getByText("right-only.yaml")).toBeInTheDocument();
-    expect(screen.getByText("仅左侧存在")).toBeInTheDocument();
-    expect(screen.getByText("仅右侧存在")).toBeInTheDocument();
+    expect(screen.getAllByText("仅左侧存在").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
 
@@ -402,6 +402,78 @@ describe("DiffView", () => {
     expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
     expect(screen.getAllByText("仅左侧存在").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows smart-match files as left and right side lists", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        selectedProject: "Order",
+        left: { connId: "left-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        right: { connId: "right-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        mode: "text",
+      })
+    );
+    apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems:
+        conn.id === "left-nacos"
+          ? [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "left-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ]
+          : [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "right-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ],
+    }));
+
+    renderDiff([leftApplyConn, rightApplyConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+
+    expect(await screen.findByText("找到 3 个 dataId，已选 3 个")).toBeInTheDocument();
+    const leftList = document.querySelector(".match-side-list.left");
+    const rightList = document.querySelector(".match-side-list.right");
+    expect(leftList).toBeInTheDocument();
+    expect(rightList).toBeInTheDocument();
+    expect(within(leftList as HTMLElement).getByText("same.yaml")).toBeInTheDocument();
+    expect(within(leftList as HTMLElement).getByText("left-only.yaml")).toBeInTheDocument();
+    expect(within(leftList as HTMLElement).getByText("缺失配置")).toBeInTheDocument();
+    expect(within(rightList as HTMLElement).getByText("same.yaml")).toBeInTheDocument();
+    expect(within(rightList as HTMLElement).getByText("right-only.yaml")).toBeInTheDocument();
+    expect(within(rightList as HTMLElement).getByText("缺失配置")).toBeInTheDocument();
+  });
+
+  it("returns from batch line diff to the previous file selection range", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => `${dataId}: content`);
+
+    renderDiff([nacosConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    expect(await screen.findByText("找到 2 个 dataId，已选 2 个")).toBeInTheDocument();
+    fireEvent.click(document.querySelectorAll<HTMLInputElement>(".match-item input")[1]);
+    expect(screen.getByText("找到 2 个 dataId，已选 1 个")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "对比选中（1）" }));
+
+    expect(await screen.findByText("已生成 1 个文件对比")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "返回文件选择" }));
+
+    expect(screen.getByText("找到 2 个 dataId，已选 1 个")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "对比选中（1）" })).toBeInTheDocument();
+    expect(screen.queryByText("已生成 1 个文件对比")).not.toBeInTheDocument();
   });
 
   it("applies the only-changes toggle to all batch diff files", async () => {
