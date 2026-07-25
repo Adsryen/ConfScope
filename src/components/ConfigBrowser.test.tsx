@@ -25,6 +25,11 @@ const snapshotMocks = vi.hoisted(() => ({
   createSnapshotFromConfigs: vi.fn(),
 }));
 
+const appApiMocks = vi.hoisted(() => ({
+  selectConfigSourceExportDirectory: vi.fn(),
+  exportConfigSourceFiles: vi.fn(),
+}));
+
 vi.mock("../api/nacos", async () => {
   const actual = await vi.importActual<typeof import("../api/nacos")>("../api/nacos");
   return {
@@ -42,6 +47,15 @@ vi.mock("../api/snapshot", async () => {
   return {
     ...actual,
     createSnapshotFromConfigs: snapshotMocks.createSnapshotFromConfigs,
+  };
+});
+
+vi.mock("../api/app", async () => {
+  const actual = await vi.importActual<typeof import("../api/app")>("../api/app");
+  return {
+    ...actual,
+    selectConfigSourceExportDirectory: appApiMocks.selectConfigSourceExportDirectory,
+    exportConfigSourceFiles: appApiMocks.exportConfigSourceFiles,
   };
 });
 
@@ -131,6 +145,8 @@ describe("ConfigBrowser", () => {
     apiMocks.publishConfig.mockReset();
     apiMocks.deleteConfig.mockReset();
     snapshotMocks.createSnapshotFromConfigs.mockReset();
+    appApiMocks.selectConfigSourceExportDirectory.mockReset();
+    appApiMocks.exportConfigSourceFiles.mockReset();
     Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:confscope-test"), configurable: true });
     Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
     Object.defineProperty(HTMLAnchorElement.prototype, "click", { value: vi.fn(), configurable: true });
@@ -161,6 +177,8 @@ describe("ConfigBrowser", () => {
       },
       configs: [],
     });
+    appApiMocks.selectConfigSourceExportDirectory.mockResolvedValue("C:\\exports\\nacos");
+    appApiMocks.exportConfigSourceFiles.mockResolvedValue({ path: "C:\\exports\\nacos", configCount: 1 });
   });
 
   it("browses local snapshot configs as read-only and shows metadata", async () => {
@@ -412,6 +430,44 @@ describe("ConfigBrowser", () => {
       dataId: "*",
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackExportOnly",
+    });
+  });
+
+  it("exports current list as source files to a selected directory", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([{ dataId: "service/app.yaml", group: "DEFAULT_GROUP", content: "server:\n  port: 8080\n", configType: "yaml" }])
+    );
+
+    renderBrowser();
+    await screen.findByText("service/app.yaml");
+
+    fireEvent.click(screen.getByTitle("导出源文件到目录"));
+
+    await waitFor(() => {
+      expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalled();
+      expect(appApiMocks.exportConfigSourceFiles).toHaveBeenCalledWith(
+        "C:\\exports\\nacos",
+        expect.objectContaining({
+          connectionId: "dev",
+          connectionName: "dev",
+          namespace: "public",
+          namespaceId: "public",
+        }),
+        [
+          expect.objectContaining({
+            dataId: "service/app.yaml",
+            group: "DEFAULT_GROUP",
+            content: "server:\n  port: 8080\n",
+            contentType: "yaml",
+          }),
+        ]
+      );
+    });
+    expect(loadOperationHistory()[0]).toMatchObject({
+      type: "export",
+      result: "success",
+      resourceName: "导出源文件到目录",
+      rollbackable: false,
     });
   });
 

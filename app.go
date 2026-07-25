@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"confscope/internal/appbackup"
@@ -28,6 +30,12 @@ type AppInfo struct {
 	Name          string               `json:"name"`
 	Version       string               `json:"version"`
 	UpdateSources []updatecheck.Source `json:"updateSources"`
+}
+
+type AppDataSnapshotFile struct {
+	Path          string `json:"path"`
+	ContentBase64 string `json:"contentBase64"`
+	Mode          uint32 `json:"mode"`
 }
 
 // App 是 Wails 暴露给前端的应用服务。
@@ -233,6 +241,20 @@ func (a *App) ValidateLocalSnapshotDirectory(path string) provider.LocalSnapshot
 	return provider.ValidateLocalSnapshotDirectory(path)
 }
 
+func (a *App) SelectConfigSourceExportDirectory() (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("wails runtime is not ready")
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择配置源文件导出目录",
+	})
+}
+
+// ExportConfigSourceFiles 将配置浏览当前列表导出为可浏览/可对比的源文件目录。
+func (a *App) ExportConfigSourceFiles(targetDir string, source provider.SnapshotSource, configs []provider.ConfigSnapshot) (provider.ConfigSourceExportResult, error) {
+	return provider.WriteConfigSourceDirectory(targetDir, source, configs)
+}
+
 func (a *App) SelectAppDataBackupSaveFile(defaultName string) (string, error) {
 	if a.ctx == nil {
 		return "", errors.New("wails runtime is not ready")
@@ -289,12 +311,80 @@ func (a *App) ReadAppDataBackupFile(path string, password string) (appbackup.Dec
 
 // CreateAppDataRecoveryPoint 在用户数据目录下创建恢复前的自动恢复点。
 func (a *App) CreateAppDataRecoveryPoint(plaintextJSON string, password string, meta appbackup.PackageMeta) (appbackup.Summary, error) {
-	homeDir, err := os.UserHomeDir()
+	recoveryDir, err := appDataRecoveryPointStorageDir()
 	if err != nil {
-		return appbackup.Summary{}, fmt.Errorf("获取用户目录失败: %w", err)
+		return appbackup.Summary{}, err
 	}
-	path := filepath.Join(homeDir, ".confscope", "app-data-recovery-points", appbackup.DefaultBackupFileName(meta))
+	path := filepath.Join(recoveryDir, appbackup.DefaultBackupFileName(meta))
 	return a.WriteAppDataBackupFile(path, plaintextJSON, password, meta)
+}
+
+// ListAppDataSnapshotFiles 读取便携快照目录文件，供应用数据备份打包。
+func (a *App) ListAppDataSnapshotFiles() ([]AppDataSnapshotFile, error) {
+	snapshotDir, err := snapshotStorageDir()
+	if err != nil {
+		return nil, err
+	}
+	files := []AppDataSnapshotFile{}
+	err = filepath.WalkDir(snapshotDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(snapshotDir, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files = append(files, AppDataSnapshotFile{
+			Path:          filepath.ToSlash(rel),
+			ContentBase64: base64.StdEncoding.EncodeToString(content),
+			Mode:          uint32(info.Mode().Perm()),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("读取快照文件失败: %w", err)
+	}
+	return files, nil
+}
+
+// RestoreAppDataSnapshotFiles 将应用数据备份中的快照文件恢复到便携快照目录。
+func (a *App) RestoreAppDataSnapshotFiles(files []AppDataSnapshotFile) error {
+	snapshotDir, err := snapshotStorageDir()
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		target, err := safeSnapshotBackupFilePath(snapshotDir, file.Path)
+		if err != nil {
+			return err
+		}
+		content, err := base64.StdEncoding.DecodeString(file.ContentBase64)
+		if err != nil {
+			return fmt.Errorf("解析快照文件失败 %s: %w", file.Path, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("创建快照恢复目录失败: %w", err)
+		}
+		mode := os.FileMode(file.Mode)
+		if mode == 0 {
+			mode = 0o644
+		}
+		if err := os.WriteFile(target, content, mode.Perm()); err != nil {
+			return fmt.Errorf("写入快照文件失败 %s: %w", file.Path, err)
+		}
+	}
+	return nil
 }
 
 // TestAppDataWebDAV 测试应用数据备份 WebDAV 目标。
@@ -491,52 +581,40 @@ func (a *App) GetSSHTunnelLocalPort(connectionId string) (int, error) {
 
 // CreateSnapshot 创建本地快照。
 func (a *App) CreateSnapshot(source provider.SnapshotSource, configs []provider.ConfigSnapshot) (*provider.Snapshot, error) {
-	// 获取快照存储目录
-	homeDir, err := os.UserHomeDir()
+	snapshotDir, err := snapshotStorageDir()
 	if err != nil {
-		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+		return nil, err
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
-		return nil, fmt.Errorf("创建快照目录失败: %w", err)
-	}
-
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.CreateSnapshot(source, configs)
 }
 
 // GetSnapshot 获取快照。
 func (a *App) GetSnapshot(id string) (*provider.Snapshot, error) {
-	homeDir, err := os.UserHomeDir()
+	snapshotDir, err := snapshotStorageDir()
 	if err != nil {
-		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+		return nil, err
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.GetSnapshot(id)
 }
 
 // ListSnapshots 列出所有快照。
 func (a *App) ListSnapshots() ([]provider.Snapshot, error) {
-	homeDir, err := os.UserHomeDir()
+	snapshotDir, err := snapshotStorageDir()
 	if err != nil {
-		return nil, fmt.Errorf("获取用户目录失败: %w", err)
+		return nil, err
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.ListSnapshots()
 }
 
 // DeleteSnapshot 删除快照。
 func (a *App) DeleteSnapshot(id string) error {
-	homeDir, err := os.UserHomeDir()
+	snapshotDir, err := snapshotStorageDir()
 	if err != nil {
-		return fmt.Errorf("获取用户目录失败: %w", err)
+		return err
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.DeleteSnapshot(id)
 }
@@ -584,24 +662,80 @@ func (a *App) ImportSnapshotWebDAVPackage(target snapshotwebdav.WebDAVTarget, re
 
 // ValidateSnapshot 校验快照目录。
 func (a *App) ValidateSnapshot(path string) error {
-	homeDir, err := os.UserHomeDir()
+	snapshotDir, err := snapshotStorageDir()
 	if err != nil {
-		return fmt.Errorf("获取用户目录失败: %w", err)
+		return err
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-
 	mgr := provider.NewSnapshotManager(snapshotDir)
 	return mgr.ValidateSnapshot(path)
 }
 
 func snapshotStorageDir() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("获取程序路径失败: %w", err)
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("获取用户目录失败: %w", err)
 	}
-	snapshotDir := filepath.Join(homeDir, ".confscope", "backups")
-	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
-		return "", fmt.Errorf("创建快照目录失败: %w", err)
+	return snapshotStorageDirFor(exePath, homeDir)
+}
+
+func snapshotStorageDirFor(exePath string, homeDir string) (string, error) {
+	snapshotDir, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	if err != nil {
+		return "", fmt.Errorf("准备快照目录失败: %w", err)
 	}
 	return snapshotDir, nil
+}
+
+func appDataRecoveryPointStorageDir() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("获取程序路径失败: %w", err)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("获取用户目录失败: %w", err)
+	}
+	recoveryDir, err := preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+	if err != nil {
+		return "", fmt.Errorf("准备应用数据恢复点目录失败: %w", err)
+	}
+	return recoveryDir, nil
+}
+
+func safeSnapshotBackupFilePath(root string, relPath string) (string, error) {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" {
+		return "", fmt.Errorf("快照文件路径不能为空")
+	}
+	slashed := filepath.ToSlash(relPath)
+	if filepath.IsAbs(relPath) || strings.HasPrefix(slashed, "/") {
+		return "", fmt.Errorf("快照文件路径不安全: %s", relPath)
+	}
+	parts := strings.Split(slashed, "/")
+	cleanParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", fmt.Errorf("快照文件路径不安全: %s", relPath)
+		}
+		cleanParts = append(cleanParts, part)
+	}
+	if len(cleanParts) == 0 {
+		return "", fmt.Errorf("快照文件路径不能为空")
+	}
+	target := filepath.Join(append([]string{root}, cleanParts...)...)
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", fmt.Errorf("计算快照文件路径失败: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("快照文件路径不安全: %s", relPath)
+	}
+	return target, nil
 }

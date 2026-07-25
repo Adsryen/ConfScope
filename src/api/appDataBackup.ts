@@ -1,8 +1,10 @@
 import {
   DownloadAppDataWebDAVBackup,
   CreateAppDataRecoveryPoint,
+  ListAppDataSnapshotFiles,
   ListAppDataWebDAVBackups,
   ReadAppDataBackupFile,
+  RestoreAppDataSnapshotFiles,
   SelectAppDataBackupOpenFile,
   SelectAppDataBackupSaveFile,
   TestAppDataWebDAV,
@@ -39,6 +41,12 @@ export interface RemoteAppDataBackup {
   modifiedAt: string;
 }
 
+export interface AppDataSnapshotFile {
+  path: string;
+  contentBase64: string;
+  mode?: number;
+}
+
 export function selectAppDataBackupSaveFile(defaultName: string): Promise<string> {
   return SelectAppDataBackupSaveFile(defaultName);
 }
@@ -66,6 +74,15 @@ export function createAppDataRecoveryPoint(
   meta: AppDataBackupPackageMeta
 ): Promise<AppDataBackupPackageSummary> {
   return CreateAppDataRecoveryPoint(plaintextJson, password, meta) as Promise<AppDataBackupPackageSummary>;
+}
+
+export async function listAppDataSnapshotFiles(): Promise<AppDataSnapshotFile[]> {
+  const result: unknown = await ListAppDataSnapshotFiles();
+  return Array.isArray(result) ? (result as AppDataSnapshotFile[]) : [];
+}
+
+export function restoreAppDataSnapshotFiles(files: AppDataSnapshotFile[]): Promise<void> {
+  return RestoreAppDataSnapshotFiles(files);
 }
 
 export async function testAppDataWebDAV(target: AppDataWebDAVSettings): Promise<void> {

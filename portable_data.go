@@ -9,6 +9,8 @@ import (
 
 const portableDataDirName = "ConfScopeData"
 const portableWebviewDirName = "webview"
+const portableSnapshotDirName = "snapshots"
+const portableAppDataRecoveryPointDirName = "app-data-recovery-points"
 
 func preparePortableWebviewData() (string, error) {
 	exePath, err := os.Executable()
@@ -22,8 +24,32 @@ func preparePortableWebviewData() (string, error) {
 	return preparePortableWebviewDataFor(exePath, appData)
 }
 
+func preparePortableSnapshotData() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("get executable path: %w", err)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get user home directory: %w", err)
+	}
+	return preparePortableSnapshotDataFor(exePath, homeDir)
+}
+
+func preparePortableAppDataRecoveryPointData() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("get executable path: %w", err)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get user home directory: %w", err)
+	}
+	return preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+}
+
 func preparePortableWebviewDataFor(exePath string, appData string) (string, error) {
-	target := filepath.Join(filepath.Dir(exePath), portableDataDirName, portableWebviewDirName)
+	target := filepath.Join(portableDataRootFor(exePath), portableWebviewDirName)
 	if hasDirectoryEntries(target) {
 		return target, nil
 	}
@@ -42,6 +68,36 @@ func preparePortableWebviewDataFor(exePath string, appData string) (string, erro
 	return target, nil
 }
 
+func preparePortableSnapshotDataFor(exePath string, homeDir string) (string, error) {
+	target := filepath.Join(portableDataRootFor(exePath), portableSnapshotDirName)
+	return preparePortableDirectoryFromLegacy(target, legacySnapshotUserDataPath(homeDir), "snapshots")
+}
+
+func preparePortableAppDataRecoveryPointDataFor(exePath string, homeDir string) (string, error) {
+	target := filepath.Join(portableDataRootFor(exePath), portableAppDataRecoveryPointDirName)
+	return preparePortableDirectoryFromLegacy(target, legacyAppDataRecoveryPointUserDataPath(homeDir), "app data recovery points")
+}
+
+func preparePortableDirectoryFromLegacy(target string, source string, label string) (string, error) {
+	if hasDirectoryEntries(target) {
+		return target, nil
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return target, fmt.Errorf("create portable %s directory: %w", label, err)
+	}
+	if samePath(source, target) || !hasDirectoryEntries(source) {
+		return target, nil
+	}
+	if err := copyDirectory(source, target); err != nil {
+		return target, fmt.Errorf("migrate legacy %s from %s: %w", label, source, err)
+	}
+	return target, nil
+}
+
+func portableDataRootFor(exePath string) string {
+	return filepath.Join(filepath.Dir(exePath), portableDataDirName)
+}
+
 func legacyWebviewUserDataPaths(appData string) []string {
 	if appData == "" {
 		return nil
@@ -51,6 +107,20 @@ func legacyWebviewUserDataPaths(appData string) []string {
 		filepath.Join(appData, "ConfScope-new.exe"),
 		filepath.Join(appData, "ConfScope"),
 	}
+}
+
+func legacySnapshotUserDataPath(homeDir string) string {
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, ".confscope", "backups")
+}
+
+func legacyAppDataRecoveryPointUserDataPath(homeDir string) string {
+	if homeDir == "" {
+		return ""
+	}
+	return filepath.Join(homeDir, ".confscope", "app-data-recovery-points")
 }
 
 func hasDirectoryEntries(path string) bool {

@@ -29,6 +29,7 @@ export interface AppDataBackupData {
   operationHistory: unknown[];
   applyPlans: unknown[];
   applyVerifications: unknown[];
+  snapshots: AppDataBackupSnapshotFile[];
   ui: unknown;
   locale: string;
   appDataBackup: unknown;
@@ -49,12 +50,13 @@ export interface AppDataBackupSummary {
   createdAt: string;
   sourcePlatform: string;
   sections: {
-    connections: number;
-    sshProfiles: number;
-    operationHistory: number;
-    applyPlans: number;
-    applyVerifications: number;
-  };
+      connections: number;
+      sshProfiles: number;
+      operationHistory: number;
+      applyPlans: number;
+      applyVerifications: number;
+      snapshots: number;
+    };
   hasSettings: boolean;
   hasUi: boolean;
   locale: string;
@@ -63,6 +65,13 @@ export interface AppDataBackupSummary {
 
 export interface CollectPortableAppDataBackupDeps {
   resolveSecret?: (pointer: StoredSecretPointer) => Promise<string>;
+  listSnapshotFiles?: () => Promise<AppDataBackupSnapshotFile[]>;
+}
+
+export interface AppDataBackupSnapshotFile {
+  path: string;
+  contentBase64: string;
+  mode?: number;
 }
 
 const UI_KEY = "cs.ui";
@@ -108,6 +117,17 @@ function sectionLocale(data: Record<string, unknown>): string {
     throw new Error("应用数据备份缺少有效分区: locale");
   }
   return localeValue(value);
+}
+
+function snapshotFileSection(value: unknown): AppDataBackupSnapshotFile {
+  if (!isObject(value) || typeof value.path !== "string" || typeof value.contentBase64 !== "string") {
+    throw new Error("应用数据备份缺少有效分区: snapshots");
+  }
+  return {
+    path: value.path,
+    contentBase64: value.contentBase64,
+    mode: typeof value.mode === "number" ? value.mode : undefined,
+  };
 }
 
 function containsSensitiveData(value: unknown): boolean {
@@ -188,6 +208,7 @@ export function collectAppDataBackupPayload(input: CollectAppDataBackupInput): A
       operationHistory: loadOperationHistory(),
       applyPlans: loadApplyPlans(),
       applyVerifications: loadApplyVerifications(),
+      snapshots: [],
       ui: readJsonStorage(UI_KEY, {}),
       locale: localeValue(localStorage.getItem(LOCALE_KEY)),
       appDataBackup: loadAppDataBackupState(),
@@ -204,6 +225,7 @@ export async function collectPortableAppDataBackupPayload(
   payload.data.connections = await Promise.all(payload.data.connections.map((item) => portableConnectionRecord(item, deps)));
   payload.data.appDataBackup = await portableWebDAVState(payload.data.appDataBackup, deps);
   payload.data.snapshotWebDAV = await portableWebDAVState(payload.data.snapshotWebDAV, deps);
+  payload.data.snapshots = deps?.listSnapshotFiles ? await deps.listSnapshotFiles() : [];
   return payload;
 }
 
@@ -233,6 +255,7 @@ export function validateAppDataBackupPayload(value: unknown): AppDataBackupPaylo
       operationHistory: arraySection(data, "operationHistory"),
       applyPlans: arraySection(data, "applyPlans"),
       applyVerifications: arraySection(data, "applyVerifications"),
+      snapshots: Array.isArray(data.snapshots) ? data.snapshots.map(snapshotFileSection) : [],
       ui: objectSection(data, "ui"),
       locale: sectionLocale(data),
       appDataBackup: objectSection(data, "appDataBackup"),
@@ -251,14 +274,15 @@ export function summarizeAppDataBackupPayload(value: unknown): AppDataBackupSumm
     sections: {
       connections: payload.data.connections.length,
       sshProfiles: payload.data.sshProfiles.length,
-      operationHistory: payload.data.operationHistory.length,
-      applyPlans: payload.data.applyPlans.length,
-      applyVerifications: payload.data.applyVerifications.length,
-    },
+        operationHistory: payload.data.operationHistory.length,
+        applyPlans: payload.data.applyPlans.length,
+        applyVerifications: payload.data.applyVerifications.length,
+        snapshots: payload.data.snapshots.length,
+      },
     hasSettings: isObject(payload.data.settings),
     hasUi: isObject(payload.data.ui),
     locale: payload.data.locale,
-    includesSensitiveData: containsSensitiveData(payload.data),
+    includesSensitiveData: payload.data.snapshots.length > 0 || containsSensitiveData(payload.data),
   };
 }
 

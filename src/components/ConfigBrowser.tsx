@@ -8,6 +8,7 @@ import { validateConfig } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import { createSnapshotFromConfigs } from "../api/snapshot";
+import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../api/app";
 import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import AlertModal from "./AlertModal";
@@ -508,6 +509,87 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     }
   };
 
+  const exportSourceFilesToDirectory = async () => {
+    let targetDir = "";
+    try {
+      targetDir = await selectConfigSourceExportDirectory();
+      if (!targetDir) return;
+    } catch (e) {
+      const message = String(e);
+      reportError({
+        title: t("config.exportSourceFilesToDirectory"),
+        source: sourceLabel,
+        message,
+        detail: message,
+      });
+      return;
+    }
+
+    const taskName = t("config.exportSourceFilesTaskName", { name: connectionName, namespace: namespaceLabel });
+    const taskScope = t("config.taskScope", { name: connectionName, namespace: namespaceLabel, count: items.length });
+    const task = taskManager.createTask(taskName, "export", { scope: taskScope, cancellable: false });
+    taskManager.startTask(task.id);
+    try {
+      await exportConfigSourceFiles(
+        targetDir,
+        {
+          provider: conn.sourceType === "local-snapshot" ? "local" : (conn.provider ?? "nacos"),
+          connectionId: conn.id,
+          connectionName,
+          namespace: tenant,
+          namespaceId: tenant,
+        },
+        items.map((it) => ({
+          namespace: tenant,
+          dataId: it.dataId,
+          group: it.group,
+          content: it.content,
+          configType: it.configType,
+          contentType: it.configType,
+          updateTime: it.updateTime ?? "",
+        }))
+      );
+      taskManager.updateProgress(task.id, items.length, 0, items.length);
+      taskManager.completeTask(task.id, true);
+      recordOperation({
+        type: "export",
+        result: "success",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: "*",
+        dataId: "*",
+        resourceName: t("config.exportSourceFilesToDirectory"),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackExportOnly",
+      });
+      toast(t("config.exportedSourceFiles", { path: targetDir }), "success");
+    } catch (e) {
+      const message = String(e);
+      taskManager.updateProgress(task.id, 0, 1, items.length || 1);
+      taskManager.completeTask(task.id, false, message);
+      recordOperation({
+        type: "export",
+        result: "failure",
+        connectionId: conn.id,
+        connectionName,
+        namespace: namespaceLabel,
+        group: "*",
+        dataId: "*",
+        resourceName: t("config.exportSourceFilesToDirectory"),
+        rollbackable: false,
+        rollbackReason: "operationHistory.rollbackOnlySuccess",
+        error: message,
+      });
+      reportError({
+        title: t("config.exportSourceFilesToDirectory"),
+        source: sourceLabel,
+        message,
+        detail: message,
+      });
+    }
+  };
+
   return (
     <div className="browser">
       <div className="browser-list">
@@ -566,6 +648,16 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                 title={t("config.exportCurrentList")}
                 aria-label={t("config.exportCurrentList")}
                 onClick={exportCurrentList}
+              >
+                <BrowserToolIcon name="download" />
+              </button>
+            )}
+            {items.length > 0 && (
+              <button
+                className="btn btn-ghost btn-sm browser-icon-btn"
+                title={t("config.exportSourceFilesToDirectory")}
+                aria-label={t("config.exportSourceFilesToDirectory")}
+                onClick={exportSourceFilesToDirectory}
               >
                 <BrowserToolIcon name="download" />
               </button>

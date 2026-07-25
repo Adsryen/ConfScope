@@ -3,8 +3,10 @@ import { getAppInfo, getCurrentPlatform } from "../api/app";
 import {
   createAppDataRecoveryPoint,
   downloadAppDataWebDAVBackup,
+  listAppDataSnapshotFiles,
   listAppDataWebDAVBackups,
   readAppDataBackupFile,
+  restoreAppDataSnapshotFiles,
   selectAppDataBackupOpenFile,
   selectAppDataBackupSaveFile,
   testAppDataWebDAV,
@@ -121,6 +123,7 @@ function SummaryPreview({ preview }: { preview: PreviewState }) {
         <span>{t("appDataBackup.summaryApplyPlans", { count: summary.sections.applyPlans })}</span>
         <span>{t("appDataBackup.summaryApplyVerifications", { count: summary.sections.applyVerifications })}</span>
         <span>{t("appDataBackup.summaryHistory", { count: summary.sections.operationHistory })}</span>
+        <span>{t("appDataBackup.summarySnapshots", { count: summary.sections.snapshots })}</span>
         <span>{summary.includesSensitiveData ? t("appDataBackup.sensitiveIncluded") : t("appDataBackup.sensitiveNone")}</span>
       </div>
     </div>
@@ -197,6 +200,9 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     passwordSecretRef: webdavDraft.password ? undefined : webdavDraft.passwordSecretRef,
   });
 
+  const collectCurrentBackupPayload = (meta: AppDataBackupPackageMeta) =>
+    collectPortableAppDataBackupPayload(meta, { listSnapshotFiles: listAppDataSnapshotFiles });
+
   const recordActivity = (
     type: AppDataBackupActivity["type"],
     statusValue: AppDataBackupActivity["status"],
@@ -245,7 +251,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       if (!path) return;
       await runWithTask(t("appDataBackup.localExportTask"), "backup", path, async () => {
         const meta = await buildMeta();
-        const payload = await collectPortableAppDataBackupPayload(meta);
+        const payload = await collectCurrentBackupPayload(meta);
         await writeAppDataBackupFile(path, JSON.stringify(payload), exportPassword, meta);
       });
       recordActivity("local_export", "success", path, t("appDataBackup.localExported"));
@@ -313,9 +319,12 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       await runWithTask(t("appDataBackup.restoreTask"), "restore", preview.target, async () => {
         const meta = await buildMeta();
-        const currentPayload = await collectPortableAppDataBackupPayload(meta);
+        const currentPayload = await collectCurrentBackupPayload(meta);
         await createAppDataRecoveryPoint(JSON.stringify(currentPayload), preview.password, meta);
         restoreAppDataBackupPayload(preview.payload);
+        if (preview.payload.data.snapshots.length > 0) {
+          await restoreAppDataSnapshotFiles(preview.payload.data.snapshots);
+        }
       });
       recordActivity("recovery_point", "success", preview.target, t("appDataBackup.recoveryPointCreated"));
       recordActivity(activityType, "success", preview.target, t("appDataBackup.restoreCompleted"));
@@ -377,7 +386,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       const remote = await runWithTask(t("appDataBackup.webdavUploadTask"), "backup", target.rootPath, async () => {
         const meta = await buildMeta();
-        const payload = await collectPortableAppDataBackupPayload(meta);
+        const payload = await collectCurrentBackupPayload(meta);
         return uploadAppDataWebDAVBackup(target, JSON.stringify(payload), webdavBackupPassword, meta);
       });
       recordActivity("webdav_upload", "success", remote.path, t("appDataBackup.webdavUploaded"));
