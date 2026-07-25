@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -291,7 +291,7 @@ describe("BackupView", () => {
 
     renderWithI18n(<BackupView />);
 
-    await screen.findByText("Snapshot WebDAV");
+    await screen.findByText("Config snapshot sync");
     fireEvent.change(screen.getByLabelText("WebDAV URL"), { target: { value: " https://dav.example.com " } });
     fireEvent.change(screen.getByLabelText("WebDAV username"), { target: { value: "ops" } });
     fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "dav-secret" } });
@@ -338,7 +338,7 @@ describe("BackupView", () => {
 
     renderWithI18n(<BackupView />);
 
-    await screen.findByText("Snapshot WebDAV");
+    await screen.findByText("Config snapshot sync");
     fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "replacement-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
 
@@ -400,7 +400,7 @@ describe("BackupView", () => {
 
     renderWithI18n(<BackupView />);
 
-    await screen.findByText("Snapshot WebDAV");
+    await screen.findByText("Config snapshot sync");
     fireEvent.change(screen.getByLabelText("WebDAV URL"), { target: { value: "https://dav.example.com" } });
     fireEvent.change(screen.getByLabelText("Snapshot package password"), { target: { value: "package-pass" } });
     fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
@@ -421,3 +421,4 @@ describe("BackupView", () => {
     expect(vi.mocked(listSnapshots).mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });
+

@@ -227,7 +227,7 @@
   },
   "appDataBackup": {
     "title": "App Data Backup",
-    "description": "Export and restore ConfScope local app data, including connections, SSH profiles, settings, history, apply plans, UI state, and language.",
+    "description": "Export and restore ConfScope local app data, including connections, SSH profiles, settings, history, apply plans, config snapshots, UI state, and language.",
     "operationFailed": "App data backup failed",
     "passwordRequired": "Backup password is required",
     "passwordMismatch": "Backup passwords do not match",
@@ -236,7 +236,7 @@
     "localSectionTitle": "Local backups",
     "localSectionHint": "Create or restore encrypted files stored on this computer.",
     "localBackup": "Local export",
-    "localBackupHint": "Create an encrypted .csbackup file for migration or rollback.",
+    "localBackupHint": "Create an encrypted .csbackup file containing app data and config snapshots for migration or rollback.",
     "localBackupPassword": "Local backup password",
     "confirmLocalBackupPassword": "Confirm local backup password",
     "exportEncryptedFile": "Export encrypted file",
@@ -255,7 +255,7 @@
     "cloudSectionTitle": "Cloud backups",
     "cloudSectionHint": "Use WebDAV for portable encrypted backup packages.",
     "webdavBackup": "WebDAV backup",
-    "webdavHint": "Use one default WebDAV destination for encrypted app data backups.",
+    "webdavHint": "Use one default WebDAV destination for encrypted app data backups, including config snapshots.",
     "webdavUrl": "WebDAV URL",
     "webdavUsername": "WebDAV username",
     "webdavPassword": "WebDAV password",
@@ -302,7 +302,8 @@
     "activityLocalRestore": "Local restore",
     "activityWebdavUpload": "WebDAV upload",
     "activityWebdavRestore": "WebDAV restore",
-    "activityRecoveryPoint": "Recovery point"
+    "activityRecoveryPoint": "Recovery point",
+    "summarySnapshots": "Snapshot files: {count}"
   },
   "ssh": {
     "pageSubtitle": "Manage reusable SSH jump-host profiles and references in one place. Connection Manager only selects or references these profiles.",
@@ -616,7 +617,10 @@
     "snapshotNoConfigs": "No config content can be saved from the current list",
     "snapshotPartialFailed": "{count} configs failed to save",
     "groupFilter": "Group",
-    "allGroups": "All groups"
+    "allGroups": "All groups",
+    "exportSourceFilesToDirectory": "Export source files to folder",
+    "exportSourceFilesTaskName": "Export source folder: {name} / {namespace}",
+    "exportedSourceFiles": "Source files exported to: {path}"
   },
   "diff": {
     "title": "Smart Config Compare",
@@ -892,8 +896,8 @@
     "sourceConnectionMissing": "The source connection for this snapshot no longer exists. Restore or recreate it first.",
     "snapshotPathMissing": "Snapshot local path is missing, so it cannot be used as a local compare source.",
     "startApply": "Generate Apply Plan",
-    "webdavTitle": "Snapshot WebDAV",
-    "webdavHint": "Upload encrypted config snapshot packages and import them back as local snapshots.",
+    "webdavTitle": "Config snapshot sync",
+    "webdavHint": "Upload/import one encrypted config snapshot package (.cssnapshot). For full app-data migration, use App Data Backup.",
     "webdavUrl": "WebDAV URL",
     "webdavUsername": "WebDAV username",
     "webdavPassword": "WebDAV password",

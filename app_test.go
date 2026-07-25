@@ -410,6 +410,70 @@ func TestAppDataBackupLocalBindingsEncryptAndReadBack(t *testing.T) {
 	if decrypted.PlaintextJSON != plaintext {
 		t.Fatalf("PlaintextJSON = %s, want %s", decrypted.PlaintextJSON, plaintext)
 	}
+
+	if _, err := app.CreateAppDataRecoveryPoint(plaintext, "backup-password", meta); err != nil {
+		t.Fatalf("CreateAppDataRecoveryPoint returned error: %v", err)
+	}
+	recoveryDir, err := appDataRecoveryPointStorageDir()
+	if err != nil {
+		t.Fatalf("appDataRecoveryPointStorageDir returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(recoveryDir, appbackup.DefaultBackupFileName(meta))); err != nil {
+		t.Fatalf("recovery point should be written under portable data dir: %v", err)
+	}
+}
+
+func TestAppDataSnapshotFilesBindingsListAndRestore(t *testing.T) {
+	app := NewApp()
+	created, err := app.CreateSnapshot(provider.SnapshotSource{
+		Provider:       provider.ProviderNacos,
+		ConnectionID:   "conn-backup",
+		ConnectionName: "backup-nacos",
+		Namespace:      "public",
+		NamespaceID:    "public",
+	}, []provider.ConfigSnapshot{
+		{DataID: "app.yaml", Group: "DEFAULT_GROUP", Content: "name: demo\n", ConfigType: "yaml", ContentType: "yaml"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSnapshot returned error: %v", err)
+	}
+
+	files, err := app.ListAppDataSnapshotFiles()
+	if err != nil {
+		t.Fatalf("ListAppDataSnapshotFiles returned error: %v", err)
+	}
+	foundMetadata := false
+	for _, file := range files {
+		if file.Path == filepath.ToSlash(filepath.Join(created.ID, "metadata.json")) && file.ContentBase64 != "" {
+			foundMetadata = true
+			break
+		}
+	}
+	if !foundMetadata {
+		t.Fatalf("snapshot metadata for %s not found in backup files: %+v", created.ID, files)
+	}
+
+	if err := app.RestoreAppDataSnapshotFiles([]AppDataSnapshotFile{{
+		Path:          filepath.ToSlash(filepath.Join("restore_test", "metadata.json")),
+		ContentBase64: "eyJpZCI6InJlc3RvcmVfdGVzdCJ9",
+		Mode:          0o644,
+	}}); err != nil {
+		t.Fatalf("RestoreAppDataSnapshotFiles returned error: %v", err)
+	}
+	snapshotDir, err := snapshotStorageDir()
+	if err != nil {
+		t.Fatalf("snapshotStorageDir returned error: %v", err)
+	}
+	restored, err := os.ReadFile(filepath.Join(snapshotDir, "restore_test", "metadata.json"))
+	if err != nil {
+		t.Fatalf("ReadFile restored snapshot file: %v", err)
+	}
+	if string(restored) != `{"id":"restore_test"}` {
+		t.Fatalf("restored snapshot file = %q", string(restored))
+	}
+	if err := app.RestoreAppDataSnapshotFiles([]AppDataSnapshotFile{{Path: "../outside.json", ContentBase64: "e30="}}); err == nil {
+		t.Fatal("RestoreAppDataSnapshotFiles returned nil error for unsafe path")
+	}
 }
 
 func TestRunCredentialStorePoCRejectsInvalidRunID(t *testing.T) {

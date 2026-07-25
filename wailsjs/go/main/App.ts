@@ -11,6 +11,8 @@ type GoApp = {
   DeleteSecureSecret(ref: SecureSecretRef): Promise<void>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
+  SelectConfigSourceExportDirectory(): Promise<string>;
+  ExportConfigSourceFiles(targetDir: string, source: any, configs: any[]): Promise<any>;
   ConfigCenterListNamespaces(profile: any): Promise<any>;
   ConfigCenterListConfigs(profile: any, request: any): Promise<any>;
   ConfigCenterGetConfig(profile: any, ref: any): Promise<any>;
@@ -113,6 +115,8 @@ type GoApp = {
   WriteAppDataBackupFile(path: string, plaintextJson: string, password: string, meta: any): Promise<any>;
   ReadAppDataBackupFile(path: string, password: string): Promise<any>;
   CreateAppDataRecoveryPoint(plaintextJson: string, password: string, meta: any): Promise<any>;
+  ListAppDataSnapshotFiles(): Promise<any[]>;
+  RestoreAppDataSnapshotFiles(files: any[]): Promise<void>;
   TestAppDataWebDAV(target: any): Promise<void>;
   ListAppDataWebDAVBackups(target: any): Promise<any[]>;
   UploadAppDataWebDAVBackup(target: any, plaintextJson: string, password: string, meta: any): Promise<any>;
@@ -179,6 +183,11 @@ export const DeleteSecureSecret = (ref: SecureSecretRef) => app().DeleteSecureSe
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 
 export const ValidateLocalSnapshotDirectory = (path: string) => app().ValidateLocalSnapshotDirectory(path);
+
+export const SelectConfigSourceExportDirectory = () => app().SelectConfigSourceExportDirectory();
+
+export const ExportConfigSourceFiles = (targetDir: string, source: any, configs: any[]) =>
+  app().ExportConfigSourceFiles(targetDir, source, configs);
 
 export const ConfigCenterListNamespaces = (profile: any) => app().ConfigCenterListNamespaces(profile);
 
@@ -322,6 +331,10 @@ export const ReadAppDataBackupFile = (path: string, password: string) => app().R
 
 export const CreateAppDataRecoveryPoint = (plaintextJson: string, password: string, meta: any) =>
   app().CreateAppDataRecoveryPoint(plaintextJson, password, meta);
+
+export const ListAppDataSnapshotFiles = () => app().ListAppDataSnapshotFiles();
+
+export const RestoreAppDataSnapshotFiles = (files: any[]) => app().RestoreAppDataSnapshotFiles(files);
 
 export const TestAppDataWebDAV = (target: any) => app().TestAppDataWebDAV(target);
 

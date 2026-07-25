@@ -12,6 +12,8 @@ const appDataBackupApi = vi.hoisted(() => ({
   writeAppDataBackupFile: vi.fn(),
   readAppDataBackupFile: vi.fn(),
   createAppDataRecoveryPoint: vi.fn(),
+  listAppDataSnapshotFiles: vi.fn(),
+  restoreAppDataSnapshotFiles: vi.fn(),
   testAppDataWebDAV: vi.fn(),
   listAppDataWebDAVBackups: vi.fn(),
   uploadAppDataWebDAVBackup: vi.fn(),
@@ -68,9 +70,11 @@ function backupPayload(connectionId = "restored-conn") {
       operationHistory: [],
       applyPlans: [],
       applyVerifications: [],
+      snapshots: [] as Array<{ path: string; contentBase64: string; mode?: number }>,
       ui: { mode: "settings" },
       locale: "en-US",
       appDataBackup: { webdav: { enabled: false, url: "", username: "", password: "", rootPath: "/confscope" }, activities: [] },
+      snapshotWebDAV: { webdav: { enabled: false, url: "", username: "", password: "", rootPath: "/confscope/snapshots" }, activities: [] },
     },
   };
 }
@@ -82,6 +86,8 @@ function renderPanel(props: Partial<Parameters<typeof AppDataBackupPanel>[0]> = 
   seedStorage?.();
   appApi.getAppInfo.mockResolvedValue({ name: "ConfScope", version: "1.4.2", updateSources: [] });
   appApi.getCurrentPlatform.mockResolvedValue("windows");
+  appDataBackupApi.listAppDataSnapshotFiles.mockResolvedValue([]);
+  appDataBackupApi.restoreAppDataSnapshotFiles.mockResolvedValue(undefined);
   return render(
     <I18nProvider>
       <AppDataBackupPanel {...props} />
@@ -136,9 +142,11 @@ describe("AppDataBackupPanel", () => {
     const [, plaintextJson, password, meta] = appDataBackupApi.writeAppDataBackupFile.mock.calls[0];
     const payload = JSON.parse(String(plaintextJson));
     expect(appDataBackupApi.selectAppDataBackupSaveFile).toHaveBeenCalledWith(expect.stringMatching(/^confscope-app-data-/));
+    expect(appDataBackupApi.listAppDataSnapshotFiles).toHaveBeenCalled();
     expect(password).toBe("backup-pass");
     expect(meta).toMatchObject({ appVersion: "1.4.2", sourcePlatform: "windows" });
     expect(payload.data.connections[0]).toMatchObject({ id: "current-conn", password: "local-secret" });
+    expect(payload.data.snapshots).toEqual([]);
     expect(localStorage.getItem("cs.appDataBackup")).not.toContain("backup-pass");
     expect(within(document.querySelector(".test-msg") as HTMLElement).getByText("Local backup exported")).toBeInTheDocument();
   });
@@ -157,6 +165,7 @@ describe("AppDataBackupPanel", () => {
 
   it("previews a local backup and restores only after creating a recovery point", async () => {
     const restored = backupPayload("restored-conn");
+    restored.data.snapshots = [{ path: "snap_1/metadata.json", contentBase64: "e30=" }];
     const onRestored = vi.fn();
     appDataBackupApi.selectAppDataBackupOpenFile.mockResolvedValue("C:\\tmp\\restore.csbackup");
     appDataBackupApi.readAppDataBackupFile.mockResolvedValue({
@@ -176,6 +185,7 @@ describe("AppDataBackupPanel", () => {
     await waitFor(() => expect(appDataBackupApi.createAppDataRecoveryPoint).toHaveBeenCalled());
     expect(JSON.parse(localStorage.getItem("cs.connections") || "[]")[0]).toMatchObject({ id: "restored-conn" });
     expect(appDataBackupApi.createAppDataRecoveryPoint.mock.calls[0][1]).toBe("restore-pass");
+    expect(appDataBackupApi.restoreAppDataSnapshotFiles).toHaveBeenCalledWith([{ path: "snap_1/metadata.json", contentBase64: "e30=" }]);
     expect(onRestored).toHaveBeenCalled();
   });
 

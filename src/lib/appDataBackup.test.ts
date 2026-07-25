@@ -162,7 +162,10 @@ describe("appDataBackup lib", () => {
 
     const payload = await collectPortableAppDataBackupPayload(
       { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" },
-      { resolveSecret: async (secret) => `resolved:${secret.ref}` }
+      {
+        resolveSecret: async (secret) => `resolved:${secret.ref}`,
+        listSnapshotFiles: async () => [{ path: "snap_1/metadata.json", contentBase64: "eyJpZCI6InNuYXBfMSJ9" }],
+      }
     );
 
     expect(payload.data.connections[0]).toEqual(
@@ -184,6 +187,7 @@ describe("appDataBackup lib", () => {
       })
     );
     expect(JSON.stringify(payload.data.snapshotWebDAV)).not.toContain("passwordSecretRef");
+    expect(payload.data.snapshots).toEqual([{ path: "snap_1/metadata.json", contentBase64: "eyJpZCI6InNuYXBfMSJ9" }]);
     expect(localStorage.getItem("cs.connections")).toContain("secretRefs");
   });
 
@@ -310,6 +314,7 @@ describe("appDataBackup lib", () => {
         operationHistory: 0,
         applyPlans: 0,
         applyVerifications: 0,
+        snapshots: 0,
       },
       hasSettings: true,
       hasUi: true,
@@ -329,6 +334,23 @@ describe("appDataBackup lib", () => {
         data: { connections: "not-array" },
       })
     ).toThrow("应用数据备份缺少有效分区: connections");
+
+    const legacyPayload = {
+      ...collectAppDataBackupPayload({
+        appVersion: "1.4.2",
+        sourcePlatform: "windows",
+        createdAt: "2026-07-07T08:00:00.000Z",
+      }),
+      data: {
+        ...collectAppDataBackupPayload({
+          appVersion: "1.4.2",
+          sourcePlatform: "windows",
+          createdAt: "2026-07-07T08:00:00.000Z",
+        }).data,
+      } as Record<string, unknown>,
+    };
+    delete legacyPayload.data.snapshots;
+    expect(validateAppDataBackupPayload(legacyPayload).data.snapshots).toEqual([]);
   });
 
   it("restores by fully replacing known localStorage keys", () => {

@@ -5,10 +5,13 @@ import {
   GetCurrentPlatform,
   GetDownloadProgress,
   InstallAndRestart,
+  ExportConfigSourceFiles,
+  SelectConfigSourceExportDirectory,
   SelectLocalSnapshotDirectory,
   ValidateLocalSnapshotDirectory,
 } from "../../wailsjs/go/main/App";
 import type { ProxySettings } from "../store/settings";
+import type { ConfigItem } from "./nacos";
 
 export interface UpdateSource {
   name: string;
@@ -64,6 +67,26 @@ export interface LocalSnapshotValidation {
   checkedAt: string;
 }
 
+export interface ConfigSourceExportSource {
+  provider?: string;
+  connectionId: string;
+  connectionName: string;
+  namespace: string;
+  namespaceId: string;
+}
+
+export interface ConfigSourceExportItem extends ConfigItem {
+  namespace?: string;
+  contentType?: string;
+  updateTime?: string;
+}
+
+export interface ConfigSourceExportResult {
+  path: string;
+  configCount: number;
+  manifest: string;
+}
+
 export function getAppInfo(): Promise<AppInfo> {
   return GetAppInfo();
 }
@@ -94,4 +117,16 @@ export function selectLocalSnapshotDirectory(): Promise<string> {
 
 export function validateLocalSnapshotDirectory(path: string): Promise<LocalSnapshotValidation> {
   return ValidateLocalSnapshotDirectory(path);
+}
+
+export function selectConfigSourceExportDirectory(): Promise<string> {
+  return SelectConfigSourceExportDirectory();
+}
+
+export function exportConfigSourceFiles(
+  targetDir: string,
+  source: ConfigSourceExportSource,
+  configs: ConfigSourceExportItem[]
+): Promise<ConfigSourceExportResult> {
+  return ExportConfigSourceFiles(targetDir, source, configs) as Promise<ConfigSourceExportResult>;
 }

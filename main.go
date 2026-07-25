@@ -21,6 +21,12 @@ func main() {
 	if err != nil {
 		println("Prepare portable data error:", err.Error())
 	}
+	if _, err := preparePortableSnapshotData(); err != nil {
+		println("Prepare portable snapshot data error:", err.Error())
+	}
+	if _, err := preparePortableAppDataRecoveryPointData(); err != nil {
+		println("Prepare portable app data recovery point data error:", err.Error())
+	}
 
 	err = wails.Run(&options.App{
 		Title:     "ConfScope - 配置中心管理工具",

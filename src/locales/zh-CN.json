@@ -227,7 +227,7 @@
   },
   "appDataBackup": {
     "title": "应用数据备份",
-    "description": "导出和恢复 ConfScope 本地应用数据，包括连接、SSH 档案、设置、历史、ApplyPlan、UI 状态和语言。",
+    "description": "导出和恢复 ConfScope 本地应用数据，包括连接、SSH 档案、设置、历史、ApplyPlan、配置快照、UI 状态和语言。",
     "operationFailed": "应用数据备份失败",
     "passwordRequired": "备份密码不能为空",
     "passwordMismatch": "两次备份密码不一致",
@@ -236,7 +236,7 @@
     "localSectionTitle": "本地备份",
     "localSectionHint": "创建或恢复保存在本机的加密备份文件。",
     "localBackup": "本地导出",
-    "localBackupHint": "创建加密 .csbackup 文件，用于迁移电脑或误操作回退。",
+    "localBackupHint": "创建加密 .csbackup 文件，包含应用数据和配置快照，用于迁移电脑或误操作回退。",
     "localBackupPassword": "本地备份密码",
     "confirmLocalBackupPassword": "确认本地备份密码",
     "exportEncryptedFile": "导出加密文件",
@@ -255,7 +255,7 @@
     "cloudSectionTitle": "云端备份",
     "cloudSectionHint": "使用 WebDAV 保存可迁移的加密备份包。",
     "webdavBackup": "WebDAV 备份",
-    "webdavHint": "使用单个默认 WebDAV 地址保存加密应用数据备份。",
+    "webdavHint": "使用单个默认 WebDAV 地址保存加密应用数据备份（包含配置快照）。",
     "webdavUrl": "WebDAV 地址",
     "webdavUsername": "WebDAV 用户名",
     "webdavPassword": "WebDAV 密码",
@@ -302,7 +302,8 @@
     "activityLocalRestore": "本地恢复",
     "activityWebdavUpload": "WebDAV 上传",
     "activityWebdavRestore": "WebDAV 恢复",
-    "activityRecoveryPoint": "恢复点"
+    "activityRecoveryPoint": "恢复点",
+    "summarySnapshots": "快照文件：{count}"
   },
   "ssh": {
     "pageSubtitle": "统一管理可复用的 SSH 跳板机档案和引用关系。连接管理页只选择或引用这里的配置。",
@@ -616,7 +617,10 @@
     "snapshotNoConfigs": "当前列表没有可保存的配置内容",
     "snapshotPartialFailed": "{count} 个配置保存失败",
     "groupFilter": "分组",
-    "allGroups": "全部分组"
+    "allGroups": "全部分组",
+    "exportSourceFilesToDirectory": "导出源文件到目录",
+    "exportSourceFilesTaskName": "导出源文件目录：{name} / {namespace}",
+    "exportedSourceFiles": "源文件已导出到：{path}"
   },
   "diff": {
     "title": "智能配置对比",
@@ -892,8 +896,8 @@
     "sourceConnectionMissing": "快照来源连接不存在，请先恢复或重新创建对应连接。",
     "snapshotPathMissing": "快照缺少本地路径，无法作为本地来源对比。",
     "startApply": "生成应用计划",
-    "webdavTitle": "快照 WebDAV",
-    "webdavHint": "上传加密配置快照包，也可以下载导入为本地快照。",
+    "webdavTitle": "配置快照同步",
+    "webdavHint": "上传/导入单个加密配置快照包（.cssnapshot）；完整应用数据迁移请使用“应用数据备份”。",
     "webdavUrl": "WebDAV 地址",
     "webdavUsername": "WebDAV 用户名",
     "webdavPassword": "WebDAV 密码",
