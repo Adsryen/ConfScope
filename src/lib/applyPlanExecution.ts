@@ -366,7 +366,7 @@ function emptyBackup(): ApplyBackupSummary {
 
 function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps): string {
   const taskType = operationTypeForApplyPlan(plan) === "restore" ? "restore" : "apply";
-  const task = deps.taskManager.createTask(`Apply plan ${plan.id}`, taskType, { scope: plan.target.label, cancellable: false });
+  const task = deps.taskManager.createTask(`Change plan ${plan.id}`, taskType, { scope: plan.target.label, cancellable: false });
   deps.taskManager.startTask(task.id);
   return task.id;
 }
@@ -402,7 +402,7 @@ export async function executeApplyPlan(
 ): Promise<ExecuteApplyPlanResult> {
   const workingPlan = selectPlanItems(plan, options.selectedItemIds);
   if (options.selectedItemIds && workingPlan.items.length === 0) {
-    return { ok: false, error: "No apply plan items selected." };
+    return { ok: false, error: "No change plan items selected." };
   }
 
   const taskId = createTask(workingPlan, deps);
@@ -415,7 +415,7 @@ export async function executeApplyPlan(
     const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
     const freshness = validateApplyPlanFreshness(workingPlan, currentSnapshots);
     if (!freshness.ok) {
-      const error = `Apply plan is stale: ${freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ")}`;
+    const error = `Change plan is stale: ${freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ")}`;
       return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), !options.dryRun);
     }
 

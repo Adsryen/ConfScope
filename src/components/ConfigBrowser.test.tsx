@@ -322,7 +322,7 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(apiMocks.getConfigDocument).toHaveBeenCalledTimes(1);
@@ -335,7 +335,7 @@ describe("ConfigBrowser", () => {
       afterContent: '{"server":{"port":9090}}',
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -350,7 +350,7 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "publish",
@@ -359,7 +359,7 @@ describe("ConfigBrowser", () => {
       beforeContent: '{"server":{"port":8080}}',
       afterContent: '{"server":{"port":9090}}',
       rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -389,7 +389,7 @@ describe("ConfigBrowser", () => {
     fireEvent.change(within(dialog).getByPlaceholderText("app.json"), { target: { value: "app.json" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    expect(await within(dialog).findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "delete",
@@ -398,7 +398,7 @@ describe("ConfigBrowser", () => {
       beforeContent: '{"server":{"port":8080}}',
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -591,11 +591,11 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to publish config",
-      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
       actionLabel: "Retry Publish",
     });
   });

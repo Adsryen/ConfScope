@@ -215,7 +215,7 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(onRolledBack).not.toHaveBeenCalled();
@@ -230,7 +230,7 @@ describe("HistoryView", () => {
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackOnlySuccess",
       resourceId: "2",
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -242,7 +242,7 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "rollback",
@@ -251,7 +251,7 @@ describe("HistoryView", () => {
       beforeContent: "server:\n  port: 1000",
       afterContent: "server:\n  port: 9090",
       rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -286,11 +286,11 @@ describe("HistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to rollback config",
-      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
       actionLabel: "Retry Rollback",
     });
   });

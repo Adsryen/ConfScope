@@ -184,7 +184,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       }
       const plan = getApplyPlan(record.planId);
       if (!plan) {
-        setRecordFollowupError(record, `Apply plan ${record.planId} is missing.`);
+        setRecordFollowupError(record, `Configuration change plan ${record.planId} is missing.`);
         return;
       }
       const sandboxConnectionId = record.targetConnectionId || plan.target.connectionId || record.connectionId;

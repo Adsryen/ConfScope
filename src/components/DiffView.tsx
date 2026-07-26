@@ -22,6 +22,10 @@ import DiffPanel from "./DiffPanel";
 import Select from "./Select";
 
 type DiffMode = "text" | "key" | "lines";
+type WorkflowStepId = "choose" | "compare" | "plan" | "execute" | "verify";
+type WorkflowStepStatus = "completed" | "current" | "upcoming";
+
+const WORKFLOW_STEP_IDS: WorkflowStepId[] = ["choose", "compare", "plan", "execute", "verify"];
 
 interface DiffJumpParams {
   leftConnId: string;
@@ -562,6 +566,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
+  const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const sourcesRef = useRef<HTMLDivElement>(null);
   const loadBothRef = useRef<(() => Promise<void>) | null>(null);
@@ -1077,6 +1082,30 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const diffFormat = mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
+  const currentWorkflowStep: WorkflowStepId =
+    loading || matchLoading || batchLoading
+      ? "compare"
+      : batchResults.length > 0 || Boolean(ready)
+        ? "plan"
+        : matchResults
+          ? "compare"
+          : "choose";
+  const currentWorkflowIndex = WORKFLOW_STEP_IDS.indexOf(currentWorkflowStep);
+  const workflowFocusStep = workflowDetailStep ?? currentWorkflowStep;
+  const workflowStepLabel = (step: WorkflowStepId) => {
+    const stepNumber = WORKFLOW_STEP_IDS.indexOf(step) + 1;
+    return t(`diff.workflowStep${stepNumber}`);
+  };
+  const workflowStepDetail = (step: WorkflowStepId) => {
+    const stepNumber = WORKFLOW_STEP_IDS.indexOf(step) + 1;
+    return t(`diff.workflowStep${stepNumber}Detail`);
+  };
+  const workflowStepStatus = (step: WorkflowStepId): WorkflowStepStatus => {
+    const index = WORKFLOW_STEP_IDS.indexOf(step);
+    if (index < currentWorkflowIndex) return "completed";
+    if (index === currentWorkflowIndex) return "current";
+    return "upcoming";
+  };
 
   const startSingleApply = () => {
     if (!ready || !onStartApply) return;
@@ -1163,6 +1192,37 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           </button>
         </div>
       </div>
+
+      <section className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
+        <div className="diff-workflow-head">
+          <div className="diff-workflow-title-wrap">
+            <span className="diff-workflow-title">{t("diff.workflowTitle")}</span>
+            <span className="diff-workflow-current">{t("diff.workflowCurrent", { step: workflowStepLabel(currentWorkflowStep) })}</span>
+          </div>
+          <span className="diff-workflow-safety">{t("diff.workflowSafety")}</span>
+        </div>
+        <ol className="diff-workflow-steps">
+          {WORKFLOW_STEP_IDS.map((step) => {
+            const status = workflowStepStatus(step);
+            const label = workflowStepLabel(step);
+            return (
+              <li className={`diff-workflow-step ${status}${workflowFocusStep === step ? " focused" : ""}`} key={step}>
+                <button type="button" onClick={() => setWorkflowDetailStep(step)}>
+                  <span className="diff-workflow-step-status">{t(`diff.workflowStatus.${status}`)}</span>
+                  <span className="diff-workflow-step-label">{label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="diff-workflow-detail">
+          <span className="diff-workflow-detail-title">
+            {t("diff.workflowDetailTitle", { step: workflowStepLabel(workflowFocusStep) })}
+          </span>
+          <span>{workflowStepDetail(workflowFocusStep)}</span>
+        </div>
+        <div className="diff-workflow-note">{t("diff.workflowSandbox")}</div>
+      </section>
 
       <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
         <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
@@ -1418,6 +1478,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           <div className="pad-msg big">
             {t("diff.selectHint")}
             <div className="diff-hint">{t("diff.supportHint")}</div>
+            <div className="diff-hint">{t("diff.nextStepHint")}</div>
           </div>
         ) : null}
       </div>

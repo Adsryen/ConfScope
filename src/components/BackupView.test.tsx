@@ -197,7 +197,7 @@ describe("BackupView", () => {
 
     const configList = await screen.findByText("Config list");
     const detail = configList.closest(".backup-detail") as HTMLElement;
-    fireEvent.click(within(detail).getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith({
       sourceType: "backup",

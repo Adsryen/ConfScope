@@ -355,7 +355,7 @@ describe("OperationHistoryView", () => {
 
     expect(screen.getByText("1 records")).toBeDefined();
     expect(screen.getByText("Not rollbackable")).toBeDefined();
-    expect(screen.getByText("Rollback requires an ApplyPlan dry-run and cannot publish previous content directly.")).toBeDefined();
+    expect(screen.getByText("Rollback requires a change-plan dry-run and cannot publish previous content directly.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Copy Record" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Rollback this operation" })).toBeNull();
   });
@@ -369,11 +369,11 @@ describe("OperationHistoryView", () => {
       </I18nProvider>
     );
 
-    expect((await screen.findAllByText("应用计划")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("配置变更计划")).length).toBeGreaterThan(0);
     expect(screen.getByText("app.yaml")).toBeDefined();
 
     const typeSelect = screen.getAllByRole("combobox")[1];
-    expect(within(typeSelect).getByRole("option", { name: "应用计划" })).toBeDefined();
+    expect(within(typeSelect).getByRole("option", { name: "配置变更计划" })).toBeDefined();
 
     fireEvent.change(typeSelect, { target: { value: "apply" } });
 
@@ -399,7 +399,7 @@ describe("OperationHistoryView", () => {
     expect(screen.getByText("总计 2 · 新增 1 · 覆盖 1 · 删除 0 · 跳过 0 · 阻塞 0")).toBeDefined();
     expect(screen.getByText("备份快照:")).toBeDefined();
     expect(screen.getByText("prod_before_apply (snap-before-1)")).toBeDefined();
-    expect(screen.getByText("应用方向:")).toBeDefined();
+    expect(screen.getByText("变更方向:")).toBeDefined();
     expect(screen.getByText("Dev -> Prod")).toBeDefined();
     expect(screen.queryByRole("button", { name: "回滚此操作" })).toBeNull();
   });
@@ -460,7 +460,7 @@ describe("OperationHistoryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Apply plan missing-plan is missing.")).toBeDefined();
+      expect(screen.getByText("Configuration change plan missing-plan is missing.")).toBeDefined();
     });
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeDefined();
     expect(onStartApply).not.toHaveBeenCalled();

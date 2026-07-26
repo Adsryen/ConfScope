@@ -280,6 +280,25 @@ describe("ApplyPlanView", () => {
     taskManagerMocks.getTaskManager.mockReturnValue(taskManagerMocks.manager);
   });
 
+  it("uses configuration change plan wording for primary actions", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+
+    expect(await screen.findByRole("heading", { name: "Configuration change plan" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Execute change" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
+  });
+
   it("generates and saves a dry-run plan, then displays plan summary counts", async () => {
     const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]);
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
@@ -348,7 +367,7 @@ describe("ApplyPlanView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("network EOF");
     expect(screen.getByRole("button", { name: "Copy error" })).toBeInTheDocument();
     expect(storeMocks.saveApplyPlan).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Execute change" })).not.toBeInTheDocument();
   });
 
   it("requires checkbox confirmation before executing a normal target", async () => {
@@ -365,7 +384,7 @@ describe("ApplyPlanView", () => {
 
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
-    const executeButton = await screen.findByRole("button", { name: "Execute apply" });
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
     expect(executeButton).toBeDisabled();
 
     fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
@@ -387,7 +406,7 @@ describe("ApplyPlanView", () => {
 
     renderView();
 
-    const executeButton = await screen.findByRole("button", { name: "Execute apply" });
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
     expect(screen.getByText(applyConfirmationText(plan))).toBeInTheDocument();
     expect(executeButton).toBeDisabled();
 
@@ -414,7 +433,7 @@ describe("ApplyPlanView", () => {
 
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
-    const executeButton = await screen.findByRole("button", { name: "Execute apply" });
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
     fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
     await waitFor(() => expect(executeButton).toBeEnabled());
     fireEvent.click(executeButton);
@@ -444,7 +463,7 @@ describe("ApplyPlanView", () => {
 
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
-    const executeButton = await screen.findByRole("button", { name: "Execute apply" });
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
     fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
     await waitFor(() => expect(executeButton).toBeEnabled());
     fireEvent.click(executeButton);
@@ -575,7 +594,7 @@ describe("ApplyPlanView", () => {
     renderView(entryPayload, [safeTargetConn]);
 
     fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
-    const executeButton = screen.getByRole("button", { name: "Execute apply" });
+    const executeButton = screen.getByRole("button", { name: "Execute change" });
     await waitFor(() => expect(executeButton).toBeEnabled());
     fireEvent.click(executeButton);
 
