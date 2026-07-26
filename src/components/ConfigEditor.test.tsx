@@ -106,7 +106,7 @@ describe("ConfigEditor", () => {
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("ConfigEditor", () => {
       afterContent: "server:\n  port: 8080",
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -128,7 +128,7 @@ describe("ConfigEditor", () => {
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
@@ -139,7 +139,7 @@ describe("ConfigEditor", () => {
       dataId: "app.yaml",
       afterContent: "server:\n  port: 8080",
       rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
     });
   });
 
@@ -150,11 +150,11 @@ describe("ConfigEditor", () => {
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute an ApplyPlan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to create config",
-      message: "Direct config writes are disabled. Generate and execute an ApplyPlan instead.",
+      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
       actionLabel: "Retry Publish",
     });
   });

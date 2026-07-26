@@ -75,7 +75,7 @@ vi.mock("../i18n", () => ({
         "audit.caseSensitive": "Case sensitive",
         "audit.addNormalizeRule": "Add Rule",
         "audit.jumpToDiff": "Jump to Diff",
-        "audit.startApply": "Generate Apply Plan",
+        "audit.startApply": "Generate Change Plan",
         "audit.setBaseline": "Set as baseline",
         "audit.close": "Close",
         "audit.detailMissing": "(Missing)",
@@ -247,7 +247,7 @@ describe("AuditView", () => {
     fireEvent.click(screen.getByText("Run Audit"));
 
     fireEvent.click(await screen.findByText("server.port"));
-    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledTimes(1);
     expect(onStartApply).toHaveBeenCalledWith({
@@ -325,7 +325,7 @@ describe("AuditView", () => {
     fireEvent.click(screen.getByText("Run Audit"));
 
     fireEvent.click(await screen.findByText("server.port"));
-    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -376,7 +376,7 @@ describe("AuditView", () => {
     fireEvent.click(screen.getByText("Run Audit"));
 
     fireEvent.click(await screen.findByText("server.port"));
-    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledTimes(1);
     const payload = onStartApply.mock.calls[0][0];
@@ -425,7 +425,7 @@ describe("AuditView", () => {
     fireEvent.click(screen.getByText("Run Audit"));
 
     fireEvent.click(await screen.findByText("server.port"));
-    expect(screen.queryByRole("button", { name: "Generate Apply Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Change Plan" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Jump to Diff" }));
     expect(onNavigate).toHaveBeenCalledWith({

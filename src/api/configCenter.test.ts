@@ -104,10 +104,10 @@ describe("config center api", () => {
     localStorage.setItem("locale", "en-US");
 
     await expect(publishConfig(profile, { ref, content: "a: 1", format: "yaml" })).rejects.toThrow(
-      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+      "Direct config writes are disabled. Generate and execute a configuration change plan instead."
     );
     await expect(deleteConfig(profile, ref)).rejects.toThrow(
-      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+      "Direct config writes are disabled. Generate and execute a configuration change plan instead."
     );
 
     expect(goApp.ConfigCenterPublishConfig).not.toHaveBeenCalled();

@@ -761,10 +761,10 @@ describe("nacos api compatibility bridge", () => {
     const conn = makeConnection("conn-direct-write");
 
     await expect(publishConfig(conn, "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).rejects.toThrow(
-      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+      "Direct config writes are disabled. Generate and execute a configuration change plan instead."
     );
     await expect(deleteConfig(conn, "public", "app.yaml", "DEFAULT_GROUP")).rejects.toThrow(
-      "Direct config writes are disabled. Generate and execute an ApplyPlan instead."
+      "Direct config writes are disabled. Generate and execute a configuration change plan instead."
     );
 
     expect(goApp.NacosPublishConfig).not.toHaveBeenCalled();

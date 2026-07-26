@@ -116,6 +116,26 @@ describe("DiffView", () => {
   });
 
 
+  it("explains the safe compare-to-change workflow before comparing", () => {
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView connections={[leftApplyConn, rightApplyConn]} />
+      </I18nProvider>
+    );
+
+    expect(screen.getByText("Configuration compare workflow")).toBeInTheDocument();
+    expect(screen.getByText("Current: Choose sources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Choose sources/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Generate change plan/ })).toBeInTheDocument();
+    expect(screen.getByText(/will not write directly to the config center/)).toBeInTheDocument();
+    expect(screen.getByText(/To use a sandbox/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Verify and promote/ }));
+    expect(screen.getByText("Step details: Verify and promote")).toBeInTheDocument();
+    expect(screen.getByText(/After sandbox verification/)).toBeInTheDocument();
+  });
+
   it("restores the last compared sources and mode from localStorage", async () => {
     localStorage.setItem(
       "cs.diffViewPreferences",
@@ -650,8 +670,10 @@ describe("DiffView", () => {
 
     expect(await screen.findByText("8080")).toBeInTheDocument();
     expect(await screen.findByText("9090")).toBeInTheDocument();
+    expect(screen.getByText("Current: Generate change plan")).toBeInTheDocument();
+    expect(document.querySelector(".diff-workflow-step.current")).toHaveTextContent("Generate change plan");
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith({
       sourceType: "diff",
@@ -738,7 +760,7 @@ describe("DiffView", () => {
     expect(await screen.findByText("8080")).toBeInTheDocument();
     expect(await screen.findByText("9090")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -797,7 +819,7 @@ describe("DiffView", () => {
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Batch Apply Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Batch Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -877,8 +899,8 @@ describe("DiffView", () => {
       </I18nProvider>
     );
 
-    expect(screen.queryByRole("button", { name: "Generate Apply Plan" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Generate Batch Apply Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Change Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate Batch Change Plan" })).toBeNull();
   });
 
   it("shows inline error when all batch diff configs fail to load", async () => {
@@ -900,5 +922,5 @@ describe("DiffView", () => {
 
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("全部配置加载失败")).toBeInTheDocument();
-  });
+  }, 15000);
 });

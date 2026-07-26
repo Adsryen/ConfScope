@@ -189,7 +189,7 @@ export async function prepareApplyExecutionSafety(
   const blockedItems = plan.items.filter((item) => item.blocked);
   const emptyBackup: ApplyBackupSummary = { backedUpCount: 0, missingBeforeCount: 0 };
   if (blockedItems.length > 0) {
-    const error = `Apply plan has ${blockedItems.length} blocked item(s).`;
+    const error = `Change plan has ${blockedItems.length} blocked item(s).`;
     return {
       ok: false,
       reason: "plan_blocked",

@@ -94,7 +94,7 @@ function findConnection(connections: Connection[], connectionId: string): Connec
 function planFromRecord(record: OperationRecord, deps: ApplyFollowupDeps): ApplyPlan | string {
   if (!record.planId) return `Apply record ${record.id} is missing planId.`;
   const plan = deps.getApplyPlan(record.planId);
-  return plan ?? `Apply plan ${record.planId} is missing.`;
+  return plan ?? `Configuration change plan ${record.planId} is missing.`;
 }
 
 export function canBuildRollbackEntry(record: OperationRecord): boolean {

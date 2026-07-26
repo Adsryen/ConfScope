@@ -187,7 +187,7 @@ function applyPlan(
 function taskManager(): TaskManager {
   const task: Task = {
     id: "task-apply-1",
-    name: "Apply plan",
+    name: "Change plan",
     type: "apply",
     scope: "Prod / public",
     cancellable: false,
@@ -344,7 +344,7 @@ describe("executeApplyPlan", () => {
     const result = await executeApplyPlan(plan, runDeps);
 
     expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
-    expect(runDeps.taskManager.createTask).toHaveBeenCalledWith("Apply plan plan-1", "restore", {
+    expect(runDeps.taskManager.createTask).toHaveBeenCalledWith("Change plan plan-1", "restore", {
       scope: "Prod / public",
       cancellable: false,
     });
