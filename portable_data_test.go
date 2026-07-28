@@ -182,3 +182,36 @@ func TestPreparePortableAppDataRecoveryPointDataCopiesLegacyWhenTargetIsEmpty(t 
 		t.Fatalf("legacy recovery point should remain for rollback: %v", err)
 	}
 }
+
+func TestPreparePortableDataUsesConfiguredRoot(t *testing.T) {
+	root := t.TempDir()
+	configuredRoot := filepath.Join(root, "shared", "ConfScopeData")
+	t.Setenv(portableDataDirEnvName, configuredRoot)
+	exePath := filepath.Join(root, "build", "bin", "ConfScope.exe")
+	appData := filepath.Join(root, "AppData", "Roaming")
+	homeDir := filepath.Join(root, "Users", "tester")
+
+	webviewDir, err := preparePortableWebviewDataFor(exePath, appData)
+	if err != nil {
+		t.Fatalf("preparePortableWebviewDataFor returned error: %v", err)
+	}
+	if webviewDir != filepath.Join(configuredRoot, portableWebviewDirName) {
+		t.Fatalf("webviewDir = %q, want configured data root", webviewDir)
+	}
+
+	snapshotDir, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	if err != nil {
+		t.Fatalf("preparePortableSnapshotDataFor returned error: %v", err)
+	}
+	if snapshotDir != filepath.Join(configuredRoot, portableSnapshotDirName) {
+		t.Fatalf("snapshotDir = %q, want configured data root", snapshotDir)
+	}
+
+	recoveryDir, err := preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+	if err != nil {
+		t.Fatalf("preparePortableAppDataRecoveryPointDataFor returned error: %v", err)
+	}
+	if recoveryDir != filepath.Join(configuredRoot, portableAppDataRecoveryPointDirName) {
+		t.Fatalf("recoveryDir = %q, want configured data root", recoveryDir)
+	}
+}

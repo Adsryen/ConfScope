@@ -1047,6 +1047,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
+  const showingBatchDiff = batchResults.length > 0;
   const batchAllOnlyChanges = batchResults.length > 0 && batchResults.every((item) => batchOnlyChanges.has(item.dataId));
   const toggleBatchOnlyChanges = (checked: boolean) => {
     setBatchOnlyChanges(checked ? new Set(batchResults.map((item) => item.dataId)) : new Set());
@@ -1074,6 +1075,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     }
     if (matchResults) void loadBatch();
     else void loadBoth();
+  };
+
+  const sameNameMatchIds = matchResults?.filter((item) => item.presence === "both").map((item) => item.dataId) ?? [];
+  const hasFilePresenceDiff = matchResults?.some((item) => item.presence !== "both") ?? false;
+  const selectSameNameMatches = () => {
+    setSelectedIds(new Set(sameNameMatchIds));
   };
 
   const ready = leftLoaded && rightLoaded;
@@ -1187,9 +1194,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             <span>{t("connection.project")}</span>
             <Select className="wide" value={activeProject} options={projectOptions} onChange={changeProject} />
           </label>
-          <button type="button" className="btn btn-ghost" onClick={() => setSourcesCollapsed((value) => !value)}>
-            {sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
-          </button>
         </div>
       </div>
 
@@ -1271,52 +1275,99 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             sortNamespaces={settings.compare.sortNamespaces}
           />
         </div>
+        <button
+          type="button"
+          className="diff-source-toggle-edge"
+          onClick={() => setSourcesCollapsed((value) => !value)}
+          aria-label={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+          title={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+        >
+          <span aria-hidden="true">{sourcesCollapsed ? "\u2304" : "\u2303"}</span>
+        </button>
       </div>
 
-      <div className="diff-loadbar">
-        <span className="fmt-label">{t("diff.compareMode")}</span>
-        <Select
-          value={mode}
-          options={[
-            { value: "text", label: t("diff.modeText") },
-            { value: "lines", label: t("diff.modeLines") },
-            { value: "key", label: t("diff.modeKey") },
-          ]}
-          onChange={(value) => setMode(value as DiffMode)}
-        />
-        {matchResults ? (
-          <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
-            {batchLoading ? t("diff.comparing") : t("diff.compareSelected", { count: selectedIds.size })}
-          </button>
-        ) : (
-          <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
-            {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
-          </button>
-        )}
-        {!matchResults && ready && onStartApply && (
-          <button className="btn btn-ghost" onClick={startSingleApply}>
-            {t("diff.startApply")}
-          </button>
-        )}
-        {notice && (
-          <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>
-            <span>{notice}</span>
-            {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
-          </div>
-        )}
-        {error && (
-          <div className="diff-loaderr">
-            <span>{error}</span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={retryCurrentCompare}
-              disabled={loading || matchLoading || batchLoading}
-            >
-              {t("diff.retryCompare")}
+      <div className={`diff-loadbar${showingBatchDiff ? " result-actions" : ""}`}>
+        {showingBatchDiff ? (
+          <>
+            <button type="button" className="btn btn-ghost btn-sm result-action result-action-back" onClick={returnToMatchList} disabled={batchLoading}>
+              {t("diff.backToMatchList")}
             </button>
-            <CopyButton text={error} label={t("diff.copyError")} />
-          </div>
+            <span className="batch-diff-count result-action-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
+            <span className="fmt-spacer" />
+            <label className="diff-toggle result-action-filter">
+              <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
+              {t("diff.batchOnlyChanges")}
+            </label>
+            <button
+              className="btn btn-ghost btn-sm result-action result-action-export"
+              title={t("diff.exportDiff")}
+              onClick={() => {
+                const diffs: DiffItem[] = batchResults.map((item) => ({
+                  dataId: item.dataId,
+                  group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
+                  namespace: left.tenant || "",
+                  leftValue: item.leftText,
+                  rightValue: item.rightText,
+                  diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
+                }));
+                exportDiff(diffs, "json");
+              }}
+            >
+              {t("diff.exportDiff")}
+            </button>
+            {onStartApply && (
+              <button className="btn btn-primary btn-sm result-action result-action-plan" onClick={startBatchApply}>
+                {t("diff.startBatchApply")}
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="fmt-label">{t("diff.compareMode")}</span>
+            <Select
+              value={mode}
+              options={[
+                { value: "text", label: t("diff.modeText") },
+                { value: "lines", label: t("diff.modeLines") },
+                { value: "key", label: t("diff.modeKey") },
+              ]}
+              onChange={(value) => setMode(value as DiffMode)}
+            />
+            {matchResults ? (
+              <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
+                {batchLoading ? t("diff.comparing") : t("diff.compareSelected", { count: selectedIds.size })}
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
+                {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
+              </button>
+            )}
+            {!matchResults && ready && onStartApply && (
+              <button className="btn btn-ghost" onClick={startSingleApply}>
+                {t("diff.startApply")}
+              </button>
+            )}
+            {notice && (
+              <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>
+                <span>{notice}</span>
+                {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
+              </div>
+            )}
+            {error && (
+              <div className="diff-loaderr">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={retryCurrentCompare}
+                  disabled={loading || matchLoading || batchLoading}
+                >
+                  {t("diff.retryCompare")}
+                </button>
+                <CopyButton text={error} label={t("diff.copyError")} />
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -1329,6 +1380,11 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 {t("diff.selectAll")}
               </label>
               <span className="match-count">{t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}</span>
+              {hasFilePresenceDiff && (
+                <button type="button" className="btn btn-ghost btn-sm match-same-only" onClick={selectSameNameMatches}>
+                  {t("diff.selectSameNameOnly")}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1342,28 +1398,32 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             <div className="match-side-by-side">
               <div className="match-side-list left">
                 <div className="match-side-title">{t("diff.sourceA")}</div>
-                {matchResults.map((item) => (
-                  <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
-                    <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
-                    <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
-                      {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
-                    </span>
-                    <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                    <span className="match-group">{item.leftGroup}</span>
-                  </label>
-                ))}
+                <div className="match-side-scroll">
+                  {matchResults.map((item) => (
+                    <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
+                      <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
+                      <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
+                        {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
+                      </span>
+                      <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                      <span className="match-group">{item.leftGroup}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="match-side-list right">
                 <div className="match-side-title">{t("diff.sourceB")}</div>
-                {matchResults.map((item) => (
-                  <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
-                    <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
-                      {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
-                    </span>
-                    <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                    <span className="match-group">{item.rightGroup}</span>
-                  </div>
-                ))}
+                <div className="match-side-scroll">
+                  {matchResults.map((item) => (
+                    <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
+                      <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
+                        {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
+                      </span>
+                      <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                      <span className="match-group">{item.rightGroup}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -1410,39 +1470,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 </div>
               </div>
             )}
-            <div className="batch-diff-toolbar">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={returnToMatchList} disabled={batchLoading}>
-                {t("diff.backToMatchList")}
-              </button>
-              <span className="batch-diff-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
-              <span className="fmt-spacer" />
-              <label className="diff-toggle">
-                <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
-                {t("diff.batchOnlyChanges")}
-              </label>
-              <button
-                className="btn btn-ghost btn-sm"
-                title={t("diff.exportDiff")}
-                onClick={() => {
-                  const diffs: DiffItem[] = batchResults.map((item) => ({
-                    dataId: item.dataId,
-                    group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
-                    namespace: left.tenant || "",
-                    leftValue: item.leftText,
-                    rightValue: item.rightText,
-                    diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
-                  }));
-                  exportDiff(diffs, "json");
-                }}
-              >
-                {t("diff.exportDiff")}
-              </button>
-              {onStartApply && (
-                <button className="btn btn-ghost btn-sm" onClick={startBatchApply}>
-                  {t("diff.startBatchApply")}
-                </button>
-              )}
-            </div>
             {batchResults.map((item) => (
               <div className="batch-diff-item" key={item.dataId}>
                 <div className="batch-diff-header" onClick={() => toggleCollapse(item.dataId)}>

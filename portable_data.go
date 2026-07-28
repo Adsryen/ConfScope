@@ -5,12 +5,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const portableDataDirName = "ConfScopeData"
 const portableWebviewDirName = "webview"
 const portableSnapshotDirName = "snapshots"
 const portableAppDataRecoveryPointDirName = "app-data-recovery-points"
+const portableDataDirEnvName = "CONFSCOPE_DATA_DIR"
 
 func preparePortableWebviewData() (string, error) {
 	exePath, err := os.Executable()
@@ -95,6 +97,9 @@ func preparePortableDirectoryFromLegacy(target string, source string, label stri
 }
 
 func portableDataRootFor(exePath string) string {
+	if configuredRoot := strings.TrimSpace(os.Getenv(portableDataDirEnvName)); configuredRoot != "" {
+		return filepath.Clean(configuredRoot)
+	}
 	return filepath.Join(filepath.Dir(exePath), portableDataDirName)
 }
 

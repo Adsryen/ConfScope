@@ -671,6 +671,7 @@
     "loadAndCompare": "Load & Compare",
     "selectAll": "Select All",
     "matchCount": "Found {total} dataIds, {selected} selected",
+    "selectSameNameOnly": "Only compare files present on both sides",
     "sourceConfig": "Compare Sources",
     "collapseSources": "Collapse Sources",
     "expandSources": "Expand Sources",
