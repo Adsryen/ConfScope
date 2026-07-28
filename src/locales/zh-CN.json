@@ -671,6 +671,7 @@
     "loadAndCompare": "加载并对比",
     "selectAll": "全选",
     "matchCount": "找到 {total} 个 dataId，已选 {selected} 个",
+    "selectSameNameOnly": "仅对比同名存在的文件",
     "sourceConfig": "对比来源",
     "collapseSources": "收起来源",
     "expandSources": "展开来源",

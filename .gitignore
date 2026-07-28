@@ -73,3 +73,12 @@ AGENTS.MD
 /local-backups/
 /ConfScopeData/
 
+# 本地数据、备份与导出压缩包
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+*.zip
+*.7z
+*.rar

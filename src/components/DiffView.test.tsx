@@ -342,12 +342,17 @@ describe("DiffView", () => {
     expect(await screen.findByText("找到 2 个 dataId，已选 2 个")).toBeInTheDocument();
     expect(document.querySelector(".diff-sources")).toHaveAttribute("aria-hidden", "true");
     expect(document.querySelector(".diff-sources")).not.toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: "展开来源" })).toBeInTheDocument();
+    const expandToggle = document.querySelector(".diff-source-panel .diff-source-toggle-edge");
+    expect(expandToggle).toBeInTheDocument();
+    expect(expandToggle).toHaveAccessibleName("展开来源");
+    expect(expandToggle).not.toHaveTextContent("展开来源");
 
     fireEvent.click(screen.getByRole("button", { name: "展开来源" }));
 
     expect(document.querySelector(".diff-sources")).toHaveAttribute("aria-hidden", "false");
-    expect(screen.getByRole("button", { name: "收起来源" })).toBeInTheDocument();
+    const collapseToggle = document.querySelector(".diff-source-panel .diff-source-toggle-edge");
+    expect(collapseToggle).toHaveAccessibleName("收起来源");
+    expect(collapseToggle).not.toHaveTextContent("收起来源");
   });
 
 
@@ -455,10 +460,16 @@ describe("DiffView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
 
     expect(await screen.findByText("找到 3 个 dataId，已选 3 个")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "仅对比同名存在的文件" }));
+    expect(screen.getByText("找到 3 个 dataId，已选 1 个")).toBeInTheDocument();
     const leftList = document.querySelector(".match-side-list.left");
     const rightList = document.querySelector(".match-side-list.right");
+    const leftScroll = leftList?.querySelector(".match-side-scroll");
+    const rightScroll = rightList?.querySelector(".match-side-scroll");
     expect(leftList).toBeInTheDocument();
     expect(rightList).toBeInTheDocument();
+    expect(leftScroll).toBeInTheDocument();
+    expect(rightScroll).toBeInTheDocument();
     expect(within(leftList as HTMLElement).getByText("same.yaml")).toBeInTheDocument();
     expect(within(leftList as HTMLElement).getByText("left-only.yaml")).toBeInTheDocument();
     expect(within(leftList as HTMLElement).getByText("缺失配置")).toBeInTheDocument();
@@ -489,9 +500,21 @@ describe("DiffView", () => {
     fireEvent.click(screen.getByRole("button", { name: "对比选中（1）" }));
 
     expect(await screen.findByText("已生成 1 个文件对比")).toBeInTheDocument();
+    const resultActions = document.querySelector(".diff-loadbar");
+    expect(resultActions).toBeInTheDocument();
+    expect(resultActions).toHaveTextContent("已生成 1 个文件对比");
+    expect(resultActions).toHaveTextContent("返回文件选择");
+    expect(resultActions).not.toHaveTextContent("对比模式");
+    expect(resultActions?.querySelector(".result-action-back")).toBeInTheDocument();
+    expect(resultActions?.querySelector(".result-action-filter")).toBeInTheDocument();
+    expect(resultActions?.querySelector(".result-action-export")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "对比选中（1）" })).not.toBeInTheDocument();
+    expect(document.querySelector(".batch-diff-toolbar")).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "返回文件选择" }));
 
     expect(screen.getByText("找到 2 个 dataId，已选 1 个")).toBeInTheDocument();
+    expect(screen.getByText("对比模式")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "对比选中（1）" })).toBeInTheDocument();
     expect(screen.queryByText("已生成 1 个文件对比")).not.toBeInTheDocument();
   });
