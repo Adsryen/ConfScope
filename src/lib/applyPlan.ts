@@ -95,6 +95,8 @@ export interface BuildApplyPlanItemInput {
   targetRef?: ApplyPlanRef;
   sourceValue: ApplyPlanValueInput;
   targetValue: ApplyPlanValueInput;
+  sourceFingerprint?: string;
+  targetFingerprint?: string;
   intent?: ApplyPlanIntent;
 }
 
@@ -270,8 +272,8 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
       action: classified.action,
       blocked: classified.blocked,
       ...(classified.blockReason ? { blockReason: classified.blockReason } : {}),
-      sourceFingerprint: sourceValue.fingerprint,
-      targetFingerprint: targetValue.fingerprint,
+      sourceFingerprint: item.sourceFingerprint ?? sourceValue.fingerprint,
+      targetFingerprint: item.targetFingerprint ?? targetValue.fingerprint,
     };
   });
 
@@ -561,10 +563,7 @@ function appendFreshnessIssue(
   });
 }
 
-export function validateApplyPlanFreshness(
-  plan: ApplyPlan,
-  snapshots: ApplyPlanFreshnessSnapshot[]
-): ApplyPlanFreshnessResult {
+export function validateApplyPlanFreshness(plan: ApplyPlan, snapshots: ApplyPlanFreshnessSnapshot[]): ApplyPlanFreshnessResult {
   const current = new Map<string, string>();
   for (const snapshot of snapshots) {
     current.set(freshnessKey(snapshot.itemId, snapshot.side), snapshot.fingerprint);
@@ -572,20 +571,8 @@ export function validateApplyPlanFreshness(
 
   const staleItems: ApplyPlanFreshnessIssue[] = [];
   for (const item of plan.items) {
-    appendFreshnessIssue(
-      staleItems,
-      item.id,
-      "source",
-      item.sourceFingerprint,
-      current.get(freshnessKey(item.id, "source"))
-    );
-    appendFreshnessIssue(
-      staleItems,
-      item.id,
-      "target",
-      item.targetFingerprint,
-      current.get(freshnessKey(item.id, "target"))
-    );
+    appendFreshnessIssue(staleItems, item.id, "source", item.sourceFingerprint, current.get(freshnessKey(item.id, "source")));
+    appendFreshnessIssue(staleItems, item.id, "target", item.targetFingerprint, current.get(freshnessKey(item.id, "target")));
   }
 
   return { ok: staleItems.length === 0, staleItems };

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
+import { diffLines } from "../lib/diff";
+import { normalizeConfig } from "../lib/normalize";
 import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
@@ -15,10 +17,16 @@ import { loadSettings } from "../store/settings";
 import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
 import { useTranslation } from "../i18n";
 import { exportDiff, type DiffItem } from "../lib/export";
-import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryItem, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
+import {
+  applyEntryRiskSummary,
+  type ApplyEntryEndpoint,
+  type ApplyEntryItem,
+  type ApplyEntryPayload,
+  type ApplyEntryRef,
+} from "../lib/applyEntry";
 import Combobox from "./Combobox";
 import CopyButton from "./CopyButton";
-import DiffPanel from "./DiffPanel";
+import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
 import Select from "./Select";
 
 type DiffMode = "text" | "key" | "lines";
@@ -76,6 +84,20 @@ interface BatchResult {
   presence: MatchPresence;
 }
 
+interface MergePreviewText {
+  leftText: string;
+  rightText: string;
+}
+
+interface BatchResultStats {
+  added: number;
+  removed: number;
+  modified: number;
+}
+
+type MergeSelectionDirection = MergeActionDirection;
+type MergeSelectionScope = "row" | "block";
+
 const DOCUMENT_KEY = "__document";
 
 function sortedLinesDoc(content: string): string {
@@ -86,6 +108,74 @@ function sortedLinesDoc(content: string): string {
     .filter((line) => line.trim() !== "")
     .sort()
     .join("\n");
+}
+
+function mergeSelectionKey(dataId: string, rowIndex: number): string {
+  return `${dataId}::${rowIndex}`;
+}
+
+function preferredNewline(text: string): string {
+  return text.includes("\r\n") ? "\r\n" : "\n";
+}
+
+function materializeMergeText(
+  leftText: string,
+  rightText: string,
+  direction: Exclude<MergeSelectionDirection, "keep">,
+  selectedRowIndexes: Set<number>
+): string {
+  const rows = diffLines(leftText, rightText).rows;
+  const output: string[] = [];
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    const selected = selectedRowIndexes.has(rowIndex);
+    if (direction === "left-to-right") {
+      if (row.type === "equal") output.push(row.right ?? row.left ?? "");
+      else if (!selected && (row.type === "modify" || row.type === "add")) output.push(row.right ?? "");
+      else if (selected && (row.type === "modify" || row.type === "del")) output.push(row.left ?? "");
+      continue;
+    }
+
+    if (row.type === "equal") output.push(row.left ?? row.right ?? "");
+    else if (!selected && (row.type === "modify" || row.type === "del")) output.push(row.left ?? "");
+    else if (selected && (row.type === "modify" || row.type === "add")) output.push(row.right ?? "");
+  }
+
+  const baseText = direction === "left-to-right" ? rightText : leftText;
+  const newline = preferredNewline(baseText);
+  const merged = output.join(newline);
+  return /\r?\n$/.test(baseText) && merged.length > 0 ? `${merged}${newline}` : merged;
+}
+
+function canMaterializeMerge(presence: MatchPresence, direction: Exclude<MergeSelectionDirection, "keep">): boolean {
+  if (presence === "both") return true;
+  if (presence === "left-only") return direction === "left-to-right";
+  return direction === "right-to-left";
+}
+
+function mergeAvailabilityForPresence(presence: MatchPresence): MergeActionAvailability {
+  return {
+    "left-to-right": presence !== "right-only",
+    "right-to-left": presence !== "left-only",
+    keep: true,
+  };
+}
+
+function mergePreviewForItem(item: BatchResult, previews: Record<string, MergePreviewText>): MergePreviewText {
+  return previews[item.dataId] ?? { leftText: item.leftText, rightText: item.rightText };
+}
+
+function mergePreviewChanged(item: BatchResult, preview: MergePreviewText, direction: Exclude<MergeSelectionDirection, "keep">): boolean {
+  return direction === "left-to-right" ? preview.rightText !== item.rightText : preview.leftText !== item.leftText;
+}
+
+function batchResultStats(leftText: string, rightText: string): BatchResultStats {
+  const result = diffLines(leftText, rightText);
+  return {
+    added: result.added,
+    removed: result.removed,
+    modified: result.modified,
+  };
 }
 
 function emptySource(connId: string, connections: Connection[] = []): Source {
@@ -246,7 +336,7 @@ function sourceFromPreference(source: DiffViewSourcePreference, connections: Con
   const usesDefaultNamespace = source.usesDefaultNamespace;
   return {
     connId: conn.id,
-    tenant: usesDefaultNamespace ? conn.defaultNamespace ?? "" : source.tenant,
+    tenant: usesDefaultNamespace ? (conn.defaultNamespace ?? "") : source.tenant,
     dataId: source.dataId,
     group: source.group.trim() || "DEFAULT_GROUP",
     usesDefaultNamespace,
@@ -560,10 +650,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [matchLoading, setMatchLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [selectedBatchDataId, setSelectedBatchDataId] = useState<string | null>(null);
   const [failedItems, setFailedItems] = useState<{ dataId: string; error: string; leftGroup: string; rightGroup: string }[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [batchOnlyChanges, setBatchOnlyChanges] = useState<Set<string>>(new Set());
+  const [mergeSelections, setMergeSelections] = useState<Record<string, MergeSelectionDirection>>({});
+  const [mergePreviews, setMergePreviews] = useState<Record<string, MergePreviewText>>({});
+  const [mergeSelectionScope, setMergeSelectionScope] = useState<MergeSelectionScope>("block");
   const [notice, setNotice] = useState<string | null>(null);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
@@ -598,16 +691,29 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const resetComparisonState = useCallback(() => {
     setMatchResults(null);
     setBatchResults([]);
+    setSelectedBatchDataId(null);
     setFailedItems([]);
     setSelectedIds(new Set());
-    setCollapsed(new Set());
     setBatchOnlyChanges(new Set());
+    setMergeSelections({});
+    setMergePreviews({});
     setLeftLoaded(null);
     setRightLoaded(null);
     setLeftFailed(false);
     setRightFailed(false);
     setNotice(null);
   }, []);
+
+  useEffect(() => {
+    if (batchResults.length === 0) {
+      setSelectedBatchDataId(null);
+      return;
+    }
+    setSelectedBatchDataId((current) => {
+      if (current && batchResults.some((item) => item.dataId === current)) return current;
+      return batchResults[0]?.dataId ?? null;
+    });
+  }, [batchResults]);
 
   useEffect(() => {
     if (selectedProject !== activeProject) {
@@ -758,6 +864,8 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setMatchResults(null);
     setBatchResults([]);
     setFailedItems([]);
+    setMergeSelections({});
+    setMergePreviews({});
     setLeftFailed(false);
     setRightFailed(false);
 
@@ -933,6 +1041,8 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setError(null);
     setNotice(null);
     setBatchOnlyChanges(new Set());
+    setMergeSelections({});
+    setMergePreviews({});
 
     const results: BatchResult[] = [];
     const failedItems: { dataId: string; error: string; leftGroup: string; rightGroup: string }[] = [];
@@ -942,8 +1052,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       const settled = await Promise.allSettled(
         chunk.map(async (item) => {
           const [leftItem, rightItem] = await Promise.all([
-            item.presence === "right-only" ? Promise.resolve(missingLoaded(item.leftGroup)) : loadSideSafe(left, item.dataId, item.leftGroup, leftFailed),
-            item.presence === "left-only" ? Promise.resolve(missingLoaded(item.rightGroup)) : loadSideSafe(right, item.dataId, item.rightGroup, rightFailed),
+            item.presence === "right-only"
+              ? Promise.resolve(missingLoaded(item.leftGroup))
+              : loadSideSafe(left, item.dataId, item.leftGroup, leftFailed),
+            item.presence === "left-only"
+              ? Promise.resolve(missingLoaded(item.rightGroup))
+              : loadSideSafe(right, item.dataId, item.rightGroup, rightFailed),
           ]);
           const hasLeftContent = !leftFailed && item.presence !== "right-only";
           const hasRightContent = !rightFailed && item.presence !== "left-only";
@@ -1038,16 +1152,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setSelectedIds((prev) => (prev.size === matchResults.length ? new Set() : new Set(matchResults.map((item) => item.dataId))));
   };
 
-  const toggleCollapse = (dataId: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(dataId)) next.delete(dataId);
-      else next.add(dataId);
-      return next;
-    });
-  };
-
   const showingBatchDiff = batchResults.length > 0;
+  const batchResultStatsMap = useMemo(
+    () =>
+      Object.fromEntries(
+        batchResults.map((item) => {
+          const preview = mergePreviewForItem(item, mergePreviews);
+          return [item.dataId, batchResultStats(preview.leftText, preview.rightText)];
+        })
+      ),
+    [batchResults, mergePreviews]
+  );
+  const selectedBatchItem =
+    (selectedBatchDataId ? batchResults.find((item) => item.dataId === selectedBatchDataId) : null) ?? batchResults[0] ?? null;
   const batchAllOnlyChanges = batchResults.length > 0 && batchResults.every((item) => batchOnlyChanges.has(item.dataId));
   const toggleBatchOnlyChanges = (checked: boolean) => {
     setBatchOnlyChanges(checked ? new Set(batchResults.map((item) => item.dataId)) : new Set());
@@ -1061,11 +1178,56 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
+  const setMergeSelection = (dataId: string, rowIndex: number, direction: MergeSelectionDirection, rowIndexes?: number[]) => {
+    const item = batchResults.find((result) => result.dataId === dataId);
+    if (!item) return;
+    const targetRows = rowIndexes && rowIndexes.length > 0 ? rowIndexes : [rowIndex];
+    const keys = targetRows.map((index) => mergeSelectionKey(dataId, index));
+
+    if (direction !== "keep") {
+      if (!canMaterializeMerge(item.presence, direction)) return;
+      setMergePreviews((current) => {
+        const currentPreview = mergePreviewForItem(item, current);
+        const selectedRows = new Set(targetRows);
+        const nextPreview: MergePreviewText =
+          direction === "left-to-right"
+            ? {
+                ...currentPreview,
+                rightText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
+              }
+            : {
+                ...currentPreview,
+                leftText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
+              };
+        if (nextPreview.leftText === currentPreview.leftText && nextPreview.rightText === currentPreview.rightText) return current;
+        return { ...current, [dataId]: nextPreview };
+      });
+    }
+
+    setMergeSelections((current) => {
+      const next = { ...current };
+      for (const key of keys) next[key] = direction;
+      return next;
+    });
+  };
+
+  const mergeSelectionValues = Object.values(mergeSelections);
+  const mergeRightCount = batchResults.filter((item) =>
+    mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "left-to-right")
+  ).length;
+  const mergeLeftCount = batchResults.filter((item) =>
+    mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "right-to-left")
+  ).length;
+  const mergeKeepCount = mergeSelectionValues.filter((item) => item === "keep").length;
+  const hasMergePreviewDraft = mergeRightCount + mergeLeftCount + mergeKeepCount > 0;
+
   const returnToMatchList = () => {
     setBatchResults([]);
+    setSelectedBatchDataId(null);
     setFailedItems([]);
     setBatchOnlyChanges(new Set());
-    setCollapsed(new Set());
+    setMergeSelections({});
+    setMergePreviews({});
   };
 
   const retryCurrentCompare = () => {
@@ -1170,6 +1332,82 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       target,
       items,
       rangeSummary: applyEntryRiskSummary(items, failedItems.length),
+      origin: {
+        mode: "diff",
+        returnMode: "diff",
+      },
+    });
+  };
+
+  const startMergeDraftApply = (direction: Exclude<MergeSelectionDirection, "keep">) => {
+    if (!onStartApply || batchResults.length === 0) return;
+    const sourceSide = direction === "left-to-right" ? left : right;
+    const targetSide = direction === "left-to-right" ? right : left;
+    const source = applyEntryEndpointFromSource(sourceSide, connections);
+    const target = applyEntryEndpointFromSource(targetSide, connections);
+    if (!source || !target) return;
+
+    const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));
+    let skippedCount = failedItems.length;
+    const items = batchResults
+      .map((item): ApplyEntryItem | null => {
+        const preview = mergePreviewForItem(item, mergePreviews);
+        if (!mergePreviewChanged(item, preview, direction)) return null;
+        if (!canMaterializeMerge(item.presence, direction)) {
+          skippedCount += 1;
+          return null;
+        }
+
+        const mergedText = direction === "left-to-right" ? preview.rightText : preview.leftText;
+        const currentTargetText = direction === "left-to-right" ? item.rightText : item.leftText;
+        if (mergedText === currentTargetText) {
+          skippedCount += 1;
+          return null;
+        }
+
+        const match = matchByDataId.get(item.dataId);
+        const sourceGroup = direction === "left-to-right" ? (match?.leftGroup ?? left.group) : (match?.rightGroup ?? right.group);
+        const targetGroup = direction === "left-to-right" ? (match?.rightGroup ?? right.group) : (match?.leftGroup ?? left.group);
+        const sourceRef = applyEntryItemFromSource(sourceSide, connections, item.dataId, sourceGroup);
+        const targetRef = applyEntryItemFromSource(targetSide, connections, item.dataId, targetGroup);
+        if (!sourceRef || !targetRef) return null;
+
+        const normalized = normalizeConfig(mergedText, item.format);
+        return {
+          ...targetRef,
+          sourceRef,
+          targetRef,
+          sourceValueOverride: {
+            exists: true,
+            value: mergedText,
+            valueType: "text",
+            format: item.format,
+            parseStatus: normalized.parseStatus,
+            ...(normalized.parseError ? { parseError: normalized.parseError } : {}),
+            content: mergedText,
+          },
+        };
+      })
+      .filter((item): item is ApplyEntryItem => item !== null);
+
+    if (items.length === 0) {
+      reportMessage({
+        level: "warning",
+        title: t("diff.mergePlanNoChanges"),
+        source: t("app.diff"),
+        message: t("diff.mergePlanNoChanges"),
+        mergeKey: "diff:merge-plan:no-changes",
+      });
+      return;
+    }
+
+    onStartApply({
+      sourceType: "diff",
+      scope: "batch",
+      source,
+      target,
+      items,
+      rangeSummary: applyEntryRiskSummary(items, skippedCount),
       origin: {
         mode: "diff",
         returnMode: "diff",
@@ -1289,16 +1527,63 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       <div className={`diff-loadbar${showingBatchDiff ? " result-actions" : ""}`}>
         {showingBatchDiff ? (
           <>
-            <button type="button" className="btn btn-ghost btn-sm result-action result-action-back" onClick={returnToMatchList} disabled={batchLoading}>
+            <div className="merge-workbench-summary" aria-live="polite">
+              <div className="merge-workbench-copy">
+                <span className="merge-workbench-title">{t("diff.mergeWorkbenchTitle")}</span>
+                <span className="merge-workbench-hint">{t("diff.mergeWorkbenchHint")}</span>
+              </div>
+              <div className="merge-scope-toggle" role="group" aria-label={t("diff.mergeScopeLabel")}>
+                <span className="merge-scope-label">{t("diff.mergeScopeLabel")}</span>
+                <button
+                  type="button"
+                  className={`merge-scope-btn${mergeSelectionScope === "row" ? " active" : ""}`}
+                  onClick={() => setMergeSelectionScope("row")}
+                  aria-pressed={mergeSelectionScope === "row"}
+                >
+                  {t("diff.mergeScopeRow")}
+                </button>
+                <button
+                  type="button"
+                  className={`merge-scope-btn${mergeSelectionScope === "block" ? " active" : ""}`}
+                  onClick={() => setMergeSelectionScope("block")}
+                  aria-pressed={mergeSelectionScope === "block"}
+                >
+                  {t("diff.mergeScopeBlock")}
+                </button>
+              </div>
+              <span className="merge-draft-summary">
+                {hasMergePreviewDraft
+                  ? t("diff.mergeDraftSummary", { right: mergeRightCount, left: mergeLeftCount, keep: mergeKeepCount })
+                  : t("diff.mergeDraftEmpty")}
+              </span>
+            </div>
+            <span className="fmt-spacer" />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm result-action result-action-back"
+              onClick={returnToMatchList}
+              disabled={batchLoading}
+            >
               {t("diff.backToMatchList")}
             </button>
             <span className="batch-diff-count result-action-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
-            <span className="fmt-spacer" />
             <label className="diff-toggle result-action-filter">
               <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
               {t("diff.batchOnlyChanges")}
             </label>
             <button
+              type="button"
+              className="btn btn-ghost btn-sm result-action result-action-clear"
+              onClick={() => {
+                setMergeSelections({});
+                setMergePreviews({});
+              }}
+              disabled={!hasMergePreviewDraft}
+            >
+              {t("diff.mergeClearDraft")}
+            </button>
+            <button
+              type="button"
               className="btn btn-ghost btn-sm result-action result-action-export"
               title={t("diff.exportDiff")}
               onClick={() => {
@@ -1316,9 +1601,27 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               {t("diff.exportDiff")}
             </button>
             {onStartApply && (
-              <button className="btn btn-primary btn-sm result-action result-action-plan" onClick={startBatchApply}>
-                {t("diff.startBatchApply")}
-              </button>
+              <div className="merge-plan-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm result-action result-action-merge-plan"
+                  onClick={() => startMergeDraftApply("left-to-right")}
+                  disabled={mergeRightCount === 0}
+                >
+                  {t("diff.startRightMergePlan", { count: mergeRightCount })}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm result-action result-action-merge-plan"
+                  onClick={() => startMergeDraftApply("right-to-left")}
+                  disabled={mergeLeftCount === 0}
+                >
+                  {t("diff.startLeftMergePlan", { count: mergeLeftCount })}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm result-action result-action-plan" onClick={startBatchApply}>
+                  {t("diff.startWholeBatchApply")}
+                </button>
+              </div>
             )}
           </>
         ) : (
@@ -1371,7 +1674,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         )}
       </div>
 
-      <div className="diff-result">
+      <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`}>
         {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
           <div className="match-list">
             <div className="match-list-head">
@@ -1470,26 +1773,89 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 </div>
               </div>
             )}
-            {batchResults.map((item) => (
-              <div className="batch-diff-item" key={item.dataId}>
-                <div className="batch-diff-header" onClick={() => toggleCollapse(item.dataId)}>
-                  <span className="batch-diff-toggle">{collapsed.has(item.dataId) ? ">" : "v"}</span>
-                  <span className="batch-diff-title">{item.dataId}</span>
-                  <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+            <div className="batch-diff-layout">
+              <aside className="batch-diff-nav" aria-label={t("diff.batchFileList")}>
+                <div className="batch-diff-nav-head">{t("diff.batchFileList")}</div>
+                <div className="batch-diff-nav-scroll">
+                  {batchResults.map((item) => {
+                    const stats = batchResultStatsMap[item.dataId] ?? batchResultStats(item.leftText, item.rightText);
+                    const active = item.dataId === selectedBatchItem?.dataId;
+                    return (
+                      <button
+                        type="button"
+                        className={`batch-diff-nav-item${active ? " active" : ""}`}
+                        key={item.dataId}
+                        onClick={() => setSelectedBatchDataId(item.dataId)}
+                        aria-current={active ? "true" : undefined}
+                      >
+                        <div className="batch-diff-nav-top">
+                          <span className="batch-diff-nav-title" title={item.dataId}>
+                            {item.dataId}
+                          </span>
+                          <div className="diff-stats batch-diff-nav-stats" aria-label={t("diff.diffStats")}>
+                            <span className="stat stat-add">{t("diff.statAdded", { count: stats.added })}</span>
+                            <span className="stat stat-del">{t("diff.statDeleted", { count: stats.removed })}</span>
+                            <span className="stat stat-mod">{t("diff.statModified", { count: stats.modified })}</span>
+                          </div>
+                        </div>
+                        <div className="batch-diff-nav-meta">
+                          <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-                {!collapsed.has(item.dataId) && (
-                  <DiffPanel
-                    leftLabel={item.leftLabel}
-                    rightLabel={item.rightLabel}
-                    leftText={item.leftText}
-                    rightText={item.rightText}
-                    format={item.format}
-                    onlyChanges={batchOnlyChanges.has(item.dataId)}
-                    onOnlyChangesChange={(checked) => toggleItemOnlyChanges(item.dataId, checked)}
-                  />
+              </aside>
+
+              <section className="batch-diff-main">
+                {selectedBatchItem ? (
+                  <>
+                    <div className="batch-diff-main-head">
+                      <div className="batch-diff-main-title-wrap">
+                        <span className="batch-diff-main-title">{selectedBatchItem.dataId}</span>
+                        <span className={`batch-diff-presence ${selectedBatchItem.presence}`}>
+                          {matchPresenceLabel(selectedBatchItem.presence)}
+                        </span>
+                      </div>
+                      <div className="batch-diff-main-meta">
+                        <span className="batch-diff-main-label" title={selectedBatchItem.leftLabel}>
+                          {selectedBatchItem.leftLabel}
+                        </span>
+                        <span aria-hidden="true">{"\u2194"}</span>
+                        <span className="batch-diff-main-label" title={selectedBatchItem.rightLabel}>
+                          {selectedBatchItem.rightLabel}
+                        </span>
+                      </div>
+                    </div>
+                    <DiffPanel
+                      leftLabel={selectedBatchItem.leftLabel}
+                      rightLabel={selectedBatchItem.rightLabel}
+                      leftText={mergePreviewForItem(selectedBatchItem, mergePreviews).leftText}
+                      rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
+                      format={selectedBatchItem.format}
+                      onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
+                      onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
+                      mergeActionLabels={{
+                        leftToRight: t("diff.mergeAddToRightPlan"),
+                        rightToLeft: t("diff.mergeAddToLeftPlan"),
+                        keep: t("diff.mergeKeepDifference"),
+                      }}
+                      mergeActionScope={mergeSelectionScope}
+                      mergeActionAvailability={mergeAvailabilityForPresence(selectedBatchItem.presence)}
+                      getMergeActionState={(rowIndex) => {
+                        const direction = mergeSelections[mergeSelectionKey(selectedBatchItem.dataId, rowIndex)];
+                        return direction ? { direction } : undefined;
+                      }}
+                      onMergeAction={(rowIndex, direction, rowIndexes) =>
+                        setMergeSelection(selectedBatchItem.dataId, rowIndex, direction, rowIndexes)
+                      }
+                    />
+                  </>
+                ) : (
+                  <div className="pad-msg big">{t("diff.batchSelectHint")}</div>
                 )}
-              </div>
-            ))}
+              </section>
+            </div>
           </div>
         )}
 

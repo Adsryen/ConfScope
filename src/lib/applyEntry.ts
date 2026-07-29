@@ -1,5 +1,6 @@
 // 应用入口上下文：只描述从差异页面进入 dry-run 计划流程的范围与定位。
 import type { ProviderType } from "../api/configCenter";
+import type { ApplyPlanValueInput } from "./applyPlan";
 
 export type ApplyEntrySourceType = "audit" | "diff" | "backup" | "promote" | "rollback";
 export type ApplyEntryScope = "key" | "config" | "batch";
@@ -26,6 +27,8 @@ export interface ApplyEntryRef {
 export interface ApplyEntryItem extends ApplyEntryRef {
   sourceRef?: ApplyEntryRef;
   targetRef?: ApplyEntryRef;
+  /** 可选的物化来源值：用于生成安全本地计划，同时不改变当前来源快照校验合同。 */
+  sourceValueOverride?: ApplyPlanValueInput;
 }
 
 export interface ApplyEntryRangeSummary {

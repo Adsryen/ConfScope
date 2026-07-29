@@ -120,9 +120,7 @@ describe("buildApplyPlan", () => {
     const base = value(true, "8080", { updateTime: "2026-07-06T00:00:00.000Z" });
 
     expect(fingerprintApplyPlanValue(ref, base)).toBe(fingerprintApplyPlanValue(ref, { ...base }));
-    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(
-      fingerprintApplyPlanValue(ref, { ...base, content: "server:\n  port: 9090" })
-    );
+    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(fingerprintApplyPlanValue(ref, { ...base, content: "server:\n  port: 9090" }));
     expect(fingerprintApplyPlanValue(ref, base)).not.toBe(
       fingerprintApplyPlanValue(ref, { ...base, updateTime: "2026-07-06T01:00:00.000Z" })
     );
@@ -191,5 +189,35 @@ describe("buildApplyPlan", () => {
     const plan = buildApplyPlan(input([{ ref, sourceValue: value(true, "8080"), targetValue: value(true, "9090") }]));
 
     expect(validateApplyPlanFreshness(plan, freshnessSnapshots(plan))).toEqual({ ok: true, staleItems: [] });
+  });
+
+  it("allows materialized merge values while preserving original source freshness", () => {
+    const materializedSource = value(true, "8080", { content: "server:\n  port: 8080\nfeature: true" });
+    const originalSourceFingerprint = "source-before-merge";
+    const originalTargetFingerprint = "target-before-merge";
+    const plan = buildApplyPlan(
+      input([
+        {
+          ref: { ...ref, key: "__document" },
+          sourceRef: { ...ref, connectionId: "conn-dev", key: "__document" },
+          targetRef: { ...ref, connectionId: "conn-prod", key: "__document" },
+          sourceValue: materializedSource,
+          targetValue: value(true, "9090", { content: "server:\n  port: 9090\nfeature: true" }),
+          sourceFingerprint: originalSourceFingerprint,
+          targetFingerprint: originalTargetFingerprint,
+        },
+      ])
+    );
+
+    expect(plan.items[0].action).toBe("overwrite");
+    expect(plan.items[0].afterValue.content).toBe("server:\n  port: 8080\nfeature: true");
+    expect(plan.items[0].sourceFingerprint).toBe(originalSourceFingerprint);
+    expect(plan.items[0].targetFingerprint).toBe(originalTargetFingerprint);
+    expect(
+      validateApplyPlanFreshness(plan, [
+        { itemId: plan.items[0].id, side: "source", fingerprint: originalSourceFingerprint },
+        { itemId: plan.items[0].id, side: "target", fingerprint: originalTargetFingerprint },
+      ])
+    ).toEqual({ ok: true, staleItems: [] });
   });
 });

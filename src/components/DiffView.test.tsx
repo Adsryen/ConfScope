@@ -115,7 +115,6 @@ describe("DiffView", () => {
     });
   });
 
-
   it("explains the safe compare-to-change workflow before comparing", () => {
     localStorage.setItem("locale", "en-US");
     render(
@@ -154,7 +153,6 @@ describe("DiffView", () => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
     });
     expect(screen.getAllByDisplayValue("app.yaml").length).toBeGreaterThanOrEqual(2);
-
   });
 
   it("uses the connection default namespace when loading config candidates", async () => {
@@ -164,7 +162,6 @@ describe("DiffView", () => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
     });
   });
-
 
   it("persists the changed compare sources back to localStorage", async () => {
     renderDiff([nacosConn, prodConn]);
@@ -355,7 +352,6 @@ describe("DiffView", () => {
     expect(collapseToggle).not.toHaveTextContent("收起来源");
   });
 
-
   it("lists disjoint dataIds instead of hiding them", async () => {
     apiMocks.listNamespaces.mockResolvedValue([
       { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 },
@@ -364,8 +360,18 @@ describe("DiffView", () => {
     apiMocks.listConfigs
       .mockResolvedValueOnce({ totalCount: 1, pageNumber: 1, pagesAvailable: 1, pageItems: [] })
       .mockResolvedValueOnce({ totalCount: 1, pageNumber: 1, pagesAvailable: 1, pageItems: [] })
-      .mockResolvedValueOnce({ totalCount: 1, pageNumber: 1, pagesAvailable: 1, pageItems: [{ dataId: "left.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }] })
-      .mockResolvedValueOnce({ totalCount: 1, pageNumber: 1, pagesAvailable: 1, pageItems: [{ dataId: "right.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }] });
+      .mockResolvedValueOnce({
+        totalCount: 1,
+        pageNumber: 1,
+        pagesAvailable: 1,
+        pageItems: [{ dataId: "left.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+      })
+      .mockResolvedValueOnce({
+        totalCount: 1,
+        pageNumber: 1,
+        pagesAvailable: 1,
+        pageItems: [{ dataId: "right.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+      });
 
     renderDiff([nacosConn]);
 
@@ -374,7 +380,6 @@ describe("DiffView", () => {
 
     expect(await screen.findByText("找到 2 个 dataId，已选 2 个")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "对比选中（2）" })).not.toBeDisabled();
-
   });
 
   it("lists left-only and right-only files when batch matching configs", async () => {
@@ -427,6 +432,87 @@ describe("DiffView", () => {
     expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
     expect(screen.getAllByText("仅左侧存在").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("only enables merge arrows that copy the existing side for one-sided files", async () => {
+    const onStartApply = vi.fn();
+    localStorage.setItem("locale", "en-US");
+    apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems:
+        conn.id === "left-nacos"
+          ? [{ dataId: "left-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }]
+          : [{ dataId: "right-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    }));
+    apiMocks.getConfig.mockImplementation(async (conn: Connection, _tenant: string, dataId: string) =>
+      conn.id === "left-nacos" ? `left: ${dataId}` : `right: ${dataId}`
+    );
+
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (2)" }));
+    expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: /left-only\.yaml/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /right-only\.yaml/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /left-only\.yaml/ }));
+    expect(screen.getByRole("button", { name: "Take left to right preview" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Take right to left preview" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /right-only\.yaml/ }));
+    expect(screen.getByRole("button", { name: "Take left to right preview" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Take right to left preview" })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
+    expect(screen.getByText("Right preview 1 | Left preview 1 | Kept 0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate right-side plan (1 files)" }));
+    expect(onStartApply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ connectionId: "left-nacos" }),
+        target: expect.objectContaining({ connectionId: "right-nacos" }),
+        items: [
+          expect.objectContaining({
+            connectionId: "right-nacos",
+            dataId: "left-only.yaml",
+            sourceValueOverride: expect.objectContaining({ content: "left: left-only.yaml" }),
+          }),
+        ],
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate left-side plan (1 files)" }));
+    expect(onStartApply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ connectionId: "right-nacos" }),
+        target: expect.objectContaining({ connectionId: "left-nacos" }),
+        items: [
+          expect.objectContaining({
+            connectionId: "left-nacos",
+            dataId: "right-only.yaml",
+            sourceValueOverride: expect.objectContaining({ content: "right: right-only.yaml" }),
+          }),
+        ],
+      })
+    );
   });
 
   it("shows smart-match files as left and right side lists", async () => {
@@ -544,11 +630,19 @@ describe("DiffView", () => {
 
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("已生成 2 个文件对比")).toBeInTheDocument();
-    expect(await screen.findByText("app.yaml")).toBeInTheDocument();
-    expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
+    const resultPane = document.querySelector(".diff-result");
+    expect(resultPane).toHaveClass("diff-result-batch");
+    const nav = resultPane?.querySelector(".batch-diff-nav");
+    const main = resultPane?.querySelector(".batch-diff-main");
+    expect(nav).toBeInTheDocument();
+    expect(main).toBeInTheDocument();
+    expect(nav?.querySelectorAll(".batch-diff-nav-item")).toHaveLength(2);
+    expect(nav?.querySelectorAll(".diff-stats.batch-diff-nav-stats")).toHaveLength(2);
+    expect(screen.getAllByText("app.yaml").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("gateway.yaml").length).toBeGreaterThan(0);
     expect(screen.getAllByText("same-app")).toHaveLength(2);
-    expect(screen.getAllByText("same-gateway")).toHaveLength(2);
-    expect(screen.getAllByLabelText("仅显示变更")).toHaveLength(2);
+    expect(screen.queryByText("same-gateway")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("仅显示变更")).toHaveLength(1);
 
     fireEvent.click(screen.getByLabelText("全部仅显示变更"));
 
@@ -556,6 +650,9 @@ describe("DiffView", () => {
     expect(screen.queryByText("same-gateway")).not.toBeInTheDocument();
     expect(screen.getByText("left-app")).toBeInTheDocument();
     expect(screen.getByText("right-app")).toBeInTheDocument();
+    expect(screen.queryByText("left-gateway")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /gateway\.yaml/ }));
+    expect(screen.queryByText("same-gateway")).not.toBeInTheDocument();
     expect(screen.getByText("left-gateway")).toBeInTheDocument();
     expect(screen.getByText("right-gateway")).toBeInTheDocument();
   });
@@ -842,7 +939,7 @@ describe("DiffView", () => {
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Batch Change Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate whole-file batch change plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -914,6 +1011,188 @@ describe("DiffView", () => {
     );
   });
 
+  it("lets users mark batch diff rows as a bidirectional merge draft without starting apply", async () => {
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "feature.enabled=false\nserver.port=8080" : "feature.enabled=true\nserver.port=8080"
+    );
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+
+    expect(await screen.findByText("Generated 1 file comparisons")).toBeInTheDocument();
+    expect(screen.getByText("Merge preview")).toBeInTheDocument();
+    expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+    expect(screen.getByText("Right preview 1 | Left preview 0 | Kept 0")).toBeInTheDocument();
+    expect(screen.getAllByText("feature.enabled=false").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("feature.enabled=true")).not.toBeInTheDocument();
+    expect(onStartApply).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
+    expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
+    expect(screen.getByText("Right preview 0 | Left preview 1 | Kept 0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep this difference" }));
+    expect(screen.getByText("Right preview 0 | Left preview 0 | Kept 1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
+    expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
+  });
+
+  it("generates one-way materialized merge plans from selected arrows", async () => {
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "server:\n  port: 8080\nfeature:\n  enabled: true" : "server:\n  port: 9090\nfeature:\n  enabled: true"
+    );
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "",
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    expect(await screen.findByText("Generated 1 file comparisons")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate right-side plan (0 files)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Generate left-side plan (0 files)" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate right-side plan (1 files)" }));
+
+    expect(onStartApply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ connectionId: "left-nacos" }),
+        target: expect.objectContaining({ connectionId: "right-nacos" }),
+        items: [
+          expect.objectContaining({
+            connectionId: "right-nacos",
+            dataId: "app.yaml",
+            key: "__document",
+            sourceRef: expect.objectContaining({ connectionId: "left-nacos", dataId: "app.yaml" }),
+            targetRef: expect.objectContaining({ connectionId: "right-nacos", dataId: "app.yaml" }),
+            sourceValueOverride: expect.objectContaining({
+              exists: true,
+              valueType: "text",
+              format: "YAML",
+              content: "server:\n  port: 8080\nfeature:\n  enabled: true",
+            }),
+          }),
+        ],
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate left-side plan (1 files)" }));
+
+    expect(onStartApply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ connectionId: "right-nacos" }),
+        target: expect.objectContaining({ connectionId: "left-nacos" }),
+        items: [
+          expect.objectContaining({
+            connectionId: "left-nacos",
+            dataId: "app.yaml",
+            key: "__document",
+            sourceRef: expect.objectContaining({ connectionId: "right-nacos", dataId: "app.yaml" }),
+            targetRef: expect.objectContaining({ connectionId: "left-nacos", dataId: "app.yaml" }),
+            sourceValueOverride: expect.objectContaining({
+              content: "server:\n  port: 9090\nfeature:\n  enabled: true",
+            }),
+          }),
+        ],
+      })
+    );
+  });
+
+  it("supports row and block scopes for bidirectional merge arrows", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos"
+        ? "feature.enabled=false\nserver.port=8080\nunchanged=true"
+        : "feature.enabled=true\nserver.port=9090\nunchanged=true"
+    );
+
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            namespace: "shared",
+            group: "DEFAULT_GROUP",
+            dataId: "",
+            autoCompare: true,
+          }}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    expect(await screen.findByText("No merge preview changes yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Take left to right preview" })[0]);
+    expect(screen.getByText("Right preview 1 | Left preview 0 | Kept 0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Row" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Take right to left preview" })[0]);
+    expect(screen.getByText("Right preview 0 | Left preview 1 | Kept 0")).toBeInTheDocument();
+  });
+
   it("does not show apply entry points before compare output exists", () => {
     localStorage.setItem("locale", "en-US");
     render(
@@ -923,7 +1202,7 @@ describe("DiffView", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Generate Change Plan" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Generate Batch Change Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generate whole-file batch change plan" })).toBeNull();
   });
 
   it("shows inline error when all batch diff configs fail to load", async () => {

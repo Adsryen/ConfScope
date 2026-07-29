@@ -5,6 +5,7 @@ import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload, ApplyEntryRef } from "./applyEntry";
 import {
   buildApplyPlan,
+  fingerprintApplyPlanValue,
   type ApplyPlan,
   type ApplyPlanEndpoint,
   type ApplyPlanRef,
@@ -25,8 +26,7 @@ export interface ApplyPlanDraftDeps {
 }
 
 export type ApplyPlanDraftResult =
-  | { ok: true; plan: ApplyPlan; sourceConnection: Connection; targetConnection: Connection }
-  | { ok: false; error: string; detail: string };
+  { ok: true; plan: ApplyPlan; sourceConnection: Connection; targetConnection: Connection } | { ok: false; error: string; detail: string };
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -182,11 +182,7 @@ async function resolveSnapshotConnection(
   return snapshotConnection;
 }
 
-async function resolveConnection(
-  connectionId: string,
-  deps: ApplyPlanDraftDeps,
-  context: ResolveContext
-): Promise<Connection | string> {
+async function resolveConnection(connectionId: string, deps: ApplyPlanDraftDeps, context: ResolveContext): Promise<Connection | string> {
   const snapshotId = snapshotIdFromConnectionId(connectionId);
   if (snapshotId) return resolveSnapshotConnection(snapshotId, deps, context);
 
@@ -213,12 +209,17 @@ async function buildPlanItems(
         readValue(sourceRef, sourceConnection, "source", deps),
         readValue(targetRef, targetConnection, "target", deps),
       ]);
+      const plannedSourceRef = planRef(sourceRef);
+      const plannedTargetRef = planRef(targetRef);
       items.push({
-        ref: planRef(targetRef),
-        sourceRef: planRef(sourceRef),
-        targetRef: planRef(targetRef),
-        sourceValue,
+        ref: plannedTargetRef,
+        sourceRef: plannedSourceRef,
+        targetRef: plannedTargetRef,
+        sourceValue: item.sourceValueOverride ?? sourceValue,
         targetValue,
+        ...(item.sourceValueOverride
+          ? { sourceFingerprint: sourceValue.fingerprint ?? fingerprintApplyPlanValue(plannedSourceRef, sourceValue) }
+          : {}),
       });
     } catch (error) {
       return errorText(error);
