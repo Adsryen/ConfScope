@@ -4,13 +4,12 @@ import { type RowType, diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
 
-export type MergeActionDirection = "left-to-right" | "right-to-left" | "keep";
+export type MergeActionDirection = "left-to-right" | "right-to-left";
 export type MergeActionScope = "row" | "block";
 
 export interface MergeActionLabels {
   leftToRight: string;
   rightToLeft: string;
-  keep: string;
 }
 
 export interface MergeActionState {
@@ -62,8 +61,13 @@ function changeBlockPosition(blockIndexes: number[], rowIndex: number): "single"
   return blockIndexes.includes(rowIndex) ? "middle" : null;
 }
 
-function mergeGutterClass(blockMode: boolean, blockPosition: ReturnType<typeof changeBlockPosition>, showActions: boolean): string {
-  const classes = ["diff-merge-gutter"];
+function mergeSideClass(
+  side: "left" | "right",
+  blockMode: boolean,
+  blockPosition: ReturnType<typeof changeBlockPosition>,
+  showActions: boolean
+): string {
+  const classes = ["diff-merge-side", side];
   if (blockMode && blockPosition) {
     classes.push("block-mode");
     classes.push(`block-${blockPosition}`);
@@ -72,7 +76,6 @@ function mergeGutterClass(blockMode: boolean, blockPosition: ReturnType<typeof c
   if (showActions) classes.push("has-actions");
   return classes.join(" ");
 }
-
 
 /** 渲染一个 diff 单元格：有可高亮格式时输出语法高亮 HTML，否则纯文本。 */
 function Cell({ text, side, format }: { text: string | null; side: string; format?: Format }) {
@@ -154,58 +157,54 @@ export default function DiffPanel({
             const canMerge = Boolean(onMergeAction && mergeActionLabels && rowHasMergeActions(r.type));
             const canMergeLeftToRight = mergeActionAvailability?.["left-to-right"] ?? true;
             const canMergeRightToLeft = mergeActionAvailability?.["right-to-left"] ?? true;
-            const canKeepDifference = mergeActionAvailability?.keep ?? true;
             const blockMode = mergeActionScope === "block";
             const mergeTargetRows = canMerge && blockMode ? changeBlockIndexes(result.rows, rowIndex) : [rowIndex];
             const blockPosition = canMerge && blockMode ? changeBlockPosition(mergeTargetRows, rowIndex) : null;
             const showMergeActions = canMerge && (!blockMode || mergeTargetRows[0] === rowIndex);
+            const showBlockBrace = canMerge && blockMode && blockPosition !== null && blockPosition !== "single";
             return (
               <div
                 className={`diff-row ${r.type}${onMergeAction ? " with-merge" : ""}${mergeState ? ` merge-${mergeState.direction}` : ""}`}
                 key={rowIndex}
               >
                 <span className="diff-gutter">{r.leftNo ?? ""}</span>
-                <Cell text={r.left} side="left" format={format} />
                 {onMergeAction && (
-                  <span className={mergeGutterClass(blockMode, blockPosition, showMergeActions)}>
-                    {canMerge && blockMode && <span className="diff-merge-block-brace" aria-hidden="true" />}
+                  <span className={mergeSideClass("left", blockMode, blockPosition, showMergeActions)}>
+                    {showBlockBrace && <span className="diff-merge-block-brace" aria-hidden="true" />}
                     {showMergeActions && mergeActionLabels && (
-                      <span className="diff-merge-actions">
-                        <button
-                          type="button"
-                          className={mergeActionClass("left-to-right", mergeState)}
-                          onClick={() => onMergeAction(rowIndex, "left-to-right", mergeTargetRows)}
-                          aria-label={mergeActionLabels.leftToRight}
-                          title={mergeActionLabels.leftToRight}
-                          disabled={!canMergeLeftToRight}
-                        >
-                          {"\u2192"}
-                        </button>
-                        <button
-                          type="button"
-                          className={mergeActionClass("right-to-left", mergeState)}
-                          onClick={() => onMergeAction(rowIndex, "right-to-left", mergeTargetRows)}
-                          aria-label={mergeActionLabels.rightToLeft}
-                          title={mergeActionLabels.rightToLeft}
-                          disabled={!canMergeRightToLeft}
-                        >
-                          {"\u2190"}
-                        </button>
-                        <button
-                          type="button"
-                          className={mergeActionClass("keep", mergeState)}
-                          onClick={() => onMergeAction(rowIndex, "keep", mergeTargetRows)}
-                          aria-label={mergeActionLabels.keep}
-                          title={mergeActionLabels.keep}
-                          disabled={!canKeepDifference}
-                        >
-                          {"\u00b7"}
-                        </button>
-                      </span>
+                      <button
+                        type="button"
+                        className={mergeActionClass("right-to-left", mergeState)}
+                        onClick={() => onMergeAction(rowIndex, "right-to-left", mergeTargetRows)}
+                        aria-label={mergeActionLabels.rightToLeft}
+                        title={mergeActionLabels.rightToLeft}
+                        disabled={!canMergeRightToLeft}
+                      >
+                        {"\u2190"}
+                      </button>
                     )}
                   </span>
                 )}
+                <Cell text={r.left} side="left" format={format} />
+                {onMergeAction && <span className="diff-merge-gutter" aria-hidden="true" />}
                 <span className="diff-gutter">{r.rightNo ?? ""}</span>
+                {onMergeAction && (
+                  <span className={mergeSideClass("right", blockMode, blockPosition, showMergeActions)}>
+                    {showBlockBrace && <span className="diff-merge-block-brace" aria-hidden="true" />}
+                    {showMergeActions && mergeActionLabels && (
+                      <button
+                        type="button"
+                        className={mergeActionClass("left-to-right", mergeState)}
+                        onClick={() => onMergeAction(rowIndex, "left-to-right", mergeTargetRows)}
+                        aria-label={mergeActionLabels.leftToRight}
+                        title={mergeActionLabels.leftToRight}
+                        disabled={!canMergeLeftToRight}
+                      >
+                        {"\u2192"}
+                      </button>
+                    )}
+                  </span>
+                )}
                 <Cell text={r.right} side="right" format={format} />
               </div>
             );
