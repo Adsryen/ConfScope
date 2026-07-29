@@ -4,6 +4,7 @@ import type { Snapshot } from "../api/snapshot";
 import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload, ApplyEntryRef } from "./applyEntry";
 import { snapshotConnectionId } from "./snapshotConnection";
+import { fingerprintApplyPlanValue } from "./applyPlan";
 import { buildApplyPlanFromEntry, type ApplyPlanDraftDeps } from "./applyPlanDraft";
 
 const sourceConn = connection("conn-dev", "Dev", "Development");
@@ -147,9 +148,7 @@ describe("buildApplyPlanFromEntry", () => {
 
   it("reads sourceRef and targetRef locations independently and writes target refs into plan items", async () => {
     const getConfigDocument = vi.fn(async (conn: Connection, _namespace: string, dataId: string) =>
-      conn.id === "conn-dev" && dataId === "source.properties"
-        ? document("feature.enabled=true")
-        : document("feature.enabled=false")
+      conn.id === "conn-dev" && dataId === "source.properties" ? document("feature.enabled=true") : document("feature.enabled=false")
     );
     const sourceRef = applyRef({ connectionId: "conn-dev", dataId: "source.properties", key: "feature.enabled" });
     const targetRef = applyRef({ connectionId: "conn-prod", dataId: "target.properties", key: "feature.enabled" });
@@ -218,6 +217,56 @@ describe("buildApplyPlanFromEntry", () => {
       "DEFAULT_GROUP"
     );
     expect(result.plan.items[0].action).toBe("overwrite");
+  });
+
+  it("uses materialized source value overrides while keeping source freshness tied to the original source document", async () => {
+    const sourceRef = applyRef({ connectionId: "conn-dev", dataId: "app.yaml" });
+    const targetRef = applyRef({ connectionId: "conn-prod", dataId: "app.yaml" });
+    const getConfigDocument = vi.fn(async (conn: Connection) =>
+      conn.id === "conn-dev"
+        ? document("server:\n  port: 8080", "yaml", "source-t1")
+        : document("server:\n  port: 9090", "yaml", "target-t1")
+    );
+    const mergedContent = "server:\n  port: 8080\nfeature:\n  enabled: true";
+
+    const result = await buildApplyPlanFromEntry(
+      entry([
+        {
+          ...targetRef,
+          sourceRef,
+          targetRef,
+          sourceValueOverride: {
+            exists: true,
+            value: mergedContent,
+            valueType: "text",
+            format: "YAML",
+            parseStatus: "ok",
+            content: mergedContent,
+          },
+        },
+      ]),
+      deps(getConfigDocument)
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    const item = result.plan.items[0];
+    expect(item.action).toBe("overwrite");
+    expect(item.sourceValue.content).toBe(mergedContent);
+    expect(item.afterValue.content).toBe(mergedContent);
+    expect(item.sourceFingerprint).toBe(
+      fingerprintApplyPlanValue(sourceRef, {
+        exists: true,
+        value: "server:\n  port: 8080",
+        valueType: "text",
+        format: "YAML",
+        parseStatus: "ok",
+        content: "server:\n  port: 8080",
+        version: "source-t1-version",
+        updateTime: "source-t1",
+      })
+    );
+    expect(item.sourceFingerprint).not.toBe(item.sourceValue.fingerprint);
   });
 
   it("returns copyable errors for invalid snapshot sources and config read failures", async () => {

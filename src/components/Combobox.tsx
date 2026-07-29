@@ -3,21 +3,21 @@ import { createPortal } from "react-dom";
 
 export interface ComboOption {
   value: string;
-  /** ?????? group?????????? */
+  /** 可选的分组或辅助说明文案。 */
   sub?: string;
 }
 
 interface Props {
   value: string;
   onChange: (v: string) => void;
-  /** ????????????????? option????? group ??? */
+  /** 选中候选项时回传完整 option，便于同步 group 等字段。 */
   onPick?: (o: ComboOption) => void;
   options: ComboOption[];
   placeholder?: string;
   disabled?: boolean;
 }
 
-/** ????:?????(????????),??????? */
+/** 模糊匹配：先子串命中，再退化到字符顺序匹配。 */
 function fuzzy(query: string, text: string): boolean {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -30,16 +30,14 @@ function fuzzy(query: string, text: string): boolean {
   return i === q.length;
 }
 
-/** ??? + ??????(combobox):??????,??????? */
+/** 输入框 + 候选下拉框（combobox）：支持模糊过滤，并防止被父容器裁剪。 */
 export default function Combobox({ value, onChange, onPick, options, placeholder, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const filtered = options
-    .filter((o) => fuzzy(value, o.value) || (o.sub ? fuzzy(value, o.sub) : false))
-    .slice(0, 50);
+  const filtered = options.filter((o) => fuzzy(value, o.value) || (o.sub ? fuzzy(value, o.sub) : false)).slice(0, 50);
 
   const updateMenuPosition = useCallback(() => {
     const trigger = ref.current;
@@ -111,7 +109,7 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
                 key={`${o.value}/${o.sub ?? ""}/${i}`}
                 className={`combo-option${o.value === value ? " active" : ""}`}
                 onMouseDown={(e) => {
-                  e.preventDefault(); // ?? input ?????????
+                  e.preventDefault(); // 防止 input 失焦抢先关闭下拉框
                   e.stopPropagation();
                   onChange(o.value);
                   onPick?.(o);

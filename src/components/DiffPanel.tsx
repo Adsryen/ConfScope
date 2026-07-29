@@ -1,8 +1,23 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
-import { diffLines } from "../lib/diff";
+import { type RowType, diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
+
+export type MergeActionDirection = "left-to-right" | "right-to-left" | "keep";
+export type MergeActionScope = "row" | "block";
+
+export interface MergeActionLabels {
+  leftToRight: string;
+  rightToLeft: string;
+  keep: string;
+}
+
+export interface MergeActionState {
+  direction: MergeActionDirection;
+}
+
+export type MergeActionAvailability = Partial<Record<MergeActionDirection, boolean>>;
 
 interface Props {
   leftLabel: string;
@@ -14,18 +29,56 @@ interface Props {
   onlyChanges?: boolean;
   onOnlyChangesChange?: (value: boolean) => void;
   hideOnlyChangesToggle?: boolean;
+  mergeActionLabels?: MergeActionLabels;
+  getMergeActionState?: (rowIndex: number) => MergeActionState | undefined;
+  mergeActionScope?: MergeActionScope;
+  mergeActionAvailability?: MergeActionAvailability;
+  onMergeAction?: (rowIndex: number, direction: MergeActionDirection, rowIndexes?: number[]) => void;
 }
+
+function mergeActionClass(direction: MergeActionDirection, state?: MergeActionState): string {
+  return `diff-merge-btn ${direction}${state?.direction === direction ? " active" : ""}`;
+}
+
+function rowHasMergeActions(type: RowType): boolean {
+  return type !== "equal";
+}
+
+function changeBlockIndexes(rows: { type: RowType }[], rowIndex: number): number[] {
+  const indexes: number[] = [];
+  for (let i = rowIndex; i >= 0 && rowHasMergeActions(rows[i].type); i--) {
+    indexes.unshift(i);
+  }
+  for (let i = rowIndex + 1; i < rows.length && rowHasMergeActions(rows[i].type); i++) {
+    indexes.push(i);
+  }
+  return indexes;
+}
+function changeBlockPosition(blockIndexes: number[], rowIndex: number): "single" | "first" | "middle" | "last" | null {
+  if (blockIndexes.length === 0) return null;
+  if (blockIndexes.length === 1 && blockIndexes[0] === rowIndex) return "single";
+  if (blockIndexes[0] === rowIndex) return "first";
+  if (blockIndexes[blockIndexes.length - 1] === rowIndex) return "last";
+  return blockIndexes.includes(rowIndex) ? "middle" : null;
+}
+
+function mergeGutterClass(blockMode: boolean, blockPosition: ReturnType<typeof changeBlockPosition>, showActions: boolean): string {
+  const classes = ["diff-merge-gutter"];
+  if (blockMode && blockPosition) {
+    classes.push("block-mode");
+    classes.push(`block-${blockPosition}`);
+    if (blockPosition === "single") classes.push("block-first", "block-last");
+  }
+  if (showActions) classes.push("has-actions");
+  return classes.join(" ");
+}
+
 
 /** 渲染一个 diff 单元格：有可高亮格式时输出语法高亮 HTML，否则纯文本。 */
 function Cell({ text, side, format }: { text: string | null; side: string; format?: Format }) {
   if (text == null) return <pre className={`diff-cell ${side}`} />;
   if (format && format !== "TEXT") {
-    return (
-      <pre
-        className={`diff-cell ${side}`}
-        dangerouslySetInnerHTML={{ __html: highlightLine(text, format) }}
-      />
-    );
+    return <pre className={`diff-cell ${side}`} dangerouslySetInnerHTML={{ __html: highlightLine(text, format) }} />;
   }
   return <pre className={`diff-cell ${side}`}>{text}</pre>;
 }
@@ -40,6 +93,11 @@ export default function DiffPanel({
   onlyChanges: controlledOnlyChanges,
   onOnlyChangesChange,
   hideOnlyChangesToggle = false,
+  mergeActionLabels,
+  getMergeActionState,
+  mergeActionScope = "block",
+  mergeActionAvailability,
+  onMergeAction,
 }: Props) {
   const { t } = useTranslation();
   const [localOnlyChanges, setLocalOnlyChanges] = useState(false);
@@ -51,7 +109,7 @@ export default function DiffPanel({
   const result = useMemo(() => diffLines(leftText, rightText), [leftText, rightText]);
 
   const rows = useMemo(
-    () => (onlyChanges ? result.rows.filter((r) => r.type !== "equal") : result.rows),
+    () => result.rows.map((row, rowIndex) => ({ row, rowIndex })).filter((entry) => !onlyChanges || entry.row.type !== "equal"),
     [result, onlyChanges]
   );
 
@@ -71,20 +129,17 @@ export default function DiffPanel({
         )}
         {!hideOnlyChangesToggle && (
           <label className="diff-toggle">
-            <input
-              type="checkbox"
-              checked={onlyChanges}
-              onChange={(e) => setOnlyChanges(e.target.checked)}
-            />
+            <input type="checkbox" checked={onlyChanges} onChange={(e) => setOnlyChanges(e.target.checked)} />
             {t("diff.onlyChanges")}
           </label>
         )}
       </div>
 
-      <div className="diff-head">
+      <div className={`diff-head${onMergeAction ? " with-merge" : ""}`}>
         <div className="diff-head-cell" title={leftLabel}>
           {leftLabel}
         </div>
+        {onMergeAction && <div className="diff-head-merge" aria-hidden="true" />}
         <div className="diff-head-cell" title={rightLabel}>
           {rightLabel}
         </div>
@@ -94,14 +149,67 @@ export default function DiffPanel({
         {rows.length === 0 ? (
           <div className="diff-empty">{t("diff.noDiffRows")}</div>
         ) : (
-          rows.map((r, idx) => (
-            <div className={`diff-row ${r.type}`} key={idx}>
-              <span className="diff-gutter">{r.leftNo ?? ""}</span>
-              <Cell text={r.left} side="left" format={format} />
-              <span className="diff-gutter">{r.rightNo ?? ""}</span>
-              <Cell text={r.right} side="right" format={format} />
-            </div>
-          ))
+          rows.map(({ row: r, rowIndex }) => {
+            const mergeState = getMergeActionState?.(rowIndex);
+            const canMerge = Boolean(onMergeAction && mergeActionLabels && rowHasMergeActions(r.type));
+            const canMergeLeftToRight = mergeActionAvailability?.["left-to-right"] ?? true;
+            const canMergeRightToLeft = mergeActionAvailability?.["right-to-left"] ?? true;
+            const canKeepDifference = mergeActionAvailability?.keep ?? true;
+            const blockMode = mergeActionScope === "block";
+            const mergeTargetRows = canMerge && blockMode ? changeBlockIndexes(result.rows, rowIndex) : [rowIndex];
+            const blockPosition = canMerge && blockMode ? changeBlockPosition(mergeTargetRows, rowIndex) : null;
+            const showMergeActions = canMerge && (!blockMode || mergeTargetRows[0] === rowIndex);
+            return (
+              <div
+                className={`diff-row ${r.type}${onMergeAction ? " with-merge" : ""}${mergeState ? ` merge-${mergeState.direction}` : ""}`}
+                key={rowIndex}
+              >
+                <span className="diff-gutter">{r.leftNo ?? ""}</span>
+                <Cell text={r.left} side="left" format={format} />
+                {onMergeAction && (
+                  <span className={mergeGutterClass(blockMode, blockPosition, showMergeActions)}>
+                    {canMerge && blockMode && <span className="diff-merge-block-brace" aria-hidden="true" />}
+                    {showMergeActions && mergeActionLabels && (
+                      <span className="diff-merge-actions">
+                        <button
+                          type="button"
+                          className={mergeActionClass("left-to-right", mergeState)}
+                          onClick={() => onMergeAction(rowIndex, "left-to-right", mergeTargetRows)}
+                          aria-label={mergeActionLabels.leftToRight}
+                          title={mergeActionLabels.leftToRight}
+                          disabled={!canMergeLeftToRight}
+                        >
+                          {"\u2192"}
+                        </button>
+                        <button
+                          type="button"
+                          className={mergeActionClass("right-to-left", mergeState)}
+                          onClick={() => onMergeAction(rowIndex, "right-to-left", mergeTargetRows)}
+                          aria-label={mergeActionLabels.rightToLeft}
+                          title={mergeActionLabels.rightToLeft}
+                          disabled={!canMergeRightToLeft}
+                        >
+                          {"\u2190"}
+                        </button>
+                        <button
+                          type="button"
+                          className={mergeActionClass("keep", mergeState)}
+                          onClick={() => onMergeAction(rowIndex, "keep", mergeTargetRows)}
+                          aria-label={mergeActionLabels.keep}
+                          title={mergeActionLabels.keep}
+                          disabled={!canKeepDifference}
+                        >
+                          {"\u00b7"}
+                        </button>
+                      </span>
+                    )}
+                  </span>
+                )}
+                <span className="diff-gutter">{r.rightNo ?? ""}</span>
+                <Cell text={r.right} side="right" format={format} />
+              </div>
+            );
+          })
         )}
       </div>
     </div>
