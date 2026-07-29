@@ -482,7 +482,7 @@ describe("DiffView", () => {
     expect(screen.getByRole("button", { name: "Take left to right preview" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Take right to left preview" })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
-    expect(screen.getByText("Right preview 1 | Left preview 1 | Kept 0")).toBeInTheDocument();
+    expect(screen.getByText("Right preview 1 | Left preview 1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Generate right-side plan (1 files)" }));
     expect(onStartApply).toHaveBeenLastCalledWith(
@@ -1048,7 +1048,7 @@ describe("DiffView", () => {
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
-    expect(screen.getByText("Right preview 1 | Left preview 0 | Kept 0")).toBeInTheDocument();
+    expect(screen.getByText("Right preview 1 | Left preview 0")).toBeInTheDocument();
     expect(screen.getAllByText("feature.enabled=false").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("feature.enabled=true")).not.toBeInTheDocument();
     expect(onStartApply).not.toHaveBeenCalled();
@@ -1057,11 +1057,8 @@ describe("DiffView", () => {
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
-    expect(screen.getByText("Right preview 0 | Left preview 1 | Kept 0")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep this difference" }));
-    expect(screen.getByText("Right preview 0 | Left preview 0 | Kept 1")).toBeInTheDocument();
+    expect(screen.getByText("Right preview 0 | Left preview 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Keep this difference" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
@@ -1185,12 +1182,12 @@ describe("DiffView", () => {
     expect(await screen.findByText("No merge preview changes yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Take left to right preview" })[0]);
-    expect(screen.getByText("Right preview 1 | Left preview 0 | Kept 0")).toBeInTheDocument();
+    expect(screen.getByText("Right preview 1 | Left preview 0")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
     fireEvent.click(screen.getByRole("button", { name: "Row" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Take right to left preview" })[0]);
-    expect(screen.getByText("Right preview 0 | Left preview 1 | Kept 0")).toBeInTheDocument();
+    expect(screen.getByText("Right preview 0 | Left preview 1")).toBeInTheDocument();
   });
 
   it("does not show apply entry points before compare output exists", () => {

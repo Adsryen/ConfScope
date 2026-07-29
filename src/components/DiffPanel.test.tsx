@@ -17,15 +17,13 @@ function renderDiffPanel(props: Parameters<typeof DiffPanel>[0], locale = "zh-CN
 
 describe("DiffPanel", () => {
   it("shows an identical state and both labels", () => {
-    renderDiffPanel(
-      {
-        leftLabel: "dev/app.yaml",
-        rightLabel: "prod/app.yaml",
-        leftText: "server.port=8080",
-        rightText: "server.port=8080",
-        format: "TEXT",
-      }
-    );
+    renderDiffPanel({
+      leftLabel: "dev/app.yaml",
+      rightLabel: "prod/app.yaml",
+      leftText: "server.port=8080",
+      rightText: "server.port=8080",
+      format: "TEXT",
+    });
 
     expect(screen.getByText("✓ 两侧内容完全一致")).toBeInTheDocument();
     expect(screen.getByText("dev/app.yaml")).toBeInTheDocument();
@@ -33,15 +31,13 @@ describe("DiffPanel", () => {
   });
 
   it("shows diff counters for changed content", () => {
-    renderDiffPanel(
-      {
-        leftLabel: "left",
-        rightLabel: "right",
-        leftText: "a\nb",
-        rightText: "a\nc\nd",
-        format: "TEXT",
-      }
-    );
+    renderDiffPanel({
+      leftLabel: "left",
+      rightLabel: "right",
+      leftText: "a\nb",
+      rightText: "a\nc\nd",
+      format: "TEXT",
+    });
 
     expect(document.querySelector(".stat-add")).toHaveTextContent("+1 新增");
     expect(document.querySelector(".stat-del")).toHaveTextContent("−0 删除");
@@ -49,14 +45,12 @@ describe("DiffPanel", () => {
   });
 
   it("can show only changed rows", () => {
-    renderDiffPanel(
-      {
-        leftLabel: "left",
-        rightLabel: "right",
-        leftText: "same\nold",
-        rightText: "same\nnew",
-      }
-    );
+    renderDiffPanel({
+      leftLabel: "left",
+      rightLabel: "right",
+      leftText: "same\nold",
+      rightText: "same\nnew",
+    });
 
     expect(screen.getAllByText("same")).toHaveLength(2);
 
@@ -68,16 +62,14 @@ describe("DiffPanel", () => {
   });
 
   it("can be controlled by a parent only-changes switch", () => {
-    renderDiffPanel(
-      {
-        leftLabel: "left",
-        rightLabel: "right",
-        leftText: "same\nold",
-        rightText: "same\nnew",
-        onlyChanges: true,
-        hideOnlyChangesToggle: true,
-      }
-    );
+    renderDiffPanel({
+      leftLabel: "left",
+      rightLabel: "right",
+      leftText: "same\nold",
+      rightText: "same\nnew",
+      onlyChanges: true,
+      hideOnlyChangesToggle: true,
+    });
 
     expect(screen.queryByText("same")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("仅显示变更")).not.toBeInTheDocument();
@@ -102,7 +94,6 @@ describe("DiffPanel", () => {
     expect(screen.getByText("No difference rows")).toBeInTheDocument();
   });
 
-
   it("renders block merge as one bracketed action for contiguous changed rows", () => {
     const onMergeAction = vi.fn();
     renderDiffPanel(
@@ -122,7 +113,6 @@ done`,
         mergeActionLabels: {
           leftToRight: "Take left block to right preview",
           rightToLeft: "Take right block to left preview",
-          keep: "Keep this block",
         },
         onMergeAction,
       },
@@ -131,14 +121,37 @@ done`,
 
     expect(screen.getAllByRole("button", { name: "Take left block to right preview" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Take right block to left preview" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Keep this block" })).toHaveLength(1);
-    expect(document.querySelectorAll(".diff-merge-gutter.block-first")).toHaveLength(1);
-    expect(document.querySelectorAll(".diff-merge-gutter.block-last")).toHaveLength(1);
-    expect(document.querySelectorAll(".diff-merge-block-brace")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Keep this block" })).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".diff-merge-side.left .diff-merge-block-brace")).toHaveLength(2);
+    expect(document.querySelectorAll(".diff-merge-side.right .diff-merge-block-brace")).toHaveLength(2);
+    expect(document.querySelectorAll(".diff-merge-block-brace")).toHaveLength(4);
 
     fireEvent.click(screen.getByRole("button", { name: "Take left block to right preview" }));
 
     expect(onMergeAction).toHaveBeenCalledWith(1, "left-to-right", [1, 2]);
+  });
+
+  it("keeps single-row merge actions split without block braces", () => {
+    renderDiffPanel(
+      {
+        leftLabel: "left",
+        rightLabel: "right",
+        leftText: "old",
+        rightText: "new",
+        format: "TEXT",
+        mergeActionScope: "block",
+        mergeActionLabels: {
+          leftToRight: "Take left block to right preview",
+          rightToLeft: "Take right block to left preview",
+        },
+        onMergeAction: vi.fn(),
+      },
+      "en-US"
+    );
+
+    expect(document.querySelector(".diff-merge-side.left .diff-merge-btn.right-to-left")).toBeInTheDocument();
+    expect(document.querySelector(".diff-merge-side.right .diff-merge-btn.left-to-right")).toBeInTheDocument();
+    expect(document.querySelector(".diff-merge-block-brace")).not.toBeInTheDocument();
   });
 
   it("localizes changed diff counters", () => {

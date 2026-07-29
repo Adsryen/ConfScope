@@ -121,7 +121,7 @@ function preferredNewline(text: string): string {
 function materializeMergeText(
   leftText: string,
   rightText: string,
-  direction: Exclude<MergeSelectionDirection, "keep">,
+  direction: MergeSelectionDirection,
   selectedRowIndexes: Set<number>
 ): string {
   const rows = diffLines(leftText, rightText).rows;
@@ -147,7 +147,7 @@ function materializeMergeText(
   return /\r?\n$/.test(baseText) && merged.length > 0 ? `${merged}${newline}` : merged;
 }
 
-function canMaterializeMerge(presence: MatchPresence, direction: Exclude<MergeSelectionDirection, "keep">): boolean {
+function canMaterializeMerge(presence: MatchPresence, direction: MergeSelectionDirection): boolean {
   if (presence === "both") return true;
   if (presence === "left-only") return direction === "left-to-right";
   return direction === "right-to-left";
@@ -157,7 +157,6 @@ function mergeAvailabilityForPresence(presence: MatchPresence): MergeActionAvail
   return {
     "left-to-right": presence !== "right-only",
     "right-to-left": presence !== "left-only",
-    keep: true,
   };
 }
 
@@ -165,7 +164,7 @@ function mergePreviewForItem(item: BatchResult, previews: Record<string, MergePr
   return previews[item.dataId] ?? { leftText: item.leftText, rightText: item.rightText };
 }
 
-function mergePreviewChanged(item: BatchResult, preview: MergePreviewText, direction: Exclude<MergeSelectionDirection, "keep">): boolean {
+function mergePreviewChanged(item: BatchResult, preview: MergePreviewText, direction: MergeSelectionDirection): boolean {
   return direction === "left-to-right" ? preview.rightText !== item.rightText : preview.leftText !== item.leftText;
 }
 
@@ -1184,25 +1183,23 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     const targetRows = rowIndexes && rowIndexes.length > 0 ? rowIndexes : [rowIndex];
     const keys = targetRows.map((index) => mergeSelectionKey(dataId, index));
 
-    if (direction !== "keep") {
-      if (!canMaterializeMerge(item.presence, direction)) return;
-      setMergePreviews((current) => {
-        const currentPreview = mergePreviewForItem(item, current);
-        const selectedRows = new Set(targetRows);
-        const nextPreview: MergePreviewText =
-          direction === "left-to-right"
-            ? {
-                ...currentPreview,
-                rightText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
-              }
-            : {
-                ...currentPreview,
-                leftText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
-              };
-        if (nextPreview.leftText === currentPreview.leftText && nextPreview.rightText === currentPreview.rightText) return current;
-        return { ...current, [dataId]: nextPreview };
-      });
-    }
+    if (!canMaterializeMerge(item.presence, direction)) return;
+    setMergePreviews((current) => {
+      const currentPreview = mergePreviewForItem(item, current);
+      const selectedRows = new Set(targetRows);
+      const nextPreview: MergePreviewText =
+        direction === "left-to-right"
+          ? {
+              ...currentPreview,
+              rightText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
+            }
+          : {
+              ...currentPreview,
+              leftText: materializeMergeText(currentPreview.leftText, currentPreview.rightText, direction, selectedRows),
+            };
+      if (nextPreview.leftText === currentPreview.leftText && nextPreview.rightText === currentPreview.rightText) return current;
+      return { ...current, [dataId]: nextPreview };
+    });
 
     setMergeSelections((current) => {
       const next = { ...current };
@@ -1211,15 +1208,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
-  const mergeSelectionValues = Object.values(mergeSelections);
   const mergeRightCount = batchResults.filter((item) =>
     mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "left-to-right")
   ).length;
   const mergeLeftCount = batchResults.filter((item) =>
     mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "right-to-left")
   ).length;
-  const mergeKeepCount = mergeSelectionValues.filter((item) => item === "keep").length;
-  const hasMergePreviewDraft = mergeRightCount + mergeLeftCount + mergeKeepCount > 0;
+  const hasMergePreviewDraft = mergeRightCount + mergeLeftCount > 0;
 
   const returnToMatchList = () => {
     setBatchResults([]);
@@ -1339,7 +1334,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
-  const startMergeDraftApply = (direction: Exclude<MergeSelectionDirection, "keep">) => {
+  const startMergeDraftApply = (direction: MergeSelectionDirection) => {
     if (!onStartApply || batchResults.length === 0) return;
     const sourceSide = direction === "left-to-right" ? left : right;
     const targetSide = direction === "left-to-right" ? right : left;
@@ -1435,445 +1430,448 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         </div>
       </div>
 
-      <section className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
-        <div className="diff-workflow-head">
-          <div className="diff-workflow-title-wrap">
-            <span className="diff-workflow-title">{t("diff.workflowTitle")}</span>
-            <span className="diff-workflow-current">{t("diff.workflowCurrent", { step: workflowStepLabel(currentWorkflowStep) })}</span>
-          </div>
-          <span className="diff-workflow-safety">{t("diff.workflowSafety")}</span>
-        </div>
-        <ol className="diff-workflow-steps">
-          {WORKFLOW_STEP_IDS.map((step) => {
-            const status = workflowStepStatus(step);
-            const label = workflowStepLabel(step);
-            return (
-              <li className={`diff-workflow-step ${status}${workflowFocusStep === step ? " focused" : ""}`} key={step}>
-                <button type="button" onClick={() => setWorkflowDetailStep(step)}>
-                  <span className="diff-workflow-step-status">{t(`diff.workflowStatus.${status}`)}</span>
-                  <span className="diff-workflow-step-label">{label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="diff-workflow-detail">
-          <span className="diff-workflow-detail-title">
-            {t("diff.workflowDetailTitle", { step: workflowStepLabel(workflowFocusStep) })}
-          </span>
-          <span>{workflowStepDetail(workflowFocusStep)}</span>
-        </div>
-        <div className="diff-workflow-note">{t("diff.workflowSandbox")}</div>
-      </section>
-
-      <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
-        <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
-          <div className="diff-source-summary-card">
-            <span className="diff-source-summary-title">{t("diff.sourceA")}</span>
-            {leftConn?.sourceType === "local-snapshot" ? (
-              <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
-            ) : leftConn ? (
-              <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />
-            ) : null}
-            <span className="diff-source-summary-text" title={sourceSummary(left, connections, t("diff.autoMatch"), t)}>
-              {sourceSummary(left, connections, t("diff.autoMatch"), t)}
-            </span>
-          </div>
-          <div className="diff-source-summary-card">
-            <span className="diff-source-summary-title">{t("diff.sourceB")}</span>
-            {rightConn?.sourceType === "local-snapshot" ? (
-              <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
-            ) : rightConn ? (
-              <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />
-            ) : null}
-            <span className="diff-source-summary-text" title={sourceSummary(right, connections, t("diff.autoMatch"), t)}>
-              {sourceSummary(right, connections, t("diff.autoMatch"), t)}
-            </span>
-          </div>
-        </div>
-        <div className="diff-sources" ref={sourcesRef} aria-hidden={sourcesCollapsed}>
-          <SourcePicker
-            title={t("diff.sourceA")}
-            connections={connections}
-            projectConnections={projectConnections}
-            source={left}
-            onChange={updateLeft}
-            onLoadError={() => setSourcesCollapsed(false)}
-            onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
-            sortNamespaces={settings.compare.sortNamespaces}
-          />
-          <SourcePicker
-            title={t("diff.sourceB")}
-            connections={connections}
-            projectConnections={projectConnections}
-            source={right}
-            onChange={updateRight}
-            onLoadError={() => setSourcesCollapsed(false)}
-            onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
-            sortNamespaces={settings.compare.sortNamespaces}
-          />
-        </div>
-        <button
-          type="button"
-          className="diff-source-toggle-edge"
-          onClick={() => setSourcesCollapsed((value) => !value)}
-          aria-label={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
-          title={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
-        >
-          <span aria-hidden="true">{sourcesCollapsed ? "\u2304" : "\u2303"}</span>
-        </button>
-      </div>
-
-      <div className={`diff-loadbar${showingBatchDiff ? " result-actions" : ""}`}>
-        {showingBatchDiff ? (
-          <>
-            <div className="merge-workbench-summary" aria-live="polite">
-              <div className="merge-workbench-copy">
-                <span className="merge-workbench-title">{t("diff.mergeWorkbenchTitle")}</span>
-                <span className="merge-workbench-hint">{t("diff.mergeWorkbenchHint")}</span>
-              </div>
-              <div className="merge-scope-toggle" role="group" aria-label={t("diff.mergeScopeLabel")}>
-                <span className="merge-scope-label">{t("diff.mergeScopeLabel")}</span>
-                <button
-                  type="button"
-                  className={`merge-scope-btn${mergeSelectionScope === "row" ? " active" : ""}`}
-                  onClick={() => setMergeSelectionScope("row")}
-                  aria-pressed={mergeSelectionScope === "row"}
-                >
-                  {t("diff.mergeScopeRow")}
-                </button>
-                <button
-                  type="button"
-                  className={`merge-scope-btn${mergeSelectionScope === "block" ? " active" : ""}`}
-                  onClick={() => setMergeSelectionScope("block")}
-                  aria-pressed={mergeSelectionScope === "block"}
-                >
-                  {t("diff.mergeScopeBlock")}
-                </button>
-              </div>
-              <span className="merge-draft-summary">
-                {hasMergePreviewDraft
-                  ? t("diff.mergeDraftSummary", { right: mergeRightCount, left: mergeLeftCount, keep: mergeKeepCount })
-                  : t("diff.mergeDraftEmpty")}
-              </span>
+      <div className="diff-workspace">
+        <aside className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
+          <div className="diff-workflow-head">
+            <div className="diff-workflow-title-wrap">
+              <span className="diff-workflow-title">{t("diff.workflowTitle")}</span>
+              <span className="diff-workflow-current">{t("diff.workflowCurrent", { step: workflowStepLabel(currentWorkflowStep) })}</span>
             </div>
-            <span className="fmt-spacer" />
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm result-action result-action-back"
-              onClick={returnToMatchList}
-              disabled={batchLoading}
-            >
-              {t("diff.backToMatchList")}
-            </button>
-            <span className="batch-diff-count result-action-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
-            <label className="diff-toggle result-action-filter">
-              <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
-              {t("diff.batchOnlyChanges")}
-            </label>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm result-action result-action-clear"
-              onClick={() => {
-                setMergeSelections({});
-                setMergePreviews({});
-              }}
-              disabled={!hasMergePreviewDraft}
-            >
-              {t("diff.mergeClearDraft")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm result-action result-action-export"
-              title={t("diff.exportDiff")}
-              onClick={() => {
-                const diffs: DiffItem[] = batchResults.map((item) => ({
-                  dataId: item.dataId,
-                  group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
-                  namespace: left.tenant || "",
-                  leftValue: item.leftText,
-                  rightValue: item.rightText,
-                  diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
-                }));
-                exportDiff(diffs, "json");
-              }}
-            >
-              {t("diff.exportDiff")}
-            </button>
-            {onStartApply && (
-              <div className="merge-plan-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm result-action result-action-merge-plan"
-                  onClick={() => startMergeDraftApply("left-to-right")}
-                  disabled={mergeRightCount === 0}
-                >
-                  {t("diff.startRightMergePlan", { count: mergeRightCount })}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm result-action result-action-merge-plan"
-                  onClick={() => startMergeDraftApply("right-to-left")}
-                  disabled={mergeLeftCount === 0}
-                >
-                  {t("diff.startLeftMergePlan", { count: mergeLeftCount })}
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm result-action result-action-plan" onClick={startBatchApply}>
-                  {t("diff.startWholeBatchApply")}
-                </button>
+            <span className="diff-workflow-safety">{t("diff.workflowSafety")}</span>
+          </div>
+          <ol className="diff-workflow-steps">
+            {WORKFLOW_STEP_IDS.map((step) => {
+              const status = workflowStepStatus(step);
+              const label = workflowStepLabel(step);
+              return (
+                <li className={`diff-workflow-step ${status}${workflowFocusStep === step ? " focused" : ""}`} key={step}>
+                  <button type="button" onClick={() => setWorkflowDetailStep(step)}>
+                    <span className="diff-workflow-step-status">{t(`diff.workflowStatus.${status}`)}</span>
+                    <span className="diff-workflow-step-label">{label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="diff-workflow-detail">
+            <span className="diff-workflow-detail-title">
+              {t("diff.workflowDetailTitle", { step: workflowStepLabel(workflowFocusStep) })}
+            </span>
+            <span>{workflowStepDetail(workflowFocusStep)}</span>
+          </div>
+          <div className="diff-workflow-note">{t("diff.workflowSandbox")}</div>
+        </aside>
+
+        <div className="diff-main-column">
+          <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
+            <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
+              <div className="diff-source-summary-card">
+                <span className="diff-source-summary-title">{t("diff.sourceA")}</span>
+                {leftConn?.sourceType === "local-snapshot" ? (
+                  <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+                ) : leftConn ? (
+                  <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />
+                ) : null}
+                <span className="diff-source-summary-text" title={sourceSummary(left, connections, t("diff.autoMatch"), t)}>
+                  {sourceSummary(left, connections, t("diff.autoMatch"), t)}
+                </span>
               </div>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="fmt-label">{t("diff.compareMode")}</span>
-            <Select
-              value={mode}
-              options={[
-                { value: "text", label: t("diff.modeText") },
-                { value: "lines", label: t("diff.modeLines") },
-                { value: "key", label: t("diff.modeKey") },
-              ]}
-              onChange={(value) => setMode(value as DiffMode)}
-            />
-            {matchResults ? (
-              <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
-                {batchLoading ? t("diff.comparing") : t("diff.compareSelected", { count: selectedIds.size })}
-              </button>
+              <div className="diff-source-summary-card">
+                <span className="diff-source-summary-title">{t("diff.sourceB")}</span>
+                {rightConn?.sourceType === "local-snapshot" ? (
+                  <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+                ) : rightConn ? (
+                  <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />
+                ) : null}
+                <span className="diff-source-summary-text" title={sourceSummary(right, connections, t("diff.autoMatch"), t)}>
+                  {sourceSummary(right, connections, t("diff.autoMatch"), t)}
+                </span>
+              </div>
+            </div>
+            <div className="diff-sources" ref={sourcesRef} aria-hidden={sourcesCollapsed}>
+              <SourcePicker
+                title={t("diff.sourceA")}
+                connections={connections}
+                projectConnections={projectConnections}
+                source={left}
+                onChange={updateLeft}
+                onLoadError={() => setSourcesCollapsed(false)}
+                onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
+                sortNamespaces={settings.compare.sortNamespaces}
+              />
+              <SourcePicker
+                title={t("diff.sourceB")}
+                connections={connections}
+                projectConnections={projectConnections}
+                source={right}
+                onChange={updateRight}
+                onLoadError={() => setSourcesCollapsed(false)}
+                onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
+                sortNamespaces={settings.compare.sortNamespaces}
+              />
+            </div>
+            <button
+              type="button"
+              className="diff-source-toggle-edge"
+              onClick={() => setSourcesCollapsed((value) => !value)}
+              aria-label={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+              title={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+            >
+              <span aria-hidden="true">{sourcesCollapsed ? "\u2304" : "\u2303"}</span>
+            </button>
+          </div>
+
+          <div className={`diff-loadbar${showingBatchDiff ? " result-actions" : ""}`}>
+            {showingBatchDiff ? (
+              <>
+                <div className="merge-workbench-summary" aria-live="polite">
+                  <div className="merge-workbench-copy">
+                    <span className="merge-workbench-title">{t("diff.mergeWorkbenchTitle")}</span>
+                    <span className="merge-workbench-hint">{t("diff.mergeWorkbenchHint")}</span>
+                  </div>
+                  <div className="merge-scope-toggle" role="group" aria-label={t("diff.mergeScopeLabel")}>
+                    <span className="merge-scope-label">{t("diff.mergeScopeLabel")}</span>
+                    <button
+                      type="button"
+                      className={`merge-scope-btn${mergeSelectionScope === "row" ? " active" : ""}`}
+                      onClick={() => setMergeSelectionScope("row")}
+                      aria-pressed={mergeSelectionScope === "row"}
+                    >
+                      {t("diff.mergeScopeRow")}
+                    </button>
+                    <button
+                      type="button"
+                      className={`merge-scope-btn${mergeSelectionScope === "block" ? " active" : ""}`}
+                      onClick={() => setMergeSelectionScope("block")}
+                      aria-pressed={mergeSelectionScope === "block"}
+                    >
+                      {t("diff.mergeScopeBlock")}
+                    </button>
+                  </div>
+                  <span className="merge-draft-summary">
+                    {hasMergePreviewDraft
+                      ? t("diff.mergeDraftSummary", { right: mergeRightCount, left: mergeLeftCount })
+                      : t("diff.mergeDraftEmpty")}
+                  </span>
+                </div>
+                <span className="fmt-spacer" />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm result-action result-action-back"
+                  onClick={returnToMatchList}
+                  disabled={batchLoading}
+                >
+                  {t("diff.backToMatchList")}
+                </button>
+                <span className="batch-diff-count result-action-count">{t("diff.batchGenerated", { count: batchResults.length })}</span>
+                <label className="diff-toggle result-action-filter">
+                  <input type="checkbox" checked={batchAllOnlyChanges} onChange={(e) => toggleBatchOnlyChanges(e.target.checked)} />
+                  {t("diff.batchOnlyChanges")}
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm result-action result-action-clear"
+                  onClick={() => {
+                    setMergeSelections({});
+                    setMergePreviews({});
+                  }}
+                  disabled={!hasMergePreviewDraft}
+                >
+                  {t("diff.mergeClearDraft")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm result-action result-action-export"
+                  title={t("diff.exportDiff")}
+                  onClick={() => {
+                    const diffs: DiffItem[] = batchResults.map((item) => ({
+                      dataId: item.dataId,
+                      group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
+                      namespace: left.tenant || "",
+                      leftValue: item.leftText,
+                      rightValue: item.rightText,
+                      diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
+                    }));
+                    exportDiff(diffs, "json");
+                  }}
+                >
+                  {t("diff.exportDiff")}
+                </button>
+                {onStartApply && (
+                  <div className="merge-plan-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm result-action result-action-merge-plan"
+                      onClick={() => startMergeDraftApply("left-to-right")}
+                      disabled={mergeRightCount === 0}
+                    >
+                      {t("diff.startRightMergePlan", { count: mergeRightCount })}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm result-action result-action-merge-plan"
+                      onClick={() => startMergeDraftApply("right-to-left")}
+                      disabled={mergeLeftCount === 0}
+                    >
+                      {t("diff.startLeftMergePlan", { count: mergeLeftCount })}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm result-action result-action-plan" onClick={startBatchApply}>
+                      {t("diff.startWholeBatchApply")}
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
-              <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
-                {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
-              </button>
+              <>
+                <span className="fmt-label">{t("diff.compareMode")}</span>
+                <Select
+                  value={mode}
+                  options={[
+                    { value: "text", label: t("diff.modeText") },
+                    { value: "lines", label: t("diff.modeLines") },
+                    { value: "key", label: t("diff.modeKey") },
+                  ]}
+                  onChange={(value) => setMode(value as DiffMode)}
+                />
+                {matchResults ? (
+                  <button className="btn btn-primary" onClick={loadBatch} disabled={batchLoading || selectedIds.size === 0}>
+                    {batchLoading ? t("diff.comparing") : t("diff.compareSelected", { count: selectedIds.size })}
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={loadBoth} disabled={loading || matchLoading}>
+                    {loading || matchLoading ? t("common.loading") : t("diff.loadAndCompare")}
+                  </button>
+                )}
+                {!matchResults && ready && onStartApply && (
+                  <button className="btn btn-ghost" onClick={startSingleApply}>
+                    {t("diff.startApply")}
+                  </button>
+                )}
+                {notice && (
+                  <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>
+                    <span>{notice}</span>
+                    {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
+                  </div>
+                )}
+                {error && (
+                  <div className="diff-loaderr">
+                    <span>{error}</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={retryCurrentCompare}
+                      disabled={loading || matchLoading || batchLoading}
+                    >
+                      {t("diff.retryCompare")}
+                    </button>
+                    <CopyButton text={error} label={t("diff.copyError")} />
+                  </div>
+                )}
+              </>
             )}
-            {!matchResults && ready && onStartApply && (
-              <button className="btn btn-ghost" onClick={startSingleApply}>
-                {t("diff.startApply")}
-              </button>
-            )}
-            {notice && (
-              <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>
-                <span>{notice}</span>
-                {(leftFailed || rightFailed) && <CopyButton text={notice} label={t("diff.copyError")} />}
-              </div>
-            )}
-            {error && (
-              <div className="diff-loaderr">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={retryCurrentCompare}
-                  disabled={loading || matchLoading || batchLoading}
-                >
-                  {t("diff.retryCompare")}
-                </button>
-                <CopyButton text={error} label={t("diff.copyError")} />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`}>
-        {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
-          <div className="match-list">
-            <div className="match-list-head">
-              <label className="match-toggle-all">
-                <input type="checkbox" checked={selectedIds.size === matchResults.length} onChange={toggleAll} />
-                {t("diff.selectAll")}
-              </label>
-              <span className="match-count">{t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}</span>
-              {hasFilePresenceDiff && (
-                <button type="button" className="btn btn-ghost btn-sm match-same-only" onClick={selectSameNameMatches}>
-                  {t("diff.selectSameNameOnly")}
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => doMatch()}
-                disabled={matchLoading}
-                title={t("diff.refreshMatch")}
-              >
-                ⟳
-              </button>
-            </div>
-            <div className="match-side-by-side">
-              <div className="match-side-list left">
-                <div className="match-side-title">{t("diff.sourceA")}</div>
-                <div className="match-side-scroll">
-                  {matchResults.map((item) => (
-                    <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
-                      <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
-                      <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
-                        {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
-                      </span>
-                      <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                      <span className="match-group">{item.leftGroup}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="match-side-list right">
-                <div className="match-side-title">{t("diff.sourceB")}</div>
-                <div className="match-side-scroll">
-                  {matchResults.map((item) => (
-                    <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
-                      <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
-                        {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
-                      </span>
-                      <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                      <span className="match-group">{item.rightGroup}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
           </div>
-        )}
 
-        {batchResults.length > 0 && (
-          <div className="batch-diff">
-            {failedItems.length > 0 && (
-              <div className="batch-diff-failures">
-                <div className="batch-diff-failures-head">
-                  <span className="batch-diff-failures-count">{t("diff.batchFailureHeader", { count: failedItems.length })}</span>
+          <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`}>
+            {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
+              <div className="match-list">
+                <div className="match-list-head">
+                  <label className="match-toggle-all">
+                    <input type="checkbox" checked={selectedIds.size === matchResults.length} onChange={toggleAll} />
+                    {t("diff.selectAll")}
+                  </label>
+                  <span className="match-count">{t("diff.matchCount", { total: matchResults.length, selected: selectedIds.size })}</span>
+                  {hasFilePresenceDiff && (
+                    <button type="button" className="btn btn-ghost btn-sm match-same-only" onClick={selectSameNameMatches}>
+                      {t("diff.selectSameNameOnly")}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      const retryItems = matchResults?.filter((m) => failedItems.some((f) => f.dataId === m.dataId)) ?? [];
-                      setSelectedIds(new Set(retryItems.map((r) => r.dataId)));
-                      void loadBatch();
-                    }}
-                    disabled={batchLoading}
+                    onClick={() => doMatch()}
+                    disabled={matchLoading}
+                    title={t("diff.refreshMatch")}
                   >
-                    {t("diff.retryAll")}
+                    ⟳
                   </button>
                 </div>
-                <div className="batch-diff-failures-list">
-                  {failedItems.map((f) => (
-                    <div className="batch-diff-failures-item" key={f.dataId}>
-                      <span className="batch-diff-failures-dataid">{f.dataId}</span>
-                      <span className="batch-diff-failures-error">{f.error}</span>
-                      <CopyButton text={`${f.dataId}: ${f.error}`} label={t("diff.copyError")} />
+                <div className="match-side-by-side">
+                  <div className="match-side-list left">
+                    <div className="match-side-title">{t("diff.sourceA")}</div>
+                    <div className="match-side-scroll">
+                      {matchResults.map((item) => (
+                        <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
+                          <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
+                          <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
+                            {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
+                          </span>
+                          <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                          <span className="match-group">{item.leftGroup}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="match-side-list right">
+                    <div className="match-side-title">{t("diff.sourceB")}</div>
+                    <div className="match-side-scroll">
+                      {matchResults.map((item) => (
+                        <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
+                          <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
+                            {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
+                          </span>
+                          <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                          <span className="match-group">{item.rightGroup}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {batchResults.length > 0 && (
+              <div className="batch-diff">
+                {failedItems.length > 0 && (
+                  <div className="batch-diff-failures">
+                    <div className="batch-diff-failures-head">
+                      <span className="batch-diff-failures-count">{t("diff.batchFailureHeader", { count: failedItems.length })}</span>
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
                         onClick={() => {
-                          setSelectedIds(new Set([f.dataId]));
+                          const retryItems = matchResults?.filter((m) => failedItems.some((f) => f.dataId === m.dataId)) ?? [];
+                          setSelectedIds(new Set(retryItems.map((r) => r.dataId)));
                           void loadBatch();
                         }}
                         disabled={batchLoading}
                       >
-                        {t("common.retry")}
+                        {t("diff.retryAll")}
                       </button>
                     </div>
-                  ))}
+                    <div className="batch-diff-failures-list">
+                      {failedItems.map((f) => (
+                        <div className="batch-diff-failures-item" key={f.dataId}>
+                          <span className="batch-diff-failures-dataid">{f.dataId}</span>
+                          <span className="batch-diff-failures-error">{f.error}</span>
+                          <CopyButton text={`${f.dataId}: ${f.error}`} label={t("diff.copyError")} />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              setSelectedIds(new Set([f.dataId]));
+                              void loadBatch();
+                            }}
+                            disabled={batchLoading}
+                          >
+                            {t("common.retry")}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="batch-diff-layout">
+                  <aside className="batch-diff-nav" aria-label={t("diff.batchFileList")}>
+                    <div className="batch-diff-nav-head">{t("diff.batchFileList")}</div>
+                    <div className="batch-diff-nav-scroll">
+                      {batchResults.map((item) => {
+                        const stats = batchResultStatsMap[item.dataId] ?? batchResultStats(item.leftText, item.rightText);
+                        const active = item.dataId === selectedBatchItem?.dataId;
+                        return (
+                          <button
+                            type="button"
+                            className={`batch-diff-nav-item${active ? " active" : ""}`}
+                            key={item.dataId}
+                            onClick={() => setSelectedBatchDataId(item.dataId)}
+                            aria-current={active ? "true" : undefined}
+                          >
+                            <div className="batch-diff-nav-top">
+                              <span className="batch-diff-nav-title" title={item.dataId}>
+                                {item.dataId}
+                              </span>
+                              <div className="diff-stats batch-diff-nav-stats" aria-label={t("diff.diffStats")}>
+                                <span className="stat stat-add">{t("diff.statAdded", { count: stats.added })}</span>
+                                <span className="stat stat-del">{t("diff.statDeleted", { count: stats.removed })}</span>
+                                <span className="stat stat-mod">{t("diff.statModified", { count: stats.modified })}</span>
+                              </div>
+                            </div>
+                            <div className="batch-diff-nav-meta">
+                              <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </aside>
+
+                  <section className="batch-diff-main">
+                    {selectedBatchItem ? (
+                      <>
+                        <div className="batch-diff-main-head">
+                          <div className="batch-diff-main-title-wrap">
+                            <span className="batch-diff-main-title">{selectedBatchItem.dataId}</span>
+                            <span className={`batch-diff-presence ${selectedBatchItem.presence}`}>
+                              {matchPresenceLabel(selectedBatchItem.presence)}
+                            </span>
+                          </div>
+                          <div className="batch-diff-main-meta">
+                            <span className="batch-diff-main-label" title={selectedBatchItem.leftLabel}>
+                              {selectedBatchItem.leftLabel}
+                            </span>
+                            <span aria-hidden="true">{"\u2194"}</span>
+                            <span className="batch-diff-main-label" title={selectedBatchItem.rightLabel}>
+                              {selectedBatchItem.rightLabel}
+                            </span>
+                          </div>
+                        </div>
+                        <DiffPanel
+                          leftLabel={selectedBatchItem.leftLabel}
+                          rightLabel={selectedBatchItem.rightLabel}
+                          leftText={mergePreviewForItem(selectedBatchItem, mergePreviews).leftText}
+                          rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
+                          format={selectedBatchItem.format}
+                          onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
+                          onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
+                          mergeActionLabels={{
+                            leftToRight: t("diff.mergeAddToRightPlan"),
+                            rightToLeft: t("diff.mergeAddToLeftPlan"),
+                          }}
+                          mergeActionScope={mergeSelectionScope}
+                          mergeActionAvailability={mergeAvailabilityForPresence(selectedBatchItem.presence)}
+                          getMergeActionState={(rowIndex) => {
+                            const direction = mergeSelections[mergeSelectionKey(selectedBatchItem.dataId, rowIndex)];
+                            return direction ? { direction } : undefined;
+                          }}
+                          onMergeAction={(rowIndex, direction, rowIndexes) =>
+                            setMergeSelection(selectedBatchItem.dataId, rowIndex, direction, rowIndexes)
+                          }
+                        />
+                      </>
+                    ) : (
+                      <div className="pad-msg big">{t("diff.batchSelectHint")}</div>
+                    )}
+                  </section>
                 </div>
               </div>
             )}
-            <div className="batch-diff-layout">
-              <aside className="batch-diff-nav" aria-label={t("diff.batchFileList")}>
-                <div className="batch-diff-nav-head">{t("diff.batchFileList")}</div>
-                <div className="batch-diff-nav-scroll">
-                  {batchResults.map((item) => {
-                    const stats = batchResultStatsMap[item.dataId] ?? batchResultStats(item.leftText, item.rightText);
-                    const active = item.dataId === selectedBatchItem?.dataId;
-                    return (
-                      <button
-                        type="button"
-                        className={`batch-diff-nav-item${active ? " active" : ""}`}
-                        key={item.dataId}
-                        onClick={() => setSelectedBatchDataId(item.dataId)}
-                        aria-current={active ? "true" : undefined}
-                      >
-                        <div className="batch-diff-nav-top">
-                          <span className="batch-diff-nav-title" title={item.dataId}>
-                            {item.dataId}
-                          </span>
-                          <div className="diff-stats batch-diff-nav-stats" aria-label={t("diff.diffStats")}>
-                            <span className="stat stat-add">{t("diff.statAdded", { count: stats.added })}</span>
-                            <span className="stat stat-del">{t("diff.statDeleted", { count: stats.removed })}</span>
-                            <span className="stat stat-mod">{t("diff.statModified", { count: stats.modified })}</span>
-                          </div>
-                        </div>
-                        <div className="batch-diff-nav-meta">
-                          <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </aside>
 
-              <section className="batch-diff-main">
-                {selectedBatchItem ? (
-                  <>
-                    <div className="batch-diff-main-head">
-                      <div className="batch-diff-main-title-wrap">
-                        <span className="batch-diff-main-title">{selectedBatchItem.dataId}</span>
-                        <span className={`batch-diff-presence ${selectedBatchItem.presence}`}>
-                          {matchPresenceLabel(selectedBatchItem.presence)}
-                        </span>
-                      </div>
-                      <div className="batch-diff-main-meta">
-                        <span className="batch-diff-main-label" title={selectedBatchItem.leftLabel}>
-                          {selectedBatchItem.leftLabel}
-                        </span>
-                        <span aria-hidden="true">{"\u2194"}</span>
-                        <span className="batch-diff-main-label" title={selectedBatchItem.rightLabel}>
-                          {selectedBatchItem.rightLabel}
-                        </span>
-                      </div>
-                    </div>
-                    <DiffPanel
-                      leftLabel={selectedBatchItem.leftLabel}
-                      rightLabel={selectedBatchItem.rightLabel}
-                      leftText={mergePreviewForItem(selectedBatchItem, mergePreviews).leftText}
-                      rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
-                      format={selectedBatchItem.format}
-                      onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
-                      onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
-                      mergeActionLabels={{
-                        leftToRight: t("diff.mergeAddToRightPlan"),
-                        rightToLeft: t("diff.mergeAddToLeftPlan"),
-                        keep: t("diff.mergeKeepDifference"),
-                      }}
-                      mergeActionScope={mergeSelectionScope}
-                      mergeActionAvailability={mergeAvailabilityForPresence(selectedBatchItem.presence)}
-                      getMergeActionState={(rowIndex) => {
-                        const direction = mergeSelections[mergeSelectionKey(selectedBatchItem.dataId, rowIndex)];
-                        return direction ? { direction } : undefined;
-                      }}
-                      onMergeAction={(rowIndex, direction, rowIndexes) =>
-                        setMergeSelection(selectedBatchItem.dataId, rowIndex, direction, rowIndexes)
-                      }
-                    />
-                  </>
-                ) : (
-                  <div className="pad-msg big">{t("diff.batchSelectHint")}</div>
-                )}
-              </section>
-            </div>
+            {!matchResults && ready ? (
+              <DiffPanel
+                leftLabel={leftLoaded.label}
+                rightLabel={rightLoaded.label}
+                leftText={leftText}
+                rightText={rightText}
+                format={diffFormat}
+              />
+            ) : !matchResults && !ready ? (
+              <div className="pad-msg big">
+                {t("diff.selectHint")}
+                <div className="diff-hint">{t("diff.supportHint")}</div>
+                <div className="diff-hint">{t("diff.nextStepHint")}</div>
+              </div>
+            ) : null}
           </div>
-        )}
-
-        {!matchResults && ready ? (
-          <DiffPanel
-            leftLabel={leftLoaded.label}
-            rightLabel={rightLoaded.label}
-            leftText={leftText}
-            rightText={rightText}
-            format={diffFormat}
-          />
-        ) : !matchResults && !ready ? (
-          <div className="pad-msg big">
-            {t("diff.selectHint")}
-            <div className="diff-hint">{t("diff.supportHint")}</div>
-            <div className="diff-hint">{t("diff.nextStepHint")}</div>
-          </div>
-        ) : null}
+        </div>
       </div>
     </div>
   );
