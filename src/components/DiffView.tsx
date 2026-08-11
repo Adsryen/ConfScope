@@ -27,13 +27,10 @@ import {
 import Combobox from "./Combobox";
 import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
+import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
 
 type DiffMode = "text" | "key" | "lines";
-type WorkflowStepId = "choose" | "compare" | "plan" | "execute" | "verify";
-type WorkflowStepStatus = "completed" | "current" | "upcoming";
-
-const WORKFLOW_STEP_IDS: WorkflowStepId[] = ["choose", "compare", "plan", "execute", "verify"];
 
 interface DiffJumpParams {
   leftConnId: string;
@@ -148,15 +145,13 @@ function materializeMergeText(
 }
 
 function canMaterializeMerge(presence: MatchPresence, direction: MergeSelectionDirection): boolean {
-  if (presence === "both") return true;
-  if (presence === "left-only") return direction === "left-to-right";
-  return direction === "right-to-left";
+  return direction === "left-to-right" && presence !== "right-only";
 }
 
 function mergeAvailabilityForPresence(presence: MatchPresence): MergeActionAvailability {
   return {
     "left-to-right": presence !== "right-only",
-    "right-to-left": presence !== "left-only",
+    "right-to-left": false,
   };
 }
 
@@ -1211,10 +1206,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const mergeRightCount = batchResults.filter((item) =>
     mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "left-to-right")
   ).length;
-  const mergeLeftCount = batchResults.filter((item) =>
-    mergePreviewChanged(item, mergePreviewForItem(item, mergePreviews), "right-to-left")
-  ).length;
-  const hasMergePreviewDraft = mergeRightCount + mergeLeftCount > 0;
+  const hasMergePreviewDraft = mergeRightCount > 0;
 
   const returnToMatchList = () => {
     setBatchResults([]);
@@ -1254,22 +1246,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         : matchResults
           ? "compare"
           : "choose";
-  const currentWorkflowIndex = WORKFLOW_STEP_IDS.indexOf(currentWorkflowStep);
-  const workflowFocusStep = workflowDetailStep ?? currentWorkflowStep;
-  const workflowStepLabel = (step: WorkflowStepId) => {
-    const stepNumber = WORKFLOW_STEP_IDS.indexOf(step) + 1;
-    return t(`diff.workflowStep${stepNumber}`);
-  };
-  const workflowStepDetail = (step: WorkflowStepId) => {
-    const stepNumber = WORKFLOW_STEP_IDS.indexOf(step) + 1;
-    return t(`diff.workflowStep${stepNumber}Detail`);
-  };
-  const workflowStepStatus = (step: WorkflowStepId): WorkflowStepStatus => {
-    const index = WORKFLOW_STEP_IDS.indexOf(step);
-    if (index < currentWorkflowIndex) return "completed";
-    if (index === currentWorkflowIndex) return "current";
-    return "upcoming";
-  };
 
   const startSingleApply = () => {
     if (!ready || !onStartApply) return;
@@ -1334,12 +1310,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
-  const startMergeDraftApply = (direction: MergeSelectionDirection) => {
+  const startMergeDraftApply = () => {
     if (!onStartApply || batchResults.length === 0) return;
-    const sourceSide = direction === "left-to-right" ? left : right;
-    const targetSide = direction === "left-to-right" ? right : left;
-    const source = applyEntryEndpointFromSource(sourceSide, connections);
-    const target = applyEntryEndpointFromSource(targetSide, connections);
+    const source = applyEntryEndpointFromSource(left, connections);
+    const target = applyEntryEndpointFromSource(right, connections);
     if (!source || !target) return;
 
     const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));
@@ -1347,24 +1321,24 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     const items = batchResults
       .map((item): ApplyEntryItem | null => {
         const preview = mergePreviewForItem(item, mergePreviews);
-        if (!mergePreviewChanged(item, preview, direction)) return null;
-        if (!canMaterializeMerge(item.presence, direction)) {
+        if (!mergePreviewChanged(item, preview, "left-to-right")) return null;
+        if (!canMaterializeMerge(item.presence, "left-to-right")) {
           skippedCount += 1;
           return null;
         }
 
-        const mergedText = direction === "left-to-right" ? preview.rightText : preview.leftText;
-        const currentTargetText = direction === "left-to-right" ? item.rightText : item.leftText;
+        const mergedText = preview.rightText;
+        const currentTargetText = item.rightText;
         if (mergedText === currentTargetText) {
           skippedCount += 1;
           return null;
         }
 
         const match = matchByDataId.get(item.dataId);
-        const sourceGroup = direction === "left-to-right" ? (match?.leftGroup ?? left.group) : (match?.rightGroup ?? right.group);
-        const targetGroup = direction === "left-to-right" ? (match?.rightGroup ?? right.group) : (match?.leftGroup ?? left.group);
-        const sourceRef = applyEntryItemFromSource(sourceSide, connections, item.dataId, sourceGroup);
-        const targetRef = applyEntryItemFromSource(targetSide, connections, item.dataId, targetGroup);
+        const sourceGroup = match?.leftGroup ?? left.group;
+        const targetGroup = match?.rightGroup ?? right.group;
+        const sourceRef = applyEntryItemFromSource(left, connections, item.dataId, sourceGroup);
+        const targetRef = applyEntryItemFromSource(right, connections, item.dataId, targetGroup);
         if (!sourceRef || !targetRef) return null;
 
         const normalized = normalizeConfig(mergedText, item.format);
@@ -1410,6 +1384,14 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     });
   };
 
+  const startApplyFromCurrentDiff = () => {
+    if (hasMergePreviewDraft) {
+      startMergeDraftApply();
+      return;
+    }
+    startBatchApply();
+  };
+
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
@@ -1431,36 +1413,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       </div>
 
       <div className="diff-workspace">
-        <aside className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
-          <div className="diff-workflow-head">
-            <div className="diff-workflow-title-wrap">
-              <span className="diff-workflow-title">{t("diff.workflowTitle")}</span>
-              <span className="diff-workflow-current">{t("diff.workflowCurrent", { step: workflowStepLabel(currentWorkflowStep) })}</span>
-            </div>
-            <span className="diff-workflow-safety">{t("diff.workflowSafety")}</span>
-          </div>
-          <ol className="diff-workflow-steps">
-            {WORKFLOW_STEP_IDS.map((step) => {
-              const status = workflowStepStatus(step);
-              const label = workflowStepLabel(step);
-              return (
-                <li className={`diff-workflow-step ${status}${workflowFocusStep === step ? " focused" : ""}`} key={step}>
-                  <button type="button" onClick={() => setWorkflowDetailStep(step)}>
-                    <span className="diff-workflow-step-status">{t(`diff.workflowStatus.${status}`)}</span>
-                    <span className="diff-workflow-step-label">{label}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          <div className="diff-workflow-detail">
-            <span className="diff-workflow-detail-title">
-              {t("diff.workflowDetailTitle", { step: workflowStepLabel(workflowFocusStep) })}
-            </span>
-            <span>{workflowStepDetail(workflowFocusStep)}</span>
-          </div>
-          <div className="diff-workflow-note">{t("diff.workflowSandbox")}</div>
-        </aside>
+        <DiffWorkflowCard currentStep={currentWorkflowStep} detailStep={workflowDetailStep} onDetailStepChange={setWorkflowDetailStep} />
 
         <div className="diff-main-column">
           <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
@@ -1499,6 +1452,11 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
                 sortNamespaces={settings.compare.sortNamespaces}
               />
+              <div className="diff-source-direction" aria-label={t("diff.sourceDirection")}>
+                <span className="diff-source-direction-arrow" aria-hidden="true">
+                  {"\u2192"}
+                </span>
+              </div>
               <SourcePicker
                 title={t("diff.sourceB")}
                 connections={connections}
@@ -1549,9 +1507,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                     </button>
                   </div>
                   <span className="merge-draft-summary">
-                    {hasMergePreviewDraft
-                      ? t("diff.mergeDraftSummary", { right: mergeRightCount, left: mergeLeftCount })
-                      : t("diff.mergeDraftEmpty")}
+                    {hasMergePreviewDraft ? t("diff.mergeDraftSummary", { right: mergeRightCount }) : t("diff.mergeDraftEmpty")}
                   </span>
                 </div>
                 <span className="fmt-spacer" />
@@ -1601,22 +1557,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                   <div className="merge-plan-actions">
                     <button
                       type="button"
-                      className="btn btn-primary btn-sm result-action result-action-merge-plan"
-                      onClick={() => startMergeDraftApply("left-to-right")}
-                      disabled={mergeRightCount === 0}
+                      className="btn btn-primary btn-sm result-action result-action-plan"
+                      onClick={startApplyFromCurrentDiff}
                     >
-                      {t("diff.startRightMergePlan", { count: mergeRightCount })}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm result-action result-action-merge-plan"
-                      onClick={() => startMergeDraftApply("right-to-left")}
-                      disabled={mergeLeftCount === 0}
-                    >
-                      {t("diff.startLeftMergePlan", { count: mergeLeftCount })}
-                    </button>
-                    <button type="button" className="btn btn-ghost btn-sm result-action result-action-plan" onClick={startBatchApply}>
-                      {t("diff.startWholeBatchApply")}
+                      {t("diff.enterBatchApply", { count: hasMergePreviewDraft ? mergeRightCount : batchResults.length })}
                     </button>
                   </div>
                 )}
@@ -1834,7 +1778,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                           onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
                           mergeActionLabels={{
                             leftToRight: t("diff.mergeAddToRightPlan"),
-                            rightToLeft: t("diff.mergeAddToLeftPlan"),
                           }}
                           mergeActionScope={mergeSelectionScope}
                           mergeActionAvailability={mergeAvailabilityForPresence(selectedBatchItem.presence)}

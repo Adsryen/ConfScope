@@ -122,9 +122,8 @@ done`,
     expect(screen.getAllByRole("button", { name: "Take left block to right preview" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Take right block to left preview" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Keep this block" })).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".diff-merge-side.left .diff-merge-block-brace")).toHaveLength(2);
-    expect(document.querySelectorAll(".diff-merge-side.right .diff-merge-block-brace")).toHaveLength(2);
-    expect(document.querySelectorAll(".diff-merge-block-brace")).toHaveLength(4);
+    expect(document.querySelectorAll(".diff-merge-center .diff-merge-block-brace")).toHaveLength(2);
+    expect(document.querySelectorAll(".diff-merge-block-brace")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Take left block to right preview" }));
 
@@ -149,8 +148,8 @@ done`,
       "en-US"
     );
 
-    expect(document.querySelector(".diff-merge-side.left .diff-merge-btn.right-to-left")).toBeInTheDocument();
-    expect(document.querySelector(".diff-merge-side.right .diff-merge-btn.left-to-right")).toBeInTheDocument();
+    expect(document.querySelector(".diff-merge-center .diff-merge-btn.right-to-left")).toBeInTheDocument();
+    expect(document.querySelector(".diff-merge-center .diff-merge-btn.left-to-right")).toBeInTheDocument();
     expect(document.querySelector(".diff-merge-block-brace")).not.toBeInTheDocument();
   });
 

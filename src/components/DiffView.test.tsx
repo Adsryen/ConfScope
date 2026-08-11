@@ -124,14 +124,17 @@ describe("DiffView", () => {
     );
 
     expect(screen.getByText("Configuration compare workflow")).toBeInTheDocument();
-    expect(screen.getByText("Current: Choose sources")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Choose sources/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Generate change plan/ })).toBeInTheDocument();
-    expect(screen.getByText(/will not write directly to the config center/)).toBeInTheDocument();
+    const direction = screen.getByLabelText("Apply direction");
+    expect(direction.querySelector(".diff-source-direction-label")).not.toBeInTheDocument();
+    expect(direction).toHaveTextContent("→");
+    expect(screen.getByText("Current: Confirm direction")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Confirm direction/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Select changes/ })).toBeInTheDocument();
+    expect(screen.getByText(/confirmation is required before writing to the right target/)).toBeInTheDocument();
     expect(screen.getByText(/To use a sandbox/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Verify and promote/ }));
-    expect(screen.getByText("Step details: Verify and promote")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Execute, verify, and promote/ }));
+    expect(screen.getByText("Step details: Execute, verify, and promote")).toBeInTheDocument();
     expect(screen.getByText(/After sandbox verification/)).toBeInTheDocument();
   });
 
@@ -434,7 +437,7 @@ describe("DiffView", () => {
     expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("only enables merge arrows that copy the existing side for one-sided files", async () => {
+  it("only exposes left-to-right merge actions for one-sided files", async () => {
     const onStartApply = vi.fn();
     localStorage.setItem("locale", "en-US");
     apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
@@ -475,16 +478,14 @@ describe("DiffView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /left-only\.yaml/ }));
     expect(screen.getByRole("button", { name: "Take left to right preview" })).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "Take right to left preview" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Take right to left preview" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
 
     fireEvent.click(screen.getByRole("button", { name: /right-only\.yaml/ }));
     expect(screen.getByRole("button", { name: "Take left to right preview" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Take right to left preview" })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
-    expect(screen.getByText("Right preview 1 | Left preview 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Take right to left preview" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate right-side plan (1 files)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
     expect(onStartApply).toHaveBeenLastCalledWith(
       expect.objectContaining({
         source: expect.objectContaining({ connectionId: "left-nacos" }),
@@ -499,20 +500,7 @@ describe("DiffView", () => {
       })
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate left-side plan (1 files)" }));
-    expect(onStartApply).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        source: expect.objectContaining({ connectionId: "right-nacos" }),
-        target: expect.objectContaining({ connectionId: "left-nacos" }),
-        items: [
-          expect.objectContaining({
-            connectionId: "left-nacos",
-            dataId: "right-only.yaml",
-            sourceValueOverride: expect.objectContaining({ content: "right: right-only.yaml" }),
-          }),
-        ],
-      })
-    );
+    expect(onStartApply).toHaveBeenCalledTimes(1);
   });
 
   it("shows smart-match files as left and right side lists", async () => {
@@ -726,7 +714,7 @@ describe("DiffView", () => {
       expect(apiMocks.getConfig).toHaveBeenCalledWith(snapshotConn, "", "app.yaml", "DEFAULT_GROUP");
       expect(apiMocks.getConfig).toHaveBeenCalledWith(nacosConn, "", "app.yaml", "DEFAULT_GROUP");
     });
-    expect(await screen.findByText("来源 B（右）: cloud EOF")).toBeInTheDocument();
+    expect(await screen.findByText("目标（右）: cloud EOF")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
   });
 
@@ -790,10 +778,10 @@ describe("DiffView", () => {
 
     expect(await screen.findByText("8080")).toBeInTheDocument();
     expect(await screen.findByText("9090")).toBeInTheDocument();
-    expect(screen.getByText("Current: Generate change plan")).toBeInTheDocument();
-    expect(document.querySelector(".diff-workflow-step.current")).toHaveTextContent("Generate change plan");
+    expect(screen.getByText("Current: Select changes")).toBeInTheDocument();
+    expect(document.querySelector(".diff-workflow-step.current")).toHaveTextContent("Select changes");
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith({
       sourceType: "diff",
@@ -880,7 +868,7 @@ describe("DiffView", () => {
     expect(await screen.findByText("8080")).toBeInTheDocument();
     expect(await screen.findByText("9090")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate Change Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -939,7 +927,7 @@ describe("DiffView", () => {
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("Generated 2 file comparisons")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate whole-file batch change plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (2 files)" }));
 
     expect(onStartApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1011,7 +999,7 @@ describe("DiffView", () => {
     );
   });
 
-  it("lets users mark batch diff rows as a bidirectional merge draft without starting apply", async () => {
+  it("lets users mark batch diff rows as a left-to-right merge draft without starting apply", async () => {
     const onStartApply = vi.fn();
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 1,
@@ -1048,7 +1036,7 @@ describe("DiffView", () => {
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
-    expect(screen.getByText("Right preview 1 | Left preview 0")).toBeInTheDocument();
+    expect(screen.getByText("1 files queued for the right target")).toBeInTheDocument();
     expect(screen.getAllByText("feature.enabled=false").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("feature.enabled=true")).not.toBeInTheDocument();
     expect(onStartApply).not.toHaveBeenCalled();
@@ -1056,9 +1044,7 @@ describe("DiffView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
-    expect(screen.getByText("Right preview 0 | Left preview 1")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Keep this difference" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Take right to left preview" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
@@ -1096,11 +1082,10 @@ describe("DiffView", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
     expect(await screen.findByText("Generated 1 file comparisons")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate right-side plan (0 files)" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Generate left-side plan (0 files)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Generate right-side plan (1 files)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
 
     expect(onStartApply).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -1124,31 +1109,10 @@ describe("DiffView", () => {
       })
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Take right to left preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Generate left-side plan (1 files)" }));
-
-    expect(onStartApply).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        source: expect.objectContaining({ connectionId: "right-nacos" }),
-        target: expect.objectContaining({ connectionId: "left-nacos" }),
-        items: [
-          expect.objectContaining({
-            connectionId: "left-nacos",
-            dataId: "app.yaml",
-            key: "__document",
-            sourceRef: expect.objectContaining({ connectionId: "right-nacos", dataId: "app.yaml" }),
-            targetRef: expect.objectContaining({ connectionId: "left-nacos", dataId: "app.yaml" }),
-            sourceValueOverride: expect.objectContaining({
-              content: "server:\n  port: 9090\nfeature:\n  enabled: true",
-            }),
-          }),
-        ],
-      })
-    );
+    expect(onStartApply).toHaveBeenCalledTimes(1);
   });
 
-  it("supports row and block scopes for bidirectional merge arrows", async () => {
+  it("supports row and block scopes for left-to-right merge arrows", async () => {
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 1,
       pageNumber: 1,
@@ -1182,12 +1146,9 @@ describe("DiffView", () => {
     expect(await screen.findByText("No merge preview changes yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Take left to right preview" })[0]);
-    expect(screen.getByText("Right preview 1 | Left preview 0")).toBeInTheDocument();
+    expect(screen.getByText("1 files queued for the right target")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset preview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Row" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Take right to left preview" })[0]);
-    expect(screen.getByText("Right preview 0 | Left preview 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Take right to left preview" })).not.toBeInTheDocument();
   });
 
   it("does not show apply entry points before compare output exists", () => {
@@ -1198,8 +1159,7 @@ describe("DiffView", () => {
       </I18nProvider>
     );
 
-    expect(screen.queryByRole("button", { name: "Generate Change Plan" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Generate whole-file batch change plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enter Configuration Change Plan" })).toBeNull();
   });
 
   it("shows inline error when all batch diff configs fail to load", async () => {

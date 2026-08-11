@@ -3,7 +3,7 @@ import { loadAppDataBackupState, saveAppDataBackupState, type AppDataWebDAVSetti
 import { loadConnections, updateConnection, type Connection } from "../store/connections";
 import { loadSnapshotWebDAVState, saveSnapshotWebDAVState, type SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
 
-export type CredentialSecretNamespace = "connection" | "app-data-webdav" | "snapshot-webdav";
+export type CredentialSecretNamespace = "connection" | "app-data-webdav" | "snapshot-webdav" | "app-data-backup";
 export type StoredSecretStatus = "stored" | "missing" | "unsupported";
 export const CONNECTION_SECRET_FIELDS = ["password", "accessKeyId", "accessKeySecret", "securityToken", "apolloToken", "consulToken"] as const;
 export type ConnectionSecretField = (typeof CONNECTION_SECRET_FIELDS)[number];
@@ -150,6 +150,26 @@ export async function resolveSecret(pointer: StoredSecretPointer, deps?: Credent
 
 export function deleteStoredSecret(pointer: StoredSecretPointer, deps?: CredentialSecretDeps): Promise<void> {
   return clientFromDeps(deps).delete(refFromPointer(pointer));
+}
+
+const APP_DATA_BACKUP_PASSWORD_REF: SecureSecretRef = {
+  namespace: "app-data-backup",
+  ownerId: "default",
+  field: "encryption-password",
+};
+
+export async function saveAppDataBackupPassword(password: string, deps?: CredentialSecretDeps): Promise<StoredSecretPointer> {
+  if (!password.trim()) {
+    throw new Error("备份密码不能为空");
+  }
+  return writeAndVerifySecret({ ...APP_DATA_BACKUP_PASSWORD_REF, value: password }, deps);
+}
+
+export async function resolveAppDataBackupPassword(pointer: StoredSecretPointer, deps?: CredentialSecretDeps): Promise<string> {
+  if (pointer.namespace !== APP_DATA_BACKUP_PASSWORD_REF.namespace || pointer.ownerId !== APP_DATA_BACKUP_PASSWORD_REF.ownerId || pointer.field !== APP_DATA_BACKUP_PASSWORD_REF.field) {
+    throw new Error("备份密码凭据引用无效，请重新设置密码");
+  }
+  return resolveSecret(pointer, deps);
 }
 
 function emptyMigrationSummary(): CredentialMigrationSummary {

@@ -30,10 +30,12 @@ import { toast } from "../lib/toast";
 import {
   loadAppDataBackupState,
   recordAppDataBackupActivity,
+  updateAppDataBackupPasswordSecretRef,
   updateAppDataWebDAVSettings,
   type AppDataBackupActivity,
   type AppDataWebDAVSettings,
 } from "../store/appDataBackup";
+import { deleteStoredSecret, resolveAppDataBackupPassword, saveAppDataBackupPassword } from "../lib/credentialSecrets";
 import CopyButton from "./CopyButton";
 
 interface Props {
@@ -138,6 +140,8 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
   const [webdavDraft, setWebdavDraft] = useState<AppDataWebDAVSettings>(() => loadAppDataBackupState().webdav);
   const [exportPassword, setExportPassword] = useState("");
   const [exportConfirm, setExportConfirm] = useState("");
+  const [savedPasswordDraft, setSavedPasswordDraft] = useState("");
+  const [savedPasswordConfirm, setSavedPasswordConfirm] = useState("");
   const [restorePath, setRestorePath] = useState("");
   const [restorePassword, setRestorePassword] = useState("");
   const [webdavBackupPassword, setWebdavBackupPassword] = useState("");
@@ -203,6 +207,22 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
   const collectCurrentBackupPayload = (meta: AppDataBackupPackageMeta) =>
     collectPortableAppDataBackupPayload(meta, { listSnapshotFiles: listAppDataSnapshotFiles });
 
+  const resolveBackupPassword = async (operationPassword: string): Promise<string> => {
+    if (operationPassword.trim()) return operationPassword;
+    const pointer = backupState.backupPasswordSecretRef;
+    if (!pointer || pointer.status !== "stored") return "";
+    return resolveAppDataBackupPassword(pointer);
+  };
+
+  const requireBackupPassword = async (operationPassword: string): Promise<string | null> => {
+    const password = await resolveBackupPassword(operationPassword);
+    if (!password.trim()) {
+      setError(t("appDataBackup.passwordRequired"));
+      return null;
+    }
+    return password;
+  };
+
   const recordActivity = (
     type: AppDataBackupActivity["type"],
     statusValue: AppDataBackupActivity["status"],
@@ -237,22 +257,20 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
 
   const exportLocalBackup = async () => {
     clearMessages();
-    if (!exportPassword) {
-      setError(t("appDataBackup.passwordRequired"));
-      return;
-    }
-    if (exportPassword !== exportConfirm) {
+    if (exportPassword && exportPassword !== exportConfirm) {
       setError(t("appDataBackup.passwordMismatch"));
       return;
     }
     setBusy("local-export");
     try {
+      const password = await requireBackupPassword(exportPassword);
+      if (!password) return;
       const path = await selectAppDataBackupSaveFile(defaultBackupName());
       if (!path) return;
       await runWithTask(t("appDataBackup.localExportTask"), "backup", path, async () => {
         const meta = await buildMeta();
         const payload = await collectCurrentBackupPayload(meta);
-        await writeAppDataBackupFile(path, JSON.stringify(payload), exportPassword, meta);
+        await writeAppDataBackupFile(path, JSON.stringify(payload), password, meta);
       });
       recordActivity("local_export", "success", path, t("appDataBackup.localExported"));
       setStatus({ ok: true, text: t("appDataBackup.localExported") });
@@ -288,18 +306,16 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setError(t("appDataBackup.localFileRequired"));
       return;
     }
-    if (!restorePassword) {
-      setError(t("appDataBackup.passwordRequired"));
-      return;
-    }
     setBusy("local-preview");
     try {
-      const decrypted = await readAppDataBackupFile(restorePath, restorePassword);
+      const password = await requireBackupPassword(restorePassword);
+      if (!password) return;
+      const decrypted = await readAppDataBackupFile(restorePath, password);
       const parsed = validateAppDataBackupPayload(JSON.parse(decrypted.plaintextJson));
       setPreview({
         source: "local",
         target: restorePath,
-        password: restorePassword,
+        password,
         payload: parsed,
         summary: summarizeAppDataBackupPayload(parsed),
         packageSummary: decrypted.summary,
@@ -352,6 +368,49 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     setStatus({ ok: true, text: t("appDataBackup.webdavSaved") });
   };
 
+  const saveBackupPassword = async () => {
+    clearMessages();
+    if (!savedPasswordDraft.trim()) {
+      setError(t("appDataBackup.passwordRequired"));
+      return;
+    }
+    if (savedPasswordDraft !== savedPasswordConfirm) {
+      setError(t("appDataBackup.passwordMismatch"));
+      return;
+    }
+    setBusy("backup-password-save");
+    try {
+      const pointer = await saveAppDataBackupPassword(savedPasswordDraft);
+      const next = updateAppDataBackupPasswordSecretRef(pointer);
+      setBackupState(next);
+      setSavedPasswordDraft("");
+      setSavedPasswordConfirm("");
+      setStatus({ ok: true, text: t("appDataBackup.savedPasswordSaved") });
+      toast(t("appDataBackup.savedPasswordSaved"), "success");
+    } catch (e) {
+      setError(toErrorMessage(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const clearBackupPassword = async () => {
+    const pointer = backupState.backupPasswordSecretRef;
+    if (!pointer) return;
+    clearMessages();
+    setBusy("backup-password-clear");
+    try {
+      await deleteStoredSecret(pointer);
+      const next = updateAppDataBackupPasswordSecretRef();
+      setBackupState(next);
+      setStatus({ ok: true, text: t("appDataBackup.savedPasswordCleared") });
+    } catch (e) {
+      setError(toErrorMessage(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const testWebDAVTarget = async () => {
     clearMessages();
     const target = currentWebDAVTarget();
@@ -378,16 +437,14 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setError(t("appDataBackup.webdavUrlRequired"));
       return;
     }
-    if (!webdavBackupPassword) {
-      setError(t("appDataBackup.passwordRequired"));
-      return;
-    }
     setBusy("webdav-upload");
     try {
+      const password = await requireBackupPassword(webdavBackupPassword);
+      if (!password) return;
       const remote = await runWithTask(t("appDataBackup.webdavUploadTask"), "backup", target.rootPath, async () => {
         const meta = await buildMeta();
         const payload = await collectCurrentBackupPayload(meta);
-        return uploadAppDataWebDAVBackup(target, JSON.stringify(payload), webdavBackupPassword, meta);
+        return uploadAppDataWebDAVBackup(target, JSON.stringify(payload), password, meta);
       });
       recordActivity("webdav_upload", "success", remote.path, t("appDataBackup.webdavUploaded"));
       setRemoteBackups((items) => [remote, ...items.filter((item) => item.path !== remote.path)]);
@@ -422,19 +479,17 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
 
   const previewRemoteBackup = async (remote: RemoteAppDataBackup) => {
     clearMessages();
-    if (!remoteRestorePassword) {
-      setError(t("appDataBackup.passwordRequired"));
-      return;
-    }
     const target = currentWebDAVTarget();
     setBusy(`webdav-preview:${remote.path}`);
     try {
-      const decrypted = await downloadAppDataWebDAVBackup(target, remote.path, remoteRestorePassword);
+      const password = await requireBackupPassword(remoteRestorePassword);
+      if (!password) return;
+      const decrypted = await downloadAppDataWebDAVBackup(target, remote.path, password);
       const parsed = validateAppDataBackupPayload(JSON.parse(decrypted.plaintextJson));
       setPreview({
         source: "webdav",
         target: remote.path,
-        password: remoteRestorePassword,
+        password,
         payload: parsed,
         summary: summarizeAppDataBackupPayload(parsed),
         packageSummary: decrypted.summary,
@@ -459,6 +514,36 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         </div>
       )}
       {error && <InlineError title={t("appDataBackup.operationFailed")} message={error} />}
+
+      <section className="app-data-backup-password-settings" aria-labelledby="app-data-backup-password-title">
+        <div className="app-data-backup-area-head">
+          <div>
+            <h6 id="app-data-backup-password-title">{t("appDataBackup.savedPasswordTitle")}</h6>
+            <span>{t("appDataBackup.savedPasswordHint")}</span>
+          </div>
+          {backupState.backupPasswordSecretRef?.status === "stored" && <strong>{t("appDataBackup.savedPasswordConfigured")}</strong>}
+        </div>
+        <div className="app-data-backup-fields">
+          <label className="field">
+            <span>{t("appDataBackup.savedPassword")}</span>
+            <input className="search-input" type="password" value={savedPasswordDraft} onChange={(e) => setSavedPasswordDraft(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>{t("appDataBackup.confirmSavedPassword")}</span>
+            <input className="search-input" type="password" value={savedPasswordConfirm} onChange={(e) => setSavedPasswordConfirm(e.target.value)} />
+          </label>
+        </div>
+        <div className="app-data-backup-action-row">
+          <button type="button" className="btn btn-primary btn-sm" onClick={saveBackupPassword} disabled={busy === "backup-password-save"}>
+            {busy === "backup-password-save" ? t("appDataBackup.savingPassword") : t("appDataBackup.savePassword")}
+          </button>
+          {backupState.backupPasswordSecretRef?.status === "stored" && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clearBackupPassword} disabled={busy === "backup-password-clear"}>
+              {busy === "backup-password-clear" ? t("appDataBackup.clearingPassword") : t("appDataBackup.clearSavedPassword")}
+            </button>
+          )}
+        </div>
+      </section>
 
       <section className="app-data-backup-work-area app-data-backup-local" aria-labelledby="app-data-backup-local-title">
         <div className="app-data-backup-area-head">

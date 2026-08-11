@@ -411,7 +411,9 @@ export default function App() {
   const browseProjectConnections = connections.filter((conn) => connectionProjectName(conn) === activeProject);
   const browseEnvironments = uniqueSorted(browseProjectConnections.map((conn) => connectionEnvironmentName(conn)));
   const activeEnvironment =
-    activeConn && connectionProjectName(activeConn) === activeProject ? connectionEnvironmentName(activeConn) : (browseEnvironments[0] ?? "");
+    activeConn && connectionProjectName(activeConn) === activeProject
+      ? connectionEnvironmentName(activeConn)
+      : (browseEnvironments[0] ?? "");
   const browseEnvironmentConnections = browseProjectConnections.filter((conn) => connectionEnvironmentName(conn) === activeEnvironment);
   const activeSourceId = browseEnvironmentConnections.some((conn) => conn.id === activeConnId)
     ? activeConnId
@@ -518,7 +520,27 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} />
+        <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} connections={connections} onStartApply={startApply} />
+      )}
+    </div>
+  );
+
+  const diffPage = (
+    <DiffView
+      connections={diffConnections}
+      onConnectionsChange={setConnections}
+      initialParams={diffInitialParams}
+      onInitialParamsConsumed={() => setDiffInitialParams(null)}
+      onStartApply={startApply}
+    />
+  );
+  const diffApplyRoute = (
+    <div className="diff-apply-route">
+      <div className="diff-apply-cache" hidden={mode === "apply"}>
+        {diffPage}
+      </div>
+      {mode === "apply" && (
+        <ApplyPlanView entry={pendingApplyEntry} connections={diffConnections} onBack={() => setMode(applyReturnTarget)} />
       )}
     </div>
   );
@@ -587,6 +609,8 @@ export default function App() {
             <SettingsView />
           ) : mode === "about" ? (
             <About embedded />
+          ) : mode === "diff" || (mode === "apply" && applyReturnTarget === "diff") ? (
+            diffApplyRoute
           ) : mode === "apply" ? (
             <ApplyPlanView entry={pendingApplyEntry} connections={diffConnections} onBack={() => setMode(applyReturnTarget)} />
           ) : connections.length === 0 ? (
@@ -598,14 +622,6 @@ export default function App() {
             </div>
           ) : mode === "browse" ? (
             browsePage
-          ) : mode === "diff" ? (
-            <DiffView
-              connections={diffConnections}
-              onConnectionsChange={setConnections}
-              initialParams={diffInitialParams}
-              onInitialParamsConsumed={() => setDiffInitialParams(null)}
-              onStartApply={startApply}
-            />
           ) : null}
         </main>
       </div>

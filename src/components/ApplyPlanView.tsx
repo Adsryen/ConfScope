@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   deleteConfigFromApplyPlan,
   deleteConfigRefFromApplyPlan,
@@ -12,12 +12,13 @@ import type { ApplyPlan, ApplyPlanAction, ApplyPlanItem, ApplyPlanSummary, Apply
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
-import { getTaskManager } from "../lib/taskmanager";
+import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
+import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 
 interface Props {
   entry: ApplyEntryPayload | null;
@@ -67,6 +68,22 @@ function countLabel(
 
 function actionLabel(t: (key: string, params?: Record<string, string | number>) => string, action: ApplyPlanAction): string {
   return t(`apply.actions.${action}`);
+}
+
+function isSandboxTarget(connection: Connection | null, plan: ApplyPlan): boolean {
+  const values = [
+    connection?.name,
+    connection?.environmentName,
+    connection?.sourceName,
+    ...(connection?.tags ?? []),
+    plan.target.label,
+    plan.target.connectionName,
+  ];
+  return values.some((value) => /sandbox|沙箱/i.test(value ?? ""));
+}
+
+function taskStatusLabel(t: (key: string, params?: Record<string, string | number>) => string, status: TaskStatus): string {
+  return t(`tasks.status${status[0].toUpperCase()}${status.slice(1)}`);
 }
 
 function PlanCountStrip({ plan }: { plan: ApplyPlan }) {
@@ -158,21 +175,13 @@ function PlanItemList({
   );
 }
 
-function ValueBlock({ title, value }: { title: string; value: ApplyPlanValueSnapshot }) {
-  const { t } = useTranslation();
-  return (
-    <div className="apply-value-block">
-      <div className="apply-value-title">{title}</div>
-      <pre>{valueText(value, t("apply.valueMissing"))}</pre>
-      {value.parseError && <div className="apply-parse-error">{value.parseError}</div>}
-    </div>
-  );
-}
-
 function ItemDetail({ item }: { item: ApplyPlanItem }) {
   const { t } = useTranslation();
   const missingLabel = t("apply.valueMissing");
   const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
+  const parseErrors = [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
+    (error): error is string => Boolean(error)
+  );
   return (
     <div className="apply-detail">
       <div className="apply-detail-head">
@@ -198,11 +207,11 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
           hideOnlyChangesToggle
         />
       </div>
-      <div className="apply-value-grid">
-        <ValueBlock title={t("apply.sourceValue")} value={item.sourceValue} />
-        <ValueBlock title={t("apply.targetValue")} value={item.targetValue} />
-        <ValueBlock title={t("apply.afterValue")} value={item.afterValue} />
-      </div>
+      {parseErrors.map((error, index) => (
+        <div className="apply-parse-error" key={`${item.id}-parse-error-${index}`}>
+          {error}
+        </div>
+      ))}
     </div>
   );
 }
@@ -216,6 +225,8 @@ function ConfirmationPanel({
   executionMode,
   executeError,
   executeNotice,
+  executionTask,
+  executionSucceeded,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
@@ -229,6 +240,8 @@ function ConfirmationPanel({
   executionMode: ExecutionMode | null;
   executeError: string | null;
   executeNotice: string | null;
+  executionTask: Task | null;
+  executionSucceeded: boolean;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
@@ -238,18 +251,20 @@ function ConfirmationPanel({
   const requiredText = applyConfirmationText(plan);
   const ready = protectedTarget ? confirmationText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
-  const dryRunDisabled = anyRunning || selectedCount === 0;
-  const executeDisabled = !ready || anyRunning || plan.summary.blocked > 0 || selectedCount === 0;
-  const executeLabel = executionMode === "apply"
-    ? t("apply.executing")
-    : selectedCount === plan.items.length
-      ? t("apply.execute")
-      : t("apply.executeSelected", { count: selectedCount });
-  const dryRunLabel = executionMode === "dry-run"
-    ? t("apply.dryRunExecuting")
-    : selectedCount === plan.items.length
-      ? t("apply.dryRun")
-      : t("apply.dryRunSelected", { count: selectedCount });
+  const dryRunDisabled = anyRunning || executionSucceeded || selectedCount === 0;
+  const executeDisabled = !ready || anyRunning || executionSucceeded || plan.summary.blocked > 0 || selectedCount === 0;
+  const executeLabel =
+    executionMode === "apply"
+      ? t("apply.executing")
+      : selectedCount === plan.items.length
+        ? t("apply.execute")
+        : t("apply.executeSelected", { count: selectedCount });
+  const dryRunLabel =
+    executionMode === "dry-run"
+      ? t("apply.dryRunExecuting")
+      : selectedCount === plan.items.length
+        ? t("apply.dryRun")
+        : t("apply.dryRunSelected", { count: selectedCount });
 
   return (
     <div className="apply-confirmation" aria-label={t("apply.confirmationLabel")}>
@@ -287,6 +302,28 @@ function ConfirmationPanel({
         </button>
       </div>
       {executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
+      {executionTask && (
+        <div className="apply-task-progress" aria-label={t("apply.taskProgressLabel")}>
+          <div className="apply-task-progress-head">
+            <strong>{t("apply.taskProgressTitle")}</strong>
+            <span className={`task-status task-status-${executionTask.status}`}>
+              {taskStatusLabel(t, executionTask.status)}
+            </span>
+          </div>
+          <div className="progress-bar large">
+            <div className="progress-fill" style={{ width: `${executionTask.progress}%` }} />
+          </div>
+          <div className="apply-task-progress-meta">
+            <span>{t("apply.taskProgressStats", { completed: executionTask.completed, total: executionTask.total })}</span>
+            <span>{t("apply.taskProgressPercent", { progress: executionTask.progress })}</span>
+          </div>
+          <div className="apply-task-progress-id">
+            <span>{t("tasks.taskId")}: <span className="mono">{executionTask.id}</span></span>
+            <CopyButton text={executionTask.id} label={t("apply.copyTaskId")} />
+          </div>
+          {executionTask.error && <pre className="apply-task-progress-error">{executionTask.error}</pre>}
+        </div>
+      )}
       {executeError && (
         <div className="inline-error" role="alert">
           <div className="inline-error-head">
@@ -310,15 +347,35 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [confirmed, setConfirmed] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode | null>(null);
+  const [lastExecutionMode, setLastExecutionMode] = useState<ExecutionMode | null>(null);
+  const [executionCompleted, setExecutionCompleted] = useState(false);
+  const [executionSucceeded, setExecutionSucceeded] = useState(false);
+  const [executionTask, setExecutionTask] = useState<Task | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
+  const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
+  const taskManager = getTaskManager();
+  const trackedTaskIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = taskManager.onTaskUpdate((task) => {
+      if (task.id === trackedTaskIdRef.current) setExecutionTask(task);
+    });
+    return () => unsubscribe?.();
+  }, [taskManager]);
 
   useEffect(() => {
     setConfirmed(false);
     setConfirmationText("");
     setExecutionMode(null);
+    setLastExecutionMode(null);
+    setExecutionCompleted(false);
+    setExecutionSucceeded(false);
+    setExecutionTask(null);
+    trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteNotice(null);
+    setWorkflowDetailStep(null);
     if (!entry) {
       setDraftState({ status: "idle" });
       setSelectedId("");
@@ -342,7 +399,12 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           return;
         }
         const savedPlan = saveApplyPlan(result.plan);
-        setDraftState({ status: "ready", plan: savedPlan, sourceConnection: result.sourceConnection, targetConnection: result.targetConnection });
+        setDraftState({
+          status: "ready",
+          plan: savedPlan,
+          sourceConnection: result.sourceConnection,
+          targetConnection: result.targetConnection,
+        });
         setSelectedId(firstSelectableItem(savedPlan));
         setSelectedIds(defaultSelectedItemIds(savedPlan));
       })
@@ -361,7 +423,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const targetConnection = draftState.status === "ready" ? draftState.targetConnection : null;
   const selectedItem = plan?.items.find((item) => item.id === selectedId) ?? plan?.items[0] ?? null;
   const protectedTarget = plan ? isProtectedApplyTarget(targetConnection, plan.target) : false;
+  const sandboxTarget = plan ? isSandboxTarget(targetConnection, plan) : false;
   const selectedCount = selectedIds.size;
+  const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
 
   const selectAllItems = () => {
     if (!plan) return;
@@ -391,6 +455,13 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       return;
     }
     setExecutionMode(dryRun ? "dry-run" : "apply");
+    setLastExecutionMode(dryRun ? "dry-run" : "apply");
+    if (!dryRun) {
+      setExecutionCompleted(false);
+      setExecutionSucceeded(false);
+    }
+    setExecutionTask(null);
+    trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteNotice(null);
     try {
@@ -398,9 +469,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         plan,
         {
           connections:
-            sourceConnection && targetConnection
-              ? applyExecutionConnections(connections, sourceConnection, targetConnection)
-              : connections,
+            sourceConnection && targetConnection ? applyExecutionConnections(connections, sourceConnection, targetConnection) : connections,
           getConfigDocument,
           publishConfig: publishConfigFromApplyPlan,
           deleteConfig: deleteConfigFromApplyPlan,
@@ -420,13 +489,21 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             return { id: snapshot.id, name: snapshot.name };
           },
           recordOperation,
-          taskManager: getTaskManager(),
+          taskManager,
         },
         {
           selectedItemIds,
+          onTaskCreated: (taskId) => {
+            trackedTaskIdRef.current = taskId;
+            setExecutionTask(taskManager.getTask(taskId) ?? null);
+          },
           ...(dryRun ? { dryRun: true } : {}),
         }
       );
+      if (result.taskId) {
+        trackedTaskIdRef.current = result.taskId;
+        setExecutionTask(taskManager.getTask(result.taskId) ?? null);
+      }
       if (!result.ok) {
         setExecuteError(result.error);
         return;
@@ -434,6 +511,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       if ("dryRun" in result && result.dryRun) {
         setExecuteNotice(t("apply.dryRunCompleted", { count: result.plannedWrites }));
       } else {
+        setExecutionCompleted(!sandboxTarget);
+        setExecutionSucceeded(true);
         setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
       }
     } catch (error) {
@@ -474,65 +553,79 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       )}
 
       {plan && (
-        <>
-          <div className="apply-plan-summary">
-            <div className="data-info-grid">
-              <div className="info-row">
-                <span className="info-label">{t("apply.planId")}:</span>
-                <span className="info-value mono">{plan.id}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">{t("apply.createdAt")}:</span>
-                <span className="info-value">{plan.createdAt}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">{t("apply.source")}:</span>
-                <span className="info-value">{plan.source.label}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">{t("apply.target")}:</span>
-                <span className="info-value">{plan.target.label}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">{t("apply.scope")}:</span>
-                <span className="info-value">{t(`apply.scopes.${plan.scope}`)}</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">{t("apply.selected")}:</span>
-                <span className="info-value">{t("apply.selectedCount", { count: plan.inputSummary.selectedCount })}</span>
-              </div>
-            </div>
-            <PlanLedger plan={plan} />
-            <PlanCountStrip plan={plan} />
-          </div>
-
-          <div className="apply-workbench">
-            <PlanItemList
-              plan={plan}
-              selectedId={selectedItem?.id ?? ""}
-              selectedIds={selectedIds}
-              onSelect={setSelectedId}
-              onToggleSelected={toggleSelectedItem}
-              onSelectAll={selectAllItems}
-              onSelectNone={selectNoItems}
-            />
-            {selectedItem ? <ItemDetail item={selectedItem} /> : <div className="data-empty-state detail-empty">{t("apply.noItems")}</div>}
-          </div>
-          <ConfirmationPanel
-            plan={plan}
-            selectedCount={selectedCount}
-            protectedTarget={protectedTarget}
-            confirmed={confirmed}
-            confirmationText={confirmationText}
-            executionMode={executionMode}
-            executeError={executeError}
-            executeNotice={executeNotice}
-            onConfirmedChange={setConfirmed}
-            onConfirmationTextChange={setConfirmationText}
-            onExecute={() => runPlan(false)}
-            onDryRun={() => runPlan(true)}
+        <div className="apply-workspace">
+          <DiffWorkflowCard
+            currentStep={workflowCurrentStep}
+            completed={executionCompleted}
+            detailStep={workflowDetailStep}
+            onDetailStepChange={setWorkflowDetailStep}
           />
-        </>
+          <div className="apply-main-column">
+            <div className="apply-plan-summary">
+              <div className="data-info-grid">
+                <div className="info-row">
+                  <span className="info-label">{t("apply.planId")}:</span>
+                  <span className="info-value mono">{plan.id}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">{t("apply.createdAt")}:</span>
+                  <span className="info-value">{plan.createdAt}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">{t("apply.source")}:</span>
+                  <span className="info-value">{plan.source.label}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">{t("apply.target")}:</span>
+                  <span className="info-value">{plan.target.label}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">{t("apply.scope")}:</span>
+                  <span className="info-value">{t(`apply.scopes.${plan.scope}`)}</span>
+                </div>
+                <div className="info-row">
+                  <span className="info-label">{t("apply.selected")}:</span>
+                  <span className="info-value">{t("apply.selectedCount", { count: plan.inputSummary.selectedCount })}</span>
+                </div>
+              </div>
+              <PlanLedger plan={plan} />
+              <PlanCountStrip plan={plan} />
+            </div>
+
+            <div className="apply-workbench">
+              <PlanItemList
+                plan={plan}
+                selectedId={selectedItem?.id ?? ""}
+                selectedIds={selectedIds}
+                onSelect={setSelectedId}
+                onToggleSelected={toggleSelectedItem}
+                onSelectAll={selectAllItems}
+                onSelectNone={selectNoItems}
+              />
+              {selectedItem ? (
+                <ItemDetail item={selectedItem} />
+              ) : (
+                <div className="data-empty-state detail-empty">{t("apply.noItems")}</div>
+              )}
+            </div>
+            <ConfirmationPanel
+              plan={plan}
+              selectedCount={selectedCount}
+              protectedTarget={protectedTarget}
+              confirmed={confirmed}
+              confirmationText={confirmationText}
+              executionMode={executionMode}
+              executeError={executeError}
+              executeNotice={executeNotice}
+              executionTask={executionTask}
+              executionSucceeded={executionSucceeded}
+              onConfirmedChange={setConfirmed}
+              onConfirmationTextChange={setConfirmationText}
+              onExecute={() => runPlan(false)}
+              onDryRun={() => runPlan(true)}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

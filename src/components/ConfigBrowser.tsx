@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Connection, connectionDisplayLabel } from "../store/connections";
+import { Connection, connectionDisplayLabel, connectionProjectName } from "../store/connections";
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
+import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
+import {
+  buildContentReplaceApplyEntry,
+  replacementImpact,
+  searchConfigContent,
+  type ContentSearchResult,
+} from "../lib/configContentSearch";
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
@@ -25,10 +32,14 @@ import Select from "./Select";
 interface Props {
   conn: Connection;
   tenant: string;
+  connections?: Connection[];
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
 
 const PAGE_SIZE = 50;
+const CONTENT_SEARCH_CONCURRENCY = 6;
 type Tab = "content" | "history";
+type SearchMode = "dataId" | "content";
 type ConfigMetadata = Pick<ConfigDocument, "version" | "source" | "updateTime">;
 type InlineErrorProps = {
   title: string;
@@ -57,6 +68,32 @@ function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineE
   );
 }
 
+function configResultKey(item: Pick<ConfigItem, "dataId" | "group">): string {
+  return `${item.group}\u0000${item.dataId}`;
+}
+
+function isWritableTarget(conn: Connection): boolean {
+  return conn.sourceType !== "local-snapshot" && !conn.readonly && (conn.provider ?? "nacos") === "nacos";
+}
+
+function isSandboxEnvironment(conn: Connection): boolean {
+  return /sandbox|沙箱/i.test(`${conn.name} ${conn.environmentName ?? ""} ${conn.sourceName ?? ""} ${(conn.tags ?? []).join(" ")}`);
+}
+
+async function mapWithConcurrency<T, R>(values: T[], limit: number, mapper: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  return results;
+}
+
 type BrowserToolIconName = "refresh" | "add" | "download";
 
 const browserToolIconPath: Record<BrowserToolIconName, string[]> = {
@@ -75,12 +112,24 @@ function BrowserToolIcon({ name }: { name: BrowserToolIconName }) {
   );
 }
 
-/** 配置浏览：左侧 dataId 列表（可搜索、分页），右侧内容 / 历史 标签页。 */
-export default function ConfigBrowser({ conn, tenant }: Props) {
+/** 配置浏览：左侧配置列表（dataId 或内容搜索），右侧内容 / 历史标签页。 */
+export default function ConfigBrowser({ conn, tenant, connections = [], onStartApply }: Props) {
   const { t } = useTranslation();
   const taskManager = useTaskManager();
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("dataId");
   const [appliedTerm, setAppliedTerm] = useState(""); // 已生效的搜索词（翻页时复用）
+  const [contentTerm, setContentTerm] = useState("");
+  const [contentResults, setContentResults] = useState<ContentSearchResult[]>([]);
+  const [contentSearchProgress, setContentSearchProgress] = useState({ loaded: 0, total: 0, failed: 0 });
+  const [contentSearchError, setContentSearchError] = useState<string | null>(null);
+  const [selectedContentKeys, setSelectedContentKeys] = useState<Set<string>>(new Set());
+  const [showReplace, setShowReplace] = useState(false);
+  const [showTargetPicker, setShowTargetPicker] = useState(false);
+  const [replaceFindText, setReplaceFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [targetConnectionId, setTargetConnectionId] = useState("");
+  const [targetNamespace, setTargetNamespace] = useState(tenant);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [knownGroups, setKnownGroups] = useState<string[]>([]);
   const [items, setItems] = useState<ConfigItem[]>([]);
@@ -111,9 +160,36 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const [validateErrs, setValidateErrs] = useState<string[]>([]);
   const dirty = editing && draft !== content;
   const isLocalSnapshot = conn.sourceType === "local-snapshot";
+  const isContentSearchActive = searchMode === "content" && Boolean(contentTerm);
+  const visibleItems = isContentSearchActive ? contentResults.map((result) => result.item) : items;
+  const selectedContentResults = contentResults.filter((result) => selectedContentKeys.has(configResultKey(result.item)));
+  const replaceImpact = replacementImpact(selectedContentResults, replaceFindText, replaceText);
+  const canStartReplacement = Boolean(onStartApply) && isWritableTarget(conn);
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
+  const targetConnections = useMemo(
+    () =>
+      connections
+        .filter(
+          (candidate) =>
+            connectionProjectName(candidate) === connectionProjectName(conn) && candidate.id !== conn.id && isWritableTarget(candidate)
+        )
+        .sort(
+          (left, right) =>
+            Number(isSandboxEnvironment(right)) - Number(isSandboxEnvironment(left)) ||
+            connectionDisplayLabel(left).localeCompare(connectionDisplayLabel(right))
+        ),
+    [conn, connections]
+  );
+  const targetConnection = targetConnections.find((candidate) => candidate.id === targetConnectionId) ?? null;
+  const sourceEndpoint: ApplyEntryEndpoint = {
+    provider: conn.provider ?? "nacos",
+    connectionId: conn.id,
+    connectionName,
+    namespace: tenant,
+    label: `${connectionDisplayLabel(conn)} / ${namespaceLabel}`,
+  };
   const inlineErrorLabels = {
     title: t("common.operationFailed"),
     retryLabel: t("common.retry"),
@@ -152,6 +228,85 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
   // 列表请求序号：防止快速搜索/刷新时旧结果覆盖新结果。
   const listReqId = useRef(0);
+  const contentSearchReqId = useRef(0);
+
+  const clearContentSearch = () => {
+    contentSearchReqId.current += 1;
+    setContentTerm("");
+    setContentResults([]);
+    setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
+    setContentSearchError(null);
+    setSelectedContentKeys(new Set());
+    setShowReplace(false);
+    setShowTargetPicker(false);
+  };
+
+  const searchAllContent = async (term: string, groupFilter = selectedGroup) => {
+    const query = term.trim();
+    if (!query) {
+      clearContentSearch();
+      fetchList("", 1, groupFilter);
+      return;
+    }
+
+    const my = ++contentSearchReqId.current;
+    const group = groupFilter.trim();
+    setContentTerm(query);
+    setContentResults([]);
+    setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
+    setContentSearchError(null);
+    setSelectedContentKeys(new Set());
+    try {
+      const firstPage = await listConfigs(conn, tenant, "", group, 1, PAGE_SIZE);
+      if (my !== contentSearchReqId.current) return;
+      const allItems = [...firstPage.pageItems];
+      const pageCount = Math.max(firstPage.pagesAvailable || 1, 1);
+      for (let page = 2; page <= pageCount; page += 1) {
+        const nextPage = await listConfigs(conn, tenant, "", group, page, PAGE_SIZE);
+        if (my !== contentSearchReqId.current) return;
+        allItems.push(...nextPage.pageItems);
+      }
+      setContentSearchProgress({ loaded: 0, total: allItems.length, failed: 0 });
+
+      const loaded = await mapWithConcurrency(allItems, CONTENT_SEARCH_CONCURRENCY, async (item) => {
+        try {
+          const document = await getConfigDocument(conn, tenant, item.dataId, item.group);
+          return { item, document, error: "" };
+        } catch (error) {
+          return { item, document: null, error: String(error) };
+        } finally {
+          if (my === contentSearchReqId.current) {
+            setContentSearchProgress((current) => ({
+              ...current,
+              loaded: current.loaded + 1,
+            }));
+          }
+        }
+      });
+      if (my !== contentSearchReqId.current) return;
+      const failures = loaded.filter((result) => result.error);
+      const documents = loaded.flatMap((result) => (result.document ? [{ item: result.item, document: result.document }] : []));
+      const results = searchConfigContent(documents, query);
+      setContentResults(results);
+      setSelectedContentKeys(new Set(results.map((result) => configResultKey(result.item))));
+      setContentSearchProgress({ loaded: allItems.length, total: allItems.length, failed: failures.length });
+      if (failures.length) {
+        setContentSearchError(failures.map((result) => `${result.item.group}/${result.item.dataId}: ${result.error}`).join("\n"));
+      }
+    } catch (error) {
+      if (my !== contentSearchReqId.current) return;
+      const message = String(error);
+      setContentSearchError(message);
+      reportError({
+        title: t("config.contentSearchFailed"),
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: t("common.retry"),
+        onAction: () => searchAllContent(query, group),
+      });
+    }
+  };
 
   const fetchList = async (term: string, page: number, groupFilter = selectedGroup) => {
     const my = ++listReqId.current;
@@ -194,11 +349,25 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
   const onSearchChange = (v: string) => {
     setSearch(v);
     window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => fetchList(v, 1, selectedGroup), 400);
+    searchTimer.current = window.setTimeout(() => {
+      if (searchMode === "content") searchAllContent(v, selectedGroup);
+      else fetchList(v, 1, selectedGroup);
+    }, 400);
   };
   const searchNow = () => {
     window.clearTimeout(searchTimer.current);
-    fetchList(search, 1, selectedGroup);
+    if (searchMode === "content") searchAllContent(search, selectedGroup);
+    else fetchList(search, 1, selectedGroup);
+  };
+  const switchSearchMode = (mode: SearchMode) => {
+    if (mode === searchMode) return;
+    window.clearTimeout(searchTimer.current);
+    setSearchMode(mode);
+    if (mode === "content") searchAllContent(search, selectedGroup);
+    else {
+      clearContentSearch();
+      fetchList(search, 1, selectedGroup);
+    }
   };
   useEffect(() => () => window.clearTimeout(searchTimer.current), []);
   const onGroupChange = (group: string) => {
@@ -209,7 +378,8 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
       setContent("");
       setMetadata(null);
       setTab("content");
-      fetchList(search, 1, group);
+      if (searchMode === "content") searchAllContent(search, group);
+      else fetchList(search, 1, group);
     });
   };
 
@@ -229,7 +399,14 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
   // 切换连接 / 命名空间时重置并重新拉列表
   useEffect(() => {
+    contentSearchReqId.current += 1;
     setSearch("");
+    setSearchMode("dataId");
+    setContentTerm("");
+    setContentResults([]);
+    setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
+    setContentSearchError(null);
+    setSelectedContentKeys(new Set());
     setSelectedGroup("");
     setKnownGroups([]);
     setSelected(null);
@@ -237,9 +414,20 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setMetadata(null);
     setTab("content");
     setShowNew(false);
+    setShowReplace(false);
+    setShowTargetPicker(false);
+    setReplaceFindText("");
+    setReplaceText("");
+    setTargetNamespace(tenant);
     fetchList("", 1, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
+
+  useEffect(() => {
+    const preferred = targetConnections.find(isSandboxEnvironment) ?? targetConnections[0];
+    setTargetConnectionId(preferred?.id ?? "");
+    setTargetNamespace(tenant);
+  }, [targetConnections, tenant]);
 
   // 每次打开配置自增，异步结果只在仍是最新一次请求时才采用，避免连点串台。
   const reqId = useRef(0);
@@ -287,6 +475,50 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     setDraft(content);
     setEditing(true);
     setSaveError(null);
+  };
+
+  const toggleContentResult = (result: ContentSearchResult) => {
+    const key = configResultKey(result.item);
+    setSelectedContentKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const openReplacePanel = () => {
+    setReplaceFindText(search.trim());
+    setReplaceText("");
+    setShowReplace(true);
+  };
+
+  const openTargetPicker = () => {
+    if (!replaceFindText) return;
+    if (replaceImpact.configs === 0) return;
+    setShowReplace(false);
+    setShowTargetPicker(true);
+  };
+
+  const startContentReplaceApply = () => {
+    if (!targetConnection || !onStartApply) return;
+    const targetLabel = `${connectionDisplayLabel(targetConnection)} / ${targetNamespace || "public"}`;
+    const entry = buildContentReplaceApplyEntry({
+      source: sourceEndpoint,
+      target: {
+        provider: targetConnection.provider ?? "nacos",
+        connectionId: targetConnection.id,
+        connectionName: targetConnection.name || connectionDisplayLabel(targetConnection),
+        namespace: targetNamespace,
+        label: targetLabel,
+      },
+      results: selectedContentResults,
+      findText: replaceFindText,
+      replaceText,
+    });
+    if (!entry) return;
+    setShowTargetPicker(false);
+    onStartApply(entry);
   };
 
   const saveEdit = async () => {
@@ -594,10 +826,26 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
     <div className="browser">
       <div className="browser-list">
         <div className="browser-search">
+          <div className="browser-search-mode" role="group" aria-label={t("config.searchMode")}>
+            <button
+              type="button"
+              className={`btn btn-ghost btn-sm${searchMode === "dataId" ? " active" : ""}`}
+              onClick={() => switchSearchMode("dataId")}
+            >
+              {t("config.searchByDataId")}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-ghost btn-sm${searchMode === "content" ? " active" : ""}`}
+              onClick={() => switchSearchMode("content")}
+            >
+              {t("config.searchByContent")}
+            </button>
+          </div>
           <div className="browser-search-row">
             <input
               className="search-input wide"
-              placeholder={t("config.searchPlaceholder")}
+              placeholder={searchMode === "content" ? t("config.contentSearchPlaceholder") : t("config.searchPlaceholder")}
               value={search}
               autoCapitalize="off"
               autoCorrect="off"
@@ -616,7 +864,9 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
             />
             <button
               className="btn btn-ghost btn-sm browser-icon-btn"
-              onClick={() => fetchList(appliedTerm, pageNo, selectedGroup)}
+              onClick={() =>
+                searchMode === "content" ? searchAllContent(search, selectedGroup) : fetchList(appliedTerm, pageNo, selectedGroup)
+              }
               title={t("config.refresh")}
               aria-label={t("config.refresh")}
               disabled={listLoading}
@@ -663,19 +913,48 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
               </button>
             )}
             {!isLocalSnapshot && items.length > 0 && (
-              <button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading}>
+              <button
+                className="btn btn-ghost btn-sm snapshot-action-btn"
+                onClick={createSnapshot}
+                disabled={snapshotSaving || listLoading}
+              >
                 {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
+              </button>
+            )}
+            {isContentSearchActive && contentResults.length > 0 && canStartReplacement && (
+              <button className="btn btn-primary btn-sm browser-replace-btn" type="button" onClick={openReplacePanel}>
+                {t("config.batchReplace")}
               </button>
             )}
           </div>
         </div>
-        <div className="browser-count">{t("config.total", { count: total })}</div>
+        <div className="browser-count">
+          {isContentSearchActive ? t("config.contentSearchCount", { count: contentResults.length }) : t("config.total", { count: total })}
+        </div>
+        {isContentSearchActive && (
+          <div className="browser-content-search-status">
+            {t("config.contentSearchProgress", { loaded: contentSearchProgress.loaded, total: contentSearchProgress.total })}
+            {contentSearchProgress.failed > 0 && (
+              <span>{t("config.contentSearchPartialFailed", { count: contentSearchProgress.failed })}</span>
+            )}
+          </div>
+        )}
         <div className="browser-items">
           {listLoading && <div className="pad-msg">{t("config.loading")}</div>}
-          {listError && <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />}
-          {!listLoading && !listError && items.length === 0 && <div className="pad-msg">{t("config.empty")}</div>}
-          {items.map((it) => {
+          {listError && (
+            <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />
+          )}
+          {isContentSearchActive && contentSearchError && (
+            <InlineError {...inlineErrorLabels} message={contentSearchError} onRetry={() => searchAllContent(contentTerm, selectedGroup)} />
+          )}
+          {!listLoading && !listError && !contentSearchError && visibleItems.length === 0 && (
+            <div className="pad-msg">{t("config.empty")}</div>
+          )}
+          {visibleItems.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
+            const result = isContentSearchActive
+              ? contentResults.find((candidate) => configResultKey(candidate.item) === configResultKey(it))
+              : null;
             return (
               <div
                 key={`${it.group}/${it.dataId}`}
@@ -689,11 +968,26 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
                   {it.group}
                   {it.configType ? ` · ${it.configType}` : ""}
                 </div>
+                {result && (
+                  <>
+                    <label className="browser-result-check" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedContentKeys.has(configResultKey(it))}
+                        onChange={() => toggleContentResult(result)}
+                      />
+                      <span>{t("config.selectForReplace")}</span>
+                    </label>
+                    <div className="browser-item-summary">{result.summary}</div>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
-        <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p, selectedGroup)} />
+        {!isContentSearchActive && (
+          <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p, selectedGroup)} />
+        )}
       </div>
 
       <div className="browser-detail">
@@ -839,6 +1133,128 @@ export default function ConfigBrowser({ conn, tenant }: Props) {
 
       {showDelete && selected && (
         <DeleteConfirm name={selected.dataId} group={selected.group} onCancel={() => setShowDelete(false)} onConfirm={doDelete} />
+      )}
+
+      {showReplace && (
+        <div className="modal-overlay" onClick={() => setShowReplace(false)}>
+          <div className="modal modal-md browser-replace-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{t("config.batchReplace")}</h3>
+              <button className="modal-x" type="button" title={t("common.close")} onClick={() => setShowReplace(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="browser-replace-summary">
+                <strong>{t("config.replaceSelection", { count: selectedContentResults.length })}</strong>
+                <span>{t("config.replaceImpact", { configs: replaceImpact.configs, replacements: replaceImpact.replacements })}</span>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="config-replace-find">
+                  {t("config.findText")}
+                </label>
+                <input
+                  id="config-replace-find"
+                  className="search-input wide mono"
+                  value={replaceFindText}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => setReplaceFindText(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="config-replace-text">
+                  {t("config.replaceText")}
+                </label>
+                <input
+                  id="config-replace-text"
+                  className="search-input wide mono"
+                  value={replaceText}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => setReplaceText(event.target.value)}
+                />
+                <div className="field-hint">{t("config.replaceLiteralHint")}</div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" type="button" onClick={() => setShowReplace(false)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={!replaceFindText || replaceImpact.configs === 0}
+                onClick={openTargetPicker}
+              >
+                {t("config.chooseApplyTarget")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTargetPicker && (
+        <div className="modal-overlay" onClick={() => setShowTargetPicker(false)}>
+          <div className="modal modal-md browser-target-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{t("config.applyToTarget")}</h3>
+              <button className="modal-x" type="button" title={t("common.close")} onClick={() => setShowTargetPicker(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="browser-target-flow">
+                <div className="browser-target-scope">
+                  <span>{t("config.applySource")}</span>
+                  <strong>{sourceEndpoint.label}</strong>
+                </div>
+                <span className="browser-target-arrow" aria-hidden="true">
+                  →
+                </span>
+                <div className="browser-target-scope">
+                  <span>{t("config.applyTarget")}</span>
+                  <strong>{targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}</strong>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label">{t("config.targetEnvironment")}</label>
+                <Select
+                  value={targetConnectionId}
+                  placeholder={t("config.noApplyTarget")}
+                  options={targetConnections.map((candidate) => ({
+                    value: candidate.id,
+                    label: `${connectionDisplayLabel(candidate)}${isSandboxEnvironment(candidate) ? ` · ${t("config.sandboxDefault")}` : ""}`,
+                  }))}
+                  onChange={setTargetConnectionId}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="config-target-namespace">
+                  {t("config.targetNamespace")}
+                </label>
+                <input
+                  id="config-target-namespace"
+                  className="search-input wide mono"
+                  value={targetNamespace}
+                  placeholder={t("app.namespaceDefault")}
+                  onChange={(event) => setTargetNamespace(event.target.value)}
+                />
+              </div>
+              <div className="field-hint browser-target-notice">{t("config.applyPlanRequired")}</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" type="button" onClick={() => setShowTargetPicker(false)}>
+                {t("common.cancel")}
+              </button>
+              <button className="btn btn-primary" type="button" disabled={!targetConnection} onClick={startContentReplaceApply}>
+                {t("config.generateApplyPlan", { count: replaceImpact.configs })}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pending && (

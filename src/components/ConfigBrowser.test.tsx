@@ -94,11 +94,16 @@ function configPage(items: ConfigItem[] = [{ dataId: "app.json", group: "DEFAULT
   };
 }
 
-function renderBrowser(locale = "zh-CN", browserConn: Connection = conn, tenant = "public") {
+function renderBrowser(
+  locale = "zh-CN",
+  browserConn: Connection = conn,
+  tenant = "public",
+  options: { connections?: Connection[]; onStartApply?: (payload: import("../lib/applyEntry").ApplyEntryPayload) => void } = {}
+) {
   localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
-      <ConfigBrowser conn={browserConn} tenant={tenant} />
+      <ConfigBrowser conn={browserConn} tenant={tenant} connections={options.connections} onStartApply={options.onStartApply} />
       <MessageCenter />
       <ErrorDialog />
     </I18nProvider>
@@ -283,6 +288,90 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "*gateway*", "", 1, 50);
   });
 
+  it("searches all config content and creates a manual batch plan for a sandbox target", async () => {
+    const sandboxConn: Connection = {
+      ...conn,
+      id: "sandbox",
+      name: "sandbox",
+      projectName: "订单",
+      environmentName: "Sandbox",
+      sourceName: "云上",
+      baseUrl: "http://sandbox.example.com/nacos",
+    };
+    const sourceConn: Connection = { ...conn, projectName: "订单", environmentName: "Development", sourceName: "云上" };
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([{ dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }])
+    );
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: "gateway:\n  host: dev.internal\n",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    });
+
+    renderBrowser("zh-CN", sourceConn, "public", { connections: [sourceConn, sandboxConn], onStartApply });
+
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "dev.internal" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+
+    expect(await screen.findByText("gateway: host: dev.internal")).toBeInTheDocument();
+    expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(sourceConn, "public", "gateway.yaml", "DEFAULT_GROUP");
+
+    fireEvent.click(screen.getByRole("button", { name: "批量替换" }));
+    fireEvent.change(screen.getByLabelText("替换为"), { target: { value: "sandbox.internal" } });
+    expect(screen.getByText("将影响 1 个配置，共 1 处替换")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "选择应用目标" }));
+
+    expect(await screen.findByText("当前来源")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划（1 项）" }));
+
+    expect(onStartApply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: "manual",
+        scope: "batch",
+        target: expect.objectContaining({ connectionId: "sandbox", namespace: "public" }),
+        items: [
+          expect.objectContaining({
+            sourceValueOverride: expect.objectContaining({ content: "gateway:\n  host: sandbox.internal\n" }),
+          }),
+        ],
+      })
+    );
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+  });
+
+  it("searches content across every config-list page", async () => {
+    apiMocks.listConfigs.mockImplementation(async (_conn: Connection, _tenant: string, _dataId: string, _group: string, page: number) => ({
+      totalCount: 2,
+      pageNumber: page,
+      pagesAvailable: 2,
+      pageItems:
+        page === 1
+          ? [{ dataId: "first.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }]
+          : [{ dataId: "second.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    }));
+    apiMocks.getConfigDocument.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => ({
+      content: dataId === "second.yaml" ? "service: remembered-value" : "service: other",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    }));
+
+    renderBrowser();
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "remembered-value" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+
+    expect(await screen.findByText("second.yaml")).toBeInTheDocument();
+    expect(apiMocks.listConfigs).toHaveBeenCalledWith(conn, "public", "", "", 2, 50);
+  });
+
   it("blocks publishing when edited content does not match the selected format", async () => {
     renderBrowser();
     fireEvent.click(await screen.findByText("app.json"));
@@ -322,7 +411,9 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(apiMocks.getConfigDocument).toHaveBeenCalledTimes(1);
@@ -350,7 +441,9 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
+    ).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "publish",
@@ -389,7 +482,9 @@ describe("ConfigBrowser", () => {
     fireEvent.change(within(dialog).getByPlaceholderText("app.json"), { target: { value: "app.json" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    expect(await within(dialog).findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
+    ).toBeInTheDocument();
     expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory()[0]).toMatchObject({
       type: "delete",
@@ -591,7 +686,9 @@ describe("ConfigBrowser", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
+    ).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(latestError()).toMatchObject({
       title: "Failed to publish config",

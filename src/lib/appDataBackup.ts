@@ -195,6 +195,20 @@ async function portableWebDAVState(value: unknown, deps: CollectPortableAppDataB
   return state;
 }
 
+function portableAppDataBackupState(value: unknown): unknown {
+  const state = cloneRecord(value);
+  if (!state) return value;
+  removeKey(state, "backupPasswordSecretRef");
+  return state;
+}
+
+function restoredAppDataBackupState(value: unknown): unknown {
+  const state = cloneRecord(value);
+  if (!state) return value;
+  removeKey(state, "backupPasswordSecretRef");
+  return state;
+}
+
 export function collectAppDataBackupPayload(input: CollectAppDataBackupInput): AppDataBackupPayload {
   return {
     schemaVersion: APP_DATA_BACKUP_SCHEMA_VERSION,
@@ -223,7 +237,7 @@ export async function collectPortableAppDataBackupPayload(
 ): Promise<AppDataBackupPayload> {
   const payload = cloneJsonObject(collectAppDataBackupPayload(input));
   payload.data.connections = await Promise.all(payload.data.connections.map((item) => portableConnectionRecord(item, deps)));
-  payload.data.appDataBackup = await portableWebDAVState(payload.data.appDataBackup, deps);
+  payload.data.appDataBackup = portableAppDataBackupState(await portableWebDAVState(payload.data.appDataBackup, deps));
   payload.data.snapshotWebDAV = await portableWebDAVState(payload.data.snapshotWebDAV, deps);
   payload.data.snapshots = deps?.listSnapshotFiles ? await deps.listSnapshotFiles() : [];
   return payload;
@@ -296,7 +310,7 @@ export function restoreAppDataBackupPayload(value: unknown): AppDataBackupPayloa
   localStorage.setItem("cs.applyVerifications", JSON.stringify(payload.data.applyVerifications));
   localStorage.setItem(UI_KEY, JSON.stringify(payload.data.ui));
   localStorage.setItem(LOCALE_KEY, payload.data.locale);
-  localStorage.setItem("cs.appDataBackup", JSON.stringify(payload.data.appDataBackup));
+  localStorage.setItem("cs.appDataBackup", JSON.stringify(restoredAppDataBackupState(payload.data.appDataBackup)));
   localStorage.setItem("cs.snapshotWebDAV", JSON.stringify(payload.data.snapshotWebDAV));
   return payload;
 }
