@@ -9,7 +9,7 @@ export type MergeActionScope = "row" | "block";
 
 export interface MergeActionLabels {
   leftToRight: string;
-  rightToLeft: string;
+  rightToLeft?: string;
 }
 
 export interface MergeActionState {
@@ -61,13 +61,12 @@ function changeBlockPosition(blockIndexes: number[], rowIndex: number): "single"
   return blockIndexes.includes(rowIndex) ? "middle" : null;
 }
 
-function mergeSideClass(
-  side: "left" | "right",
+function mergeCenterClass(
   blockMode: boolean,
   blockPosition: ReturnType<typeof changeBlockPosition>,
   showActions: boolean
 ): string {
-  const classes = ["diff-merge-side", side];
+  const classes = ["diff-merge-center"];
   if (blockMode && blockPosition) {
     classes.push("block-mode");
     classes.push(`block-${blockPosition}`);
@@ -168,10 +167,11 @@ export default function DiffPanel({
                 key={rowIndex}
               >
                 <span className="diff-gutter">{r.leftNo ?? ""}</span>
+                <Cell text={r.left} side="left" format={format} />
                 {onMergeAction && (
-                  <span className={mergeSideClass("left", blockMode, blockPosition, showMergeActions)}>
+                  <span className={mergeCenterClass(blockMode, blockPosition, showMergeActions)}>
                     {showBlockBrace && <span className="diff-merge-block-brace" aria-hidden="true" />}
-                    {showMergeActions && mergeActionLabels && (
+                    {showMergeActions && mergeActionLabels?.rightToLeft && canMergeRightToLeft && (
                       <button
                         type="button"
                         className={mergeActionClass("right-to-left", mergeState)}
@@ -183,14 +183,6 @@ export default function DiffPanel({
                         {"\u2190"}
                       </button>
                     )}
-                  </span>
-                )}
-                <Cell text={r.left} side="left" format={format} />
-                {onMergeAction && <span className="diff-merge-gutter" aria-hidden="true" />}
-                <span className="diff-gutter">{r.rightNo ?? ""}</span>
-                {onMergeAction && (
-                  <span className={mergeSideClass("right", blockMode, blockPosition, showMergeActions)}>
-                    {showBlockBrace && <span className="diff-merge-block-brace" aria-hidden="true" />}
                     {showMergeActions && mergeActionLabels && (
                       <button
                         type="button"
@@ -205,6 +197,7 @@ export default function DiffPanel({
                     )}
                   </span>
                 )}
+                <span className="diff-gutter">{r.rightNo ?? ""}</span>
                 <Cell text={r.right} side="right" format={format} />
               </div>
             );

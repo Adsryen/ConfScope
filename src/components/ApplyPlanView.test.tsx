@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
+import type { Task } from "../lib/taskmanager";
 import { buildApplyPlan, type ApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
 import { applyConfirmationText } from "../lib/applyPlanExecution";
 import ApplyPlanView from "./ApplyPlanView";
@@ -276,6 +277,8 @@ describe("ApplyPlanView", () => {
     snapshotMocks.createSnapshot.mockReset();
     snapshotMocks.createSnapshot.mockResolvedValue({ id: "snap-before-1", name: "before_apply" });
     historyMocks.recordOperation.mockReset();
+    taskManagerMocks.manager.getTask.mockReset();
+    taskManagerMocks.manager.onTaskUpdate.mockReset();
     taskManagerMocks.getTaskManager.mockReset();
     taskManagerMocks.getTaskManager.mockReturnValue(taskManagerMocks.manager);
   });
@@ -295,6 +298,8 @@ describe("ApplyPlanView", () => {
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
     expect(await screen.findByRole("heading", { name: "Configuration change plan" })).toBeInTheDocument();
+    expect(await screen.findByText("Current: Generate and review plan")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Execute, verify, and promote/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Execute change" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
   });
@@ -321,7 +326,7 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("Blocked 0")).toBeInTheDocument();
   });
 
-  it("shows item actions and selected item source, target, after and block details", async () => {
+  it("shows item actions and target-to-after diff without duplicate value blocks", async () => {
     const plan = makePlan([
       item("new.key", value("from-source"), value("", false)),
       item("changed.key", value("from-source"), value("from-target")),
@@ -347,8 +352,11 @@ describe("ApplyPlanView", () => {
 
     fireEvent.click(screen.getByText("changed.key"));
     expect(screen.getByText("Action: overwrite")).toBeInTheDocument();
-    expect(screen.getAllByText("from-source").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("from-target").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("from-source")).toHaveLength(1);
+    expect(screen.getAllByText("from-target")).toHaveLength(1);
+    expect(screen.queryByText("Source value")).not.toBeInTheDocument();
+    expect(screen.getByText("Target value")).toBeInTheDocument();
+    expect(screen.getByText("After value")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("broken.key"));
     expect(screen.getByText("Block reason: source_parse_error")).toBeInTheDocument();
@@ -439,6 +447,8 @@ describe("ApplyPlanView", () => {
     fireEvent.click(executeButton);
 
     expect(await screen.findAllByText("plan-saved-1")).toHaveLength(2);
+    expect(await screen.findByText("Change plan complete")).toBeInTheDocument();
+    expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(5);
     await waitFor(() =>
       expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
         savedPlan,
@@ -504,15 +514,14 @@ describe("ApplyPlanView", () => {
     );
   });
 
-
   it("passes the selected item subset and dry-run flag to execution", async () => {
-    const plan = makePlan([
-      item("first.key", value("first-source"), value("first-target")),
-      item("second.key", value("second-source"), value("second-target")),
-    ], {
-      targetId: "conn-stage",
-      targetLabel: "Staging / public",
-    });
+    const plan = makePlan(
+      [item("first.key", value("first-source"), value("first-target")), item("second.key", value("second-source"), value("second-target"))],
+      {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }
+    );
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
       ok: true,
       plan,
@@ -538,6 +547,77 @@ describe("ApplyPlanView", () => {
       expect.objectContaining({ selectedItemIds: [plan.items[1].id], dryRun: true })
     );
     expect(await screen.findByText("Dry-run passed. Planned writes: 1")).toBeInTheDocument();
+  });
+
+  it("shows the execution task progress and task id", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    const task: Task = {
+      id: "task-live-1",
+      name: "Change plan plan-preview-1",
+      type: "apply",
+      scope: "Staging / public",
+      cancellable: false,
+      status: "success",
+      progress: 100,
+      total: 1,
+      completed: 1,
+      failed: 0,
+      error: "",
+      startTime: "2026-07-06T00:00:00.000Z",
+      endTime: "2026-07-06T00:00:01.000Z",
+      elapsedTime: 1000,
+    };
+    taskManagerMocks.manager.getTask.mockReturnValue(task);
+    executionMocks.executeApplyPlan.mockImplementationOnce(async (_plan, _deps, options: { onTaskCreated?: (taskId: string) => void }) => {
+      options.onTaskCreated?.(task.id);
+      return { ok: true, taskId: task.id, historyId: "history-1" };
+    });
+    const planEntry = { ...entryPayload, target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" } };
+
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(planEntry, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+    expect(await screen.findByText("Execution progress")).toBeInTheDocument();
+    expect(screen.getByText("Processed 1/1 items")).toBeInTheDocument();
+    expect(screen.getByText("task-live-1")).toBeInTheDocument();
+  });
+
+  it("keeps the fifth step current after a successful sandbox execution", async () => {
+    const sandboxConn: Connection = {
+      ...safeTargetConn,
+      id: "conn-sandbox",
+      name: "Sandbox",
+      environmentName: "Sandbox",
+    };
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: sandboxConn.id,
+      targetLabel: "Sandbox / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: sandboxConn,
+    });
+
+    const sandboxEntry = { ...entryPayload, target: { ...entryPayload.target, connectionId: sandboxConn.id, connectionName: sandboxConn.name, label: "Sandbox / public" } };
+    renderView(sandboxEntry, [sourceConn, sandboxConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+    expect(await screen.findByText("Current: Execute, verify, and promote")).toBeInTheDocument();
+    expect(screen.queryByText("Change plan complete")).not.toBeInTheDocument();
   });
 
   it("includes resolved runtime source connections when executing rollback plans", async () => {

@@ -25,6 +25,7 @@ export interface AppDataBackupActivity {
 
 export interface AppDataBackupState {
   webdav: AppDataWebDAVSettings;
+  backupPasswordSecretRef?: StoredSecretPointer;
   activities: AppDataBackupActivity[];
 }
 
@@ -57,7 +58,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeSecretPointer(value: unknown): StoredSecretPointer | undefined {
+function normalizeSecretPointer(value: unknown, expectedNamespace: StoredSecretPointer["namespace"]): StoredSecretPointer | undefined {
   if (!isObjectRecord(value)) return undefined;
   const status = value.status;
   if (status !== "stored" && status !== "missing" && status !== "unsupported") return undefined;
@@ -67,7 +68,7 @@ function normalizeSecretPointer(value: unknown): StoredSecretPointer | undefined
   const field = stringValue(value.field);
   const migratedAt = stringValue(value.migratedAt);
   if (!ref || !namespace || !ownerId || !field || !migratedAt) return undefined;
-  if (namespace !== "app-data-webdav") return undefined;
+  if (namespace !== expectedNamespace) return undefined;
   return {
     ref,
     namespace: namespace as StoredSecretPointer["namespace"],
@@ -93,7 +94,7 @@ function normalizeWebDAV(value: unknown): AppDataWebDAVSettings {
     username: stringValue(raw.username).trim(),
     password: stringValue(raw.password),
     rootPath: normalizeRootPath(raw.rootPath),
-    passwordSecretRef: normalizeSecretPointer(raw.passwordSecretRef),
+    passwordSecretRef: normalizeSecretPointer(raw.passwordSecretRef, "app-data-webdav"),
   };
 }
 
@@ -148,6 +149,7 @@ function normalizeState(value: unknown): AppDataBackupState {
     : [];
   return {
     webdav: normalizeWebDAV(raw.webdav),
+    backupPasswordSecretRef: normalizeSecretPointer(raw.backupPasswordSecretRef, "app-data-backup"),
     activities: sortActivities(activities).slice(0, MAX_ACTIVITIES),
   };
 }
@@ -177,6 +179,12 @@ export function updateAppDataWebDAVSettings(patch: Partial<AppDataWebDAVSettings
       ...patch,
     },
   });
+}
+
+export function updateAppDataBackupPasswordSecretRef(pointer?: StoredSecretPointer): AppDataBackupState {
+  const current = loadAppDataBackupState();
+  const { backupPasswordSecretRef: _previous, ...withoutPrevious } = current;
+  return saveAppDataBackupState(pointer ? { ...withoutPrevious, backupPasswordSecretRef: pointer } : withoutPrevious);
 }
 
 export function recordAppDataBackupActivity(input: AppDataBackupActivityInput): AppDataBackupActivity {

@@ -25,8 +25,18 @@ const appApi = vi.hoisted(() => ({
   getCurrentPlatform: vi.fn(),
 }));
 
+const credentialSecrets = vi.hoisted(() => ({
+  deleteStoredSecret: vi.fn(),
+  resolveAppDataBackupPassword: vi.fn(),
+  saveAppDataBackupPassword: vi.fn(),
+}));
+
 vi.mock("../api/appDataBackup", () => appDataBackupApi);
 vi.mock("../api/app", () => appApi);
+vi.mock("../lib/credentialSecrets", async () => {
+  const actual = await vi.importActual<typeof import("../lib/credentialSecrets")>("../lib/credentialSecrets");
+  return { ...actual, ...credentialSecrets };
+});
 vi.mock("../lib/toast", () => ({ toast: vi.fn() }));
 
 class MemoryStorage {
@@ -99,6 +109,7 @@ describe("AppDataBackupPanel", () => {
   beforeEach(() => {
     Object.values(appDataBackupApi).forEach((fn) => fn.mockReset());
     Object.values(appApi).forEach((fn) => fn.mockReset());
+    Object.values(credentialSecrets).forEach((fn) => fn.mockReset());
   });
 
   it("separates local, cloud, restore, and activity work areas", async () => {
@@ -149,6 +160,52 @@ describe("AppDataBackupPanel", () => {
     expect(payload.data.snapshots).toEqual([]);
     expect(localStorage.getItem("cs.appDataBackup")).not.toContain("backup-pass");
     expect(within(document.querySelector(".test-msg") as HTMLElement).getByText("Local backup exported")).toBeInTheDocument();
+  });
+
+  it("uses a securely saved backup password for local export without operation input", async () => {
+    const pointer = {
+      ref: "app-data-backup.default.encryption-password",
+      namespace: "app-data-backup" as const,
+      ownerId: "default",
+      field: "encryption-password",
+      migratedAt: "2026-08-11T00:00:00.000Z",
+      status: "stored" as const,
+    };
+    credentialSecrets.saveAppDataBackupPassword.mockResolvedValue(pointer);
+    credentialSecrets.resolveAppDataBackupPassword.mockResolvedValue("saved-backup-pass");
+    appDataBackupApi.selectAppDataBackupSaveFile.mockResolvedValue("C:\\tmp\\confscope.csbackup");
+    appDataBackupApi.writeAppDataBackupFile.mockResolvedValue({ format: "confscope.app-data-backup", schemaVersion: 1, appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-08-11T00:00:00.000Z", size: 120 });
+    renderPanel();
+
+    const savedPasswordInputs = document.querySelectorAll(".app-data-backup-password-settings input");
+    fireEvent.change(savedPasswordInputs[0], { target: { value: "saved-backup-pass" } });
+    fireEvent.change(savedPasswordInputs[1], { target: { value: "saved-backup-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save password" }));
+    await waitFor(() => expect(credentialSecrets.saveAppDataBackupPassword).toHaveBeenCalledWith("saved-backup-pass"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Export encrypted file" }));
+    await waitFor(() => expect(appDataBackupApi.writeAppDataBackupFile).toHaveBeenCalled());
+    expect(appDataBackupApi.writeAppDataBackupFile.mock.calls[0][2]).toBe("saved-backup-pass");
+    expect(localStorage.getItem("cs.appDataBackup")).not.toContain("saved-backup-pass");
+  });
+
+  it("clears the saved backup password reference after deleting the system credential", async () => {
+    const pointer = {
+      ref: "app-data-backup.default.encryption-password",
+      namespace: "app-data-backup",
+      ownerId: "default",
+      field: "encryption-password",
+      migratedAt: "2026-08-11T00:00:00.000Z",
+      status: "stored",
+    };
+    credentialSecrets.deleteStoredSecret.mockResolvedValue(undefined);
+    renderPanel({}, () => {
+      localStorage.setItem("cs.appDataBackup", JSON.stringify({ webdav: {}, backupPasswordSecretRef: pointer, activities: [] }));
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear saved password" }));
+    await waitFor(() => expect(credentialSecrets.deleteStoredSecret).toHaveBeenCalledWith(pointer));
+    expect(JSON.parse(localStorage.getItem("cs.appDataBackup") || "{}").backupPasswordSecretRef).toBeUndefined();
   });
 
   it("blocks local export when backup passwords do not match", async () => {

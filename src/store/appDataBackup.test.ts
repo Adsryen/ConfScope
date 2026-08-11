@@ -4,6 +4,7 @@ import {
   loadAppDataBackupState,
   recordAppDataBackupActivity,
   saveAppDataBackupState,
+  updateAppDataBackupPasswordSecretRef,
   updateAppDataWebDAVSettings,
 } from "./appDataBackup";
 
@@ -137,6 +138,41 @@ describe("appDataBackup store", () => {
     );
 
     expect(loadAppDataBackupState().webdav.passwordSecretRef).toBeUndefined();
+  });
+
+  it("persists only the dedicated app-data backup password pointer", () => {
+    const pointer = {
+      ref: "app-data-backup.default.encryption-password",
+      namespace: "app-data-backup" as const,
+      ownerId: "default",
+      field: "encryption-password",
+      migratedAt: "2026-08-11T00:00:00.000Z",
+      status: "stored" as const,
+    };
+
+    expect(updateAppDataBackupPasswordSecretRef(pointer).backupPasswordSecretRef).toEqual(pointer);
+    expect(loadAppDataBackupState().backupPasswordSecretRef).toEqual(pointer);
+    expect(updateAppDataBackupPasswordSecretRef().backupPasswordSecretRef).toBeUndefined();
+  });
+
+  it("drops app-data backup password pointers from another credential namespace", () => {
+    localStorage.setItem(
+      "cs.appDataBackup",
+      JSON.stringify({
+        webdav: {},
+        backupPasswordSecretRef: {
+          ref: "connection.conn-1.password",
+          namespace: "connection",
+          ownerId: "conn-1",
+          field: "password",
+          migratedAt: "2026-08-11T00:00:00.000Z",
+          status: "stored",
+        },
+        activities: [],
+      })
+    );
+
+    expect(loadAppDataBackupState().backupPasswordSecretRef).toBeUndefined();
   });
 
   it("records activities newest first and clears them without deleting WebDAV settings", () => {

@@ -53,6 +53,7 @@ function endpoint(overrides: Partial<ApplyPlanEndpoint> = {}): ApplyPlanEndpoint
 describe("apply plan execution confirmation helpers", () => {
   it.each([
     [{ environmentName: "Production" }, endpoint()],
+    [{ environmentName: "UAT" }, endpoint()],
     [{ sourceName: "prod-vpc" }, endpoint()],
     [{ name: "线上公网" }, endpoint()],
     [{ environmentName: "生产" }, endpoint()],

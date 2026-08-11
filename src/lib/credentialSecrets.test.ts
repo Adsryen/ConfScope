@@ -4,7 +4,9 @@ import {
   formatStoredSecretRef,
   countMigratableStoredCredentials,
   migrateStoredCredentials,
+  resolveAppDataBackupPassword,
   resolveSecret,
+  saveAppDataBackupPassword,
   writeAndVerifySecret,
   type SecureStoreClient,
   type StoredSecretPointer,
@@ -97,6 +99,20 @@ describe("credential secrets", () => {
 
     expect(client.read).toHaveBeenCalledWith({ namespace: "app-data-webdav", ownerId: "default", field: "password" });
     expect(client.delete).toHaveBeenCalledWith({ namespace: "app-data-webdav", ownerId: "default", field: "password" });
+  });
+
+  it("stores and resolves the app-data backup encryption password through its dedicated ref", async () => {
+    const client = makeClient();
+    const pointer = await saveAppDataBackupPassword("backup-pass", { client, now: () => "2026-08-11T00:00:00.000Z" });
+
+    expect(pointer).toMatchObject({
+      ref: "app-data-backup.default.encryption-password",
+      namespace: "app-data-backup",
+      ownerId: "default",
+      field: "encryption-password",
+    });
+    await expect(resolveAppDataBackupPassword(pointer, { client })).resolves.toBe("secret-value");
+    await expect(saveAppDataBackupPassword("   ", { client })).rejects.toThrow("备份密码不能为空");
   });
 
   it("reports a clear error when a stored pointer cannot be resolved", async () => {

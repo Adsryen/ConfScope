@@ -2,7 +2,7 @@
 import type { ProviderType } from "../api/configCenter";
 import type { ApplyPlanValueInput } from "./applyPlan";
 
-export type ApplyEntrySourceType = "audit" | "diff" | "backup" | "promote" | "rollback";
+export type ApplyEntrySourceType = "audit" | "diff" | "backup" | "promote" | "rollback" | "manual";
 export type ApplyEntryScope = "key" | "config" | "batch";
 export type ApplyEntryRiskLevel = "low" | "medium" | "high";
 export type ApplyEntryRiskReason = "batch_apply" | "has_skipped_items";

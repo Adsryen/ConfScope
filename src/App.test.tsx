@@ -3,6 +3,7 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "./test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { I18nProvider } from "./i18n";
 import type { Connection } from "./store/connections";
 import type { BackupDiffJumpParams } from "./components/BackupView";
@@ -137,15 +138,7 @@ vi.mock("./components/OperationHistoryView", () => ({
   ),
 }));
 vi.mock("./components/ApplyPlanView", () => ({
-  default: ({
-    entry,
-    connections,
-    onBack,
-  }: {
-    entry: ApplyEntryPayload | null;
-    connections: Connection[];
-    onBack: () => void;
-  }) => {
+  default: ({ entry, connections, onBack }: { entry: ApplyEntryPayload | null; connections: Connection[]; onBack: () => void }) => {
     viewMocks.applyProps.push({ entry, connections });
     return (
       <section aria-label="apply-plan-workbench">
@@ -257,7 +250,7 @@ vi.mock("./components/BackupView", () => ({
 }));
 
 vi.mock("./components/DiffView", () => ({
-  default: ({
+  default: function MockDiffView({
     connections,
     initialParams,
     onStartApply,
@@ -265,11 +258,16 @@ vi.mock("./components/DiffView", () => ({
     connections: Connection[];
     initialParams: DiffJumpParams | null;
     onStartApply?: (payload: ApplyEntryPayload) => void;
-  }) => {
+  }) {
     viewMocks.diffProps.push({ connections, initialParams });
+    const [compareCount, setCompareCount] = useState(0);
     return (
       <div data-testid="diff-view">
         Diff View
+        <button type="button" onClick={() => setCompareCount((count) => count + 1)}>
+          Mock diff compare
+        </button>
+        <span data-testid="diff-state">{compareCount}</span>
         <button type="button" onClick={() => onStartApply?.(viewMocks.makeApplyPayload("diff"))}>
           Mock diff apply
         </button>
@@ -645,6 +643,26 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mock ApplyPlanView back" }));
 
     expect(screen.getByRole("button", { name: "Mock backup apply" })).toBeInTheDocument();
+  });
+
+  it("returns from a diff plan without resetting the previous diff state", async () => {
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "diff", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mock diff compare" }));
+    expect(screen.getByTestId("diff-state")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock diff apply" }));
+    expect(screen.getByRole("heading", { name: "Apply Plan Workbench" })).toBeInTheDocument();
+    expect(screen.getByTestId("diff-view").closest(".diff-apply-cache")).toHaveAttribute("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock ApplyPlanView back" }));
+    expect(screen.getByTestId("diff-state")).toHaveTextContent("1");
   });
 
   it("routes history follow-up entries to ApplyPlanView and returns to history without persisting apply mode", async () => {

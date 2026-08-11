@@ -142,6 +142,7 @@ describe("appDataBackup lib", () => {
           rootPath: "/confscope",
           passwordSecretRef: pointer("app-data-webdav.default.password", "app-data-webdav", "default", "password"),
         },
+        backupPasswordSecretRef: pointer("app-data-backup.default.encryption-password", "app-data-backup", "default", "encryption-password"),
         activities: [],
       })
     );
@@ -181,6 +182,7 @@ describe("appDataBackup lib", () => {
       })
     );
     expect(JSON.stringify(payload.data.appDataBackup)).not.toContain("passwordSecretRef");
+    expect(JSON.stringify(payload.data.appDataBackup)).not.toContain("backupPasswordSecretRef");
     expect(payload.data.snapshotWebDAV).toEqual(
       expect.objectContaining({
         webdav: expect.objectContaining({ password: "resolved:snapshot-webdav.default.password" }),

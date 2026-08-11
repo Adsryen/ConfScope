@@ -22,7 +22,7 @@ import {
 import { detectFormat, nacosType, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 
-const PROTECTED_TARGET_MARKERS = ["prod", "production", "生产", "真实", "线上"] as const;
+const PROTECTED_TARGET_MARKERS = ["uat", "prod", "production", "生产", "真实", "线上"] as const;
 const DOCUMENT_KEY = "__document";
 
 export interface ExecuteApplyPlanDeps {
@@ -40,6 +40,7 @@ export interface ExecuteApplyPlanDeps {
 export interface ExecuteApplyPlanOptions {
   selectedItemIds?: string[];
   dryRun?: boolean;
+  onTaskCreated?: (taskId: string) => void;
 }
 
 export type ExecuteApplyPlanResult =
@@ -364,9 +365,10 @@ function emptyBackup(): ApplyBackupSummary {
   return { backedUpCount: 0, missingBeforeCount: 0 };
 }
 
-function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps): string {
+function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps, onTaskCreated?: (taskId: string) => void): string {
   const taskType = operationTypeForApplyPlan(plan) === "restore" ? "restore" : "apply";
   const task = deps.taskManager.createTask(`Change plan ${plan.id}`, taskType, { scope: plan.target.label, cancellable: false });
+  onTaskCreated?.(task.id);
   deps.taskManager.startTask(task.id);
   return task.id;
 }
@@ -405,7 +407,7 @@ export async function executeApplyPlan(
     return { ok: false, error: "No change plan items selected." };
   }
 
-  const taskId = createTask(workingPlan, deps);
+  const taskId = createTask(workingPlan, deps, options.onTaskCreated);
   const sourceConnection = findConnection(deps, workingPlan.source.connectionId);
   if (typeof sourceConnection === "string") return recordFailure(workingPlan, deps, taskId, sourceConnection, emptyBackup(), !options.dryRun);
   const targetConnection = findConnection(deps, workingPlan.target.connectionId);
