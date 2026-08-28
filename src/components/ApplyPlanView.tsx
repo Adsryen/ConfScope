@@ -14,6 +14,7 @@ import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
+import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import CopyButton from "./CopyButton";
@@ -464,6 +465,27 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteNotice(null);
+    const session = createAuditSession("apply");
+    auditSessionEvent(session, {
+      kind: "apply_plan_start",
+      scope: "apply",
+      planId: plan.id,
+      sourceType: plan.inputSummary?.sourceType,
+      direction: "left->right",
+      left: plan.source?.label,
+      right: plan.target?.label,
+      selectedCount: selectedItemIds.length,
+      dryRun,
+      summary: {
+        total: plan.summary?.total ?? 0,
+        create: plan.summary?.create ?? 0,
+        overwrite: plan.summary?.overwrite ?? 0,
+        delete: plan.summary?.delete ?? 0,
+        skip: plan.summary?.skip ?? 0,
+        parseError: plan.summary?.parse_error ?? 0,
+        blocked: plan.summary?.blocked ?? 0,
+      },
+    });
     try {
       const result = await executeApplyPlan(
         plan,
@@ -500,12 +522,15 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           ...(dryRun ? { dryRun: true } : {}),
         }
       );
+      const resultHistoryId = "historyId" in result ? result.historyId : undefined;
       if (result.taskId) {
         trackedTaskIdRef.current = result.taskId;
         setExecutionTask(taskManager.getTask(result.taskId) ?? null);
       }
       if (!result.ok) {
         setExecuteError(result.error);
+        auditSessionEvent(session, { kind: "apply_error", result: "failure", taskId: result.taskId, historyId: resultHistoryId, error: result.error });
+        endAuditSession(session, "failure", result.error);
         return;
       }
       if ("dryRun" in result && result.dryRun) {
@@ -515,8 +540,17 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         setExecutionSucceeded(true);
         setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
       }
+      auditSessionEvent(session, {
+        kind: "apply_result",
+        result: "success",
+        taskId: result.taskId,
+        historyId: resultHistoryId,
+      });
+      endAuditSession(session, "success");
     } catch (error) {
       setExecuteError(error instanceof Error ? error.message : String(error));
+      auditSessionEvent(session, { kind: "apply_error", result: "failure", error: error instanceof Error ? error.message : String(error) });
+      endAuditSession(session, "failure", error instanceof Error ? error.message : String(error));
     } finally {
       setExecutionMode(null);
     }

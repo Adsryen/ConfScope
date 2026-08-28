@@ -9,6 +9,8 @@ type GoApp = {
   WriteSecureSecret(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
   ReadSecureSecret(ref: SecureSecretRef): Promise<string>;
   DeleteSecureSecret(ref: SecureSecretRef): Promise<void>;
+  AppendAuditEvent(raw: string): Promise<void>;
+  ReadAuditLogLines(limit: number): Promise<string[]>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   SelectConfigSourceExportDirectory(): Promise<string>;
@@ -179,6 +181,10 @@ export const WriteSecureSecret = (ref: SecureSecretRef, value: string) => app().
 export const ReadSecureSecret = (ref: SecureSecretRef) => app().ReadSecureSecret(ref);
 
 export const DeleteSecureSecret = (ref: SecureSecretRef) => app().DeleteSecureSecret(ref);
+
+export const AppendAuditEvent = (raw: string) => app().AppendAuditEvent(raw);
+
+export const ReadAuditLogLines = (limit: number) => app().ReadAuditLogLines(limit);
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 

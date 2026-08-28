@@ -7088,3 +7088,95 @@ button,
   justify-content: flex-end;
   margin-top: 24px;
 }
+
+/* ── 审计日志（LogViewer） ── */
+.log-viewer .log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.log-viewer .log-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.log-viewer .log-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.log-viewer .log-detail-meta .task-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-viewer .log-jsonl {
+  margin: 0;
+  padding: 10px 12px;
+  background: #101014;
+  border: 1px solid #26262e;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: auto;
+  max-height: 220px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #b8b8c2;
+}
+.log-viewer .log-detail-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  flex: 1;
+}
+.log-viewer .log-event {
+  border: 1px solid #232329;
+  border-radius: 6px;
+}
+.log-viewer .log-event summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.log-viewer .log-event-kind {
+  font-weight: 600;
+}
+.log-viewer .log-event-kind.danger {
+  color: #e06c75;
+}
+.log-viewer .log-event-ts {
+  color: #6b6b78;
+}
+.log-viewer .log-event-loc,
+.log-viewer .log-event-dir {
+  color: #8a8a99;
+}
+.log-viewer .log-event-payload {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid #232329;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 300px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #b8b8c2;
+}
+.log-viewer .log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9a9aa8;
+  white-space: nowrap;
+}

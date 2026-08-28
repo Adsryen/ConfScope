@@ -88,7 +88,9 @@
     "namespaceLoadFailed": "命名空间加载失败",
     "navGroupConfig": "配置管理",
     "navGroupData": "数据管理",
-    "navGroupSystem": "系统设置"
+    "navGroupSystem": "系统设置",
+    "logViewer": "审计日志",
+    "logViewerPlanned": "会话审计日志"
   },
   "apply": {
     "title": "配置变更计划",
@@ -795,7 +797,9 @@
     "mergeClearDraft": "重置预览",
     "mergePlanNoChanges": "没有可生成变更计划的预览变更",
     "diffStats": "差异统计",
-    "startApplyNeedsLoad": "请先点击「加载并对比」完成两侧加载，再点击此箭头进入变更计划"
+    "startApplyNeedsLoad": "请先点击「加载并对比」完成两侧加载，再点击此箭头进入变更计划",
+    "logRecorded": "已记录对比会话（#会话号见「审计日志」）",
+    "logRecordedWithId": "对比会话已记录：{id}（可在「审计日志」查看完整过程）"
   },
   "history": {
     "title": "历史版本",
@@ -876,7 +880,8 @@
     "exportCSV": "导出 CSV",
     "exportJSON": "导出 JSON",
     "sanitizeToggle": "脱敏导出（替换 password/token/secretKey/accessKey）",
-    "hideIgnored": "隐藏已忽略"
+    "hideIgnored": "隐藏已忽略",
+    "logRecorded": "审计运行已记录：{id}（可在「审计日志」查看）"
   },
   "operationHistory": {
     "opPublish": "发布",
@@ -948,7 +953,8 @@
     "followupFailed": "后续动作失败",
     "generatingFollowup": "生成中...",
     "selectHint": "选择一条操作记录",
-    "selectHintDetail": "查看配置、来源、结果和错误详情。"
+    "selectHintDetail": "查看配置、来源、结果和错误详情。",
+    "viewLog": "查看日志"
   },
   "backup": {
     "pageSubtitle": "管理和浏览本地快照",
@@ -1095,5 +1101,21 @@
     "noProxy": "不走代理",
     "feedback": "🐛 反馈问题",
     "close": "关闭"
+  },
+  "logViewer": {
+    "subtitle": "audit-trail.jsonl · 对比/审计/应用会话的完整事件流",
+    "empty": "暂无审计会话",
+    "emptyHint": "在「配置对比」执行对比、在「配置矩阵」执行审计、或执行应用计划后，这里会记录完整过程",
+    "allKinds": "全部类型",
+    "showContent": "显示配置内容",
+    "refresh": "刷新",
+    "eventCountUnit": "事件",
+    "kindCompare": "对比",
+    "kindAudit": "审计",
+    "kindApply": "应用",
+    "statusSuccess": "成功",
+    "statusFailure": "失败",
+    "statusRunning": "进行中",
+    "webModeNote": "当前为 Web 手动桥模式，日志仅保留在内存中；原生应用会将事件持久化到 audit-trail.jsonl。"
   }
 }

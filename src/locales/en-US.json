@@ -88,7 +88,9 @@
     "namespaceLoadFailed": "Failed to load namespaces",
     "navGroupConfig": "Config",
     "navGroupData": "Data",
-    "navGroupSystem": "System"
+    "navGroupSystem": "System",
+    "logViewer": "Audit Log",
+    "logViewerPlanned": "Session audit log"
   },
   "apply": {
     "title": "Configuration change plan",
@@ -795,7 +797,9 @@
     "mergeClearDraft": "Reset preview",
     "mergePlanNoChanges": "No preview changes can be materialized into a change plan",
     "diffStats": "Diff stats",
-    "startApplyNeedsLoad": "Click \"Load and compare\" first to load both sides, then click this arrow to enter the change plan"
+    "startApplyNeedsLoad": "Click \"Load and compare\" first to load both sides, then click this arrow to enter the change plan",
+    "logRecorded": "Compare session recorded (session id visible in Audit Log)",
+    "logRecordedWithId": "Compare session recorded: {id} (full process in Audit Log)"
   },
   "history": {
     "title": "History",
@@ -876,7 +880,8 @@
     "exportCSV": "Export CSV",
     "exportJSON": "Export JSON",
     "sanitizeToggle": "Sanitize export (replace password/token/secretKey/accessKey)",
-    "hideIgnored": "Hide Ignored"
+    "hideIgnored": "Hide Ignored",
+    "logRecorded": "Audit run recorded: {id} (viewable in Audit Log)"
   },
   "operationHistory": {
     "opPublish": "Publish",
@@ -948,7 +953,8 @@
     "followupFailed": "Follow-up action failed",
     "generatingFollowup": "Generating...",
     "selectHint": "Select an operation record",
-    "selectHintDetail": "View config, source, result, and error details."
+    "selectHintDetail": "View config, source, result, and error details.",
+    "viewLog": "View log"
   },
   "backup": {
     "pageSubtitle": "Manage and inspect local snapshots",
@@ -1095,5 +1101,21 @@
     "noProxy": "No Proxy",
     "feedback": "🐛 Report Issue",
     "close": "Close"
+  },
+  "logViewer": {
+    "subtitle": "audit-trail.jsonl · full event stream of compare/audit/apply sessions",
+    "empty": "No audit sessions yet",
+    "emptyHint": "Run a compare in Config Diff, an audit in Config Matrix, or execute an apply plan — the full process is recorded here",
+    "allKinds": "All kinds",
+    "showContent": "Show config content",
+    "refresh": "Refresh",
+    "eventCountUnit": "events",
+    "kindCompare": "Compare",
+    "kindAudit": "Audit",
+    "kindApply": "Apply",
+    "statusSuccess": "Success",
+    "statusFailure": "Failure",
+    "statusRunning": "Running",
+    "webModeNote": "Web manual-bridge mode: events are kept in memory only; the native app persists them to audit-trail.jsonl."
   }
 }

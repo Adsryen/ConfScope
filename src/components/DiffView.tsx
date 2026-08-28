@@ -30,6 +30,7 @@ import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
 import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
+import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 
 type DiffMode = "text" | "key" | "lines";
 
@@ -658,6 +659,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const sourcesRef = useRef<HTMLDivElement>(null);
   const loadBothRef = useRef<(() => Promise<void>) | null>(null);
+  const auditSessionRef = useRef<AuditSession | null>(null);
   const projectNames = useMemo(
     () => [...uniqueValues(connections.map((item) => connectionProjectName(item)))].sort((a, b) => compareText(a, b)),
     [connections]
@@ -976,6 +978,20 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setLoading(true);
     setError(null);
     setNotice(null);
+    const session = createAuditSession("compare");
+    auditSessionRef.current = { id: session, startedAt: new Date().toISOString(), kind: "compare", status: "running", events: [] };
+    auditSessionEvent(session, {
+      kind: "compare_start",
+      scope: "compare",
+      mode,
+      selectedCount: 1,
+      direction: "left->right",
+      left: sourceSummary(left, connections, "", t),
+      right: sourceSummary(right, connections, "", t),
+      source: { connId: left.connId, name: connectionSourceName(connections.find((item) => item.id === left.connId) ?? ({} as Connection)), namespace: left.tenant, dataId: left.dataId, group: left.group },
+      target: { connId: right.connId, name: connectionSourceName(connections.find((item) => item.id === right.connId) ?? ({} as Connection)), namespace: right.tenant, dataId: right.dataId, group: right.group },
+      dataId: left.dataId || right.dataId,
+    });
     const [leftResult, rightResult] = await Promise.allSettled([loadOne(left), loadOne(right)]);
     const errors: string[] = [];
 
@@ -995,6 +1011,8 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setError(message || null);
     setSourcesCollapsed(!message);
     if (message) {
+      auditSessionEvent(session, { kind: "compare_error", result: "failure", error: message });
+      endAuditSession(session, "failure", message);
       reportError({
         title: t("diff.compareLoadFailed"),
         source: t("app.diff"),
@@ -1004,6 +1022,20 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         actionLabel: t("diff.retryCompare"),
         onAction: () => loadBoth(),
       });
+    }
+    {
+      const leftText = leftResult.status === "fulfilled" ? leftResult.value.content : "";
+      const rightText = rightResult.status === "fulfilled" ? rightResult.value.content : "";
+      const stats = diffLines(leftText, rightText);
+      auditSessionEvent(session, {
+        kind: "compare_result",
+        result: "success",
+        identical: stats.added === 0 && stats.removed === 0 && stats.modified === 0,
+        additions: stats.added,
+        deletions: stats.removed,
+        changedKeys: stats.modified,
+      });
+      endAuditSession(session, "success");
     }
     setLoading(false);
   };
@@ -1029,6 +1061,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     if (!matchResults) return;
     const toCompare = matchResults.filter((item) => selectedIds.has(item.dataId));
     if (toCompare.length === 0) return;
+    const session = createAuditSession("compare");
+    auditSessionRef.current = { id: session, startedAt: new Date().toISOString(), kind: "compare", status: "running", events: [] };
+    auditSessionEvent(session, {
+      kind: "compare_start",
+      scope: "compare",
+      mode,
+      selectedCount: toCompare.length,
+      direction: "left->right",
+      left: sourceSummary(left, connections, "", t),
+      right: sourceSummary(right, connections, "", t),
+      source: { connId: left.connId, name: connectionSourceName(connections.find((item) => item.id === left.connId) ?? ({} as Connection)), namespace: left.tenant, dataId: "", group: left.group },
+      target: { connId: right.connId, name: connectionSourceName(connections.find((item) => item.id === right.connId) ?? ({} as Connection)), namespace: right.tenant, dataId: "", group: right.group },
+    });
 
     setBatchLoading(true);
     setBatchResults([]);
@@ -1123,6 +1168,48 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       actionLabel: t("common.retry"),
       onAction: () => loadBatch(),
     });
+
+    let totalAdded = 0;
+    let totalRemoved = 0;
+    let totalModified = 0;
+    let identicalCount = 0;
+    for (const item of results) {
+      const stats = batchResultStats(item.leftText, item.rightText);
+      totalAdded += stats.added;
+      totalRemoved += stats.removed;
+      totalModified += stats.modified;
+      if (item.presence === "both" && stats.added === 0 && stats.removed === 0 && stats.modified === 0) identicalCount += 1;
+      auditSessionEvent(session, {
+        kind: "compare_result",
+        result: "success",
+        dataId: item.dataId,
+        group: left.group,
+        identical: item.presence !== "both" ? undefined : stats.added === 0 && stats.removed === 0 && stats.modified === 0,
+        additions: stats.added,
+        deletions: stats.removed,
+        changedKeys: stats.modified,
+      });
+    }
+    for (const item of failedItems) {
+      auditSessionEvent(session, { kind: "compare_error", result: "failure", dataId: item.dataId, error: item.error });
+    }
+    auditSessionEvent(session, {
+      kind: "compare_result",
+      result: failCount === total ? "failure" : "success",
+      summary: {
+        total,
+        create: identicalCount,
+        overwrite: results.length - identicalCount,
+        delete: 0,
+        skip: 0,
+        parseError: 0,
+        blocked: 0,
+      },
+      additions: totalAdded,
+      deletions: totalRemoved,
+      changedKeys: totalModified,
+    });
+    endAuditSession(session, failCount === total ? "failure" : "success", failCount > 0 ? failedItems.map((f) => `${f.dataId}: ${f.error}`).join("; ") : undefined);
 
     setBatchResults(results);
     setFailedItems(failedItems);
