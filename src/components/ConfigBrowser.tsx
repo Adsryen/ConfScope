@@ -5,6 +5,7 @@ import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
 import {
   buildContentReplaceApplyEntry,
   replacementImpact,
+  highlightSearchTerm,
   searchConfigContent,
   type ContentSearchResult,
 } from "../lib/configContentSearch";
@@ -978,7 +979,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       />
                       <span>{t("config.selectForReplace")}</span>
                     </label>
-                    <div className="browser-item-summary">{result.summary}</div>
+                    <div className="browser-item-summary" dangerouslySetInnerHTML={{ __html: highlightSearchTerm(result.summary, contentTerm) }} />
                   </>
                 )}
               </div>
@@ -1094,7 +1095,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         ))}
                       </div>
                     )}
-                    <CodeView code={content} format={fmt} />
+                    <CodeView code={content} format={fmt} searchTerm={isContentSearchActive ? contentTerm : undefined} />
                   </>
                 )}
               </div>

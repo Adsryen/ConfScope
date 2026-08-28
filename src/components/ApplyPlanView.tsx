@@ -538,7 +538,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
 
       {!entry && <div className="data-empty-state page-empty">{t("apply.missingEntry")}</div>}
 
-      {entry && draftState.status === "loading" && <div className="pad-msg big">{t("apply.generating")}</div>}
+      {entry && draftState.status === "loading" && <div className="pad-msg big apply-draft-loading" role="status">{t("apply.generating")}</div>}
 
       {entry && draftState.status === "error" && (
         <div className="inline-error" role="alert">

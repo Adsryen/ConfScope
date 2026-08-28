@@ -261,6 +261,8 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
     const targetValue = snapshotValue(targetRef, item.targetValue);
     const classified = classify(sourceValue, targetValue, item.intent ?? "sync");
     const afterValue = afterValueFor(targetRef, classified.action, sourceValue, targetValue);
+    // 指纹基于“值内容快照”重算（与执行时 readCurrentValue 的口径一致），
+    // 避免草稿构建与执行之间 updateTime/秒级时间戳漂移导致计划被误判为 stale。
     return {
       id: itemId(targetRef),
       ref: targetRef,
@@ -272,8 +274,8 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
       action: classified.action,
       blocked: classified.blocked,
       ...(classified.blockReason ? { blockReason: classified.blockReason } : {}),
-      sourceFingerprint: item.sourceFingerprint ?? sourceValue.fingerprint,
-      targetFingerprint: item.targetFingerprint ?? targetValue.fingerprint,
+      sourceFingerprint: item.sourceFingerprint ?? fingerprintApplyPlanValue(sourceRef, sourceValue),
+      targetFingerprint: item.targetFingerprint ?? fingerprintApplyPlanValue(targetRef, targetValue),
     };
   });
 

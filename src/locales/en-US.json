@@ -794,7 +794,8 @@
     "mergeDraftEmpty": "No merge preview changes yet",
     "mergeClearDraft": "Reset preview",
     "mergePlanNoChanges": "No preview changes can be materialized into a change plan",
-    "diffStats": "Diff stats"
+    "diffStats": "Diff stats",
+    "startApplyNeedsLoad": "Click \"Load and compare\" first to load both sides, then click this arrow to enter the change plan"
   },
   "history": {
     "title": "History",

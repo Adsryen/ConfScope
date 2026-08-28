@@ -316,10 +316,17 @@ describe("ConfigBrowser", () => {
     fireEvent.click(screen.getByRole("button", { name: "内容" }));
     const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
     fireEvent.change(searchInput, { target: { value: "dev.internal" } });
-    fireEvent.keyDown(searchInput, { key: "Enter" });
-
-    expect(await screen.findByText("gateway: host: dev.internal")).toBeInTheDocument();
+    // 输入即搜：400ms 防抖后自动发起内容搜索（无需 Enter）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
     expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(sourceConn, "public", "gateway.yaml", "DEFAULT_GROUP");
+
+    // 摘要与正文命中词高亮
+    await waitFor(() => {
+      const marks = document.querySelectorAll(".browser-item-summary .search-hit, .code-area .search-hit");
+      expect(marks.length).toBeGreaterThan(0);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "批量替换" }));
     fireEvent.change(screen.getByLabelText("替换为"), { target: { value: "sandbox.internal" } });

@@ -24,7 +24,8 @@ import {
   type ApplyEntryPayload,
   type ApplyEntryRef,
 } from "../lib/applyEntry";
-import Combobox from "./Combobox";
+import Combobox from "./Combobox"
+import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
 import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
@@ -1452,11 +1453,26 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
                 sortNamespaces={settings.compare.sortNamespaces}
               />
-              <div className="diff-source-direction" aria-label={t("diff.sourceDirection")}>
+              <button
+                type="button"
+                className="diff-source-direction"
+                aria-label={t("diff.sourceDirection")}
+                title={t("diff.startApply")}
+                onClick={() => {
+                  if (onStartApply && ready) {
+                    try {
+                      startSingleApply();
+                    } catch (e) {
+                    }
+                  } else {
+                    toast(t("diff.startApplyNeedsLoad"), "info");
+                  }
+                }}
+              >
                 <span className="diff-source-direction-arrow" aria-hidden="true">
                   {"\u2192"}
                 </span>
-              </div>
+              </button>
               <SourcePicker
                 title={t("diff.sourceB")}
                 connections={connections}

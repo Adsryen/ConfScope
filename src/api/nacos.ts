@@ -444,17 +444,35 @@ function fromConfigCenterDocument(document: ConfigCenterConfigDocument): ConfigD
 }
 
 function fromConfigCenterHistoryPage(page: ConfigCenterHistoryPage): HistoryPage {
+  // 兼容真实 Wails runtime：Go 结构体 JSON 序列化会省略零值字符串字段
+  // （provider.ConfigRef 的 dataId 在历史列表行可能缺 key → undefined），
+  // 且 nacos 原生历史行用平铺 dataId/group（无 ref）。这里统一取
+  // 「ref.dataId 优先，其次平铺 dataId」，避免「中心历史」整列 dataId 空。
+  const toItem = (raw: unknown): HistoryItem | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw as Record<string, unknown>;
+    const ref = (r.ref ?? null) as Record<string, unknown> | null;
+    const dataId = String((ref?.dataId as string | undefined) ?? r.dataId ?? "");
+    const group = String((ref?.group as string | undefined) ?? r.group ?? "");
+    return {
+      id: String(r.id ?? ""),
+      dataId,
+      group,
+      opType: String(r.opType ?? ""),
+      lastModifiedTime: String(r.lastModifiedTime ?? ""),
+    };
+  };
+  const items: HistoryItem[] = [];
+  const rawItems = Array.isArray(page.pageItems) ? page.pageItems : [];
+  for (const raw of rawItems) {
+    const item = toItem(raw);
+    if (item) items.push(item);
+  }
   return {
     totalCount: page.totalCount,
     pageNumber: page.pageNumber,
     pagesAvailable: page.pagesAvailable,
-    pageItems: page.pageItems.map((item) => ({
-      id: item.id,
-      dataId: item.ref.dataId,
-      group: item.ref.group,
-      opType: item.opType,
-      lastModifiedTime: item.lastModifiedTime,
-    })),
+    pageItems: items,
   };
 }
 

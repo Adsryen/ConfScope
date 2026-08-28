@@ -29,6 +29,8 @@ export interface AuditCell {
   parseStatus?: ParseStatus;
   parseError?: string;
   updatedAt?: string;
+  /** 该环境配置实际所在命名空间（跨命名空间审计时各行可能不同）。 */
+  namespace?: string;
 }
 
 export interface AuditRow {
@@ -59,8 +61,11 @@ interface RowBucket {
   originalDataIds: Record<string, string>;
 }
 
-function rowId(namespace: string, group: string, dataId: string, key: string): string {
-  return [namespace, group, dataId, key].join("|");
+/** 行唯一键：group|dataId|key（不含 namespace——同一 dataId 组在不同命名空间下
+ * 属于同一配置项，跨命名空间审计需对齐到同一行；各环境实际命名空间
+ * 记录在 row.namespace（首见环境）与 AuditCell，供跳转/导出使用。 */
+function rowId(group: string, dataId: string, key: string): string {
+  return [group, dataId, key].join("|");
 }
 
 function wildcardMatch(pattern: string | undefined, value: string): boolean {
@@ -107,9 +112,10 @@ export function buildAuditMatrix(
   for (const source of sources) {
     const dataId = normalizeName(source.dataId);
     for (const entry of source.entries) {
-      const id = rowId(source.namespace, source.group, dataId, entry.key);
+      const id = rowId(source.group, dataId, entry.key);
+      const existing = buckets.get(id);
       const bucket =
-        buckets.get(id) ??
+        existing ??
         ({
           providerType: source.providerType,
           namespace: source.namespace,
@@ -127,6 +133,7 @@ export function buildAuditMatrix(
         parseStatus: entry.parseStatus,
         parseError: entry.parseError,
         updatedAt: source.updatedAt,
+        namespace: source.namespace,
       };
       bucket.originalDataIds[source.envId] = source.dataId;
       buckets.set(id, bucket);
@@ -140,7 +147,7 @@ export function buildAuditMatrix(
 
       const ignoreRule = matchingIgnoreRule(bucket, options.ignoreRules ?? []);
       return {
-        id: rowId(bucket.namespace, bucket.group, bucket.dataId, bucket.key),
+        id: rowId(bucket.group, bucket.dataId, bucket.key),
         providerType: bucket.providerType,
         namespace: bucket.namespace,
         group: bucket.group,
