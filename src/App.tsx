@@ -77,6 +77,12 @@ interface UIState {
   browseProject?: string;
   browseEnvironment?: string;
   browseSourceId?: string;
+  diffLeftConnId?: string;
+  diffRightConnId?: string;
+  diffNamespace?: string;
+  diffGroup?: string;
+  diffDataId?: string;
+  diffAutoCompare?: boolean;
 }
 
 const UI_KEY = "cs.ui";
@@ -157,6 +163,18 @@ export default function App() {
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
   const knownMode = isNavigableMode(ui0.mode) ? ui0.mode : "browse";
   const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
+  // 启动时若上次停在 diff 页且记录了左右来源, 恢复为预填参数(含自动对比)
+  const initialDiffParams: DiffJumpParams | null =
+    initialMode === "diff" && ui0.diffLeftConnId && ui0.diffRightConnId
+      ? {
+          leftConnId: ui0.diffLeftConnId,
+          rightConnId: ui0.diffRightConnId,
+          namespace: ui0.diffNamespace ?? "",
+          group: ui0.diffGroup ?? "",
+          dataId: ui0.diffDataId ?? "",
+          autoCompare: ui0.diffAutoCompare,
+        }
+      : null;
   const [mode, setMode] = useState<Mode>(initialMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
@@ -166,7 +184,7 @@ export default function App() {
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（AuditView → DiffView）
-  const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(null);
+  const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(initialDiffParams);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
   const diffConnections = useMemo(
@@ -210,9 +228,19 @@ export default function App() {
         browseProject: activeConnection ? connectionProjectName(activeConnection) : "",
         browseEnvironment: activeConnection ? connectionEnvironmentName(activeConnection) : "",
         browseSourceId: activeConnection?.id ?? "",
+        ...(diffJumpPersist
+          ? {
+              diffLeftConnId: diffJumpPersist.leftConnId,
+              diffRightConnId: diffJumpPersist.rightConnId,
+              diffNamespace: diffJumpPersist.namespace,
+              diffGroup: diffJumpPersist.group,
+              diffDataId: diffJumpPersist.dataId,
+              diffAutoCompare: diffJumpPersist.autoCompare,
+            }
+          : {}),
       })
     );
-  }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed]);
+  }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed, diffInitialParams]);
 
   // 启动后低频后台检查更新（延迟 5 分钟，仅一次）
   useEffect(() => {
@@ -393,6 +421,20 @@ export default function App() {
     toast(t("backup.comparePrepared"), "info");
     recordSnapshotCompare("success");
   };
+
+  // diff 页的左右来源: 有跳转参数用跳转的, 否则沿用上次持久化的
+  const diffJumpPersist =
+    diffInitialParams ??
+    (mode === "diff"
+      ? {
+          leftConnId: ui0.diffLeftConnId ?? "",
+          rightConnId: ui0.diffRightConnId ?? "",
+          namespace: ui0.diffNamespace ?? "",
+          group: ui0.diffGroup ?? "",
+          dataId: ui0.diffDataId ?? "",
+          autoCompare: ui0.diffAutoCompare,
+        }
+      : null);
 
   const startApply = (payload: ApplyEntryPayload) => {
     setPendingApplyEntry(payload);
