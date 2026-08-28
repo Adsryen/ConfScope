@@ -16,11 +16,15 @@ type Namespace struct {
 }
 
 // ConfigItem 是配置列表中的单条配置摘要。
+// 注意: Nacos v1 列表接口返回的字段是 "type" 与 "lastModifiedTime"
+// (不是 "configType"); 两者都映射以兼容不同版本。
 type ConfigItem struct {
-	DataId     string `json:"dataId"`
-	Group      string `json:"group"`
-	Content    string `json:"content"`
-	ConfigType string `json:"configType"`
+	DataId           string `json:"dataId"`
+	Group            string `json:"group"`
+	Content          string `json:"content"`
+	Type             string `json:"type"`
+	ConfigType       string `json:"configType"`
+	LastModifiedTime string `json:"lastModifiedTime"`
 }
 
 // ConfigPage 是配置列表分页结果。

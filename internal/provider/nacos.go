@@ -1,6 +1,11 @@
 package provider
 
-import "confscope/internal/nacos"
+import (
+	"fmt"
+	"time"
+
+	"confscope/internal/nacos"
+)
 
 type NacosProvider struct {
 	client *nacos.Client
@@ -64,11 +69,34 @@ func (p *NacosProvider) ListConfigs(profile ConnectionProfile, req ListConfigsRe
 				Group:        item.Group,
 				DataID:       item.DataId,
 			},
-			Content: item.Content,
-			Format:  item.ConfigType,
+			Content:    item.Content,
+			Format:     firstNonEmpty(item.Type, item.ConfigType),
+			UpdateTime: nacosTimeToString(item.LastModifiedTime),
 		})
 	}
 	return out, nil
+}
+
+// firstNonEmpty 返回第一个非空字符串。
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// nacosTimeToString 把 Nacos 毫秒时间戳字符串转成 "YYYY-MM-DD HH:mm:ss"（本地时区）。
+func nacosTimeToString(ms string) string {
+	if ms == "" {
+		return ""
+	}
+	var n int64
+	if _, err := fmt.Sscanf(ms, "%d", &n); err != nil || n <= 0 {
+		return ""
+	}
+	return time.UnixMilli(n).Format("2006-01-02 15:04:05")
 }
 
 func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (ConfigDocument, error) {

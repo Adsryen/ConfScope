@@ -42,10 +42,12 @@ func (c *Client) ListConfigs(baseURL, accessToken, apiVersion, namespace, dataID
 	for _, item := range asArray(asObject(data)["pageItems"]) {
 		c := asObject(item)
 		page.PageItems = append(page.PageItems, ConfigItem{
-			DataId:     s(c, "dataId"),
-			Group:      sAny(c, "group", "groupName"),
-			Content:    s(c, "content"),
-			ConfigType: s(c, "type"),
+			DataId:           s(c, "dataId"),
+			Group:            sAny(c, "group", "groupName"),
+			Content:          s(c, "content"),
+			Type:             s(c, "type"),
+			ConfigType:       sAny(c, "type", "configType"),
+			LastModifiedTime: s(c, "lastModifiedTime"),
 		})
 	}
 	return page, nil
