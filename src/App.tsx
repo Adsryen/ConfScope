@@ -22,6 +22,7 @@ import ErrorDialog from "./components/ErrorDialog";
 import MessageCenter from "./components/MessageCenter";
 import BackupView, { type BackupDiffJumpParams } from "./components/BackupView";
 import TaskCenter from "./components/TaskCenter";
+import LogViewer from "./components/LogViewer";
 import StartupDialog from "./components/StartupDialog";
 import ApplyPlanView from "./components/ApplyPlanView";
 import { reportError, reportMessage } from "./lib/errorCenter";
@@ -36,7 +37,7 @@ import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } fro
 import { recordOperation } from "./store/operationHistory";
 import type { ApplyEntryPayload } from "./lib/applyEntry";
 
-type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "settings" | "about";
+type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "logviewer" | "settings" | "about";
 type Mode = NavigableMode | "apply";
 
 const navIconPath: Record<NavigableMode, string[]> = {
@@ -54,6 +55,7 @@ const navIconPath: Record<NavigableMode, string[]> = {
     "M19 17l-3 3",
   ],
   tasks: ["M5 7l2 2 4-4", "M13 8h6", "M5 16l2 2 4-4", "M13 17h6"],
+  logviewer: ["M5 3h14v18H5z", "M9 7h6", "M9 11h6", "M9 15h4"],
   settings: ["M5 7h14", "M5 12h14", "M5 17h14", "M9 5v4", "M15 10v4", "M11 15v4"],
   about: ["M12 11v6", "M12 7h.01", "M12 22a10 10 0 100-20 10 10 0 000 20z"],
 };
@@ -121,6 +123,7 @@ function isNavigableMode(mode: string | undefined): mode is NavigableMode {
     case "history":
     case "backup":
     case "tasks":
+    case "logviewer":
     case "settings":
     case "about":
       return true;
@@ -318,6 +321,7 @@ export default function App() {
         { mode: "history", label: t("app.history") },
         { mode: "backup", label: t("app.backup") },
         { mode: "tasks", label: t("app.tasks") },
+        { mode: "logviewer", label: t("app.logViewer") },
       ],
     },
     {
@@ -603,6 +607,8 @@ export default function App() {
             <BackupView onNavigateToDiff={navigateBackupToDiff} onStartApply={startApply} />
           ) : mode === "tasks" ? (
             <TaskCenter />
+          ) : mode === "logviewer" ? (
+            <LogViewer />
           ) : mode === "ssh" ? (
             <SSHManagerView />
           ) : mode === "settings" ? (

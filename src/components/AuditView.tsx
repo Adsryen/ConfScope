@@ -9,6 +9,7 @@ import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
+import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import Select from "./Select";
 
 export interface DiffJumpParams {
@@ -339,6 +340,13 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     setError(null);
     setRows([]);
     setSelectedRow(null);
+    const session = createAuditSession("audit");
+    auditSessionEvent(session, {
+      kind: "audit_run_start",
+      scope: "audit",
+      selectedCount: envSources.length,
+      left: envSources.map((env) => envLabel(env)).join(" | "),
+    });
 
     try {
       const sources: AuditSource[] = [];
@@ -387,6 +395,17 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       });
       setRows(matrix);
       setBaseline(envSources[0] ? envKey(envSources[0]) : "");
+      const statusSummary: Record<string, number> = {};
+      for (const row of matrix) {
+        statusSummary[row.status] = (statusSummary[row.status] ?? 0) + 1;
+      }
+      auditSessionEvent(session, {
+        kind: "audit_run_result",
+        result: errors.length === 0 ? "success" : "failure",
+        statusSummary,
+        error: errors.length > 0 ? errors.join(" | ") : undefined,
+      });
+      endAuditSession(session, errors.length === 0 ? "success" : "failure", errors.length > 0 ? errors.join(" | ") : undefined);
 
       if (errors.length > 0) {
         reportError({
@@ -397,6 +416,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       }
     } catch (e) {
       setError(String(e));
+      auditSessionEvent(session, { kind: "audit_run_result", result: "failure", error: String(e) });
+      endAuditSession(session, "failure", String(e));
     } finally {
       setLoading(false);
     }
