@@ -9,10 +9,13 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ["**/build/**"],
+      ignored: ["**/build/**", "**/tests/retest/**", "**/results/**", "**/test-results/**", "**/local-backups/**"],
+    },
+    optimizeDeps: {
+      exclude: ["**/local-backups/**"],
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, "e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", ".tmp/**"],
+    exclude: [...configDefaults.exclude, "e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", "tests/retest/specs/**", "tests/smoke/bridge/**", "tests/smoke/global-teardown.test.ts", "tests/smoke/native/global-setup.test.ts", "tests/smoke/native/global-teardown.test.ts", ".tmp/**"],
   },
 });

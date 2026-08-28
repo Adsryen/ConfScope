@@ -13,8 +13,13 @@ interface Props {
  *  光标/选区来自 textarea,着色来自下层 pre,滚动同步。配色与 CodeView 一致。 */
 export default function CodeEditor({ value, onChange, format, placeholder }: Props) {
   const preRef = useRef<HTMLPreElement>(null);
-  // 末尾补一个换行,保证最后一行(及 textarea 末尾空行)与高亮层高度对齐
-  const html = highlightCode(value, format) + "\n";
+  // 末尾只在原文本身以换行结尾时才补一个换行,保证高亮层与 textarea 行数严格一致
+  // (无条件补 "\n" 会让高亮层多出一行空行,拖拽选区/滚动同步在长文档上发生偏移)
+  // 高亮层用 HTML 表示,而 HTML 解析会把“片段末尾的换行”再补一个换行
+  // (<div>x\n</div> 解析后 textContent 为 x\n\n),导致 pre 比 textarea 多一行、
+  // 拖拽选区/滚动同步偏移。因此末尾换行不用裸 "\n" 表示,而是放在一个空 span 里
+  // (解析后不产生额外文本),保证高亮层文本与 textarea 值严格一致。
+  const html = value.endsWith("\n") ? highlightCode(value, format) + "<span></span>" : highlightCode(value, format);
 
   const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
     const pre = preRef.current;

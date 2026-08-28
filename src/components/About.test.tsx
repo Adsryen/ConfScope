@@ -157,11 +157,13 @@ describe("About", () => {
   });
 
   it("uses loaded app version for automatic update checks", async () => {
+    // lastCheckAt 设为 7 小时前：触发「距上次检查 > 6 小时」的自动检查
+    const stale = new Date(Date.now() - 7 * 3600000).toISOString();
     localStorage.setItem(
       "cs.settings",
       JSON.stringify({
         proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
-        update: { skipVersion: "", lastCheckAt: "" },
+        update: { skipVersion: "", lastCheckAt: stale },
         compare: { sortConnections: true, sortNamespaces: true },
       })
     );

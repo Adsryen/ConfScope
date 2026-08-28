@@ -25,7 +25,7 @@ describe("buildAuditMatrix", () => {
 
     expect(rows).toEqual([
       expect.objectContaining({
-        id: "public|DEFAULT_GROUP|app.yaml|server.port",
+        id: "DEFAULT_GROUP|app.yaml|server.port",
         key: "server.port",
         status: "consistent",
         values: {
@@ -57,6 +57,22 @@ describe("buildAuditMatrix", () => {
 
     expect(rows[0].status).toBe("missing");
     expect(rows[0].values.prod).toEqual({ exists: false });
+  });
+
+  it("aligns the same dataId across different namespaces into one row", () => {
+    const a = source("dev", { "server.port": "8080", "feature.name": "alpha" });
+    a.namespace = "ns-dev";
+    const b = source("prod", { "server.port": "9090", "feature.name": "ALPHA" });
+    b.namespace = "ns-qa";
+    const rows = buildAuditMatrix([a, b]);
+
+    expect(rows).toHaveLength(2);
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(byKey["feature.name"].status).toBe("inconsistent");
+    expect(byKey["feature.name"].values.dev).toMatchObject({ exists: true, value: "alpha", namespace: "ns-dev" });
+    expect(byKey["feature.name"].values.prod).toMatchObject({ exists: true, value: "ALPHA", namespace: "ns-qa" });
+    expect(byKey["server.port"].values.dev).toMatchObject({ exists: true, value: "8080", namespace: "ns-dev" });
+    expect(byKey["server.port"].values.prod).toMatchObject({ exists: true, value: "9090", namespace: "ns-qa" });
   });
 
   it("marks rows parse_error when a source entry failed to parse", () => {

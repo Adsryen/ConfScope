@@ -2631,11 +2631,35 @@ button,
   gap: 4px;
   color: var(--blue);
   text-align: center;
+  /* 应用方向箭头：装饰性外观的可点击按钮（点击进入配置变更计划） */
+  margin: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.diff-source-direction:hover,
+.diff-source-direction:focus-visible {
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  outline: none;
+}
+.diff-source-direction:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent);
+}
+.diff-source-direction:active {
+  transform: scale(0.96);
 }
 .diff-source-direction-arrow {
   font-size: 26px;
   font-weight: 700;
   line-height: 1;
+  /* 明确的命中区域：零宽度 span 会导致 force-click 无法落在按钮内 */
+  display: block;
+  width: 40px;
+  height: 32px;
 }
 .diff-source-toggle-edge {
   position: absolute;
@@ -3037,6 +3061,17 @@ button,
   min-width: 0;
   color: var(--text-dim);
 }
+/* 内容搜索命中高亮（列表摘要与代码视图共用） */
+.search-hit {
+  background: color-mix(in srgb, var(--yellow, #e5c07b) 45%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.code-area .search-hit {
+  background: color-mix(in srgb, var(--yellow, #e5c07b) 60%, transparent);
+}
+
 .required-mark {
   color: var(--red);
   margin-left: 3px;
@@ -5571,7 +5606,9 @@ button,
   color: var(--text-hi);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 不用 nowrap：超长 dataId 截断后 innerText 会丢失内容，换行保留完整文本 */
+  white-space: normal;
+  word-break: break-all;
   flex: 1;
   min-width: 0;
 }

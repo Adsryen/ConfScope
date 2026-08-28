@@ -225,9 +225,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     onNavigateToDiff({
       leftConnId: baseline.split(":")[0],
       rightConnId: targetEnvId.split(":")[0],
-      namespace: selectedRow.namespace,
+      namespace: selectedRow.values[baseline]?.namespace ?? selectedRow.namespace,
       group: selectedRow.group,
-      dataId: selectedRow.dataId,
+      dataId: selectedRow.originalDataIds[baseline] ?? selectedRow.dataId,
     });
   }, [selectedRow, baseline, envIds, onNavigateToDiff]);
 
@@ -255,7 +255,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     const targetRef: ApplyEntryRef = {
       provider: targetEnv.conn.provider ?? "nacos",
       connectionId: targetEnv.conn.id,
-      namespace: targetEnv.namespace || selectedRow.namespace,
+      namespace: targetEnv.namespace || selectedRow.values[targetEnvId]?.namespace || selectedRow.namespace,
       group: selectedRow.group,
       dataId: selectedRow.originalDataIds[targetEnvId] ?? selectedRow.dataId,
       key: selectedRow.key,

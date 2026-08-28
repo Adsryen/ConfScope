@@ -33,6 +33,32 @@ function normalizedText(value: string): string {
   return value.toLocaleLowerCase();
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 把文本中的搜索词包裹为 <mark class="search-hit">，返回已转义的 HTML 片段。
+ *  大小写不敏感（与 containsText 的匹配语义一致）；多个命中全部标记。 */
+export function highlightSearchTerm(text: string, term: string): string {
+  const q = term.trim();
+  if (!q) return escapeHtml(text);
+  const pattern = new RegExp(escapeRegex(q), "gi");
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(pattern)) {
+    out += escapeHtml(text.slice(last, m.index)) + `<mark class="search-hit">${escapeHtml(m[0])}</mark>`;
+    last = m.index + m[0].length;
+  }
+  return out + escapeHtml(text.slice(last));
+}
+
 function containsText(value: string, term: string): boolean {
   return normalizedText(value).includes(normalizedText(term));
 }

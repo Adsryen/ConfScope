@@ -3,6 +3,7 @@ import type { ConfigDocument, ConfigItem } from "../api/nacos";
 import type { ApplyEntryEndpoint } from "./applyEntry";
 import {
   buildContentReplaceApplyEntry,
+  highlightSearchTerm,
   replacementImpact,
   replaceConfigContent,
   searchConfigContent,
@@ -36,6 +37,20 @@ const target: ApplyEntryEndpoint = {
   namespace: "public",
   label: "订单 / 沙箱 / 云上 / public",
 };
+
+describe("highlightSearchTerm", () => {
+  it("wraps case-insensitive hits in mark.search-hit and escapes html", () => {
+    const multiple = highlightSearchTerm("8080 and 18080", "8080");
+    expect(multiple).toContain('<mark class="search-hit">8080</mark>');
+    expect(multiple.match(/<mark class="search-hit">/g)).toHaveLength(2);
+    expect(multiple.replace(/<[^>]+>/g, "")).toBe("8080 and 18080");
+    expect(highlightSearchTerm("a<b&c>d", "a<b&c>d")).toBe(
+      '<mark class="search-hit">a&lt;b&amp;c&gt;d</mark>'
+    );
+    expect(highlightSearchTerm("no match", "zzz")).toBe("no match");
+    expect(highlightSearchTerm("x", " ")).toBe("x");
+  });
+});
 
 describe("config content search", () => {
   it("matches dataId, group, and Chinese content without case sensitivity", () => {

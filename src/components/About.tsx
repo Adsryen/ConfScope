@@ -123,15 +123,15 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     setErrorMessage("");
     const settings = loadSettings();
     try {
+      updateUpdateSettings({ lastCheckAt: new Date().toISOString() });
       const result = await checkForUpdates({
         currentVersion: appInfo.version,
         sources: appInfo.updateSources,
         proxy: settings.proxy,
       });
       setUpdateResult(result);
-      // 保存检查状态
+      // 保存检查状态（lastCheckAt 已在检查入口记录）
       updateUpdateSettings({
-        lastCheckAt: new Date().toISOString(),
         lastSeenVersion: result.latestVersion || "",
       });
       if (result.error) {
@@ -178,7 +178,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     const settings = loadSettings();
     const lastCheck = settings.update.lastCheckAt ? new Date(settings.update.lastCheckAt).getTime() : 0;
     const hoursSinceCheck = (Date.now() - lastCheck) / 3600000;
-    if (hoursSinceCheck > 6 || !settings.update.lastCheckAt) {
+    if (settings.update.lastCheckAt && hoursSinceCheck > 6) {
       runUpdateCheck();
     }
   }, [appInfoLoaded, runUpdateCheck, updatePhase]);

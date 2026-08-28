@@ -126,6 +126,8 @@ describe("DiffView", () => {
     expect(screen.getByText("Configuration compare workflow")).toBeInTheDocument();
     const direction = screen.getByLabelText("Apply direction");
     expect(direction.querySelector(".diff-source-direction-label")).not.toBeInTheDocument();
+    // 应用方向箭头是一个可点击的按钮：对比完成前点击只提示先加载
+    expect(direction).toBeInstanceOf(HTMLButtonElement);
     expect(direction).toHaveTextContent("→");
     expect(screen.getByText("Current: Confirm direction")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Confirm direction/ })).toBeInTheDocument();

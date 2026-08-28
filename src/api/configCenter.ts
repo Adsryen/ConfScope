@@ -99,6 +99,9 @@ export interface HistoryItem {
   ref: ConfigRef;
   opType: string;
   lastModifiedTime: string;
+  /** nacos 原生平铺形态兜底字段（Wails runtime 序列化 Go 零值字段时 ref.dataId 可能缺失） */
+  dataId?: string;
+  group?: string;
 }
 
 export interface HistoryPage {
