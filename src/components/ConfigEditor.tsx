@@ -21,7 +21,11 @@ interface Props {
 export default function ConfigEditor({ conn, namespace, onClose }: Props) {
   const { t } = useTranslation();
   const [dataId, setDataId] = useState("");
-  const [group, setGroup] = useState("DEFAULT_GROUP");
+  // 默认 group 跟随连接配置（留空/DEFAULT_GROUP → DEFAULT_GROUP）
+  const [group, setGroup] = useState(() => {
+    const g = (conn.defaultGroup ?? "").trim();
+    return g && g !== "DEFAULT_GROUP" ? g : "DEFAULT_GROUP";
+  });
   const [fmt, setFmt] = useState<Format>("YAML");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);

@@ -211,6 +211,8 @@ export interface ConfigDocument {
   version: string;
   source: string;
   updateTime: string;
+  /** 内容摘要（Nacos v1 列表接口 md5），供 apply plan 内容级指纹。 */
+  md5?: string;
 }
 
 export interface HistoryItem {
@@ -440,6 +442,7 @@ function fromConfigCenterDocument(document: ConfigCenterConfigDocument): ConfigD
     version: document.version ?? "",
     source: document.source ?? "",
     updateTime: document.updateTime ?? "",
+    ...(document.md5 ? { md5: document.md5 } : {}),
   };
 }
 
@@ -543,7 +546,16 @@ export async function listConfigs(
           ? "DEFAULT_GROUP"
           : group;
     const page = await configCenterListConfigs(profile, { namespace, dataId, group: normalizedGroup, pageNo, pageSize });
-    return fromConfigCenterConfigPage(page);
+    const items = fromConfigCenterConfigPage(page).pageItems;
+    // Nacos v1 的 group 过滤存在大小写不精确的问题（过滤后结果可能混入
+    // 大小写不同/前缀相近的其他 group），前端必须按请求的 group 再做一次
+    // 精确过滤兜底（空 group = 不过滤）。
+    if (group) {
+      const expected = group.toLowerCase();
+      const kept = items.filter((item) => item.group.toLowerCase() === expected);
+      return { ...page, pageItems: kept, totalCount: kept.length };
+    }
+    return { ...page, pageItems: items };
   });
 }
 

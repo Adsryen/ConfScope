@@ -166,6 +166,7 @@ function documentValue(ref: ApplyPlanRef, document: ConfigDocument): ApplyPlanVa
     content: document.content,
     version: document.version,
     updateTime: document.updateTime,
+    ...(document.md5 ? { md5: document.md5 } : {}),
   };
   return { ...value, fingerprint: fingerprintApplyPlanValue(ref, value) };
 }

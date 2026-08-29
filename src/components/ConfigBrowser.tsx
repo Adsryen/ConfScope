@@ -131,7 +131,11 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [replaceText, setReplaceText] = useState("");
   const [targetConnectionId, setTargetConnectionId] = useState("");
   const [targetNamespace, setTargetNamespace] = useState(tenant);
-  const [selectedGroup, setSelectedGroup] = useState("");
+  // 初始 group：跟随连接的默认 group（空/DEFAULT_GROUP 视为不限制，显示全部）
+  const [selectedGroup, setSelectedGroup] = useState(() => {
+    const g = (conn?.defaultGroup ?? "").trim();
+    return g === "" || g === "DEFAULT_GROUP" ? "" : g;
+  });
   const [knownGroups, setKnownGroups] = useState<string[]>([]);
   const [items, setItems] = useState<ConfigItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -408,7 +412,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
     setContentSearchError(null);
     setSelectedContentKeys(new Set());
-    setSelectedGroup("");
+    const resetGroup = (conn.defaultGroup ?? "").trim();
+    const resetGroupValue = resetGroup === "" || resetGroup === "DEFAULT_GROUP" ? "" : resetGroup;
+    setSelectedGroup(resetGroupValue);
     setKnownGroups([]);
     setSelected(null);
     setContent("");
@@ -420,7 +426,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setReplaceFindText("");
     setReplaceText("");
     setTargetNamespace(tenant);
-    fetchList("", 1, "");
+    fetchList("", 1, resetGroupValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant]);
 
@@ -886,13 +892,15 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             )}
           </div>
           <div className="browser-action-row">
-            <Select
-              className="browser-group-select"
-              value={selectedGroup}
-              options={groupOptions}
-              onChange={onGroupChange}
-              title={t("config.groupFilter")}
-            />
+            <div className="browse-scope-field" title={t("config.groupFilter")}>
+              <span className="browse-scope-label">{t("config.groupFilter")}</span>
+              <Select
+                className="browser-group-select"
+                value={selectedGroup}
+                options={groupOptions}
+                onChange={onGroupChange}
+              />
+            </div>
             {items.length > 0 && (
               <button
                 className="btn btn-ghost btn-sm browser-icon-btn"

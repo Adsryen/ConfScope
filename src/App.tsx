@@ -79,9 +79,8 @@ interface UIState {
   browseSourceId?: string;
   diffLeftConnId?: string;
   diffRightConnId?: string;
-  diffNamespace?: string;
-  diffGroup?: string;
-  diffDataId?: string;
+  diffLeft?: { tenant?: string; dataId?: string; group?: string };
+  diffRight?: { tenant?: string; dataId?: string; group?: string };
   diffAutoCompare?: boolean;
 }
 
@@ -169,9 +168,8 @@ export default function App() {
       ? {
           leftConnId: ui0.diffLeftConnId,
           rightConnId: ui0.diffRightConnId,
-          namespace: ui0.diffNamespace ?? "",
-          group: ui0.diffGroup ?? "",
-          dataId: ui0.diffDataId ?? "",
+          left: ui0.diffLeft,
+          right: ui0.diffRight,
           autoCompare: ui0.diffAutoCompare,
         }
       : null;
@@ -232,9 +230,16 @@ export default function App() {
           ? {
               diffLeftConnId: diffJumpPersist.leftConnId,
               diffRightConnId: diffJumpPersist.rightConnId,
-              diffNamespace: diffJumpPersist.namespace,
-              diffGroup: diffJumpPersist.group,
-              diffDataId: diffJumpPersist.dataId,
+              diffLeft: {
+                tenant: diffJumpPersist.left?.tenant ?? "",
+                dataId: diffJumpPersist.left?.dataId ?? "",
+                group: diffJumpPersist.left?.group ?? "",
+              },
+              diffRight: {
+                tenant: diffJumpPersist.right?.tenant ?? "",
+                dataId: diffJumpPersist.right?.dataId ?? "",
+                group: diffJumpPersist.right?.group ?? "",
+              },
               diffAutoCompare: diffJumpPersist.autoCompare,
             }
           : {}),
@@ -412,9 +417,10 @@ export default function App() {
     setDiffInitialParams({
       leftConnId: snapshotConnection.id,
       rightConnId: params.sourceConnectionId,
-      namespace: params.namespace,
-      group: params.group,
-      dataId: params.dataId,
+      // 两侧都是同一逻辑配置，namespace/group/dataId 相同，但左右连接各自的存储独立，
+      // 必须显式传两侧，避免 DiffView 用左连接命名空间去右连接取数
+      left: { tenant: params.namespace, group: params.group, dataId: params.dataId },
+      right: { tenant: params.namespace, group: params.group, dataId: params.dataId },
       autoCompare: true,
     });
     setMode("diff");
@@ -429,9 +435,8 @@ export default function App() {
       ? {
           leftConnId: ui0.diffLeftConnId ?? "",
           rightConnId: ui0.diffRightConnId ?? "",
-          namespace: ui0.diffNamespace ?? "",
-          group: ui0.diffGroup ?? "",
-          dataId: ui0.diffDataId ?? "",
+          left: ui0.diffLeft,
+          right: ui0.diffRight,
           autoCompare: ui0.diffAutoCompare,
         }
       : null);

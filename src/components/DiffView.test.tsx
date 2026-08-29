@@ -37,6 +37,7 @@ const nacosConn: Connection = {
   username: "nacos",
   password: "secret",
   defaultNamespace: "dev-tenant",
+  defaultGroup: "RETEST-PROD",
 };
 
 const snapshotConn: Connection = {
@@ -154,8 +155,8 @@ describe("DiffView", () => {
     renderDiff([nacosConn, prodConn]);
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(prodConn, "prod-tenant", "", "", 1, 500);
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(prodConn, "prod-tenant", "", "", 1, 1000);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 1000);
     });
     expect(screen.getAllByDisplayValue("app.yaml").length).toBeGreaterThanOrEqual(2);
   });
@@ -164,7 +165,7 @@ describe("DiffView", () => {
     renderDiff([nacosConn]);
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 1, 1000);
     });
   });
 
@@ -173,7 +174,7 @@ describe("DiffView", () => {
 
     await screen.findAllByText("开发");
     const environmentButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发"));
-    fireEvent.click(environmentButtons[0]);
+    fireEvent.pointerDown(environmentButtons[0]);
     fireEvent.mouseDown(await screen.findByText("生产"));
 
     await waitFor(() => {
@@ -193,7 +194,7 @@ describe("DiffView", () => {
     expect(screen.getAllByText("开发").length).toBeGreaterThan(0);
 
     const environmentButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发"));
-    fireEvent.click(environmentButtons[0]);
+    fireEvent.pointerDown(environmentButtons[0]);
     fireEvent.mouseDown(await screen.findByText("生产"));
 
     expect(await screen.findAllByText("生产")).not.toHaveLength(0);
@@ -201,11 +202,11 @@ describe("DiffView", () => {
     expect(document.querySelector(".env-prod")).toBeInTheDocument();
 
     const projectButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("订单系统"));
-    fireEvent.click(projectButtons[0]);
+    fireEvent.pointerDown(projectButtons[0]);
     fireEvent.mouseDown(await screen.findByText("支付系统"));
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(otherProjectConn, "dev-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(otherProjectConn, "dev-tenant", "", "", 1, 1000);
     });
     expect(screen.getAllByText((text) => text.includes("支付内网")).length).toBeGreaterThan(0);
     expect(screen.queryByText((text) => text.includes("云上公网"))).not.toBeInTheDocument();
@@ -217,7 +218,7 @@ describe("DiffView", () => {
     const view = renderDiff([initialConn]);
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(initialConn, "", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(initialConn, "", "", "", 1, 1000);
     });
 
     view.rerender(
@@ -227,7 +228,7 @@ describe("DiffView", () => {
     );
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "dev-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "dev-tenant", "", "", 1, 1000);
     });
   });
 
@@ -241,11 +242,11 @@ describe("DiffView", () => {
 
     await screen.findAllByText("开发命名空间");
     const namespaceButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发命名空间"));
-    fireEvent.click(namespaceButtons[0]);
+    fireEvent.pointerDown(namespaceButtons[0]);
     fireEvent.mouseDown(await screen.findByText("生产命名空间"));
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 1000);
     });
 
     const nextConn = { ...nacosConn, defaultNamespace: "qa-tenant" };
@@ -256,7 +257,7 @@ describe("DiffView", () => {
     );
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "prod-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nextConn, "prod-tenant", "", "", 1, 1000);
     });
   });
 
@@ -272,11 +273,11 @@ describe("DiffView", () => {
 
     await screen.findAllByText("开发命名空间");
     const namespaceButtons = screen.getAllByRole("button").filter((button) => button.textContent?.includes("开发命名空间"));
-    fireEvent.click(namespaceButtons[0]);
+    fireEvent.pointerDown(namespaceButtons[0]);
     fireEvent.mouseDown(await screen.findByText("生产命名空间"));
 
     await waitFor(() => {
-      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 500);
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "prod-tenant", "", "", 1, 1000);
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "设为默认" })[0]);
@@ -462,9 +463,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -670,9 +670,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "dev-snapshot",
             rightConnId: "dev-nacos",
-            namespace: "",
-            group: "DEFAULT_GROUP",
-            dataId: "app.yaml",
+            left: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
             autoCompare: true,
           }}
           onInitialParamsConsumed={onInitialParamsConsumed}
@@ -703,9 +702,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "dev-snapshot",
             rightConnId: "dev-nacos",
-            namespace: "",
-            group: "DEFAULT_GROUP",
-            dataId: "app.yaml",
+            left: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
             autoCompare: true,
           }}
         />
@@ -768,9 +766,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "app.yaml",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -857,9 +854,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "",
-            group: "DEFAULT_GROUP",
-            dataId: "app.yaml",
+            left: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -914,9 +910,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -1021,9 +1016,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -1072,9 +1066,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
             autoCompare: true,
           }}
           onStartApply={onStartApply}
@@ -1135,9 +1128,8 @@ describe("DiffView", () => {
           initialParams={{
             leftConnId: "left-nacos",
             rightConnId: "right-nacos",
-            namespace: "shared",
-            group: "DEFAULT_GROUP",
-            dataId: "",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
             autoCompare: true,
           }}
         />

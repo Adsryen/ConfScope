@@ -537,6 +537,9 @@
     "defaultNamespace": "默认命名空间 ID（留空=public）",
     "defaultNamespacePlaceholder": "留空表示 public",
     "defaultNamespaceHelp": "Nacos namespaceId。留空表示 public，不是命名空间显示名称。",
+    "defaultGroup": "默认 Group",
+    "defaultGroupPlaceholder": "留空表示 DEFAULT_GROUP",
+    "defaultGroupHelp": "Nacos group。留空或填 DEFAULT_GROUP 表示默认组；填写后浏览/对比/新建配置默认使用该 group。",
     "loadNamespaces": "加载命名空间",
     "loadingNamespaces": "加载中…",
     "loadNamespacesFailed": "命名空间加载失败",
@@ -667,6 +670,7 @@
   },
   "diff": {
     "title": "智能配置对比",
+    "groupPlaceholder": "选择 Group（留空/默认 DEFAULT_GROUP）",
     "selectConfig": "选择要对比的配置",
     "source": "来源",
     "target": "目标",

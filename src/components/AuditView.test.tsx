@@ -428,12 +428,12 @@ describe("AuditView", () => {
     expect(screen.queryByRole("button", { name: "Generate Change Plan" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Jump to Diff" }));
+    // 两侧独立携带各自的 namespace/group/dataId（右连接用其默认 namespace）
     expect(onNavigate).toHaveBeenCalledWith({
       leftConnId: "c1",
       rightConnId: "c2",
-      namespace: "public",
-      group: "DEFAULT_GROUP",
-      dataId: "app.yaml",
+      left: { tenant: "public", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+      right: { tenant: "public", group: "DEFAULT_GROUP", dataId: "app.yaml" },
     });
   });
 
@@ -485,7 +485,8 @@ describe("AuditView", () => {
     });
     expect(envSources[0]).toMatchObject({
       namespace: "public",
-      group: "DEFAULT_GROUP",
+      // 连接未配置默认 group → 留空（表示该命名空间全部 group）
+      group: "",
     });
   });
 });

@@ -257,7 +257,7 @@ describe("ConfigBrowser", () => {
     expect(await screen.findByText("app.json")).toBeInTheDocument();
     expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
 
-    fireEvent.click(within(screen.getByTitle("分组")).getByRole("button"));
+    fireEvent.pointerDown(within(screen.getByTitle("分组")).getByRole("button"));
     fireEvent.mouseDown(await screen.findByText("DEV_GROUP"));
 
     await waitFor(() => {
@@ -266,7 +266,7 @@ describe("ConfigBrowser", () => {
     expect(await screen.findByText("gateway.yaml")).toBeInTheDocument();
     expect(screen.queryByText("app.json")).not.toBeInTheDocument();
 
-    fireEvent.click(within(screen.getByTitle("分组")).getByRole("button"));
+    fireEvent.pointerDown(within(screen.getByTitle("分组")).getByRole("button"));
     fireEvent.mouseDown(await screen.findByText("全部分组"));
 
     await waitFor(() => {

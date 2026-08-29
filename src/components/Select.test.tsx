@@ -21,7 +21,7 @@ describe("Select", () => {
     const onChange = vi.fn();
     render(<Select value="json" options={options} onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.pointerDown(screen.getByRole("button"));
     fireEvent.mouseDown(screen.getByText("YAML"));
 
     expect(onChange).toHaveBeenCalledWith("yaml");
@@ -31,7 +31,7 @@ describe("Select", () => {
   it("closes on Escape", () => {
     render(<Select value="json" options={options} onChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.pointerDown(screen.getByRole("button"));
     expect(screen.getByText("YAML")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -41,7 +41,7 @@ describe("Select", () => {
   it("renders the options menu in a body portal so it is not clipped by parent overflow", () => {
     render(<Select value="json" options={options} onChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.pointerDown(screen.getByRole("button"));
 
     const menu = document.querySelector(".sel-menu-portal") as HTMLElement;
     expect(menu).toBeInTheDocument();

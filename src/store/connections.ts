@@ -69,6 +69,8 @@ export interface Connection {
   securityToken?: string;
   /** 默认命名空间 id（tenant），空表示 public。 */
   defaultNamespace: string;
+  /** 默认 group。空或 DEFAULT_GROUP 表示默认组；设置后浏览/对比/新建/审计默认使用它。 */
+  defaultGroup?: string;
   /** SSH 隧道配置（可选） */
   sshConfig?: SSHConfig;
   /** 全局 SSH 隧道配置档案引用；优先于 sshConfig。 */
@@ -209,7 +211,35 @@ function stringValue(value: unknown): string {
 
 function normalizeStoredConnection(value: unknown): Connection | null {
   if (!isObjectRecord(value)) return null;
-  return normalizeConnection(value);
+  const conn = normalizeConnection(value);
+  // 安全存储迁移会重写 cs.connections（只回写 secretRefs + 已解引用字段）。
+  // 历史版本的回写清单漏了 defaultGroup，导致持久化连接丢失默认 group、
+  // group 筛选/下拉回退成"全部分组"。这里按字段白名单合并原始记录，
+  // 确保新增字段不会被迁移流程静默丢弃。
+  // 注意：secretRefs 是对象字段，由 normalizeConnectionSecretRefs 规范化
+  // （空对象→undefined），不能参与标量回填，否则会把规范化后的 undefined
+  // 覆盖回原始空对象，破坏"无效引用应丢弃"的既有语义。
+  const knownFields = [
+    "id", "name", "projectId", "projectName", "environmentId", "environmentName",
+    "sourceName", "sourceType", "localPath", "forceLocalSnapshot", "localValidation",
+    "readonly", "isDefaultSource", "tags", "provider", "distribution", "authType",
+    "baseUrl", "username", "password", "accessKeyId", "accessKeySecret", "securityToken",
+    "defaultNamespace", "defaultGroup", "sshConfig", "sshProfileId", "useProxy",
+    "apolloEnv", "apolloAppId", "apolloCluster", "apolloNamespaceName", "apolloToken",
+    "consulToken", "consulDatacenter", "consulKeyPrefix",
+  ] as const;
+  const target = conn as unknown as Record<string, unknown>;
+  for (const field of knownFields) {
+    const rawValue = value[field];
+    if (rawValue !== undefined && target[field] === undefined) {
+      target[field] = rawValue;
+    }
+  }
+  // 清理回填产生的 undefined 槽位，保持序列化形态与 normalizeConnection 一致
+  for (const key of Object.keys(target)) {
+    if (target[key] === undefined) delete target[key];
+  }
+  return conn;
 }
 
 function normalizeSecretPointer(value: unknown): StoredSecretPointer | undefined {
@@ -275,6 +305,7 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     accessKeySecret: raw.accessKeySecret,
     securityToken: raw.securityToken,
     defaultNamespace: raw.defaultNamespace ?? "",
+    defaultGroup: raw.defaultGroup,
     sshConfig: raw.sshConfig,
     sshProfileId: raw.sshProfileId ?? "",
     useProxy: raw.useProxy ?? false,

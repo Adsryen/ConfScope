@@ -94,6 +94,25 @@ describe("connection store", () => {
     expect(loadConnections()).toEqual([updated]);
   });
 
+  it("preserves the default group when loading connections", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "retest-a",
+          name: "Retest A",
+          sourceType: "nacos",
+          provider: "nacos",
+          baseUrl: "http://127.0.0.1:19848/nacos",
+          defaultNamespace: "retest-dev",
+          defaultGroup: "RETEST-PROD",
+        },
+      ])
+    );
+    const list = loadConnections();
+    expect(list[0].defaultGroup).toBe("RETEST-PROD");
+  });
+
   it("deletes a connection by id", () => {
     vi.mocked(Math.random).mockReturnValueOnce(0.123456).mockReturnValueOnce(0.654321);
     const first = upsertConnection({
@@ -277,9 +296,10 @@ describe("connection store", () => {
     expect(loadConnections()[0]).toEqual(
       expect.objectContaining({
         id: "conn-secretref",
-        secretRefs: undefined,
+        password: "",
       })
     );
+    expect("secretRefs" in (loadConnections()[0] as unknown as Record<string, unknown>)).toBe(false);
   });
 
   it("preserves local snapshot force and validation metadata", () => {

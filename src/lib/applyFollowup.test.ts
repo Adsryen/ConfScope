@@ -67,6 +67,7 @@ function value(content: string, version = "v1"): BuildApplyPlanInput["items"][nu
     content,
     version,
     updateTime: `2026-07-06T00:00:00.000Z-${version}`,
+    md5: `md5-${version}`,
   };
 }
 
@@ -143,6 +144,7 @@ function document(content: string, version = "v1"): ConfigDocument {
     version,
     source: "nacos",
     updateTime: `2026-07-06T00:00:00.000Z-${version}`,
+    md5: `md5-${version}`,
   };
 }
 
@@ -236,7 +238,8 @@ describe("apply follow-up entry builders", () => {
         fingerprint: fingerprintApplyPlanValue(applyPlan.items[0].ref, value("server:\n  port: 8080", "sandbox-v2")),
       },
     ]);
-    expect(fingerprints[0].fingerprint).not.toBe(fingerprintApplyPlanValue(applyPlan.items[0].ref, value("server:\n  port: 8080")));
+    // 新语义：指纹基于内容 + md5；version 元数据（含 md5）漂移才改变指纹
+    expect(fingerprints[0].fingerprint).not.toBe(fingerprintApplyPlanValue(applyPlan.items[0].ref, value("server:\n  port: 8080", "v3")));
   });
 
   it("captures missing current target fingerprints for sandbox delete results", async () => {
