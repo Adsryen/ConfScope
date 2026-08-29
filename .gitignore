@@ -94,3 +94,5 @@ results/
 
 # Local manual retest bridge (ephemeral test env, not part of product)
 /public/manual-bridge-*.js
+scripts/retest-data/generated/
+scripts/retest-data/__pycache__/
