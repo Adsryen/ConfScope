@@ -109,6 +109,27 @@ describe("normalizeConfig", () => {
     });
   });
 
+  it("downgrades YAML duplicate key to a warning (last value wins, not fatal)", () => {
+    const result = normalizeConfig(
+      ["server:", "  port: 8080", "server:", "  port: 9090"].join("\n"),
+      "YAML"
+    );
+
+    // duplicate key 不再阻塞：parseStatus 保持 ok，条目按后值覆盖
+    expect(result.parseStatus).toBe("ok");
+    expect(result.parseError).toMatch(/duplicate/i);
+    expect(result.entries.map((entry) => [entry.key, entry.value])).toEqual([
+      ["server.port", "9090"],
+    ]);
+  });
+
+  it("keeps other YAML syntax errors fatal", () => {
+    const result = normalizeConfig("server: { port: [unclosed", "YAML");
+
+    expect(result.parseStatus).toBe("error");
+    expect(result.parseError).toBeTruthy();
+  });
+
   it("returns a document-level fallback entry when parsing fails", () => {
     const result = normalizeConfig('{"server":', "JSON");
 

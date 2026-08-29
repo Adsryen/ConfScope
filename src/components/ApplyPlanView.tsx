@@ -225,9 +225,15 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
   const { t } = useTranslation();
   const missingLabel = t("apply.valueMissing");
   const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
-  const parseErrors = [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
-    (error): error is string => Boolean(error)
-  );
+  const hasFatalParseError =
+    item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
+  // parseError 现在兼作 warning（如 YAML duplicate key）：只在存在 fatal 解析失败时展示，
+  // 避免"后值覆盖"类警告把详情区刷成红色误导用户。
+  const parseErrors = hasFatalParseError
+    ? [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
+        (error): error is string => Boolean(error)
+      )
+    : [];
   return (
     <div className="apply-detail">
       <div className="apply-detail-head">
