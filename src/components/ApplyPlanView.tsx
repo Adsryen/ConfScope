@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteConfigFromApplyPlan,
   deleteConfigRefFromApplyPlan,
@@ -8,7 +8,9 @@ import {
 } from "../api/nacos";
 import { createSnapshot, getSnapshot } from "../api/snapshot";
 import { useTranslation } from "../i18n";
-import type { ApplyPlan, ApplyPlanAction, ApplyPlanItem, ApplyPlanSummary, ApplyPlanValueSnapshot } from "../lib/applyPlan";
+import { withEditedAfterValue, type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
+import CodeEditor from "./CodeEditor";
+import { validateConfig } from "../lib/validate";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
@@ -221,10 +223,34 @@ function PlanItemList({
   );
 }
 
-function ItemDetail({ item }: { item: ApplyPlanItem }) {
+function ItemDetail({ item, onEditAfterValue }: { item: ApplyPlanItem; onEditAfterValue?: (itemId: string, content: string) => void }) {
   const { t } = useTranslation();
   const missingLabel = t("apply.valueMissing");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [editErrs, setEditErrs] = useState<string[]>([]);
   const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
+  const currentAfter = valueText(item.afterValue, missingLabel);
+  const canEdit = Boolean(onEditAfterValue) && item.action !== "delete";
+
+  const startEdit = () => {
+    setDraft(currentAfter);
+    setEditErrs([]);
+    setEditing(true);
+  };
+  const commitEdit = () => {
+    const problems = validateConfig(draft, diffFormat);
+    if (problems.length > 0) {
+      setEditErrs(problems);
+      return;
+    }
+    onEditAfterValue?.(item.id, draft);
+    setEditing(false);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditErrs([]);
+  };
   const hasFatalParseError =
     item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
   // parseError 现在兼作 warning（如 YAML duplicate key）：fatal 解析失败红色展示；
@@ -253,7 +279,37 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
       <div className="apply-detail-meta">
         <span>{t("apply.actionLine", { action: item.action })}</span>
         {item.blockReason && <span>{t("apply.blockReasonLine", { reason: item.blockReason })}</span>}
+        {canEdit && !editing && (
+          <button className="btn btn-ghost btn-sm" type="button" onClick={startEdit}>
+            {t("apply.editTarget")}
+          </button>
+        )}
       </div>
+      {editing && (
+        <div className="apply-edit-panel">
+          <div className="apply-edit-head">
+            <span className="apply-edit-hint">{t("apply.editTargetHint")}</span>
+            <div className="apply-edit-actions">
+              <button className="btn btn-ghost btn-sm" type="button" onClick={cancelEdit}>
+                {t("common.cancel")}
+              </button>
+              <button className="btn btn-primary btn-sm" type="button" onClick={commitEdit}>
+                {t("apply.editTargetSave")}
+              </button>
+            </div>
+          </div>
+          {editErrs.length > 0 && (
+            <div className="apply-edit-errors">
+              {editErrs.map((err, i) => (
+                <div key={i}>{err}</div>
+              ))}
+            </div>
+          )}
+          <div className="apply-edit-editor">
+            <CodeEditor value={draft} onChange={setDraft} format={diffFormat} />
+          </div>
+        </div>
+      )}
       <div className="apply-diff-preview">
         <DiffPanel
           leftLabel={t("apply.targetValue")}
@@ -558,10 +614,50 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
 
   const selectAllItems = () => {
     if (!plan) return;
-    setSelectedIds(defaultSelectedItemIds(plan));
+    // 只增减可执行项，不取消已勾选项：
+    // 编辑面板打开时点"全选"可能误触面板（面板盖住按钮区域），
+    // 若"全选"同时把已勾选项清空，会意外取消用户刚勾的项。
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const candidate of plan.items) {
+        if (isSelectableApplyItem(candidate)) next.add(candidate.id);
+      }
+      return next;
+    });
   };
 
   const selectNoItems = () => setSelectedIds(new Set());
+
+  // 人工编辑目标内容：更新选中 item 的 afterValue（执行层真正写库的内容），
+  // 重算解析/动作后持久化计划，并写入变更会话（含完整编辑后内容，供排查）。
+  const handleEditAfterValue = useCallback(
+    (itemId: string, content: string) => {
+      if (draftState.status !== "ready") return;
+      const plan = draftState.plan;
+      const item = plan.items.find((candidate) => candidate.id === itemId);
+      if (!item) return;
+      const edited = withEditedAfterValue(item, content);
+      const nextPlan = { ...plan, items: plan.items.map((candidate) => (candidate.id === itemId ? edited : candidate)) };
+      const savedPlan = saveApplyPlan(nextPlan);
+      setDraftState({ ...draftState, plan: savedPlan });
+      sessionEventSafe(applyEntrySessionRef.current, {
+        kind: "apply_edit_target",
+        scope: "apply",
+        step: "plan",
+        planId: savedPlan.id,
+        selectedCount: selectedIds.size,
+        payload: JSON.stringify({
+          itemId: edited.id,
+          dataId: edited.ref.dataId,
+          group: edited.ref.group,
+          action: edited.action,
+          blocked: edited.blocked,
+          afterContent: content,
+        }),
+      });
+    },
+    [draftState, selectedIds]
+  );
 
   const toggleSelectedItem = (id: string) => {
     if (!plan) return;
@@ -835,7 +931,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
                 onSelectNone={selectNoItems}
               />
               {selectedItem ? (
-                <ItemDetail item={selectedItem} />
+                <ItemDetail item={selectedItem} onEditAfterValue={handleEditAfterValue} />
               ) : (
                 <div className="data-empty-state detail-empty">{t("apply.noItems")}</div>
               )}

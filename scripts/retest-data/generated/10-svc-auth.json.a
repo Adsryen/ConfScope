@@ -1,0 +1,29 @@
+{
+  "name": "auth-svc",
+  "env": "dev",
+  "jwt": {
+    "issuer": "https://auth.dev.example.com",
+    "ttl-minutes": 120,
+    "rotate-hours": 24
+  },
+  "oauth": {
+    "providers": [
+      {
+        "id": "github",
+        "label": "GitHub"
+      },
+      {
+        "id": "wechat",
+        "label": "微信"
+      }
+    ]
+  },
+  "mfa": {
+    "enabled": false,
+    "reason": "开发跳过 MFA"
+  },
+  "session": {
+    "ttl-minutes": 720,
+    "concurrent": true
+  }
+}

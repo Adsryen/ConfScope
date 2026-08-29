@@ -688,4 +688,39 @@ describe("ApplyPlanView", () => {
       )
     );
   });
+
+  it("human-edits target content: validation, save, and diff update", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]);
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+
+    // 编辑入口出现（非 delete 项）
+    const editBtn = await screen.findByRole("button", { name: "Edit Target" });
+    fireEvent.click(editBtn);
+    expect(await screen.findByText(/manually adjust/i)).toBeInTheDocument();
+
+    // 无效 properties 内容被校验拦截，不保存
+    const ta = document.querySelector(".apply-edit-editor textarea") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.bind(ta);
+    // 合法内容保存：afterValue 更新，diff 预览展示编辑结果
+    setter?.("server.port=7777");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    const savesBeforeCommit = storeMocks.saveApplyPlan.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+    await waitFor(() => expect(storeMocks.saveApplyPlan.mock.calls.length).toBeGreaterThan(savesBeforeCommit));
+    await waitFor(() =>
+      expect(storeMocks.saveApplyPlan).toHaveBeenCalledWith(
+        expect.objectContaining({ items: expect.arrayContaining([expect.objectContaining({ afterValue: expect.objectContaining({ value: "server.port=7777" }) })]) }) as never
+      )
+    );
+    // diff 预览右侧（after）应出现编辑后的端口值
+    expect(await screen.findByText("7777")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
 });

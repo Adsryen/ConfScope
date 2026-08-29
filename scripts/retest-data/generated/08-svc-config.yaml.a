@@ -1,0 +1,17 @@
+# 公共配置 - 开发
+# 本文件各服务共享
+
+common:
+  # 时区
+  timezone: Asia/Shanghai
+  # 语言
+  locale: zh-CN
+  # 开发环境标识
+  env: dev
+
+# 公共依赖版本
+deps:
+  # 开发锁旧版
+  netty: 4.1.80
+  # grpc
+  grpc: 1.50.0

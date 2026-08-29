@@ -400,3 +400,115 @@ test("T-AP-04 变更会话记录: 5 步事件链 + 完整内容 + 无凭据", as
   }
   await page.screenshot({ path: "results/ap04-apply-session-record.png", fullPage: true });
 });
+
+// T-AP-05: 变更计划内人工编辑目标内容（机器判定不准/需人工补充场景）
+// 链路：对比 svc-pay.properties → 进入计划 → 选中项 → 编辑目标内容 → 保存并重新校验
+// → diff 预览含新 marker → dry-run → 执行 → B 侧落库含 marker → 恢复基线。
+// 附带断言：编辑事件 apply_edit_target 写入变更会话且含完整编辑后内容。
+test("T-AP-05 变更计划内人工编辑目标内容: 编辑→校验→执行→落库", async ({ page, retest }) => {
+  await installRetestBridge(page, retest);
+
+  // 幂等：执行变更会写 B 侧，开始前恢复种子基线
+  await republishRetestData();
+
+  const t0 = Date.now();
+  const mark = (label: string) => console.log(`[T-AP-05][t+${Date.now() - t0}ms] ${label}`);
+  const runStartIso = new Date().toISOString();
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
+  await dismissStartupDialog(page);
+
+  await loadSingleCompare(page, "svc-pay.properties");
+  mark("对比完成");
+
+  const before = await fetchNacosContent(BASE_B, NS_B, "svc-pay.properties", GROUP);
+  mark("fetch before 完成");
+  expect(before).toBeTruthy();
+
+  await page.getByRole("button", { name: "进入配置变更计划" }).last().click();
+  await expect(page.locator(".apply-ledger, .apply-item-list").first()).toBeVisible({ timeout: 30_000 });
+  mark("进入计划");
+
+  const selectAllBtn = page.getByRole("button", { name: "全选" }).first();
+  if (await selectAllBtn.count()) await selectAllBtn.click();
+  await page.waitForTimeout(300);
+
+  // 打开选中项详情（默认选中第一项），点"编辑目标内容"
+  await page.locator(".apply-item-row").first().click().catch(() => undefined);
+  // 编辑面板会盖住上方"全选"按钮，先点"编辑目标内容"再勾选，
+  // 避免点"全选"时实际点到编辑面板（导致面板关闭、勾选中止）
+  await page.getByRole("button", { name: "编辑目标内容" }).click({ timeout: 10_000 });
+  await expect(page.locator(".apply-edit-panel")).toBeVisible({ timeout: 10_000 });
+  mark("编辑面板打开");
+
+  const marker = `retest.edit.marker=${Date.now()}`;
+  await page.locator(".apply-edit-editor textarea").first().fill(before + "\n" + marker + "\n");
+  await page.getByRole("button", { name: "保存并重新校验" }).click();
+  await page.waitForTimeout(800);
+  await expect(page.locator(".apply-edit-panel")).toHaveCount(0);
+  const diffText = (await page.locator(".apply-diff-preview").textContent().catch(() => "")) ?? "";
+  expect(diffText, "diff 预览应包含编辑后 marker").toContain(marker);
+  mark("编辑保存，diff 已更新");
+
+  // 勾选本变更项（详情勾选框；面板遮挡下用 force 点击）
+  const itemCheck = page.locator(".apply-item-row input[type=checkbox]").first();
+  await itemCheck.check({ force: true });
+  await expect(page.locator(".apply-selection-note").first()).toContainText("已选变更项：1");
+  mark("变更项已勾选");
+
+  // 确认项已选中（无需再点"全选"——编辑面板遮挡时点"全选"可能误触面板）
+
+  // Dry-run → 执行
+  const dryRunBtn = page.locator("button", { hasText: "Dry-run 检查" }).last();
+  await dryRunBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await page.locator(".apply-execution-notice").count()) === 0) {
+    await dryRunBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(page.locator(".apply-execution-notice").filter({ hasText: "Dry-run 检查" })).toBeVisible({ timeout: 60_000 });
+  mark("dry-run 完成");
+
+  await page.locator(".apply-confirm-check input").check();
+  await page.waitForTimeout(300);
+  const execBtn = page.locator("button", { hasText: "执行变更" }).last();
+  await execBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await page.locator(".apply-task-progress").count()) === 0) {
+    await execBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(page.locator(".apply-task-progress, .inline-error").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".apply-task-progress .task-status-success, .apply-task-progress .task-status-failed").first()).toBeVisible({ timeout: 60_000 });
+  const execNotice = await page.locator(".apply-execution-notice").last().textContent().catch(() => null);
+  console.log(`[T-AP-05] 执行提示=${String(execNotice).slice(0, 80)}`);
+  expect(execNotice).toContain("变更执行完成");
+  mark("执行完成");
+
+  // 落库验证：轮询 B 侧直到 marker 出现（publish 异步落库）
+  let after = "";
+  for (let i = 0; i < 30; i++) {
+    after = await fetchNacosContent(BASE_B, NS_B, "svc-pay.properties", GROUP).catch(() => "");
+    if (after.includes(marker)) break;
+    await page.waitForTimeout(2000);
+  }
+  expect(after, "B 侧应包含人工编辑写入的 marker").toContain(marker);
+  mark("B 侧落库验证通过");
+
+  // 会话记录：apply_edit_target 事件含完整编辑后内容
+  const lines = readAuditLines().filter((l) => String(l.ts ?? "") >= runStartIso);
+  const editEvents = lines.filter((l) => l.kind === "apply_edit_target");
+  expect(editEvents.length).toBeGreaterThanOrEqual(1);
+  const editPayload = JSON.parse(String((editEvents[0] as { payload?: string }).payload ?? "{}")) as {
+    dataId?: string; afterContent?: string;
+  };
+  expect(editPayload.dataId).toBe("svc-pay.properties");
+  expect(String(editPayload.afterContent ?? "")).toContain(marker);
+  mark("apply_edit_target 会话记录验证通过");
+
+  // 恢复基线（把 marker 摘掉，保证后续用例/人工复测基线干净）
+  await republishRetestData();
+  for (let i = 0; i < 15; i++) {
+    const cur = await fetchNacosContent(BASE_B, NS_B, "svc-pay.properties", GROUP).catch(() => "");
+    if (!cur.includes(marker)) break;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  await page.screenshot({ path: "results/ap05-edit-target.png", fullPage: true });
+  mark("全部完成");
+});

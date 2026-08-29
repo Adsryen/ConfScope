@@ -1,0 +1,29 @@
+# 通知服务 - 开发
+app:
+  name: notify-svc
+
+# 渠道
+channels:
+  sms:
+    enabled: true
+    # 开发用 mock 发送
+    provider: mock
+  email:
+    enabled: true
+    # 开发 SMTP 本机
+    smtp:
+      host: 127.0.0.1
+      port: 1025
+  push:
+    enabled: false
+
+# 模板
+templates:
+  dir: ./templates
+  # 开发热加载
+  hot-reload: true
+
+# 限流
+rate-limit:
+  # 开发宽松
+  per-minute: 1000
