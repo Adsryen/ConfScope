@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ListConfigs 按条件分页查询配置列表。
@@ -48,15 +49,17 @@ func (c *Client) ListConfigs(baseURL, accessToken, apiVersion, namespace, dataID
 			Type:             s(c, "type"),
 			ConfigType:       sAny(c, "type", "configType"),
 			LastModifiedTime: s(c, "lastModifiedTime"),
+			Md5:              sAny(c, "md5", "dataMd5"),
 		})
 	}
 	return page, nil
 }
 
-// GetConfig 获取指定配置内容。
+// GetConfig 获取指定配置内容与内容摘要。
 //
-// v1 直接返回纯文本内容，v3 返回 JSON 信封并把内容放在 data.content。
-func (c *Client) GetConfig(baseURL, accessToken, apiVersion, namespace, dataID, group string) (string, error) {
+// v1 的 /v1/cs/configs 只返回纯文本，md5 通过额外的列表查询获取（查询失败时 md5 为空）；
+// v3 的 JSON 信封自带 md5 字段。
+func (c *Client) GetConfig(baseURL, accessToken, apiVersion, namespace, dataID, group string) (ConfigContent, error) {
 	version := parseAPI(apiVersion)
 	query := url.Values{}
 	query.Set("dataId", dataID)
@@ -65,13 +68,63 @@ func (c *Client) GetConfig(baseURL, accessToken, apiVersion, namespace, dataID, 
 		setNonEmpty(query, "namespaceId", namespace)
 		data, err := c.getJSON(baseURL, "/v3/console/cs/config", query, accessToken, version)
 		if err != nil {
-			return "", err
+			return ConfigContent{}, err
 		}
-		return s(asObject(data), "content"), nil
+		obj := asObject(data)
+		return ConfigContent{
+			Content: s(obj, "content"),
+			Md5:     sAny(obj, "md5", "dataMd5"),
+		}, nil
 	}
 	query.Set("group", group)
 	setNonEmpty(query, "tenant", namespace)
-	return c.getText(baseURL, "/v1/cs/configs", query, accessToken, version)
+	content, err := c.getText(baseURL, "/v1/cs/configs", query, accessToken, version)
+	if err != nil {
+		return ConfigContent{}, err
+	}
+	md5, _ := c.queryConfigMd5(baseURL, accessToken, version, namespace, dataID, group)
+	return ConfigContent{Content: content, Md5: md5}, nil
+}
+
+// queryConfigMd5 通过 v1 列表接口查单条配置的 md5（best-effort，带与 getText 一致的重试）。
+func (c *Client) queryConfigMd5(baseURL, accessToken string, version apiVersion, namespace, dataID, group string) (string, error) {
+	var lastErr error
+	for retry := 0; retry < maxRetries; retry++ {
+		if retry > 0 {
+			time.Sleep(retryBackoff(retry - 1))
+		}
+		md5, err, statusCode := c.queryConfigMd5Once(baseURL, accessToken, version, namespace, dataID, group)
+		if err == nil {
+			return md5, nil
+		}
+		if !isRetryable(err, statusCode) {
+			return "", err
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+func (c *Client) queryConfigMd5Once(baseURL, accessToken string, version apiVersion, namespace, dataID, group string) (string, error, int) {
+	query := url.Values{}
+	query.Set("search", "blur")
+	query.Set("dataId", dataID)
+	query.Set("group", group)
+	query.Set("pageNo", "1")
+	query.Set("pageSize", "10")
+	setNonEmpty(query, "tenant", namespace)
+	data, err := c.getJSON(baseURL, "/v1/cs/configs", query, accessToken, version)
+	if err != nil {
+		return "", err, 0
+	}
+	items := asArray(asObject(data)["pageItems"])
+	for _, item := range items {
+		itemObj := asObject(item)
+		if s(itemObj, "dataId") == dataID && (sAny(itemObj, "group", "groupName") == group || sAny(itemObj, "group", "groupName") == "") {
+			return sAny(itemObj, "md5", "dataMd5"), nil, 0
+		}
+	}
+	return "", nil, 0
 }
 
 // PublishConfig 发布或更新配置。

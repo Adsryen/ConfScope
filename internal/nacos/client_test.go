@@ -218,36 +218,53 @@ func TestGetConfigUsesV3EnvelopeAndTokenHeader(t *testing.T) {
 			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"content":"server:\n  port: 8080"}}`))
+		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"content":"server:\n  port: 8080","md5":"abc123"}}`))
 	}))
 
-	content, err := NewClient().GetConfig(server.URL, "token", "v3", "ns", "app.yaml", "GROUP")
+	result, err := NewClient().GetConfig(server.URL, "token", "v3", "ns", "app.yaml", "GROUP")
 	if err != nil {
 		t.Fatalf("GetConfig returned error: %v", err)
 	}
-	if content != "server:\n  port: 8080" {
-		t.Fatalf("content = %q", content)
+	if result.Content != "server:\n  port: 8080" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if result.Md5 != "abc123" {
+		t.Fatalf("md5 = %q, want abc123", result.Md5)
 	}
 }
 
 func TestGetConfigUsesV1TextResponseAndTokenQuery(t *testing.T) {
+	seen := map[string]bool{}
 	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/cs/configs" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
 		q := r.URL.Query()
 		if q.Get("tenant") != "public" || q.Get("group") != "DEFAULT_GROUP" || q.Get("dataId") != "app.yaml" || q.Get("accessToken") != "token" {
 			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
 		}
+		if q.Get("search") == "blur" {
+			seen["list"] = true
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"totalCount":1,"pageItems":[{"dataId":"app.yaml","group":"DEFAULT_GROUP","type":"yaml","md5":"md5-v1-abc"}]}`))
+			return
+		}
+		if r.URL.Path != "/v1/cs/configs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		seen["get"] = true
 		_, _ = w.Write([]byte("plain: true"))
 	}))
 
-	content, err := NewClient().GetConfig(server.URL, "token", "v1", "public", "app.yaml", "DEFAULT_GROUP")
+	result, err := NewClient().GetConfig(server.URL, "token", "v1", "public", "app.yaml", "DEFAULT_GROUP")
 	if err != nil {
 		t.Fatalf("GetConfig returned error: %v", err)
 	}
-	if content != "plain: true" {
-		t.Fatalf("content = %q", content)
+	if result.Content != "plain: true" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if result.Md5 != "md5-v1-abc" {
+		t.Fatalf("md5 = %q, want md5-v1-abc", result.Md5)
+	}
+	if !seen["list"] || !seen["get"] {
+		t.Fatalf("expected both list and get requests, got %v", seen)
 	}
 }
 
@@ -262,12 +279,12 @@ func TestGetConfigDecodesGBKTextResponse(t *testing.T) {
 		_, _ = w.Write(gbk)
 	}))
 
-	content, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
+	result, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
 	if err != nil {
 		t.Fatalf("GetConfig returned error: %v", err)
 	}
-	if content != want {
-		t.Fatalf("content = %q, want %q", content, want)
+	if result.Content != want {
+		t.Fatalf("content = %q, want %q", result.Content, want)
 	}
 }
 
@@ -282,12 +299,12 @@ func TestGetConfigFallsBackToGB18030WithoutCharset(t *testing.T) {
 		_, _ = w.Write(gb18030)
 	}))
 
-	content, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
+	result, err := NewClient().GetConfig(server.URL, "", "v1", "", "app.yaml", "DEFAULT_GROUP")
 	if err != nil {
 		t.Fatalf("GetConfig returned error: %v", err)
 	}
-	if content != want {
-		t.Fatalf("content = %q, want %q", content, want)
+	if result.Content != want {
+		t.Fatalf("content = %q, want %q", result.Content, want)
 	}
 }
 

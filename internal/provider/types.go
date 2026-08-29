@@ -98,6 +98,8 @@ type ConfigDocument struct {
 	Version    string    `json:"version"`
 	Source     string    `json:"source"`
 	UpdateTime string    `json:"updateTime"`
+	// Md5 是内容摘要（Nacos v1 列表接口原生 md5），供前端做内容级指纹。
+	Md5 string `json:"md5"`
 }
 
 type PublishConfigRequest struct {

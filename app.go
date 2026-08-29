@@ -460,7 +460,7 @@ func (a *App) NacosListConfigs(
 	return a.nacos.ListConfigs(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize)
 }
 
-// NacosGetConfig 获取指定配置的完整内容。
+// NacosGetConfig 获取指定配置的内容（v1 额外查询列表接口取 md5，仅用于 apply plan 指纹）。
 func (a *App) NacosGetConfig(
 	baseUrl string,
 	accessToken string,
@@ -469,7 +469,11 @@ func (a *App) NacosGetConfig(
 	dataId string,
 	group string,
 ) (string, error) {
-	return a.nacos.GetConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
+	result, err := a.nacos.GetConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group)
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
 }
 
 // NacosHistoryList 查询指定配置的历史版本列表。
