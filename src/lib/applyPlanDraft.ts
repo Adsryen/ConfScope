@@ -192,6 +192,54 @@ async function resolveConnection(connectionId: string, deps: ApplyPlanDraftDeps,
   return conn ?? `Missing connection ${connectionId}`;
 }
 
+async function readDocumentContent(
+  ref: ApplyEntryRef,
+  conn: Connection,
+  deps: ApplyPlanDraftDeps
+): Promise<{ content?: string; version?: string; updateTime?: string; md5?: string }> {
+  try {
+    const doc = await deps.getConfigDocument(conn, ref.namespace, ref.dataId, ref.group);
+    return {
+      content: doc.content,
+      ...(doc.version ? { version: doc.version } : {}),
+      ...(doc.updateTime ? { updateTime: doc.updateTime } : {}),
+      ...(doc.md5 ? { md5: doc.md5 } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 为 item 的 value 快照挂载文档全文（content/version/md5），供变更会话记录
+ * 落盘“完整现场”（jsonl 里可直接看到改了什么）。
+ *
+ * 顺序很关键：先基于“不含 content”的原始值预计算 value.fingerprint，再挂 content。
+ * 这样 buildApplyPlan 里 snapshotValue 采用预计算指纹（与 key 口径一致，
+ * applyFollowup/applyPlanExecution 重算口径相同 → freshness 不漂移），
+ * 而 content 字段保留在快照上供展示/记录；classify 的可比指纹也不含 content，
+ * 因此 key 级项不会因两端文档全文不同被误判 overwrite。
+ */
+async function attachContent(
+  ref: ApplyEntryRef,
+  value: ApplyPlanValueInput,
+  conn: Connection,
+  deps: ApplyPlanDraftDeps
+): Promise<ApplyPlanValueInput> {
+  if (value.content !== undefined) {
+    return { ...value, fingerprint: value.fingerprint ?? fingerprintApplyPlanValue(ref, value) };
+  }
+  const doc = await readDocumentContent(ref, conn, deps);
+  const base: ApplyPlanValueInput = {
+    ...value,
+    ...(doc.content !== undefined ? { content: doc.content } : {}),
+    ...(doc.version ? { version: doc.version } : {}),
+    ...(doc.updateTime ? { updateTime: doc.updateTime } : {}),
+    ...(doc.md5 ? { md5: doc.md5 } : {}),
+  };
+  return { ...base, fingerprint: fingerprintApplyPlanValue(ref, value) };
+}
+
 async function buildPlanItems(
   entry: ApplyEntryPayload,
   deps: ApplyPlanDraftDeps,
@@ -211,17 +259,21 @@ async function buildPlanItems(
         readValue(sourceRef, sourceConnection, "source", deps),
         readValue(targetRef, targetConnection, "target", deps),
       ]);
+      // 完整内容记录：变更会话需要逐项的完整文件内容（含 document 级项）。
+      // 先按原始值预计算指纹再挂 content（见 attachContent），
+      // 保证 classify 与执行前 freshness 校验均不受文档全文影响。
       const plannedSourceRef = planRef(sourceRef);
       const plannedTargetRef = planRef(targetRef);
+      const [enrichedSourceValue, enrichedTargetValue] = await Promise.all([
+        attachContent(plannedSourceRef, sourceValue, sourceConnection, deps),
+        attachContent(plannedTargetRef, targetValue, targetConnection, deps),
+      ]);
       items.push({
         ref: plannedTargetRef,
         sourceRef: plannedSourceRef,
         targetRef: plannedTargetRef,
-        sourceValue: item.sourceValueOverride ?? sourceValue,
-        targetValue,
-        ...(item.sourceValueOverride
-          ? { sourceFingerprint: sourceValue.fingerprint ?? fingerprintApplyPlanValue(plannedSourceRef, sourceValue) }
-          : {}),
+        sourceValue: item.sourceValueOverride ?? enrichedSourceValue,
+        targetValue: enrichedTargetValue,
       });
     } catch (error) {
       return errorText(error);
