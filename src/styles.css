@@ -1616,6 +1616,10 @@ button,
   min-width: 0;
 }
 
+.browser-group-select .sel {
+  display: block;
+}
+
 .browser-group-select .sel-trigger {
   min-width: 0;
 }
@@ -5221,10 +5225,18 @@ button,
 
 /* 矩阵表格 */
 .audit-matrix {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: auto;
-  max-height: 60vh;
+}
+
+.audit-matrix-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .audit-matrix-header {
@@ -5391,6 +5403,10 @@ button,
 
 /* 详情面板 */
 .audit-detail {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35);
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: 8px;
