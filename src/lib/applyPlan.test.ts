@@ -116,11 +116,17 @@ describe("buildApplyPlan", () => {
     });
   });
 
-  it("creates stable fingerprints: content changes them, timestamp-only drift does not", () => {
+  it("creates stable fingerprints: value changes them, content/timestamp-only drift does not", () => {
     const base = value(true, "8080", { updateTime: "2026-07-06T00:00:00.000Z" });
 
     expect(fingerprintApplyPlanValue(ref, base)).toBe(fingerprintApplyPlanValue(ref, { ...base }));
-    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(fingerprintApplyPlanValue(ref, { ...base, content: "server:\n  port: 9090" }));
+    // 值语义变化 → 指纹变化
+    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(fingerprintApplyPlanValue(ref, { ...base, value: "9090" }));
+    // content（文档全文）不参与：它仅供会话记录展示/挂载，
+    // key 级指纹必须与执行期 key 读取口径一致，否则挂全文后会误判 stale/overwrite
+    expect(fingerprintApplyPlanValue(ref, base)).toBe(
+      fingerprintApplyPlanValue(ref, { ...base, content: "server:\n  port: 9090" })
+    );
     // updateTime 是服务端秒级时间戳，内容未变时不参与指纹（避免误判 stale）
     expect(fingerprintApplyPlanValue(ref, base)).toBe(
       fingerprintApplyPlanValue(ref, { ...base, updateTime: "2026-07-06T01:00:00.000Z" })

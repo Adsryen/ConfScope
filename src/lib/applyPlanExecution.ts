@@ -37,10 +37,23 @@ export interface ExecuteApplyPlanDeps {
   taskManager: TaskManager;
 }
 
+export interface ApplyItemWriteResult {
+  item: ApplyPlanItem;
+  kind: PlannedWrite["kind"];
+  result: "success" | "failure";
+  error?: string;
+  /** 写入前目标完整内容（delete 时为删除前内容）。 */
+  beforeContent?: string;
+  /** 写入后完整内容（delete 后为空串）。 */
+  afterContent?: string;
+}
+
 export interface ExecuteApplyPlanOptions {
   selectedItemIds?: string[];
   dryRun?: boolean;
   onTaskCreated?: (taskId: string) => void;
+  /** 逐项写入完成回调（成功或失败即回调；供变更会话记录落盘完整现场）。 */
+  onItemResult?: (result: ApplyItemWriteResult) => void;
 }
 
 export type ExecuteApplyPlanResult =
@@ -446,30 +459,58 @@ export async function executeApplyPlan(
       let completed = 0;
       for (const write of writes) {
         const ref = targetRef(write.item);
-        if (write.kind === "publish") {
-          await deps.publishConfig(
-            targetConnection,
-            ref.namespace,
-            ref.dataId,
-            ref.group,
-            write.content ?? "",
-            write.configType ?? "text"
-          );
-        } else if (write.kind === "delete") {
-          await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
-        } else if (write.kind === "publish_ref") {
-          if (!deps.publishConfigRef) throw new Error("Provider ref publish binding is not available.");
-          const writeRef = providerWriteRef(write.item);
-          if (typeof writeRef === "string") throw new Error(writeRef);
-          await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
-        } else {
-          if (!deps.deleteConfigRef) throw new Error("Provider ref delete binding is not available.");
-          const writeRef = providerWriteRef(write.item);
-          if (typeof writeRef === "string") throw new Error(writeRef);
-          await deps.deleteConfigRef(targetConnection, writeRef);
+        // 完整现场：写入前目标当前内容（best-effort；读失败不阻断执行）
+        let beforeContent: string | undefined;
+        try {
+          const current = await readCurrentValue(write.item, targetConnection, "target", deps);
+          beforeContent = current.content ?? current.value;
+        } catch {
+          beforeContent = undefined;
+        }
+        let itemError: string | undefined;
+        try {
+          if (write.kind === "publish") {
+            await deps.publishConfig(
+              targetConnection,
+              ref.namespace,
+              ref.dataId,
+              ref.group,
+              write.content ?? "",
+              write.configType ?? "text"
+            );
+          } else if (write.kind === "delete") {
+            await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
+          } else if (write.kind === "publish_ref") {
+            if (!deps.publishConfigRef) throw new Error("Provider ref publish binding is not available.");
+            const writeRef = providerWriteRef(write.item);
+            if (typeof writeRef === "string") throw new Error(writeRef);
+            await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
+          } else {
+            if (!deps.deleteConfigRef) throw new Error("Provider ref delete binding is not available.");
+            const writeRef = providerWriteRef(write.item);
+            if (typeof writeRef === "string") throw new Error(writeRef);
+            await deps.deleteConfigRef(targetConnection, writeRef);
+          }
+        } catch (e) {
+          itemError = errorMessage(e);
         }
         completed += 1;
         deps.taskManager.updateProgress(taskId, completed, 0, writes.length);
+        if (options.onItemResult) {
+          try {
+            options.onItemResult({
+              item: write.item,
+              kind: write.kind,
+              result: itemError ? "failure" : "success",
+              error: itemError,
+              beforeContent,
+              afterContent: itemError ? undefined : write.kind === "delete" || write.kind === "delete_ref" ? "" : write.content ?? "",
+            });
+          } catch {
+            // 会话记录失败不阻断执行
+          }
+        }
+        if (itemError) throw new Error(itemError);
       }
     } catch (error) {
       return recordFailure(workingPlan, deps, taskId, errorMessage(error), safety.backup);

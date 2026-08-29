@@ -31,7 +31,7 @@ function connection(id: string, name: string, environmentName: string): Connecti
 function document(content: string, format = "properties", updateTime = ""): ConfigDocument {
   return {
     content,
-    format,
+    format: format === "properties" ? "Properties" : format,
     version: updateTime ? `${updateTime}-version` : "",
     source: "nacos",
     updateTime,
@@ -142,6 +142,11 @@ describe("buildApplyPlanFromEntry", () => {
       ["removed.key", "delete"],
       ["same.key", "skip"],
     ]);
+    // 变更会话记录依赖：key 级项也要挂载文档全文（before/after 完整现场），
+    // 且挂载不影响分类（same.key 仍为 skip，而不是因两端文档全文不同被误判 overwrite）。
+    const byKey = new Map(result.plan.items.map((item) => [item.ref.key, item]));
+    expect(byKey.get("same.key")?.sourceValue.content).toBe("new.key=from-source\nchanged.key=from-source\nsame.key=same");
+    expect(byKey.get("same.key")?.targetValue.content).toBe("changed.key=from-target\nremoved.key=old\nsame.key=same");
     expect(result.plan.source.label).toBe("Dev / public");
     expect(result.plan.target.label).toBe("Prod / public");
   });
@@ -254,19 +259,55 @@ describe("buildApplyPlanFromEntry", () => {
     expect(item.action).toBe("overwrite");
     expect(item.sourceValue.content).toBe(mergedContent);
     expect(item.afterValue.content).toBe(mergedContent);
+    // 物化 override 自带 content：指纹按 override 全文计算（含 content），
+    // 并与快照预计算指纹一致（value.fingerprint 同值，freshness 口径统一）。
     expect(item.sourceFingerprint).toBe(
       fingerprintApplyPlanValue(sourceRef, {
         exists: true,
-        value: "server:\n  port: 8080",
+        value: mergedContent,
         valueType: "text",
         format: "YAML",
         parseStatus: "ok",
-        content: "server:\n  port: 8080",
-        version: "source-t1-version",
-        updateTime: "source-t1",
+        content: mergedContent,
       })
     );
-    expect(item.sourceFingerprint).not.toBe(item.sourceValue.fingerprint);
+    expect(item.sourceFingerprint).toBe(item.sourceValue.fingerprint);
+  });
+
+  it("keeps a full-file diff as an overwrite when key-level values look identical but file contents differ", async () => {
+    // 生产常见场景：两侧同名 key 的取值一致，但文件里有不同的注释/其他行。
+    // key 级比较（value 指纹）看不出差异；挂载文档全文后，文件级差异体现在 content 上。
+    const sourceContent = "# dev header\n# only in dev\nport=8080\nname=order";
+    const targetContent = "# prod header\nport=8080\nname=order\nextra=true";
+    const getConfigDocument = vi.fn(async (conn: Connection) =>
+      conn.id === "conn-dev" ? document(sourceContent) : document(targetContent)
+    );
+    const sourceRef = applyRef({ connectionId: "conn-dev", dataId: "app.properties", key: "port" });
+    const targetRef = applyRef({ connectionId: "conn-prod", dataId: "app.properties", key: "port" });
+
+    const result = await buildApplyPlanFromEntry(entry([{ ...targetRef, sourceRef, targetRef }], "key"), deps(getConfigDocument));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    const item = result.plan.items[0];
+    // key 级值一致 → 分类仍为 skip（指纹不被文档全文污染，回归保护：
+    // 上一版在 key 级 value 挂上两侧不同全文后被误判 overwrite）；
+    expect(item.action).toBe("skip");
+    expect(item.sourceValue.value).toBe("8080");
+    expect(item.targetValue.value).toBe("8080");
+    // 完整现场仍完整：两侧文档全文都挂在快照上，供会话记录展示；
+    expect(item.sourceValue.content).toBe(sourceContent);
+    expect(item.targetValue.content).toBe(targetContent);
+    // 指纹口径与执行期 key 读取一致（仅 key 值，不含 content），避免误判 stale；
+    expect(item.sourceFingerprint).toBe(
+      fingerprintApplyPlanValue(sourceRef, {
+        exists: true,
+        value: "8080",
+        valueType: "number",
+        format: "Properties",
+        parseStatus: "ok",
+      })
+    );
   });
 
   it("returns copyable errors for invalid snapshot sources and config read failures", async () => {

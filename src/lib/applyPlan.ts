@@ -155,11 +155,13 @@ function valueForFingerprint(value: ApplyPlanValueInput): Record<string, string 
     format: value.format ?? "",
     parseStatus: value.parseStatus ?? "",
     parseError: value.parseError ?? "",
-    content: value.content ?? "",
     md5: value.md5 ?? "",
   };
 }
 
+// 可比指纹：仅覆盖 value/valueType/format/parse 等“值语义”字段。
+// content 是文档全文，仅供会话记录展示（见 buildPlanItems 的挂载），
+// 不参与分类比较——否则“同一 key 不同文件”的文档级 content 会污染 key 级比较。
 function comparableValueFingerprint(value: ApplyPlanValueSnapshot): string {
   return JSON.stringify(valueForFingerprint(value));
 }
@@ -167,6 +169,8 @@ function comparableValueFingerprint(value: ApplyPlanValueSnapshot): string {
 /**
  * 值快照指纹。version/updateTime 是 Nacos 服务端秒级时间戳，
  * 内容未变也会漂移，因此不参与指纹；md5 是内容摘要，参与指纹。
+ * content（文档全文）不参与：key 级项的指纹必须与 applyFollowup/applyPlanExecution
+ * 的 key 口径一致，否则挂上全文后执行前 freshness 校验会误判 stale。
  */
 export function fingerprintApplyPlanValue(ref: ApplyPlanRef, value: Omit<ApplyPlanValueSnapshot, "fingerprint">): string {
   return JSON.stringify({

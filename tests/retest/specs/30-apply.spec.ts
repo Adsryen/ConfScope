@@ -1,7 +1,25 @@
 import { test, expect, fetchNacosContent } from "./retestTest";
-import { installRetestBridge } from "../bridge/installRetestBridge";
+import { readFileSync } from "node:fs";
+import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
 import { loadRetestState } from "../state";
 import { republishRetestData } from "../bridge/republishData";
+
+/** republish 后轮询确认 Nacos B 的 svc-gateway.yaml 恢复为生产基线（publish 异步落库，偶尔返回后尚未可查）。 */
+async function republishAndVerifyBaseline() {
+  await republishRetestData();
+  for (let i = 0; i < 5; i++) {
+    try {
+      const tenant = NS_B === "public" ? "" : NS_B;
+      const res = await fetch(
+        `${BASE_B}/v1/cs/configs?dataId=svc-gateway.yaml&group=${encodeURIComponent(GROUP)}&tenant=${encodeURIComponent(tenant)}`,
+        { cache: "no-store" }
+      );
+      const text = res.ok ? await res.text() : "";
+      if (text.includes("生产环境") && !text.includes("开发环境")) return;
+    } catch { /* retry */ }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 
 const NS_A = "retest-dev";
@@ -107,7 +125,7 @@ test("T-AP-02 批量变更计划: 13 项匹配 + parse_error 阻断守卫 + 执�
 
   // 幂等：本测试会写库（执行变更），开始前重新发布种子数据，恢复 A/B 干净基线，
   // 否则上次执行已把 A/B 改成一致，计划会变成 11 skip 导致无可执行项。
-  await republishRetestData();
+  await republishAndVerifyBaseline();
 
   const t0 = Date.now();
   const mark = (label: string) => console.log(`[T-AP-02][t+${Date.now() - t0}ms] ${label}`);
@@ -272,4 +290,113 @@ test("T-AP-03 浏览页直接发布被阻断且 Nacos 不变", async ({ page, re
   // Nacos 内容不变：守卫阻止了写入，A 侧 svc-pay.json 不应包含本次注入的标记
   const after = await fetchNacosContent(BASE_A, NS_A, "svc-pay.json", GROUP);
   expect(after).not.toContain("direct publish attempt");
+});
+
+/** 读取审计 jsonl 全部行（逐行解析；跳过脏行）。 */
+function readAuditLines(): Array<Record<string, unknown>> {
+  let text: string;
+  try {
+    text = readFileSync(RETEST_AUDIT_FILE, "utf8");
+  } catch {
+    return [];
+  }
+  const out: Array<Record<string, unknown>> = [];
+  for (const raw of text.split("\n")) {
+    const l = raw.trim();
+    if (!l) continue;
+    try {
+      const obj = JSON.parse(l) as unknown;
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) out.push(obj as Record<string, unknown>);
+    } catch {
+      // 脏行：跳过
+    }
+  }
+  return out;
+}
+
+// T-AP-04: 变更会话记录（apply-* 事件链，含完整配置内容）
+// 单文档 对比→计划→dry-run→执行 全链路后，audit-trail.jsonl 必须出现
+// 本次运行的 apply_session_start / apply_selection / apply_dryrun / apply_execute /
+// apply_item_result / apply_result（同 sessionId 串成一条时间线），
+// payload 含完整配置内容（svc-gateway.yaml 的“生产环境”/“开发环境”），
+// 且任何事件不含凭据字段（accessToken/password）。
+test("T-AP-04 变更会话记录: 5 步事件链 + 完整内容 + 无凭据", async ({ page, retest }) => {
+  await installRetestBridge(page, retest);
+
+  const runStartIso = new Date().toISOString();
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
+  await dismissStartupDialog(page);
+  // 重置测试数据基线（写库测试会修改 Nacos B，需恢复到"生产/开发"基线）
+  await republishAndVerifyBaseline();
+  await loadSingleCompare(page);
+
+  await page.getByRole("button", { name: "进入配置变更计划" }).last().click();
+  await expect(page.locator(".apply-ledger, .apply-item-list").first()).toBeVisible({ timeout: 30_000 });
+
+  const selectAllBtn = page.getByRole("button", { name: "全选" }).first();
+  if (await selectAllBtn.count()) await selectAllBtn.click();
+  await page.waitForTimeout(300);
+
+  const dryRunBtn = page.locator("button", { hasText: "Dry-run 检查" }).last();
+  await dryRunBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await page.locator(".apply-execution-notice").count()) === 0) {
+    await dryRunBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(page.locator(".apply-execution-notice").filter({ hasText: "Dry-run 检查通过" })).toBeVisible({ timeout: 60_000 });
+
+  await page.locator(".apply-confirm-check input").check();
+  await page.waitForTimeout(300);
+  const execBtn = page.locator("button", { hasText: "执行变更" }).last();
+  await execBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await page.locator(".apply-task-progress").count()) === 0) {
+    await execBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(page.locator(".apply-task-progress, .inline-error").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".apply-task-progress .task-status-success, .apply-task-progress .task-status-failed").first()).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+
+  const lines = readAuditLines().filter((l) => String(l.ts ?? "") >= runStartIso);
+  const byKind = (k: string) => lines.filter((l) => l.kind === k);
+  console.log(`[T-AP-04] 本次行数=${lines.length}` +
+    ` session_start=${byKind("apply_session_start").length}` +
+    ` selection=${byKind("apply_selection").length}` +
+    ` dryrun=${byKind("apply_dryrun").length}` +
+    ` execute=${byKind("apply_execute").length}` +
+    ` item_result=${byKind("apply_item_result").length}` +
+    ` result=${byKind("apply_result").length}`);
+
+  // 5 步事件链齐全（同一条变更会话）
+  for (const kind of ["apply_session_start", "apply_selection", "apply_dryrun", "apply_execute", "apply_item_result", "apply_result"] as const) {
+    expect(byKind(kind).length).toBeGreaterThanOrEqual(1);
+  }
+  // 同一 sessionId 串成时间线（除 session_start/end 外的 apply-* 事件共用一个会话）
+  const sessionIds = new Set(lines.filter((l) => String(l.kind).startsWith("apply_")).map((l) => l.sessionId));
+  expect(sessionIds.size).toBe(1);
+  const applySessionId = [...sessionIds][0];
+  for (const kind of ["apply_session_start", "apply_selection", "apply_dryrun", "apply_execute", "apply_item_result", "apply_result"] as const) {
+    expect(byKind(kind).every((l) => l.sessionId === applySessionId)).toBe(true);
+  }
+
+  // 完整配置内容：session_start 的 payload 含 svc-gateway.yaml 的源/目标全文
+  const start = byKind("apply_session_start")[0] as { payload?: string };
+  const startPayload = JSON.parse(String(start.payload ?? "{}")) as {
+    items?: Array<{ ref?: { dataId?: string }; sourceValue?: { content?: string }; targetValue?: { content?: string } }>;
+  };
+  const startItem = startPayload.items?.find((i) => i.ref?.dataId === "svc-gateway.yaml");
+  expect(startItem).toBeTruthy();
+  expect(startItem?.sourceValue?.content).toContain("开发环境");
+  expect(startItem?.targetValue?.content).toContain("生产环境");
+
+  // 逐项结果：before/after 完整内容
+  const itemResult = byKind("apply_item_result")[0] as { payload?: string };
+  const itemPayload = JSON.parse(String(itemResult.payload ?? "{}")) as { beforeContent?: string; afterContent?: string };
+  expect(String(itemPayload.beforeContent ?? "")).toContain("生产环境");
+  expect(String(itemPayload.afterContent ?? "")).toContain("开发环境");
+
+  // 安全：任何本次事件不含凭据字段
+  for (const line of lines) {
+    expect(JSON.stringify(line)).not.toMatch(/accessToken|password/i);
+  }
+  await page.screenshot({ path: "results/ap04-apply-session-record.png", fullPage: true });
 });

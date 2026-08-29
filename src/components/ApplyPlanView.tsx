@@ -46,6 +46,51 @@ function defaultSelectedItemIds(plan: ApplyPlan): Set<string> {
   return new Set(plan.items.filter(isSelectableApplyItem).map((item) => item.id));
 }
 
+/** 变更会话 id（组件级，跨 runPlan 调用复用同一 session，五步事件串成一条时间线）。 */
+function genApplySessionId(): string {
+  return `apply-${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 单条 item 的完整现场（源/目标/写后 完整内容 + 指纹 + 阻断原因），供会话记录 payload。 */
+function planItemFullRecord(item: ApplyPlanItem): Record<string, unknown> {
+  const pick = (v: ApplyPlanItem["sourceValue"]) => ({
+    exists: v.exists,
+    value: v.value ?? null,
+    format: v.format ?? null,
+    parseStatus: v.parseStatus ?? null,
+    parseError: v.parseError ?? null,
+    content: v.content ?? null,
+    version: v.version ?? null,
+    md5: v.md5 ?? null,
+    fingerprint: v.fingerprint,
+  });
+  return {
+    id: item.id,
+    action: item.action,
+    blocked: item.blocked,
+    blockReason: item.blockReason ?? null,
+    ref: { provider: item.ref.provider, namespace: item.ref.namespace, group: item.ref.group, dataId: item.ref.dataId, key: item.ref.key },
+    sourceRef: item.sourceRef ? { namespace: item.sourceRef.namespace, group: item.sourceRef.group, dataId: item.sourceRef.dataId, key: item.sourceRef.key } : null,
+    sourceValue: pick(item.sourceValue),
+    targetValue: pick(item.targetValue),
+    afterValue: pick(item.afterValue),
+  };
+}
+
+function planItemsFullRecord(plan: ApplyPlan): Array<Record<string, unknown>> {
+  return plan.items.map(planItemFullRecord);
+}
+
+/** 会话记录辅助：把事件写入 audit session（静默失败，不阻断主流程）。 */
+function sessionEventSafe(sessionId: string | null, event: Parameters<typeof auditSessionEvent>[1]): void {
+  if (!sessionId) return;
+  try {
+    auditSessionEvent(sessionId, event);
+  } catch {
+    // 审计失败不影响主流程
+  }
+}
+
 function appendConnection(connections: Connection[], connection: Connection): Connection[] {
   return connections.some((item) => item.id === connection.id) ? connections : [...connections, connection];
 }
@@ -362,6 +407,11 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
   const taskManager = getTaskManager();
   const trackedTaskIdRef = useRef<string | null>(null);
+  // 变更会话 id：进入计划时创建，整个组件生命周期内五步事件共用
+  const applySessionRef = useRef<string | null>(null);
+  // 进入计划时的 apply_session_start 事件会话 id（runPlan 复用；
+  // 不用 createAuditSession 的返回值是因为事件需写入会话列表供审计日志页展示）
+  const applyEntrySessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = taskManager.onTaskUpdate((task) => {
@@ -393,6 +443,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     setDraftState({ status: "loading" });
     setSelectedId("");
     setSelectedIds(new Set());
+    applySessionRef.current = null;
+    applyEntrySessionRef.current = null;
     buildApplyPlanFromEntry(entry, {
       connections,
       getSnapshot,
@@ -405,6 +457,37 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           return;
         }
         const savedPlan = saveApplyPlan(result.plan);
+        // 变更会话开始（第 1 步 choose）：记录完整现场——两端端点 + 全部 items 完整内容
+        if (!applySessionRef.current) {
+          applySessionRef.current = genApplySessionId();
+        }
+        const planSession = createAuditSession("apply");
+        applyEntrySessionRef.current = planSession;
+        auditSessionEvent(planSession, {
+          kind: "apply_session_start",
+          scope: "apply",
+          step: "choose",
+          planId: savedPlan.id,
+          sourceType: result.plan.inputSummary?.sourceType,
+          direction: "left->right",
+          left: result.plan.source?.label,
+          right: result.plan.target?.label,
+          summary: {
+            total: result.plan.summary?.total ?? 0,
+            create: result.plan.summary?.create ?? 0,
+            overwrite: result.plan.summary?.overwrite ?? 0,
+            delete: result.plan.summary?.delete ?? 0,
+            skip: result.plan.summary?.skip ?? 0,
+            parseError: result.plan.summary?.parse_error ?? 0,
+            blocked: result.plan.summary?.blocked ?? 0,
+          },
+          payload: JSON.stringify({
+            source: { label: result.plan.source?.label, connectionId: result.plan.source?.connectionId, namespace: result.plan.source?.namespace },
+            target: { label: result.plan.target?.label, connectionId: result.plan.target?.connectionId, namespace: result.plan.target?.namespace },
+            scope: result.plan.scope,
+            items: planItemsFullRecord(result.plan),
+          }),
+        });
         setDraftState({
           status: "ready",
           plan: savedPlan,
@@ -423,6 +506,30 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       alive = false;
     };
   }, [connections, entry]);
+
+  // 第 3 步「选择变更」：每次勾选变化记录选中集 + 每项完整内容（变化才记，避免刷屏）
+  const selectionJson = JSON.stringify(Array.from(selectedIds).sort());
+  const lastSelectionRef = useRef<string>("");
+  const planForSelection = draftState.status === "ready" ? draftState.plan : null;
+  useEffect(() => {
+    if (!planForSelection) return;
+    if (selectionJson === lastSelectionRef.current) return;
+    lastSelectionRef.current = selectionJson;
+    const ids = new Set(selectedIds);
+    const selected = planForSelection.items.filter((item) => ids.has(item.id));
+    sessionEventSafe(applyEntrySessionRef.current, {
+      kind: "apply_selection",
+      scope: "apply",
+      step: "plan",
+      planId: planForSelection.id,
+      selectedCount: selected.length,
+      payload: JSON.stringify({
+        selectedIds: Array.from(ids),
+        summary: planForSelection.summary,
+        items: selected.map(planItemFullRecord),
+      }),
+    });
+  }, [selectionJson, planForSelection, selectedIds]);
 
   const plan = draftState.status === "ready" ? draftState.plan : null;
   const sourceConnection = draftState.status === "ready" ? draftState.sourceConnection : null;
@@ -477,10 +584,12 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteNotice(null);
-    const session = createAuditSession("apply");
+    // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
+    const session = applyEntrySessionRef.current ?? createAuditSession("apply");
     auditSessionEvent(session, {
-      kind: "apply_plan_start",
+      kind: dryRun ? "apply_dryrun" : "apply_execute",
       scope: "apply",
+      step: dryRun ? "execute" : "verify",
       planId: plan.id,
       sourceType: plan.inputSummary?.sourceType,
       direction: "left->right",
@@ -532,6 +641,28 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             setExecutionTask(taskManager.getTask(taskId) ?? null);
           },
           ...(dryRun ? { dryRun: true } : {}),
+          onItemResult: (r) => {
+            sessionEventSafe(session, {
+              kind: "apply_item_result",
+              scope: "apply",
+              step: "verify",
+              planId: plan.id,
+              dryRun,
+              dataId: r.item.ref.dataId,
+              group: r.item.ref.group,
+              direction: "left->right",
+              result: r.result,
+              error: r.error,
+              payload: JSON.stringify({
+                itemId: r.item.id,
+                action: r.item.action,
+                kind: r.kind,
+                ref: { namespace: r.item.ref.namespace, group: r.item.ref.group, dataId: r.item.ref.dataId, key: r.item.ref.key },
+                beforeContent: r.beforeContent ?? null,
+                afterContent: r.afterContent ?? null,
+              }),
+            });
+          },
         }
       );
       const resultHistoryId = "historyId" in result ? result.historyId : undefined;
@@ -559,13 +690,48 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       auditSessionEvent(session, {
         kind: "apply_result",
         result: "success",
+        step: dryRun ? "execute" : "verify",
+        dryRun,
         taskId: result.taskId,
         historyId: resultHistoryId,
+        payload: JSON.stringify({
+          dryRun,
+          plannedWrites: "dryRun" in result ? result.plannedWrites : undefined,
+          selectedCount: selectedItemIds.length,
+          items: plan.items
+            .filter((item) => selectedItemIds.includes(item.id))
+            .map((item) => ({
+              id: item.id,
+              action: item.action,
+              dataId: item.ref.dataId,
+              group: item.ref.group,
+              afterContent: item.afterValue.content ?? null,
+              fingerprint: item.afterValue.fingerprint,
+            })),
+        }),
       });
       endAuditSession(session, "success");
     } catch (error) {
       setExecuteError(error instanceof Error ? error.message : String(error));
-      auditSessionEvent(session, { kind: "apply_error", result: "failure", error: error instanceof Error ? error.message : String(error) });
+      auditSessionEvent(session, {
+        kind: "apply_error",
+        result: "failure",
+        step: dryRun ? "execute" : "verify",
+        dryRun,
+        error: error instanceof Error ? error.message : String(error),
+        payload: JSON.stringify({
+          selectedCount: selectedItemIds.length,
+          items: plan.items
+            .filter((item) => selectedItemIds.includes(item.id))
+            .map((item) => ({
+              id: item.id,
+              action: item.action,
+              dataId: item.ref.dataId,
+              group: item.ref.group,
+              afterContent: item.afterValue.content ?? null,
+            })),
+        }),
+      });
       endAuditSession(session, "failure", error instanceof Error ? error.message : String(error));
     } finally {
       setExecutionMode(null);

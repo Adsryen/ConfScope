@@ -6,6 +6,15 @@
 //
 // 事件均为"只追加"，不修改历史；内容字段可能包含配置文本，
 // 但绝不包含凭据（access token / 密码），由构造方保证。
+//
+// 变更会话（apply-*）约定：
+//   - apply_session_start：进入计划的完整现场（源/目标端点 + 全部 items 完整内容）
+//   - apply_selection：用户每次勾选变化（选中项 + 每项 before/after 完整内容）
+//   - apply_dryrun / apply_execute：第 4/5 步请求（dryRun 标记 + 选中集）
+//   - apply_item_result：逐项执行结果（before/after 完整内容 + 错误）
+//   - apply_verify：终态（成功/失败/沙箱验证）
+//   大 JSON（items 列表等）放在 payload 字段（字符串化），避免嵌套类型膨胀，
+//   也方便 jsonl 逐行 grep。
 
 export const AUDIT_EVENT_SCHEMA_VERSION = 1;
 export const AUDIT_SESSION_MAX_EVENTS = 2000;
@@ -21,7 +30,13 @@ export type AuditEventType =
   | "apply_plan_start"
   | "apply_item"
   | "apply_result"
-  | "apply_error";
+  | "apply_error"
+  | "apply_session_start"
+  | "apply_selection"
+  | "apply_dryrun"
+  | "apply_execute"
+  | "apply_item_result"
+  | "apply_verify";
 
 export interface AuditEventPayload {
   schema: number;
@@ -74,6 +89,10 @@ export interface AuditEventPayload {
   error?: string;
   dryRun?: boolean;
   backupSnapshotId?: string;
+  /** 步骤标识：choose/compare/plan/execute/verify（与 DiffWorkflowCard 五步一致）。 */
+  step?: string;
+  /** 大 JSON 负载（字符串化）：items 完整内容、选中集、逐项 before/after 等。 */
+  payload?: string;
 }
 
 interface AuditBridge {
