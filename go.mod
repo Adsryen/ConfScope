@@ -1,12 +1,12 @@
 module confscope
 
-go 1.22.0
+go 1.25.0
 
 require (
-	github.com/wailsapp/wails/v2 v2.12.0
-	golang.org/x/crypto v0.33.0
-	golang.org/x/net v0.35.0
-	golang.org/x/text v0.22.0
+	github.com/wailsapp/wails/v2 v2.13.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.54.0
+	golang.org/x/text v0.37.0
 )
 
 require (
@@ -34,5 +34,5 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )
