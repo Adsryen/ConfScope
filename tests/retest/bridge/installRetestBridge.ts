@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { createRetestInvoke } from "./retestBinding";
+import { createRetestInvoke, RETEST_AUDIT_FILE } from "./retestBinding";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
 
@@ -78,6 +78,10 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
         // 复测容器是持久化的，跨 run 残留的 cs.* 状态会污染历史/审计/任务断言
         window.localStorage.clear();
       }
+      // manual-bridge-sync.js（index.html head 内联）只在自己 marker 缺失时播种；
+      // 它在本 init script 之前执行，可能已用旧版 seed（缺 defaultGroup）写入 cs.*。
+      // 这里无条件覆写 retest seed：storage 是模块单例（createRetestStorageSeed 每次
+      // 安装重新生成），保证 defaultGroup 等字段一定存在，不受页面脚本时序影响。
       for (const item of storage) {
         window.localStorage.setItem(item.key, item.value);
       }
@@ -87,6 +91,14 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
         app[item] = (...args: unknown[]) => target.__confscopeRetestInvoke(item, args);
       }
       target.go = { main: { App: app } };
+      // 审计桥：前端 auditBootstrap 安装 window.__auditBridge（web 手动桥模式同样注入）。
+      // retest 桥在这里接管 AppendAuditEvent → /tmp 的 audit-trail.jsonl（只追加，跨 run 保留）。
+      (target as { __auditBridge?: unknown }).__auditBridge = {
+        appendAuditEvent: (payload: unknown) => {
+          const raw = JSON.stringify(payload);
+          void target.__confscopeRetestInvoke("AppendAuditEvent", [raw]);
+        },
+      };
       target.runtime = {
         EventsOn: () => undefined,
         EventsOff: () => undefined,
@@ -97,3 +109,4 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
 }
 
 export const RETEST_BRIDGE_MARKER = "retest.bridge.marker";
+export { RETEST_AUDIT_FILE };

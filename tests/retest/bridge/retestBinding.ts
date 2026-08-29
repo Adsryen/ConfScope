@@ -26,7 +26,7 @@ function v1(ep: NacosEndpoint, path: string, query: Record<string, string>): str
 }
 
 async function getText(url: string): Promise<string> {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const text = await res.text();
   if (!res.ok) throw new Error(`Nacos ${res.status}: ${text.slice(0, 200)}`);
   return text;
@@ -61,6 +61,7 @@ function nacosTime(ms: number): string {
 }
 
 import { createHash } from "node:crypto";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 
 const bridgeListeners: Array<(line: string) => void> = [];
 
@@ -74,6 +75,20 @@ const bridgeLog = (...parts: unknown[]) => {
   for (const fn of bridgeListeners) fn(line);
 };
 
+// 审计事件持久化（模拟 Go 侧 AppendAuditEvent → <dataDir>/audit-trail.jsonl）：
+// 容器跨 run 持久化，jsonl 只追加，供 60-audit spec 校验完整操作过程。
+export const RETEST_AUDIT_DIR = "/tmp/confscope-retest/audit";
+export const RETEST_AUDIT_FILE = `${RETEST_AUDIT_DIR}/audit-trail.jsonl`;
+const auditSessions = new Map<string, { kind: string; status: string }>();
+function appendAuditEventNode(raw: string): void {
+  try {
+    mkdirSync(RETEST_AUDIT_DIR, { recursive: true });
+    appendFileSync(RETEST_AUDIT_FILE, `${raw.replace(/\n/g, " ")}\n`, "utf8");
+  } catch {
+    // 审计失败不阻断主流程
+  }
+}
+
 /** 进程级共享的发布时间戳（key: `${baseUrl}|${ns}|${group}|${dataId}`，value: 毫秒）。
  *  Nacos v1 的 Last-Modified 头精度为秒级，批量执行中前序写入会刷新后序读取的时间戳，
  *  桥在发布/删除后记录精确毫秒值，读取时优先使用，避免秒级取整造成计划陈旧误判。
@@ -82,29 +97,6 @@ const bridgeLog = (...parts: unknown[]) => {
  *  若前一个 spec 在 Nacos 上发布/删除过配置（刷新了 Last-Modified），后一个 spec 的审计/对比
  *  读到旧秒级时间戳，会导致数据被误判为「未变更」或陈旧。用文件兜底跨进程共享。
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-
-const STAMP_FILE = "/tmp/confscope-retest-publish-stamps.json";
-
-function loadStampFile(): Map<string, number> {
-  try {
-    if (!existsSync(STAMP_FILE)) return new Map();
-    const raw = JSON.parse(readFileSync(STAMP_FILE, "utf8")) as Record<string, number>;
-    return new Map(Object.entries(raw));
-  } catch {
-    return new Map();
-  }
-}
-
-const sharedPublishStamps = loadStampFile();
-
-function persistStamps(): void {
-  try {
-    writeFileSync(STAMP_FILE, JSON.stringify(Object.fromEntries(sharedPublishStamps)));
-  } catch {
-    /* 忽略持久化失败，退回进程内共享 */
-  }
-}
 
 function md5Of(text: string): string {
   return createHash("md5").update(text, "utf8").digest("hex");
@@ -187,18 +179,16 @@ export function createRetestInvoke(): RetestInvoke {
     return ep;
   };
 
+  // 发布 stamp 只记录本 Playwright 进程内的发布。
+  // 注意：复测容器是持久化的，跨 run 残留 stamp（旧版曾落盘 /tmp）会让
+  // GetConfig 误判"内容未变"（stamp >= Nacos Last-Modified），审计/历史场景因此失真。
   const publishStamps = new Map<string, number>();
   const stampKey = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) =>
     `${ep.baseUrl}|${namespace}|${group}|${dataId}`;
   const readStamp = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) =>
-    sharedPublishStamps.get(stampKey(ep, namespace, group, dataId))
-      ?? publishStamps.get(`${namespace}/${group}/${dataId}`)
-      ?? null;
+    publishStamps.get(stampKey(ep, namespace, group, dataId)) ?? null;
   const writeStamp = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) => {
-    const now = Date.now();
-    sharedPublishStamps.set(stampKey(ep, namespace, group, dataId), now);
-    publishStamps.set(`${namespace}/${group}/${dataId}`, now);
-    persistStamps();
+    publishStamps.set(stampKey(ep, namespace, group, dataId), Date.now());
   };
   // Nacos v1 历史列表（/v1/cs/history?search=accurate...）
   /** Nacos v1 的 /cs/history?search=accurate 在 dataId 为空串（列表拉取场景）时不返回任何行
@@ -277,6 +267,15 @@ export function createRetestInvoke(): RetestInvoke {
     return items;
   };
 
+  // ConfigCenter 门面走 /v1/console/namespaces（{code,message,data} 包裹，需解包）；
+  // 旧版 Nacos* 方法走同一接口的数组形态。两者共用本解析。
+  const rawNamespacesV1 = async (ep: NacosEndpoint): Promise<RawNamespace[]> => {
+    const data = await getJson<unknown>(v1(ep, "/console/namespaces", {}));
+    const items = Array.isArray(data) ? data : ((data as { data?: RawNamespace[] }).data ?? []);
+    return items;
+  };
+
+
   // ConfigCenter* 的 page/pageItems 形态与 Go 序列化一致，但经 JSON 往返后
   // pageItems 可能变成非数组（例如 Nacos 端点返回错误对象）。这里统一兜底，
   // 避免 UI 侧 list.filter is not a function 直接崩溃（50-history 实测发现）。
@@ -295,6 +294,7 @@ export function createRetestInvoke(): RetestInvoke {
   };
 
   const invokeInner = async (method: string, args: unknown[]) => {
+    const state = loadRetestState();
     switch (method) {
       case "GetAppInfo":
         // 与存储播种的 startup.lastShown* 版本一致 → 不触发欢迎弹窗
@@ -319,25 +319,41 @@ export function createRetestInvoke(): RetestInvoke {
         return version;
       }
       case "NacosLogin": {
-        // 复测 Nacos 关闭鉴权：真实登录必然失败，模拟"未配置账号"的免鉴权成功
+        // 复测 Nacos 关闭鉴权：auth.enabled=false 时 /v1/auth/login 会长时间挂起
+        // （等 auth-server），真实链路此处挂死；免鉴权直接返回空 token。
         return { accessToken: "", tokenTtl: 18000, globalAdmin: false };
       }
 
       // ── 新版 ConfigCenter 门面（profile + ref/req 结构体） ──
       case "ConfigCenterTestConnection": {
         const ep = getEndpoint(args);
-        await getText(v1(ep, "/console/health/readiness", {}));
+        // 与 Go 侧 NacosProvider.TestConnection 行为一致：探测命名空间接口。
+        // 注意：v2.5.2 容器没有 /console/health/readiness（那是 2.4+ 的 8080 端口），
+        // 走该路径会 404 导致连接测试误报失败。
+        await rawNamespaces(ep);
         return null;
       }
       case "ConfigCenterListNamespaces": {
         const ep = getEndpoint(args);
-        const items = await rawNamespaces(ep);
-        return items.map((item) => ({
+        // 与 Go 侧一致：v1 命名空间接口是 /v1/console/namespaces（非 v3 路径）。
+        const items = await rawNamespacesV1(ep);
+        // 必须镜像 src/api/nacos.ts 的 fromConfigCenterNamespace：
+        //   { id: item.namespace, name: item.namespaceShowName || fallback, configCount, kind }
+        // 桥输出经 exposeFunction JSON 序列化给 UI，字段名必须与前端映射读取的 {id,name} 一致，
+        // 否则 UI 静默丢弃（曾发生：桥输出 {namespace,...} → ns 下拉只剩 public 默认项）。
+        const out = items.map((item) => ({
           id: item.namespace,
           name: item.namespaceShowName || (item.namespace ? item.namespace : "public"),
           configCount: item.configCount ?? 0,
           kind: item.type ?? 0,
         }));
+        // 复测扩展：B 连接追加哨兵命名空间 "B 侧 (prod)" → namespace "retest:envB"，
+        // 浏览/编辑/历史 UI 切到它即读到 B 侧(19849/retest-qa)同 dataId 的 prod 版内容
+        // （Nacos v2 发布时不自动建命名空间, 无法用真实 ns; 生产程序不经此桥, 不受影响）。
+        if (ep.baseUrl === state.nacos.b.baseUrl) {
+          out.push({ id: "retest:envB", name: "B 侧 (prod)", configCount: 16, kind: 0 });
+        }
+        return out;
       }
       case "ConfigCenterListConfigs": {
         const ep = getEndpoint(args);
@@ -346,7 +362,7 @@ export function createRetestInvoke(): RetestInvoke {
           search: "blur",
           dataId: String(req.dataId ?? ""),
           group: String(req.group ?? ""),
-          tenant: String(req.namespace ?? ""),
+          tenant: String(req.namespace ?? "") === "retest:envB" ? ep.namespace : String(req.namespace ?? ""),
           pageNo: String(req.pageNo ?? 1),
           pageSize: String(req.pageSize ?? 20),
         };
@@ -375,12 +391,17 @@ export function createRetestInvoke(): RetestInvoke {
       case "ConfigCenterGetConfig": {
         const ep = getEndpoint(args);
         const ref = normalizeRefLike(args[1]);
+        // 复测扩展：tenant 参数 "retest:envB" 让浏览/编辑/历史 UI 可切换同一 dataId
+        // 的 B 侧(prod 版)内容 —— 用于大文件(330 行)编辑器回归等测试。
+        // 生产程序不经过本桥, 不受影响; 普通 tenant(retest-dev/retest-qa)行为不变。
+        const nacosTenant =
+          ref.namespace === "retest:envB" ? ep.namespace : ref.namespace;
         // 注意：GET /cs/configs 会命中 Chromium/Node 默认 HTTP 缓存（同 URL 同缓存键，
         // 无 cache-control 头）。审计等场景两侧命名空间不同但 dataId/group 相同时
         // （URL 仅 tenant 参数不同…tenant 在 query 里，仍可能因代理/预取混淆），
         // 一律加 no-store 强制回源，保证每次读取拿到真实当前内容。
-        const res = await fetch(v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: ref.namespace }), { cache: "no-store" });
-        if (res.status === 404) throw new Error(`404 config not found: ${ref.namespace}/${ref.group}/${ref.dataId}`);
+        const res = await fetch(v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: nacosTenant }), { cache: "no-store" });
+        if (res.status === 404) throw new Error(`404 config not found: ${nacosTenant}/${ref.group}/${ref.dataId}`);
         const content = await res.text();
         if (!res.ok) throw new Error(`Nacos ${res.status}: ${content.slice(0, 200)}`);
         const type = (ref.dataId.split(".").pop() ?? "").toLowerCase();
@@ -440,7 +461,8 @@ export function createRetestInvoke(): RetestInvoke {
         const ep = getEndpoint(args);
         const ref = normalizeRefLike(args[1]);
         bridgeLog("ListHistory in", ref.namespace, ref.dataId || "(all)", ref.group || "(all)");
-        const items = await rawHistory(ep, ref.namespace, ref.dataId, ref.group);
+        const histTenant = ref.namespace === "retest:envB" ? ep.namespace : ref.namespace;
+        const items = await rawHistory(ep, histTenant, ref.dataId, ref.group);
         bridgeLog("ListHistory out", items.length, items[0]?.ref?.dataId ?? "-", items[0]?.lastModifiedTime ?? "-");
         // ConfigCenterHistoryItem 用 ref 结构（含 namespace），与 nacos.ts HistoryItem（平铺）不同。
         // Wails 侧 Go 结构体把零值字符串字段直接省略（JSON 无 key），所以行 ref.dataId
@@ -474,7 +496,8 @@ export function createRetestInvoke(): RetestInvoke {
       case "ConfigCenterGetHistoryDetail": {
         const ep = getEndpoint(args);
         const ref = normalizeRefLike(args[1]);
-        const d = await rawHistoryDetail(ep, ref.namespace, ref.dataId, ref.group, String(args[2]));
+        const histDetailTenant = ref.namespace === "retest:envB" ? ep.namespace : ref.namespace;
+        const d = await rawHistoryDetail(ep, histDetailTenant, ref.dataId, ref.group, String(args[2]));
         return {
           id: d.id,
           ref: { provider: "nacos", connectionId: ref.connectionId, namespace: ref.namespace, group: ref.group, dataId: ref.dataId, key: "" },
@@ -638,32 +661,36 @@ export function createRetestInvoke(): RetestInvoke {
       case "UploadSnapshotWebDAVPackage":
       case "ImportSnapshotWebDAVPackage":
         return null;
+      case "AppendAuditEvent": {
+        // raw 为单行 JSON（JSONL）
+        const line = String(args[0] ?? "");
+        appendAuditEventNode(line);
+        try {
+          const ev = JSON.parse(line) as { kind?: string; sessionId?: string; result?: string; status?: string };
+          if (ev.kind && ev.sessionId) {
+            if (ev.kind === "session_start") auditSessions.set(ev.sessionId, { kind: String(ev.kind), status: "running" });
+            else if (ev.kind === "session_end") auditSessions.set(ev.sessionId, { kind: String(ev.kind), status: String(ev.status ?? "unknown") });
+          }
+        } catch {
+          // 非 JSON 行也照写
+        }
+        return null;
+      }
+      case "ReadAuditLogLines": {
+        try {
+          const limit = Number(args[0] ?? 5000);
+          const text = readFileSync(RETEST_AUDIT_FILE, "utf8");
+          const lines = text.split("\n").filter((l) => l.trim() !== "");
+          return lines.slice(-Math.max(1, limit));
+        } catch {
+          return [];
+        }
+      }
       default:
         throw new Error(`retest bridge: 未实现绑定 ${method}`);
     }
   };
   return async (method: string, args: unknown[]) => {
-    if (method === "ConfigCenterListHistory" || method === "ConfigCenterGetHistoryDetail" || method === "NacosHistoryList" || method === "NacosHistoryDetail") {
-      const start = Date.now();
-      try {
-        const res = await invokeInner(method, args);
-        return normalizePage(res);
-      } catch (e) {
-        console.log(`[retest-bridge] ${method} FAILED: ${e}`);
-        throw e;
-      }
-    }
-    if (method === "ConfigCenterPublishConfigFromApplyPlan" || method === "ConfigCenterPublishConfigRefFromApplyPlan" || method === "ConfigCenterDeleteConfigFromApplyPlan" || method === "ConfigCenterDeleteConfigRefFromApplyPlan" || method === "CreateSnapshot") {
-      const start = Date.now();
-      try {
-        const res = await invokeInner(method, args);
-        console.log(`[retest-bridge] ${method} took ${Date.now() - start}ms`);
-        return normalizePage(res);
-      } catch (e) {
-        console.log(`[retest-bridge] ${method} FAILED after ${Date.now() - start}ms:`, e);
-        throw e;
-      }
-    }
     const start = Date.now();
     const profile = args[0] as Record<string, unknown>;
     const label = `${method} [${profile?.id ?? "?"} ${String(profile?.baseUrl ?? "")}]`;

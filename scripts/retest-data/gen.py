@@ -1,5 +1,23 @@
 # -*- coding: utf-8 -*-
-"""生成生产级 retest 配置数据（A/B 环境对），覆盖真实生产场景差异。"""
+"""生成生产级 retest 配置数据（A/B 环境对），覆盖真实生产场景差异。
+
+数据设计（14 个同名 dataId，4 个 group）：
+  RETEST-PROD     10 个：gateway/billing/search/pay.json/pay.properties/common.env/
+                  config/data/auth/legacy
+  RETEST-ORDER     1 个：svc-order.toml
+  RETEST-MESSENGE  1 个：svc-notify.yaml（B 侧故意 tab 缩进 YAML 语法错误 → parse_error）
+  DEFAULT_GROUP    1 个：svc-monitor.properties
+
+覆盖场景：
+  - 大量注释 + 注释措辞/行序差异 + 值差异（gateway/billing/search）
+  - 同 dataId 跨 group 同名（pay/order/notify/monitor 在 RETEST-PROD 与各自 group 都有）
+  - 同一文件两环境行数漂移（legacy dev 50 行 vs prod 330 行，注释块偏移）
+  - 仅一侧存在的模块/键（billing 注释掉的模块、auth compliance、props mock 开关）
+  - 空值/缺失（data.yaml null/空字符串）
+  - 语法错误（notify B 侧 tab 缩进）
+  - JSON 数组元素差异（auth providers）
+  - 行序重排（gateway server/upstreams 顺序、order.toml [db] 提前）
+"""
 import json, os, urllib.parse, urllib.request
 
 OUT = os.path.dirname(os.path.abspath(__file__))
@@ -117,8 +135,8 @@ upstreams:
       idle-timeout: 60
 
 server:
-  # HTTP 监听端口（生产固定 8443）
-  port: 8443
+  # HTTP 监听端口（生产固定 8080，与开发一致）
+  port: 8080
   graceful-shutdown: 60
   # 生产开启限流
   rate-limit:
@@ -582,6 +600,9 @@ new-pricing = false
 # 生产无 cohort 概念
 # cohort = "prod-all"
 """
+# ---- svc-order.toml 的 RETEST-ORDER 侧：与 RETEST-PROD 内容相同（同 dataId 不同 group） ----
+B_TOML_ORDER = B_TOML
+
 
 # ============ 7. svc-common.env — env 风格, 注释差异 + 值差异 + 仅一侧 ============
 A_ENV = """# 公共环境变量 - 开发
@@ -644,6 +665,67 @@ PPROF_ENABLED=false
 """
 
 # ============ 8. svc-notify.yaml — B 侧 YAML 语法错误（parse_error 场景） ============
+# ============ 13. svc-monitor.properties — 监控探针配置, DEFAULT_GROUP ============
+A_PROPS_MONITOR = """# ============================================================
+# 监控探针配置 - 开发 (DEFAULT_GROUP)
+# 所有服务共享的指标/健康检查探针
+# ============================================================
+
+# ---- 探针 ----
+# 开发用 http 探针
+probe.type=http
+# 探针路径
+probe.path=/actuator/health
+# 探针间隔(秒)
+probe.interval=10
+# 超时
+probe.timeout=3
+
+# ---- 指标 ----
+# 开发只暴露基础指标
+metrics.expose=basic
+# 开发不上报 Prometheus (本地拉取)
+prometheus.push=false
+
+# ---- 告警 ----
+# 开发告警到本机
+alert.channel=local
+# 开发阈值宽松
+alert.cpu-threshold=90
+alert.mem-threshold=90
+"""
+B_PROPS_MONITOR = """# ============================================================
+# 监控探针配置 - 生产 (QA 预演) (DEFAULT_GROUP)
+# 所有服务共享的指标/健康检查探针
+# ============================================================
+
+# ---- 探针 ----
+# 生产用 tcp + http 双探针
+probe.type=tcp
+probe.http-fallback=true
+probe.path=/actuator/health
+# 生产探针更频繁
+probe.interval=5
+probe.timeout=2
+
+# ---- 指标 ----
+# 生产全量指标
+metrics.expose=full
+# 生产上报 Prometheus
+prometheus.push=true
+prometheus.endpoint=http://prom.internal:9090
+
+# ---- 告警 ----
+# 生产告警到值班群
+alert.channel=pagerduty
+# 生产阈值严格
+alert.cpu-threshold=75
+alert.mem-threshold=80
+# 生产加磁盘告警
+alert.disk-threshold=85
+"""
+
+# ============ svc-notify.yaml 原定义（RETEST-PROD） ============
 A_YAML_NOTIFY = """# 通知服务 - 开发
 app:
   name: notify-svc
@@ -713,6 +795,9 @@ rate-limit:
   # 生产按租户限流
   per-tenant: true
 """
+# ---- svc-notify.yaml 的 RETEST-MESSENGE 侧：与 RETEST-PROD 相同（保留 tab 缩进错误） ----
+B_YAML_NOTIFY_MESSENGE = B_YAML_NOTIFY
+
 
 # ============ 9. svc-config.yaml — 纯注释变化（值全部相同） ============
 A_YAML_CFG = """# 公共配置 - 开发
@@ -856,7 +941,7 @@ B_AUTH = {
   }
 }
 
-# ============ 12. svc-legacy.yaml — 大文件(200+行) + 行漂移 + 大量注释 ============
+# ============ 12. svc-legacy.yaml — 行数漂移（dev 50 行 vs prod 330 行）+ 大量注释 ============
 def gen_legacy(env, tag):
     lines = []
     ap = lines.append
@@ -889,8 +974,9 @@ def gen_legacy(env, tag):
     ap(f"  # 输出目录")
     ap(f"  output: /var/report/{'dev' if env=='dev' else 'prod'}")
     ap("")
-    # 中间塞 60 个生成注释行模拟大文件
-    for i in range(1, 61):
+    # 中间塞生成注释行模拟大文件：dev 少量(10)，prod 大量(300) → 行数漂移
+    note_count = 10 if env == "dev" else 300
+    for i in range(1, note_count + 1):
         ap(f"# legacy note {i}: 模块{i}迁移进度 {'30' if env=='dev' else '70'}% (2026-{(i%12)+1:02d})")
     ap("")
     ap("# ---- 模块 4: 消息 ----")
@@ -926,18 +1012,29 @@ FILES = []
 def f(dataId, group, type_, a, b):
     FILES.append(dict(dataId=dataId, group=group, type=type_, a=a, b=b))
 
-f("svc-gateway.yaml",   "DEFAULT_GROUP", "yaml",       A_YAML_GW,   B_YAML_GW)
-f("svc-billing.yaml",   "DEFAULT_GROUP", "yaml",       A_YAML_BILLING, B_YAML_BILLING)
-f("svc-search.yaml",    "DEFAULT_GROUP", "yaml",       A_YAML_SEARCH, B_YAML_SEARCH)
-f("svc-pay.json",       "DEFAULT_GROUP", "json",       json.dumps(A_PAY, ensure_ascii=False, indent=2), json.dumps(B_PAY, ensure_ascii=False, indent=2))
-f("svc-pay.properties", "DEFAULT_GROUP", "properties", A_PROPS,     B_PROPS)
-f("svc-order.toml",     "DEFAULT_GROUP", "toml",       A_TOML,      B_TOML)
-f("svc-common.env",     "DEFAULT_GROUP", "env",        A_ENV,       B_ENV)
-f("svc-notify.yaml",    "DEFAULT_GROUP", "yaml",       A_YAML_NOTIFY, B_YAML_NOTIFY)
-f("svc-config.yaml",    "DEFAULT_GROUP", "yaml",       A_YAML_CFG,  B_YAML_CFG)
-f("svc-data.yaml",      "DEFAULT_GROUP", "yaml",       A_YAML_DATA, B_YAML_DATA)
-f("svc-auth.json",      "DEFAULT_GROUP", "json",       json.dumps(A_AUTH, ensure_ascii=False, indent=2), json.dumps(B_AUTH, ensure_ascii=False, indent=2))
-f("svc-legacy.yaml",    "DEFAULT_GROUP", "yaml",       gen_legacy("dev","A"), gen_legacy("prod","B"))
+# RETEST-PROD：10 个
+f("svc-gateway.yaml",   "RETEST-PROD", "yaml",       A_YAML_GW,   B_YAML_GW)
+f("svc-billing.yaml",   "RETEST-PROD", "yaml",       A_YAML_BILLING, B_YAML_BILLING)
+f("svc-search.yaml",    "RETEST-PROD", "yaml",       A_YAML_SEARCH, B_YAML_SEARCH)
+f("svc-pay.json",       "RETEST-PROD", "json",       json.dumps(A_PAY, ensure_ascii=False, indent=2), json.dumps(B_PAY, ensure_ascii=False, indent=2))
+f("svc-pay.properties", "RETEST-PROD", "properties", A_PROPS,     B_PROPS)
+f("svc-order.toml",     "RETEST-PROD", "toml",       A_TOML,      B_TOML)
+f("svc-common.env",     "RETEST-PROD", "env",        A_ENV,       B_ENV)
+f("svc-notify.yaml",    "RETEST-PROD", "yaml",       A_YAML_NOTIFY, B_YAML_NOTIFY)
+f("svc-config.yaml",    "RETEST-PROD", "yaml",       A_YAML_CFG,  B_YAML_CFG)
+f("svc-data.yaml",      "RETEST-PROD", "yaml",       A_YAML_DATA, B_YAML_DATA)
+f("svc-auth.json",      "RETEST-PROD", "json",       json.dumps(A_AUTH, ensure_ascii=False, indent=2), json.dumps(B_AUTH, ensure_ascii=False, indent=2))
+f("svc-legacy.yaml",    "RETEST-PROD", "yaml",       gen_legacy("dev","A"), gen_legacy("prod","B"))
+# RETEST-ORDER：同 dataId 不同 group（与 RETEST-PROD 的 svc-order.toml 同名）
+f("svc-order.toml",     "RETEST-ORDER", "toml",      A_TOML,      B_TOML_ORDER)
+# RETEST-MESSENGE：同 dataId 不同 group（B 侧保留 tab 缩进错误）
+f("svc-notify.yaml",    "RETEST-MESSENGE", "yaml",   A_YAML_NOTIFY, B_YAML_NOTIFY_MESSENGE)
+# DEFAULT_GROUP：监控探针
+f("svc-monitor.properties", "DEFAULT_GROUP", "properties", A_PROPS_MONITOR, B_PROPS_MONITOR)
+# RETEST-PROD：svc-legacy.yaml 的 prod 版独立 dataId（两侧同 330 行）。
+# 目的：浏览页可直接打开大文件做编辑器测试，无需命名空间切换/哨兵 remap
+# （prod 版 330 行 = gen_legacy("prod","B")，与 svc-legacy.yaml 的 B 侧一致）。
+f("svc-legacy-prod.yaml", "RETEST-PROD", "yaml", gen_legacy("prod", "A"), gen_legacy("prod", "B"))
 
 # 写文件供检查
 os.makedirs(os.path.join(OUT, "generated"), exist_ok=True)
