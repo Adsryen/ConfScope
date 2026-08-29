@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
+import { clearAppCache } from "../lib/cacheCleanup";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
@@ -19,6 +20,8 @@ export default function SettingsView() {
   const [credentialSummary, setCredentialSummary] = useState<CredentialMigrationSummary | null>(null);
   const [credentialError, setCredentialError] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [cacheResult, setCacheResult] = useState<"" | "ok" | "fail">("");
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -28,6 +31,7 @@ export default function SettingsView() {
     { id: "settings-compare", label: t("settings.comparePreferences") },
     { id: "settings-credentials", label: t("settings.credentials") },
     { id: "settings-backup", label: t("settings.backup") },
+    { id: "settings-developer", label: t("settings.developer") },
   ];
 
   const update = (patch: Partial<AppSettings>) => {
@@ -81,6 +85,20 @@ export default function SettingsView() {
       setCredentialError(toErrorMessage(e));
     } finally {
       setCredentialBusy(false);
+    }
+  };
+
+
+  const runClearCache = async () => {
+    setCacheBusy(true);
+    setCacheResult("");
+    try {
+      await clearAppCache();
+      setCacheResult("ok");
+    } catch {
+      setCacheResult("fail");
+    } finally {
+      setCacheBusy(false);
     }
   };
 
@@ -249,6 +267,34 @@ export default function SettingsView() {
                 {t("settings.clearLocalHistory")}
               </button>
             </div>
+          </section>
+
+          <section id="settings-developer" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.developer")}</h4>
+              <div className="settings-panel-description">{t("settings.developerDescription")}</div>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.clearCache")}</strong>
+                <div className="settings-panel-description">{t("settings.clearCacheHint")}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-danger"
+                disabled={cacheBusy}
+                onClick={() => {
+                  if (cacheBusy) return;
+                  if (confirm(t("settings.confirmClearCache"))) {
+                    void runClearCache();
+                  }
+                }}
+              >
+                {cacheBusy ? "…" : t("settings.clearCache")}
+              </button>
+            </div>
+            {cacheResult === "ok" && <div className="test-msg ok">{t("settings.clearCacheSuccess")}</div>}
+            {cacheResult === "fail" && <div className="inline-error" role="alert">{t("settings.clearCacheFailed")}</div>}
           </section>
         </div>
       </div>

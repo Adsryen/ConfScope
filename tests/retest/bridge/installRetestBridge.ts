@@ -58,6 +58,7 @@ const WAILS_METHODS = [
   "ListSnapshotWebDAVPackages",
   "UploadSnapshotWebDAVPackage",
   "ImportSnapshotWebDAVPackage",
+  "ClearAuditTrail",
 ] as const;
 
 export async function installRetestBridge(page: Page, state: RetestState): Promise<void> {

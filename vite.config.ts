@@ -1,6 +1,6 @@
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 
 /** Web 手动桥（public/manual-bridge-sync.js）的审计落盘端点：
  *  浏览器侧 __auditBridge 把 AppendAuditEvent POST 到这里，
@@ -31,6 +31,24 @@ function retestAuditPlugin() {
           res.setHeader("Content-Type", "application/json");
           res.end("{}");
         });
+      });
+      // 开发者“清理缓存”：truncate 审计文件（与 Go ClearAuditTrail 行为一致，幂等）
+      server.middlewares.use("/__retest_audit_clear", (req: any, res: any) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        let ok = true;
+        try {
+          mkdirSync(AUDIT_DIR, { recursive: true });
+          if (existsSync(AUDIT_FILE)) writeFileSync(AUDIT_FILE, "", "utf8");
+        } catch {
+          ok = false;
+        }
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok }));
       });
     },
   };
