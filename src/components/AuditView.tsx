@@ -12,12 +12,17 @@ import CopyButton from "./CopyButton";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import Select from "./Select";
 
+export interface DiffJumpSideParams {
+  tenant?: string;
+  dataId?: string;
+  group?: string;
+}
+
 export interface DiffJumpParams {
   leftConnId: string;
   rightConnId: string;
-  namespace: string;
-  group: string;
-  dataId: string;
+  left?: DiffJumpSideParams | null;
+  right?: DiffJumpSideParams | null;
   autoCompare?: boolean;
 }
 
@@ -128,12 +133,17 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   );
 
   // 环境来源（最多 6 个）
+  // group 默认跟随连接配置的默认 group（留空 = 该命名空间全部 group）
+  const defaultGroupFor = (c: Connection) => {
+    const g = (c.defaultGroup ?? "").trim();
+    return g && g !== "DEFAULT_GROUP" ? g : "";
+  };
   const [envSources, setEnvSources] = useState<EnvSource[]>(() => {
     const nonLocal = projectConns.filter((c) => c.sourceType !== "local-snapshot");
     return nonLocal.slice(0, 4).map((c) => ({
       conn: c,
       namespace: c.defaultNamespace ?? "",
-      group: "DEFAULT_GROUP",
+      group: defaultGroupFor(c),
       dataIdFilter: "",
     }));
   });
@@ -144,7 +154,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       if (nonLocal.length === 0) return [];
       return nonLocal.slice(0, 4).map((c) => {
         const existing = prev.find((s) => s.conn.id === c.id);
-        return existing ?? { conn: c, namespace: c.defaultNamespace ?? "", group: "DEFAULT_GROUP", dataIdFilter: "" };
+        return existing ?? { conn: c, namespace: c.defaultNamespace ?? "", group: defaultGroupFor(c), dataIdFilter: "" };
       });
     });
   }, [projectConns]);
@@ -223,12 +233,20 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       return cell?.exists && cell.value !== baselineCell?.value;
     }) ?? envIds.find((envId) => envId !== baseline);
     if (!targetEnvId) return;
+    const targetEnv = envSources.find((env) => envKey(env) === targetEnvId);
     onNavigateToDiff({
       leftConnId: baseline.split(":")[0],
       rightConnId: targetEnvId.split(":")[0],
-      namespace: selectedRow.values[baseline]?.namespace ?? selectedRow.namespace,
-      group: selectedRow.group,
-      dataId: selectedRow.originalDataIds[baseline] ?? selectedRow.dataId,
+      left: {
+        tenant: selectedRow.values[baseline]?.namespace ?? selectedRow.namespace,
+        group: selectedRow.group,
+        dataId: selectedRow.originalDataIds[baseline] ?? selectedRow.dataId,
+      },
+      right: {
+        tenant: targetEnv ? targetEnv.namespace : selectedRow.namespace,
+        group: selectedRow.group,
+        dataId: selectedRow.originalDataIds[targetEnvId] ?? selectedRow.dataId,
+      },
     });
   }, [selectedRow, baseline, envIds, onNavigateToDiff]);
 
@@ -323,7 +341,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     if (unused.length === 0) return;
     setEnvSources((prev) => [
       ...prev,
-      { conn: unused[0], namespace: unused[0].defaultNamespace ?? "", group: "DEFAULT_GROUP", dataIdFilter: "" },
+      { conn: unused[0], namespace: unused[0].defaultNamespace ?? "", group: defaultGroupFor(unused[0]), dataIdFilter: "" },
     ]);
   };
 
@@ -519,7 +537,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 <input
                   className="search-input mono"
                   value={env.group}
-                  placeholder="DEFAULT_GROUP"
+                  placeholder={t("diff.groupPlaceholder")}
                   onChange={(e) => updateSource(index, { group: e.target.value })}
                 />
               </label>
