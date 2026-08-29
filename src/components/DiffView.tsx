@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { diffLines } from "../lib/diff";
-import { normalizeConfig } from "../lib/normalize";
+import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
 import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
@@ -160,8 +160,43 @@ function mergePreviewForItem(item: BatchResult, previews: Record<string, MergePr
   return previews[item.dataId] ?? { leftText: item.leftText, rightText: item.rightText };
 }
 
+function batchWarningsForItem(
+  item: BatchResult,
+  previews: Record<string, MergePreviewText>,
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string[] {
+  const preview = previews[item.dataId];
+  if (!preview || item.format !== "YAML") return [];
+  const warnings: string[] = [];
+  const leftWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideLeft", item.dataId, preview.leftText);
+  const rightWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideRight", item.dataId, preview.rightText);
+  if (leftWarn) warnings.push(leftWarn);
+  if (rightWarn) warnings.push(rightWarn);
+  return warnings;
+}
+
 function mergePreviewChanged(item: BatchResult, preview: MergePreviewText, direction: MergeSelectionDirection): boolean {
   return direction === "left-to-right" ? preview.rightText !== item.rightText : preview.leftText !== item.leftText;
+}
+
+function duplicateKeyParts(
+  duplicates: ReturnType<typeof extractDuplicateKeys>,
+  t: (key: string) => string
+): string {
+  return duplicates
+    .map((d) => `"${d.key}" @ ${t("diff.duplicateLine")} ${d.lineNumbers.join(", ")}`)
+    .join("; ");
+}
+
+/** 重复 key 提示文案：哪个 key、出现在哪些行、处理方式与建议动作。 */
+function buildDuplicateKeyWarning(t: (key: string, vars?: Record<string, string | number>) => string, sideKey: string, dataId: string, text: string): string | null {
+  const duplicates = extractDuplicateKeys(text);
+  if (duplicates.length === 0) return null;
+  return t("diff.duplicateKeyWarning", {
+    side: t(sideKey),
+    dataId,
+    parts: duplicateKeyParts(duplicates, t),
+  });
 }
 
 function batchResultStats(leftText: string, rightText: string): BatchResultStats {
@@ -1364,6 +1399,15 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const leftText = ready ? prepareText(leftLoaded) : "";
   const rightText = ready ? prepareText(rightLoaded) : "";
   const diffFormat = mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
+  const singleWarnings = useMemo(() => {
+    if (!ready || diffFormat !== "YAML") return [] as string[];
+    const warnings: string[] = [];
+    const leftWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideLeft", leftLoaded.label, leftText);
+    const rightWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideRight", rightLoaded.label, rightText);
+    if (leftWarn) warnings.push(leftWarn);
+    if (rightWarn) warnings.push(rightWarn);
+    return warnings;
+  }, [ready, diffFormat, leftLoaded, rightLoaded, leftText, rightText, t]);
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
   const currentWorkflowStep: WorkflowStepId =
@@ -1917,6 +1961,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                           leftText={mergePreviewForItem(selectedBatchItem, mergePreviews).leftText}
                           rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
                           format={selectedBatchItem.format}
+                          warnings={batchWarningsForItem(selectedBatchItem, mergePreviews, t)}
                           onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
                           onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
                           mergeActionLabels={{
@@ -1948,6 +1993,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 leftText={leftText}
                 rightText={rightText}
                 format={diffFormat}
+                warnings={singleWarnings}
               />
             ) : !matchResults && !ready ? (
               <div className="pad-msg big">

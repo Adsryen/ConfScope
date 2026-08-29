@@ -227,13 +227,18 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
   const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
   const hasFatalParseError =
     item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
-  // parseError 现在兼作 warning（如 YAML duplicate key）：只在存在 fatal 解析失败时展示，
-  // 避免"后值覆盖"类警告把详情区刷成红色误导用户。
+  // parseError 现在兼作 warning（如 YAML duplicate key）：fatal 解析失败红色展示；
+  // 非 fatal 的 warning（后值覆盖类）用黄色提示，不再完全隐藏。
   const parseErrors = hasFatalParseError
     ? [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
         (error): error is string => Boolean(error)
       )
     : [];
+  const parseWarnings = hasFatalParseError
+    ? []
+    : [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
+        (error): error is string => Boolean(error)
+      );
   return (
     <div className="apply-detail">
       <div className="apply-detail-head">
@@ -262,6 +267,11 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
       {parseErrors.map((error, index) => (
         <div className="apply-parse-error" key={`${item.id}-parse-error-${index}`}>
           {error}
+        </div>
+      ))}
+      {parseWarnings.map((warning, index) => (
+        <div className="apply-parse-warning" key={`${item.id}-parse-warning-${index}`}>
+          {"\u26A0"} {warning}
         </div>
       ))}
     </div>

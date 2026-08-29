@@ -33,6 +33,8 @@ interface Props {
   mergeActionScope?: MergeActionScope;
   mergeActionAvailability?: MergeActionAvailability;
   onMergeAction?: (rowIndex: number, direction: MergeActionDirection, rowIndexes?: number[]) => void;
+  /** 展示在 diff 区顶部的警告条（如 duplicate key 提示）。 */
+  warnings?: string[];
 }
 
 function mergeActionClass(direction: MergeActionDirection, state?: MergeActionState): string {
@@ -100,6 +102,7 @@ export default function DiffPanel({
   mergeActionScope = "block",
   mergeActionAvailability,
   onMergeAction,
+  warnings,
 }: Props) {
   const { t } = useTranslation();
   const [localOnlyChanges, setLocalOnlyChanges] = useState(false);
@@ -119,6 +122,15 @@ export default function DiffPanel({
 
   return (
     <div className="diff-panel">
+      {warnings && warnings.length > 0 && (
+        <div className="diff-warnings" role="status">
+          {warnings.map((warning, index) => (
+            <div className="diff-warning" key={index}>
+              {"\u26A0"} {warning}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="diff-stats">
         {identical ? (
           <span className="diff-same">{t("diff.sideBySideIdentical")}</span>

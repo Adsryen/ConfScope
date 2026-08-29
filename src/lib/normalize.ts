@@ -107,6 +107,49 @@ function normalizeJson(content: string): NormalizeResult {
   }
 }
 
+/** 同一顶层 key 在文件中出现多次（位置不同），按 key 归并出现行号。 */
+export interface DuplicateKeyInfo {
+  key: string;
+  lineNumbers: number[];
+}
+
+/**
+ * 扫描 YAML 文本中"位置不同的重复键"：顶层 key 与缩进后的父级 key 各成一层，
+ * 同一层出现相同 key 即视为重复。返回每个重复 key 及其出现行号（1 起）。
+ * 仅依赖行首缩进，不解析完整文档，足够用于可视化提示。
+ */
+export function extractDuplicateKeys(content: string): DuplicateKeyInfo[] {
+  const levelOccurrences = new Map<string, { key: string; lines: number[] }>();
+  content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .forEach((raw, index) => {
+      const line = raw;
+      if (!line.trim() || line.trimStart().startsWith("#")) return;
+      const indent = line.length - line.trimStart().length;
+      if (indent > 0 && indent % 2 !== 0) return;
+      const level = indent / 2;
+      const m = line.match(new RegExp(`^${String(" ".repeat(indent))}([A-Za-z0-9_.\\-]+):`));
+      if (!m) return;
+      const record = levelOccurrences.get(`${level}::${m[1]}`);
+      if (record) record.lines.push(index + 1);
+      else levelOccurrences.set(`${level}::${m[1]}`, { key: m[1], lines: [index + 1] });
+    });
+  const merged = new Map<string, DuplicateKeyInfo>();
+  for (const record of levelOccurrences.values()) {
+    if (record.lines.length < 2) continue;
+    const existing = merged.get(record.key);
+    if (existing) {
+      for (const line of record.lines) if (!existing.lineNumbers.includes(line)) existing.lineNumbers.push(line);
+      existing.lineNumbers.sort((a, b) => a - b);
+    } else {
+      merged.set(record.key, { key: record.key, lineNumbers: [...record.lines].sort((a, b) => a - b) });
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.lineNumbers[0] - b.lineNumbers[0]);
+}
+
 function normalizeYaml(content: string): NormalizeResult {
   const doc = parseDocument(content, { uniqueKeys: true });
   if (doc.errors.length) {
