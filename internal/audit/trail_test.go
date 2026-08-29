@@ -49,3 +49,20 @@ func TestReadLinesLimitKeepsTail(t *testing.T) {
 		t.Fatalf("want 3 lines, got %d", len(lines))
 	}
 }
+
+func TestClearTruncatesTrail(t *testing.T) {
+	dir := t.TempDir()
+	if err := Append(dir, `{"schema":1,"ts":"t0","kind":"session_start"}`); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := Clear(dir); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got := ReadLines(dir, 0); len(got) != 0 {
+		t.Fatalf("want empty after clear, got %v", got)
+	}
+	// 幂等：文件不存在时 Clear 不报错
+	if err := Clear(t.TempDir()); err != nil {
+		t.Fatalf("clear on missing file: %v", err)
+	}
+}

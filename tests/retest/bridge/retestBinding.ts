@@ -61,7 +61,7 @@ function nacosTime(ms: number): string {
 }
 
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const bridgeListeners: Array<(line: string) => void> = [];
 
@@ -685,6 +685,15 @@ export function createRetestInvoke(): RetestInvoke {
         } catch {
           return [];
         }
+      }
+      case "ClearAuditTrail": {
+        // 模拟 Go ClearAuditTrail：truncate 审计文件（幂等；不存在则 no-op）
+        try {
+          writeFileSync(RETEST_AUDIT_FILE, "");
+        } catch {
+          // 审计文件缺失等场景：静默跳过
+        }
+        return null;
       }
       default:
         throw new Error(`retest bridge: 未实现绑定 ${method}`);

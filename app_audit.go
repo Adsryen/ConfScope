@@ -44,3 +44,17 @@ func (a *App) ReadAuditLogLines(limit int) []string {
 	return audit.ReadLines(dir, limit)
 }
 
+// ClearAuditTrail 清空审计文件（开发者“清理缓存”入口）。
+// 失败只打印不抛错：清理是辅助动作，不能阻断设置页。
+func (a *App) ClearAuditTrail() error {
+	dir := auditDataDir()
+	if dir == "" {
+		return errors.New("audit data dir unavailable")
+	}
+	if err := audit.Clear(dir); err != nil {
+		println("audit clear failed:", err.Error())
+		return err
+	}
+	return nil
+}
+

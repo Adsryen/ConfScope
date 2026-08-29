@@ -46,6 +46,20 @@ func Append(dataDir, content string) error {
 	return writer.Flush()
 }
 
+// Clear 清空审计文件（truncate 为 0 字节）。
+// 只截断不删除：保持文件句柄/权限/路径不变，避免“文件不存在”分支；
+// 文件不存在时直接成功（幂等）。仅由开发者“清理缓存”入口调用。
+func Clear(dataDir string) error {
+	if dataDir == "" {
+		return nil
+	}
+	path := filepath.Join(dataDir, TrailFileName)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	return os.Truncate(path, 0)
+}
+
 // ReadLines 读取最近 limit 行事件（从文件尾部取；limit<=0 时取全部上限 5000）。
 func ReadLines(dataDir string, limit int) []string {
 	if dataDir == "" {

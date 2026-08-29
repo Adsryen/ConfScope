@@ -10,6 +10,7 @@ type GoApp = {
   ReadSecureSecret(ref: SecureSecretRef): Promise<string>;
   DeleteSecureSecret(ref: SecureSecretRef): Promise<void>;
   AppendAuditEvent(raw: string): Promise<void>;
+  ClearAuditTrail(): Promise<void>;
   ReadAuditLogLines(limit: number): Promise<string[]>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
@@ -183,6 +184,7 @@ export const ReadSecureSecret = (ref: SecureSecretRef) => app().ReadSecureSecret
 export const DeleteSecureSecret = (ref: SecureSecretRef) => app().DeleteSecureSecret(ref);
 
 export const AppendAuditEvent = (raw: string) => app().AppendAuditEvent(raw);
+export const ClearAuditTrail = () => app().ClearAuditTrail();
 
 export const ReadAuditLogLines = (limit: number) => app().ReadAuditLogLines(limit);
 

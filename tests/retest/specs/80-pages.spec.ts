@@ -1,5 +1,6 @@
 import { test, expect } from "./retestTest";
-import { installRetestBridge } from "../bridge/installRetestBridge";
+import { readFileSync, writeFileSync } from "node:fs";
+import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
 import { loadRetestState } from "../state";
 import { navigate, dismissStartupDialog } from "./ui";
 
@@ -149,4 +150,43 @@ test("T-PG-04 审计日志页: 持久化 jsonl 事件展示", async ({ page, ret
   const pageText = await page.locator(".page-surface").first().innerText();
   console.log(`[T-PG-04] 审计日志页文本片段 = ${pageText.slice(0, 300)}`);
   await page.screenshot({ path: "results/pg04-logviewer.png", fullPage: true });
+});
+
+// T-PG-05: 开发者“清理缓存”（设置页）：清 localStorage cs.* + truncate audit-trail.jsonl
+test("T-PG-05 设置页: 开发者清理缓存（localStorage + audit-trail）", async ({ page, retest }) => {
+  await installRetestBridge(page, retest);
+
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
+  await dismissStartupDialog(page);
+
+  // 前置：种一个 cs.* 键 + 确保 audit 文件有内容
+  await page.evaluate(() => window.localStorage.setItem("cs.retest.probe", "1"));
+  writeFileSync(RETEST_AUDIT_FILE, `{"schema":1,"ts":"${new Date().toISOString()}","kind":"session_start","sessionId":"cleanup-probe"}\n`);
+
+  await navigate(page, "设置");
+  await expect(page.locator(".settings-page")).toBeVisible({ timeout: 15_000 });
+
+  // 开发者面板：清理缓存按钮
+  const clearBtn = page.locator("#settings-developer button").filter({ hasText: "清理缓存" }).first();
+  await expect(clearBtn).toBeVisible({ timeout: 10_000 });
+  // 确认对话框
+  page.once("dialog", (d) => void d.accept());
+  await clearBtn.click();
+
+  // 成功提示
+  await expect(page.locator("#settings-developer .test-msg.ok")).toBeVisible({ timeout: 10_000 });
+
+  // localStorage cs.* 被清空
+  const csKeys = await page.evaluate(() =>
+    Object.keys(window.localStorage).filter((k) => k.startsWith("cs."))
+  );
+  expect(csKeys).toEqual([]);
+
+  // audit-trail.jsonl 被 truncate 为空（web 手动桥经 vite 中间件 /__retest_audit_clear 真实落盘；
+  // 原生则走 Go ClearAuditTrail truncate，由 Go 单测 TestClearTruncatesTrail 覆盖）
+  const text = readFileSync(RETEST_AUDIT_FILE, "utf8").trim();
+  expect(text).toBe("");
+
+  await page.screenshot({ path: "results/pg05-clear-cache.png", fullPage: true });
 });

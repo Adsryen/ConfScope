@@ -1,10 +1,30 @@
 import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { navigate, dismissStartupDialog, setDiffSource, readDiffGroupOptions } from "./ui";
+import { republishRetestData } from "../bridge/republishData";
 
 const NS_A = "retest-dev";
 const NS_B = "retest-qa";
 const GROUP = "RETEST-PROD";
+const BASE_B = "http://127.0.0.1:19849/nacos";
+
+/** 确保 Nacos B 的 svc-gateway.yaml 是"生产"基线（写库类测试可能把它改成开发侧，导致 0 差异）。
+ *  用 republishRetestData 重发种子 + 轮询确认。 */
+async function ensureDiffBaseline() {
+  const tenant = NS_B === "public" ? "" : NS_B;
+  const url = `${BASE_B}/v1/cs/configs?dataId=svc-gateway.yaml&group=${encodeURIComponent(GROUP)}&tenant=${encodeURIComponent(tenant)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = res.ok ? await res.text() : "";
+  if (text && text.includes("开发环境")) {
+    await republishRetestData();
+    for (let i = 0; i < 5; i++) {
+      const r2 = await fetch(url, { cache: "no-store" });
+      const t2 = r2.ok ? await r2.text() : "";
+      if (t2.includes("生产环境") && !t2.includes("开发环境")) return;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+}
 
 /** 对比页预填已支持左右独立 namespace，这里走"展开来源 → 手动选"的真人路径。 */
 async function loadSingleCompare(page: any, dataId = "svc-gateway.yaml") {
@@ -25,6 +45,7 @@ test("T-DIFF-01 单文档对比: 双 Nacos 同 dataId 差异渲染", async ({ pa
   await page.goto("/");
   await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
   await dismissStartupDialog(page);
+  await ensureDiffBaseline();
   await loadSingleCompare(page);
 
   // dev 与 qa 侧注释/值不同 → 必有 modify/add/del 行
@@ -168,6 +189,7 @@ test("T-DIFF-05 自动恢复: 左右独立 namespace 预填 + 自动对比", asy
   await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
   await dismissStartupDialog(page);
   // 存储种子已播种 diff 页 + 左右独立 namespace + autoCompare
+  await ensureDiffBaseline();
   await page.waitForTimeout(4000);
 
   // 应已自动进入对比页并完成对比
