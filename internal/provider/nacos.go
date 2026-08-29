@@ -102,14 +102,15 @@ func nacosTimeToString(ms string) string {
 func (p *NacosProvider) GetConfig(profile ConnectionProfile, ref ConfigRef) (ConfigDocument, error) {
 	client := p.clientFor(profile)
 	ref.Namespace = normalizeMSERequestNamespace(profile, ref.Namespace)
-	content, err := client.GetConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
+	result, err := client.GetConfig(profile.BaseURL, profile.AccessToken, profile.APIVersion, ref.Namespace, ref.DataID, ref.Group)
 	if err != nil {
 		return ConfigDocument{}, err
 	}
 	return ConfigDocument{
 		Ref:     normalizeRef(profile, ref),
-		Content: content,
+		Content: result.Content,
 		Source:  string(ProviderNacos),
+		Md5:     result.Md5,
 	}, nil
 }
 

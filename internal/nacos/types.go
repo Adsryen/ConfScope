@@ -25,6 +25,14 @@ type ConfigItem struct {
 	Type             string `json:"type"`
 	ConfigType       string `json:"configType"`
 	LastModifiedTime string `json:"lastModifiedTime"`
+	// Md5 仅 v1 列表接口返回；v3 列表无此字段。
+	Md5 string `json:"md5"`
+}
+
+// ConfigContent 是 GetConfig 的结果：v1 只返回纯文本，md5 需另行查询。
+type ConfigContent struct {
+	Content string
+	Md5     string
 }
 
 // ConfigPage 是配置列表分页结果。
