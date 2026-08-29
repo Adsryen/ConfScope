@@ -110,7 +110,22 @@ function normalizeJson(content: string): NormalizeResult {
 function normalizeYaml(content: string): NormalizeResult {
   const doc = parseDocument(content, { uniqueKeys: true });
   if (doc.errors.length) {
-    const parseError = `YAML:${doc.errors[0].message.split("\n")[0]}`;
+    // duplicate key 是真实生产环境最常见的"合法但重复"写法（如多环境合并残留），
+    // 降级为 warning 而不是 fatal：toJSON() 仍能产出有效对象（后值覆盖前值，
+    // 与运行时 YAML 解析器行为一致），不应阻塞配置同步。
+    // 其他 YAML 语法错误（缩进/结构）仍按 fatal 处理。
+    const messages = doc.errors.map((e) => e.message.split("\n")[0]);
+    // yaml 库 duplicate key 错误文案是 "Map keys must be unique at line N, column M:"
+    const allDuplicate = messages.every((m) => /duplicate|map keys must be unique/i.test(m));
+    if (allDuplicate) {
+      const parseWarning = `YAML:${messages[0]}（duplicate key 已按后值覆盖处理，不阻塞同步）`;
+      return {
+        parseStatus: "ok",
+        parseError: parseWarning,
+        entries: normalizeObject(doc.toJSON()),
+      };
+    }
+    const parseError = `YAML:${messages[0]}`;
     return { parseStatus: "error", parseError, entries: [documentEntry(content, "error", parseError)] };
   }
   return {
