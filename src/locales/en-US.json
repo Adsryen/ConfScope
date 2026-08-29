@@ -177,7 +177,10 @@
     "taskProgressStats": "Processed {completed}/{total} items",
     "taskProgressPercent": "{progress}%",
     "copyTaskId": "Copy task ID",
-    "noSelectedItems": "Select at least one change item."
+    "noSelectedItems": "Select at least one change item.",
+    "editTarget": "Edit Target",
+    "editTargetHint": "Manually adjust the content that will be written to the target (use when auto-detection is inaccurate or you need to add something). Saving re-validates and updates this diff preview and the execution plan.",
+    "editTargetSave": "Save & Re-validate"
   },
   "settings": {
     "groupBasic": "General",

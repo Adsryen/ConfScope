@@ -1,6 +1,7 @@
 // ApplyPlan 领域模型：写入前 dry-run 计划的唯一可复用快照合同。
 import type { ProviderType } from "../api/configCenter";
 import { FORMATS, type Format } from "./format";
+import { normalizeConfig } from "./normalize";
 import type { ConfigEntry, ParseStatus } from "./normalize";
 
 export const APPLY_PLAN_SCHEMA_VERSION = 1;
@@ -207,6 +208,53 @@ function deletedValue(ref: ApplyPlanRef, source: ApplyPlanValueSnapshot, target:
     format: source.format ?? target.format,
     parseStatus: source.parseStatus ?? target.parseStatus,
   });
+}
+
+/**
+ * 人工编辑 item 的目标内容（afterValue）：把编辑后的文本作为"将写入目标"的新值，
+ * 重算解析状态/指纹/动作。返回新 item（不可变）。
+ * - 编辑只影响写入结果，不改 sourceValue/targetValue 原始快照。
+ * - 若编辑内容解析失败 → parse_error 阻断（执行层兜底也会拦截）。
+ */
+export function withEditedAfterValue(item: ApplyPlanItem, content: string): ApplyPlanItem {
+  const ref = item.ref;
+  const format = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
+  const normalized = normalizeConfig(content, format);
+  const base: Omit<ApplyPlanValueSnapshot, "fingerprint"> = {
+    exists: true,
+    value: content,
+    content,
+    valueType: "text",
+    format,
+    parseStatus: normalized.parseStatus,
+  };
+  if (normalized.parseError) base.parseError = normalized.parseError;
+  const afterValue: ApplyPlanValueSnapshot = {
+    ...base,
+    fingerprint: fingerprintApplyPlanValue(ref, base),
+  };
+  const intent: ApplyPlanIntent = item.action === "delete" ? "delete" : item.action === "skip" ? "skip" : "sync";
+  const classified = classify(item.sourceValue, item.targetValue, intent);
+  // 人工编辑意味着"用编辑内容覆盖目标"：若未解析失败，动作至少是 overwrite（create 保留）
+  let action: ApplyPlanAction = classified.action;
+  let blocked = classified.blocked;
+  let blockReason = classified.blockReason;
+  if (normalized.parseStatus === "error") {
+    action = "parse_error";
+    blocked = true;
+    blockReason = "edited_parse_error";
+  } else if (action === "skip" || action === "delete") {
+    action = "overwrite";
+    blocked = false;
+    blockReason = undefined;
+  }
+  return {
+    ...item,
+    afterValue,
+    action,
+    blocked,
+    ...(blockReason ? { blockReason } : {}),
+  };
 }
 
 function classify(source: ApplyPlanValueSnapshot, target: ApplyPlanValueSnapshot, intent: ApplyPlanIntent): ClassifiedItem {

@@ -177,7 +177,10 @@
     "taskProgressStats": "已处理 {completed}/{total} 项",
     "taskProgressPercent": "{progress}%",
     "copyTaskId": "复制任务 ID",
-    "noSelectedItems": "请至少选择一个变更项。"
+    "noSelectedItems": "请至少选择一个变更项。",
+    "editTarget": "编辑目标内容",
+    "editTargetHint": "人工调整将写入目标的内容（机器判定不准/需补充时使用）。保存后会重新校验，并更新此差异预览与执行计划。",
+    "editTargetSave": "保存并重新校验"
   },
   "settings": {
     "groupBasic": "基础信息",

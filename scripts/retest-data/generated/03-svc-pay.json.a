@@ -1,0 +1,46 @@
+{
+  "_comment": "支付服务配置 - 开发环境; 本文件禁止手工编辑, 走 ConfScope 应用",
+  "app": {
+    "name": "pay-svc",
+    "env": "dev",
+    "_note": "开发环境: 所有外部依赖指向 127.0.0.1"
+  },
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "name": "pay_dev",
+    "pool": {
+      "max": 10,
+      "min": 1
+    }
+  },
+  "channels": {
+    "alipay": {
+      "enabled": true,
+      "sandbox": true,
+      "app_id": "DEV-A-001"
+    },
+    "wechat": {
+      "enabled": true,
+      "sandbox": true,
+      "mch_id": "1900000001"
+    },
+    "unionpay": {
+      "enabled": false,
+      "reason": "开发未签约"
+    }
+  },
+  "risk": {
+    "enabled": true,
+    "rules": [
+      "amount>50000",
+      "velocity>10/min"
+    ],
+    "_note": "开发规则集精简, 只保留两条"
+  },
+  "retry": {
+    "max": 3,
+    "backoff_ms": 100
+  },
+  "audit_log": true
+}

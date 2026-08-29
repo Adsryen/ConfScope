@@ -232,3 +232,59 @@ describe("buildApplyPlan", () => {
     ).toEqual({ ok: true, staleItems: [] });
   });
 });
+
+import { withEditedAfterValue, type ApplyPlanItem } from "./applyPlan";
+
+function makeItem(action: ApplyPlanItem["action"], sourceContent: string, targetContent: string): ApplyPlanItem {
+  const plan = buildApplyPlan(
+    input([
+      {
+        ref: { ...ref, key: "__document" },
+        sourceRef: { ...ref, connectionId: "conn-dev", key: "__document" },
+        targetRef: ref,
+        sourceValue: value(true, "8080", { content: sourceContent }),
+        targetValue: value(true, "9090", { content: targetContent }),
+      },
+    ])
+  );
+  const item = plan.items[0];
+  if (action === item.action) return item;
+  return { ...item, action, blocked: false };
+}
+
+describe("withEditedAfterValue", () => {
+  it("overwrites afterValue content and recomputes fingerprint/action", () => {
+    const item = makeItem("overwrite", "a: 1", "a: 2");
+    const edited = withEditedAfterValue(item, "a: 99\nb: new");
+    expect(edited.afterValue.content).toBe("a: 99\nb: new");
+    expect(edited.afterValue.exists).toBe(true);
+    expect(edited.afterValue.parseStatus).toBe("ok");
+    expect(edited.action).toBe("overwrite");
+    expect(edited.blocked).toBe(false);
+    // 原始 targetValue 快照不受影响
+    expect(edited.targetValue.content).toBe("a: 2");
+  });
+
+  it("turns a skip item into overwrite when manually edited", () => {
+    const item = makeItem("skip", "a: 1", "a: 1");
+    const edited = withEditedAfterValue(item, "a: 2");
+    expect(edited.action).toBe("overwrite");
+    expect(edited.afterValue.content).toBe("a: 2");
+  });
+
+  it("blocks when edited content has a YAML syntax error", () => {
+    const item = makeItem("overwrite", "a: 1", "a: 2");
+    const edited = withEditedAfterValue(item, "a: [unclosed");
+    expect(edited.action).toBe("parse_error");
+    expect(edited.blocked).toBe(true);
+    expect(edited.blockReason).toBe("edited_parse_error");
+  });
+
+  it("keeps duplicate-key warning (parseStatus ok) without blocking", () => {
+    const item = makeItem("overwrite", "a: 1", "a: 2");
+    const edited = withEditedAfterValue(item, "a: 1\na: 2");
+    expect(edited.blocked).toBe(false);
+    expect(edited.action).toBe("overwrite");
+    expect(edited.afterValue.parseError).toBeTruthy();
+  });
+});
