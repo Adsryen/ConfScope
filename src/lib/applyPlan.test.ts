@@ -116,13 +116,18 @@ describe("buildApplyPlan", () => {
     });
   });
 
-  it("creates stable fingerprints and changes them when content metadata changes", () => {
+  it("creates stable fingerprints: content changes them, timestamp-only drift does not", () => {
     const base = value(true, "8080", { updateTime: "2026-07-06T00:00:00.000Z" });
 
     expect(fingerprintApplyPlanValue(ref, base)).toBe(fingerprintApplyPlanValue(ref, { ...base }));
     expect(fingerprintApplyPlanValue(ref, base)).not.toBe(fingerprintApplyPlanValue(ref, { ...base, content: "server:\n  port: 9090" }));
-    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(
+    // updateTime 是服务端秒级时间戳，内容未变时不参与指纹（避免误判 stale）
+    expect(fingerprintApplyPlanValue(ref, base)).toBe(
       fingerprintApplyPlanValue(ref, { ...base, updateTime: "2026-07-06T01:00:00.000Z" })
+    );
+    // md5 是内容摘要，参与指纹
+    expect(fingerprintApplyPlanValue(ref, base)).not.toBe(
+      fingerprintApplyPlanValue(ref, { ...base, updateTime: "2026-07-06T01:00:00.000Z", md5: "deadbeef" })
     );
   });
 

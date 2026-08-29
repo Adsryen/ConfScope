@@ -37,9 +37,8 @@ type DiffMode = "text" | "key" | "lines";
 interface DiffJumpParams {
   leftConnId: string;
   rightConnId: string;
-  namespace: string;
-  group: string;
-  dataId: string;
+  left?: { tenant?: string; dataId?: string; group?: string } | null;
+  right?: { tenant?: string; dataId?: string; group?: string } | null;
   autoCompare?: boolean;
 }
 
@@ -176,11 +175,12 @@ function batchResultStats(leftText: string, rightText: string): BatchResultStats
 
 function emptySource(connId: string, connections: Connection[] = []): Source {
   const conn = connections.find((item) => item.id === connId);
+  const defaultGroup = (conn?.defaultGroup ?? "").trim();
   return {
     connId,
     tenant: conn?.defaultNamespace ?? "",
     dataId: "",
-    group: "DEFAULT_GROUP",
+    group: defaultGroup || "DEFAULT_GROUP",
     usesDefaultNamespace: true,
   };
 }
@@ -457,9 +457,16 @@ function SourcePicker({
     setCfgError(null);
     setConfigs([]);
 
-    listConfigs(conn, source.tenant, "", "", 1, 500)
+    listConfigs(conn, source.tenant, "", "", 1, 1000) // group 传空 → 返回该命名空间全部 group
       .then((page) => {
-        if (alive) setConfigs(page.pageItems);
+        if (!alive) return;
+        // 客户端精确过滤：Nacos v1 的 group=空 可能混入大小写不同的兄弟 group，
+        // 只保留与当前选中 group 精确匹配（忽略大小写）的配置项。
+        const expected = (source.group || "").trim().toLowerCase();
+        const items = expected
+          ? page.pageItems.filter((item) => (item.group || "").trim().toLowerCase() === expected)
+          : page.pageItems;
+        setConfigs(items);
       })
       .catch((e) => {
         if (!alive) return;
@@ -484,7 +491,8 @@ function SourcePicker({
     return () => {
       alive = false;
     };
-  }, [cfgReload, conn, source.connId, source.tenant, t, title]);
+  // source.group 必须入依赖：否则清空/输入 group 后不会重新拉取候选，group 下拉无法枚举该命名空间全部 group
+  }, [cfgReload, conn, source.connId, source.tenant, source.group, t, title]);
 
   const namespaceItems = namespaces
     .filter((item) => item.namespace)
@@ -495,7 +503,8 @@ function SourcePicker({
   ];
   const canSetDefaultNamespace = !!conn && conn.sourceType !== "local-snapshot" && source.tenant !== (conn.defaultNamespace ?? "");
   const dataIdOptions = configs.map((item) => ({ value: item.dataId, sub: item.group }));
-  const groupOptions = Array.from(new Set(configs.map((item) => item.group))).map((value) => ({ value }));
+  // 全量枚举该命名空间下的 group（不传 group 过滤，否则非默认 group 永远选不到）
+  const groupOptions = Array.from(new Set(configs.map((item) => item.group))).filter(Boolean).map((value) => ({ value }));
 
   useEffect(() => {
     onLoadErrorRef.current = onLoadError;
@@ -614,12 +623,29 @@ function SourcePicker({
         </label>
 
         <label className="field">
-          <span>group</span>
+          <span>{t("config.groupFilter")}</span>
           <Combobox
             value={source.group}
-            placeholder="DEFAULT_GROUP"
+            placeholder={t("diff.groupPlaceholder")}
             options={groupOptions}
-            onChange={(value) => onChange({ ...source, group: value })}
+            onChange={(value) => {
+              // 空 group 保持为空：允许用户清空后枚举该命名空间全部 group；
+              // 真正提交/加载时才回退到 DEFAULT_GROUP（见 loadOne / 加载 effect）。
+              const group = value.trim();
+              const next = { ...source, group };
+              // 输入过程中的部分匹配不清空已选 dataId，避免边打边丢候选；
+              // 只有"选中"一个具体 group 且 dataId 不属于该 group 时才清空。
+              onChange(next);
+            }}
+            onPick={(option) => {
+              const group = option.value.trim() || "DEFAULT_GROUP";
+              const next = { ...source, group };
+              if (next.dataId) {
+                const inGroup = configs.some((item) => item.dataId === next.dataId && item.group === group);
+                if (!inGroup) next.dataId = "";
+              }
+              onChange(next);
+            }}
           />
         </label>
       </div>
@@ -657,6 +683,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
+  const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
   const sourcesRef = useRef<HTMLDivElement>(null);
   const loadBothRef = useRef<(() => Promise<void>) | null>(null);
   const auditSessionRef = useRef<AuditSession | null>(null);
@@ -760,19 +787,22 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     // 设置项目
     const projectName = connectionProjectName(leftConn);
     setSelectedProject(projectName);
-    // 预填左右来源
+    // 预填左右来源：左右各自独立的 namespace/group/dataId。
+    // 未指定的一侧回退到该连接配置的默认 namespace（而非用对侧的 namespace，
+    // 否则会在右连接上查到空列表，group 下拉与 dataId 候选全空）。
+    const prefGroup = (side?: { group?: string } | null) => (side?.group ?? "").trim() || "DEFAULT_GROUP";
     setLeft({
       connId: initialParams.leftConnId,
-      tenant: initialParams.namespace,
-      dataId: initialParams.dataId,
-      group: initialParams.group,
+      tenant: initialParams.left?.tenant ?? leftConn.defaultNamespace ?? "",
+      dataId: initialParams.left?.dataId ?? "",
+      group: prefGroup(initialParams.left),
       usesDefaultNamespace: false,
     });
     setRight({
       connId: initialParams.rightConnId,
-      tenant: initialParams.namespace,
-      dataId: initialParams.dataId,
-      group: initialParams.group,
+      tenant: initialParams.right?.tenant ?? rightConn.defaultNamespace ?? "",
+      dataId: initialParams.right?.dataId ?? "",
+      group: prefGroup(initialParams.right),
       usesDefaultNamespace: false,
     });
     setSourcesCollapsed(true);
@@ -1043,15 +1073,25 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
 
   useEffect(() => {
     if (!pendingAutoCompare) return;
+    const wantLeft = {
+      tenant: pendingAutoCompare.left?.tenant ?? leftConnFor(pendingAutoCompare.leftConnId)?.defaultNamespace ?? "",
+      group: (pendingAutoCompare.left?.group ?? "").trim() || "DEFAULT_GROUP",
+      dataId: pendingAutoCompare.left?.dataId ?? "",
+    };
+    const wantRight = {
+      tenant: pendingAutoCompare.right?.tenant ?? leftConnFor(pendingAutoCompare.rightConnId)?.defaultNamespace ?? "",
+      group: (pendingAutoCompare.right?.group ?? "").trim() || "DEFAULT_GROUP",
+      dataId: pendingAutoCompare.right?.dataId ?? "",
+    };
     const ready =
       left.connId === pendingAutoCompare.leftConnId &&
       right.connId === pendingAutoCompare.rightConnId &&
-      left.tenant === pendingAutoCompare.namespace &&
-      right.tenant === pendingAutoCompare.namespace &&
-      left.group === pendingAutoCompare.group &&
-      right.group === pendingAutoCompare.group &&
-      left.dataId === pendingAutoCompare.dataId &&
-      right.dataId === pendingAutoCompare.dataId;
+      left.tenant === wantLeft.tenant &&
+      right.tenant === wantRight.tenant &&
+      left.group === wantLeft.group &&
+      right.group === wantRight.group &&
+      left.dataId === wantLeft.dataId &&
+      right.dataId === wantRight.dataId;
     if (!ready) return;
     setPendingAutoCompare(null);
     void loadBothRef.current?.();

@@ -537,6 +537,9 @@
     "defaultNamespace": "Default Namespace ID (empty=public)",
     "defaultNamespacePlaceholder": "Leave empty for public",
     "defaultNamespaceHelp": "Nacos namespaceId. Empty means public; this is not the namespace display name.",
+    "defaultGroup": "Default Group",
+    "defaultGroupPlaceholder": "Empty means DEFAULT_GROUP",
+    "defaultGroupHelp": "Nacos group. Empty or DEFAULT_GROUP means the default group; when set, browse/compare/create use it by default.",
     "loadNamespaces": "Load Namespaces",
     "loadingNamespaces": "Loading…",
     "loadNamespacesFailed": "Failed to load namespaces",
@@ -667,6 +670,7 @@
   },
   "diff": {
     "title": "Smart Config Compare",
+    "groupPlaceholder": "Select Group (empty = DEFAULT_GROUP)",
     "selectConfig": "Select configs to compare",
     "source": "Source",
     "target": "Target",

@@ -17,9 +17,14 @@ interface Props {
   disabled?: boolean;
 }
 
-/** 模糊匹配：先子串命中，再退化到字符顺序匹配。 */
-function fuzzy(query: string, text: string): boolean {
+/** 模糊匹配：子串命中或字符顺序命中。
+ * 注意：当前值(value)作为查询时不能把候选"过滤没"——
+ * 否则 group/dataId 这类"值=当前选中项"的 combobox 展开后只剩自身一项，
+ * 用户无法看到/切换到其他候选（真人操作下表现为下拉候选不全）。
+ * 候选项与当前值完全相同时视为命中。 */
+function fuzzy(query: string, text: string, exactValue?: string): boolean {
   if (!query) return true;
+  if (exactValue !== undefined && text === exactValue) return true;
   const q = query.toLowerCase();
   const t = text.toLowerCase();
   if (t.includes(q)) return true;
@@ -37,7 +42,7 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const filtered = options.filter((o) => fuzzy(value, o.value) || (o.sub ? fuzzy(value, o.sub) : false)).slice(0, 50);
+  const filtered = options.filter((o) => fuzzy(value, o.value, value) || (o.sub ? fuzzy(value, o.sub) : false)).slice(0, 50);
 
   const updateMenuPosition = useCallback(() => {
     const trigger = ref.current;
@@ -67,17 +72,17 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: PointerEvent) => {
       const target = e.target as Node;
       if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     const onResize = () => updateMenuPosition();
-    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("pointerdown", onDoc);
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", onResize, true);
     return () => {
-      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("pointerdown", onDoc);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onResize, true);
     };

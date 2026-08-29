@@ -145,6 +145,7 @@ function documentValue(item: ApplyPlanItem, document: ConfigDocument, ref = targ
     content: document.content,
     version: document.version,
     updateTime: document.updateTime,
+    ...(document.md5 ? { md5: document.md5 } : {}),
   };
   return { ...value, fingerprint: fingerprintApplyPlanValue(ref, value) };
 }

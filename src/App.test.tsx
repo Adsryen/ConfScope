@@ -535,14 +535,14 @@ describe("App", () => {
       fireEvent.mouseDown(option);
     };
 
-    fireEvent.click(filterButtons()[1]);
+    fireEvent.pointerDown(filterButtons()[1]);
     pickOption("Test");
 
     await waitFor(() => {
       expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].conn.id).toBe("conn-order-test-private");
     });
 
-    fireEvent.click(filterButtons()[2]);
+    fireEvent.pointerDown(filterButtons()[2]);
     pickOption("Cloud");
 
     await waitFor(() => {
@@ -573,9 +573,9 @@ describe("App", () => {
     expect(latestProps.initialParams).toEqual({
       leftConnId: "snapshot:snap-1",
       rightConnId: "conn-1",
-      namespace: "",
-      group: "DEFAULT_GROUP",
-      dataId: "app.yaml",
+      // 两侧独立携带同一逻辑配置（快照对比，namespace/group/dataId 相同）
+      left: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+      right: { tenant: "", group: "DEFAULT_GROUP", dataId: "app.yaml" },
       autoCompare: true,
     });
     expect(latestProps.connections).toEqual(

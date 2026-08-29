@@ -30,6 +30,9 @@ export default function Select({
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 标记最近一次"由触发器自身 pointerdown 打开"，用于 click 兜底去重
+  // （同一物理点击会先触发 pointerdown 再触发 click，两者都 toggle 会闪开即关）。
+  const openedByTrigger = useRef(false);
   const cur = options.find((o) => o.value === value);
 
   const updateMenuPosition = useCallback(() => {
@@ -60,19 +63,19 @@ export default function Select({
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: PointerEvent) => {
       const target = e.target as Node;
       if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     const onResize = () => updateMenuPosition();
-    window.addEventListener("mousedown", onDoc);
+    window.addEventListener("pointerdown", onDoc);
     window.addEventListener("keydown", onKey);
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", onResize, true);
     return () => {
-      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("pointerdown", onDoc);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onResize, true);
@@ -85,7 +88,25 @@ export default function Select({
         type="button"
         className="sel-trigger"
         disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
+        onPointerDown={(e) => {
+          // 用 pointerdown 而非 click 开菜单：click 会先触发 window pointerdown 监听，
+          // 触发器自身在 ref 外时（如点击边框 1px 处）会被误判为"外部点击"立即关闭，
+          // 菜单闪开即关，用户/自动化都看不到选项（对比页"来源"下拉实测）。
+          e.stopPropagation();
+          openedByTrigger.current = true;
+          setOpen((o) => !o);
+        }}
+        onClick={(e) => {
+          // 兜底：纯 mouse 事件的点击器（部分自动化驱动/触屏合成点击）不触发
+          // PointerEvent 的 onPointerDown，此时用 click 开菜单；同一物理点击
+          // 已由 pointerdown 处理过（openedByTrigger）则跳过，避免 toggle 两次。
+          if (openedByTrigger.current) {
+            openedByTrigger.current = false;
+            return;
+          }
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
       >
         <span className={`sel-value${cur ? "" : " placeholder"}`}>
           {cur?.label ?? placeholder ?? ""}

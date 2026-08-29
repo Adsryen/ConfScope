@@ -109,6 +109,7 @@ function documentValue(format: Format, document: ConfigDocument): ApplyPlanValue
     content: document.content,
     version: document.version,
     updateTime: document.updateTime,
+    ...(document.md5 ? { md5: document.md5 } : {}),
   };
 }
 
@@ -122,6 +123,7 @@ function missingValue(format?: Format, document?: ConfigDocument): ApplyPlanValu
     ...(normalized.parseError ? { parseError: normalized.parseError } : {}),
     version: document.version,
     updateTime: document.updateTime,
+    ...(document.md5 ? { md5: document.md5 } : {}),
   };
 }
 

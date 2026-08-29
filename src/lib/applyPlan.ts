@@ -38,6 +38,7 @@ export interface ApplyPlanValueSnapshot {
   content?: string;
   version?: string;
   updateTime?: string;
+  md5?: string;
   fingerprint: string;
 }
 
@@ -155,8 +156,7 @@ function valueForFingerprint(value: ApplyPlanValueInput): Record<string, string 
     parseStatus: value.parseStatus ?? "",
     parseError: value.parseError ?? "",
     content: value.content ?? "",
-    version: value.version ?? "",
-    updateTime: value.updateTime ?? "",
+    md5: value.md5 ?? "",
   };
 }
 
@@ -164,6 +164,10 @@ function comparableValueFingerprint(value: ApplyPlanValueSnapshot): string {
   return JSON.stringify(valueForFingerprint(value));
 }
 
+/**
+ * 值快照指纹。version/updateTime 是 Nacos 服务端秒级时间戳，
+ * 内容未变也会漂移，因此不参与指纹；md5 是内容摘要，参与指纹。
+ */
 export function fingerprintApplyPlanValue(ref: ApplyPlanRef, value: Omit<ApplyPlanValueSnapshot, "fingerprint">): string {
   return JSON.stringify({
     provider: ref.provider,
@@ -189,6 +193,7 @@ function snapshotValue(ref: ApplyPlanRef, value: ApplyPlanValueInput): ApplyPlan
   if (typeof value.content === "string") snapshot.content = value.content;
   if (typeof value.version === "string") snapshot.version = value.version;
   if (typeof value.updateTime === "string") snapshot.updateTime = value.updateTime;
+  if (typeof value.md5 === "string") snapshot.md5 = value.md5;
   return snapshot;
 }
 
@@ -403,10 +408,12 @@ function parseValueSnapshot(value: unknown): ApplyPlanValueSnapshot | null {
   const content = optionalString(value.content);
   const version = optionalString(value.version);
   const updateTime = optionalString(value.updateTime);
+  const md5 = optionalString(value.md5);
   if (parseError !== undefined) snapshot.parseError = parseError;
   if (content !== undefined) snapshot.content = content;
   if (version !== undefined) snapshot.version = version;
   if (updateTime !== undefined) snapshot.updateTime = updateTime;
+  if (md5 !== undefined) snapshot.md5 = md5;
   return snapshot;
 }
 

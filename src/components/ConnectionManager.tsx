@@ -43,6 +43,7 @@ const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   username: "nacos",
   password: "",
   defaultNamespace: "",
+  defaultGroup: "",
   sshConfig: undefined,
   sshProfileId: "",
   useProxy: false,
@@ -274,6 +275,7 @@ function connectionTestKey(draft: Draft): string {
     accessKeyId: draft.accessKeyId ?? "",
     securityToken: draft.securityToken ?? "",
     defaultNamespace: providerDefaultNamespace(draft),
+    defaultGroup: draft.provider === "nacos" ? (draft.defaultGroup ?? "") : "",
     sshProfileId: draft.sshProfileId ?? "",
     sshConfig: sshConfig.host ? sshConfig : undefined,
     forceLocalSnapshot: !!draft.forceLocalSnapshot,
@@ -812,6 +814,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         : undefined,
       baseUrl: toSave.sourceType === "local-snapshot" ? toSave.localPath?.trim() || "" : toSave.baseUrl.trim(),
       defaultNamespace: providerDefaultNamespace(toSave),
+      defaultGroup: toSave.provider === "nacos" ? (toSave.defaultGroup ?? "").trim() : "",
       apolloEnv: toSave.apolloEnv?.trim() || "",
       apolloAppId: toSave.apolloAppId?.trim() || "",
       apolloCluster: toSave.apolloCluster?.trim() || "",
@@ -850,6 +853,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     const startedAt = Date.now();
     const snapshot: Draft = {
       ...draft,
+      defaultGroup: draft.provider === "nacos" ? (draft.defaultGroup ?? "").trim() : "",
       defaultNamespace: providerDefaultNamespace(draft),
       tags: [...(draft.tags ?? [])],
       sshConfig: draft.sshConfig ? { ...draft.sshConfig } : undefined,
@@ -1780,6 +1784,22 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   </div>
                 )}
               </label>
+              {draft.provider === "nacos" && (
+                <label className="field">
+                  <FieldLabel {...fieldLabelProps} tip={t("connection.defaultGroupHelp")}>
+                    {t("connection.defaultGroup")}
+                  </FieldLabel>
+                  <input
+                    className="search-input wide mono"
+                    value={draft.defaultGroup ?? ""}
+                    placeholder={t("connection.defaultGroupPlaceholder")}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    onChange={(e) => set({ defaultGroup: e.target.value })}
+                  />
+                </label>
+              )}
             </section>
           )}
 

@@ -220,6 +220,7 @@ function ItemDetail({ item }: { item: ApplyPlanItem }) {
 function ConfirmationPanel({
   plan,
   selectedCount,
+  selectedIds,
   protectedTarget,
   confirmed,
   confirmationText,
@@ -235,6 +236,7 @@ function ConfirmationPanel({
 }: {
   plan: ApplyPlan;
   selectedCount: number;
+  selectedIds: Set<string>;
   protectedTarget: boolean;
   confirmed: boolean;
   confirmationText: string;
@@ -253,7 +255,10 @@ function ConfirmationPanel({
   const ready = protectedTarget ? confirmationText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
   const dryRunDisabled = anyRunning || executionSucceeded || selectedCount === 0;
-  const executeDisabled = !ready || anyRunning || executionSucceeded || plan.summary.blocked > 0 || selectedCount === 0;
+  // 执行守卫基于「已勾选且可执行」的项：存在 blocked 项本身不再全局禁用按钮，
+  // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
+  const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
+  const executeDisabled = !ready || anyRunning || executionSucceeded || selectedCount === 0 || selectedHasBlocked;
   const executeLabel =
     executionMode === "apply"
       ? t("apply.executing")
@@ -449,12 +454,19 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
 
   const runPlan = async (dryRun: boolean) => {
     if (!plan || executionMode) return;
-    const selectedItemIds = Array.from(selectedIds);
+    // 始终过滤 blocked/parse_error/skip 项：勾选框禁用只是 UI 层守卫，
+    // 这里是执行层兜底，避免任何来源（含旧计划数据）把阻断项写入目标。
+    const selectedItemIds = Array.from(selectedIds).filter((id) => {
+      const item = plan.items.find((candidate) => candidate.id === id);
+      return item ? isSelectableApplyItem(item) : false;
+    });
     if (selectedItemIds.length === 0) {
       setExecuteNotice(null);
       setExecuteError(t("apply.noSelectedItems"));
       return;
     }
+    // 计划里被阻断（parse_error 等）的项数，用于执行完成提示里告知用户
+    const skippedBlocked = plan.items.filter((item) => !isSelectableApplyItem(item)).length;
     setExecutionMode(dryRun ? "dry-run" : "apply");
     setLastExecutionMode(dryRun ? "dry-run" : "apply");
     if (!dryRun) {
@@ -538,7 +550,11 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       } else {
         setExecutionCompleted(!sandboxTarget);
         setExecutionSucceeded(true);
-        setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
+        if (skippedBlocked > 0) {
+          setExecuteNotice(`${t("apply.executionSucceeded", { count: selectedItemIds.length })}（另有 ${skippedBlocked} 项已阻断，未执行）`);
+        } else {
+          setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
+        }
       }
       auditSessionEvent(session, {
         kind: "apply_result",
@@ -645,6 +661,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             <ConfirmationPanel
               plan={plan}
               selectedCount={selectedCount}
+              selectedIds={selectedIds}
               protectedTarget={protectedTarget}
               confirmed={confirmed}
               confirmationText={confirmationText}

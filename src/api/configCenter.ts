@@ -86,6 +86,8 @@ export interface ConfigDocument {
   version: string;
   source: string;
   updateTime: string;
+  /** 内容摘要（Nacos v1 列表接口 md5），供 apply plan 内容级指纹。 */
+  md5?: string;
 }
 
 export interface PublishConfigRequest {
