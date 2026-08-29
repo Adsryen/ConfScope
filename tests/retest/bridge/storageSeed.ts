@@ -21,11 +21,14 @@ function nacosConnection(state: RetestState, id: string, name: string, env: "a" 
     username: "",
     password: "",
     defaultNamespace: ep.namespace,
+    defaultGroup: "RETEST-PROD",
     useProxy: false,
   };
 }
 
 export function createRetestStorageSeed(state: RetestState): BrowserStorageSeed[] {
+  // 防御：历史 run 的播种可能写入不含 defaultGroup 的 cs.connections，
+  // 这里始终用本模块重新生成，保证复测数据自带默认 group。
   return [
     { key: "locale", value: "zh-CN" },
     {
@@ -43,7 +46,17 @@ export function createRetestStorageSeed(state: RetestState): BrowserStorageSeed[
     },
     {
       key: "cs.ui",
-      value: JSON.stringify({ connId: "retest-a", mode: "browse", sidebarCollapsed: false }),
+      value: JSON.stringify({
+        connId: "retest-a",
+        mode: "diff",
+        sidebarCollapsed: false,
+        diffLeftConnId: "retest-a",
+        diffRightConnId: "retest-b",
+        // 两侧 namespace 不同（dev/qa），必须分开记录，DiffView 恢复时才不会跨连接错配
+        diffLeft: { tenant: state.nacos.a.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
+        diffRight: { tenant: state.nacos.b.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
+        diffAutoCompare: true,
+      }),
     },
     {
       key: "cs.connections",

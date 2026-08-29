@@ -7,7 +7,7 @@ ENDPOINTS = {
     "a": ("http://127.0.0.1:19848/nacos", "retest-dev"),
     "b": ("http://127.0.0.1:19849/nacos", "retest-qa"),
 }
-GROUP = "RETEST-PROD"
+# 每个文件自己的 group 由 gen.py 决定（多 group 覆盖）；这里不再硬编码
 
 def publish(base, tenant, dataId, group, content, nacos_type):
     form = {
@@ -46,19 +46,25 @@ for side,(base,tenant) in ENDPOINTS.items():
             delete_config(base, tenant, d, existing[d]["group"])
             print(f"[{side}] deleted old {d}")
 
-# 2) 发布 12 对新文件
+# 2) 发布 14 对新文件（每个文件用 gen.py 里声明的 group）
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen as genmod
+# dataId -> (group, nacos_type)
+pair_groups = {it["dataId"]: (it["group"], it["type"]) for it in genmod.FILES}
+
 results = []
 for p in sorted(glob.glob(os.path.join(GEN, "*"))):
     name = os.path.basename(p)            # 00-svc-gateway.yaml.a
     dataId = name.rsplit(".",1)[0]       # 00-svc-gateway.yaml
     side = name[-1]                      # a/b
     realId = dataId.split("-",1)[1]      # svc-gateway.yaml
-    ftype = realId.rsplit(".",1)[1]      # yaml
+    group, ftype = pair_groups[realId]
     nacos_type = {"yaml":"yaml","yml":"yaml","json":"json","properties":"properties","toml":"toml","env":"text"}.get(ftype, "text")
     base, tenant = ENDPOINTS[side]
     content = open(p).read()
-    publish(base, tenant, realId, GROUP, content, nacos_type)
-    print(f"[{side}] published {realId} ({nacos_type})")
+    publish(base, tenant, realId, group, content, nacos_type)
+    print(f"[{side}] published {realId} (group={group}, type={nacos_type})")
 
 # 3) 校验
 for side,(base,tenant) in ENDPOINTS.items():
