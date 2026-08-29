@@ -164,3 +164,52 @@ describe("normalizeConfig", () => {
     });
   });
 });
+
+import { extractDuplicateKeys } from "./normalize";
+
+describe("extractDuplicateKeys", () => {
+  it("detects top-level duplicate keys with all positions", () => {
+    const dupes = extractDuplicateKeys("a: 1\nb: 2\na: 3\n");
+    expect(dupes).toEqual([{ key: "a", lineNumbers: [1, 3] }]);
+  });
+
+  it("detects nested-level duplicate keys and merges same key across levels", () => {
+    const content = [
+      "svc:",
+      "  logging:",
+      "    level: info",
+      "logging:",
+      "  other: warn",
+      "svc:",
+      "  logging:",
+      "    level: error",
+      "logging:",
+      "  other: error",
+      "",
+    ].join("\n");
+    const dupes = extractDuplicateKeys(content);
+    // 同一 key 在不同缩进层重复出现（logging 在 L1/L0、level/other 在 L2）都要报出
+    expect(dupes).toEqual([
+      { key: "svc", lineNumbers: [1, 6] },
+      { key: "logging", lineNumbers: [2, 4, 7, 9] },
+      { key: "level", lineNumbers: [3, 8] },
+      { key: "other", lineNumbers: [5, 10] },
+    ]);
+  });
+
+  it("returns [] for clean files", () => {
+    expect(extractDuplicateKeys("a: 1\nb:\n  c: 2\n")).toEqual([]);
+  });
+
+  it("ignores comments, list items and empty lines", () => {
+    expect(extractDuplicateKeys("# a: 1\n- item: 1\n- item: 2\n  item: 3\n")).toEqual([]);
+  });
+
+  it("distinguishes different keys that share a prefix", () => {
+    expect(extractDuplicateKeys("logging: 1\nlogging-level: 2\n")).toEqual([]);
+  });
+
+  it("handles CRLF content", () => {
+    expect(extractDuplicateKeys("a: 1\r\nb: 2\r\na: 3\r\n")).toEqual([{ key: "a", lineNumbers: [1, 3] }]);
+  });
+});

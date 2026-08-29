@@ -810,7 +810,11 @@
     "diffStats": "Diff stats",
     "startApplyNeedsLoad": "Click \"Load and compare\" first to load both sides, then click this arrow to enter the change plan",
     "logRecorded": "Compare session recorded (session id visible in Audit Log)",
-    "logRecordedWithId": "Compare session recorded: {id} (full process in Audit Log)"
+    "logRecordedWithId": "Compare session recorded: {id} (full process in Audit Log)",
+    "duplicateKeyWarning": "{side} {dataId} has duplicate keys at different positions: {parts}. YAML loading keeps the last occurrence; review whether to remove one.",
+    "duplicateSideLeft": "left side",
+    "duplicateSideRight": "right side",
+    "duplicateLine": "line"
   },
   "history": {
     "title": "History",

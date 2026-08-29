@@ -12,6 +12,8 @@
   --border: #3e3e42;
   --red: #f44747;
   --red-h: #ff6b6b;
+  --amber: #d7ba7d;
+  --amber-h: #e5c07b;
   --green: #4ec9b0;
   --yellow: #dcdcaa;
   --blue: #4fc3f7;
@@ -6711,6 +6713,33 @@ button,
   flex: 1;
   min-height: 0;
   max-height: none;
+}
+
+.diff-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.diff-warning {
+  padding: 7px 9px;
+  color: var(--amber-h);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.apply-parse-warning {
+  padding: 7px 9px;
+  color: var(--amber-h);
+  background: rgba(245, 158, 11, 0.1);
+  border-top: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .apply-parse-error {
