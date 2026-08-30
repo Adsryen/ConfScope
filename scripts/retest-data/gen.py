@@ -74,9 +74,15 @@ logging:
   level: debug
   outputs:
     - console
-  # 开发环境不接 ELK
+    - file
+  # 开发本地文件日志
+  elk:
+    enabled: true
+    level: debug
+  # 开发接本地 ELK（故意重复: 与上方 elk 同父路径, 后值覆盖前值, 用于重复 key 警告回归）
   elk:
     enabled: false
+    endpoint: http://localhost:9200
 
 # 可观测性
 metrics:
@@ -177,7 +183,11 @@ security:
   tls:
     enabled: true
     cert-file: /etc/gateway/tls/server.crt
-    key-file: /etc/gateway/tls/server.key
+  # 生产备用证书（故意重复: 与上方 tls 同父路径, 后值覆盖前值, 用于重复 key 警告回归）
+  tls:
+    enabled: true
+    cert-file: /etc/gateway/tls/prod.crt
+    key-file: /etc/gateway/tls/prod.key
   cors:
     # 生产白名单
     allowed-origins:

@@ -814,7 +814,7 @@
     "startApplyNeedsLoad": "请先点击「加载并对比」完成两侧加载，再点击此箭头进入变更计划",
     "logRecorded": "已记录对比会话（#会话号见「审计日志」）",
     "logRecordedWithId": "对比会话已记录：{id}（可在「审计日志」查看完整过程）",
-    "duplicateKeyWarning": "{side} {dataId} 存在位置不同的重复 key：{parts}。YAML 加载时按后值覆盖前值，请人工确认是否删除其中一处。",
+    "duplicateKeyWarning": "{side} {dataId} 存在同一层级下位置不同的重复 key：{parts}。YAML 加载时按后值覆盖前值，请人工确认是否删除其中一处。",
     "duplicateSideLeft": "左侧",
     "duplicateSideRight": "右侧",
     "duplicateLine": "行"

@@ -18,14 +18,20 @@ test("T-DIFF-06 重复 key 警告: 单文档对比显示 duplicate key 提示条
 
   const warnings = page.locator(".diff-warning");
   const count = await warnings.count();
-  // A 侧注入了重复 logging key（第 48/78 行起），B 侧 tenants 区块有同名 key 不同位置
+  // A 侧 logging.elk 同父路径重复（行 54/58），B 侧 security.tls 同父路径重复（行 74/78）
   expect(count).toBe(2);
   const left = (await warnings.nth(0).textContent()) ?? "";
   const right = (await warnings.nth(1).textContent()) ?? "";
   expect(left).toContain("svc-gateway.yaml");
-  expect(left).toContain("logging");
-  expect(left).toContain("48");
-  expect(left).toContain("78");
+  expect(left).toContain("logging.elk");
+  expect(left).toContain("54");
+  expect(left).toContain("58");
   expect(right).toContain("svc-gateway.yaml");
+  expect(right).toContain("security.tls");
+  expect(right).toContain("74");
+  expect(right).toContain("78");
+  // 关键回归：不同父路径的同名 key（payment.mock.enabled vs alipay.enabled 之类）不得误报
+  expect(left).not.toContain('"enabled"');
+  expect(right).not.toContain('"enabled"');
   await page.screenshot({ path: "results/diff06-duplicate-key-warning.png", fullPage: true });
 });
