@@ -168,7 +168,8 @@ logging:
   elk:
     enabled: true
     endpoint: http://elk.internal:9200
-    # 索引前缀
+  # 索引前缀（故意重复: 与上方 elk 同父路径, 后值覆盖前值, 用于重复 key 警告回归）
+  elk:
     index-prefix: prod-gateway
 
 # 可观测性
