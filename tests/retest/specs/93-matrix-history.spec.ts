@@ -35,7 +35,7 @@ async function runSingleApply(page: import("@playwright/test").Page): Promise<st
   await page.locator(".apply-confirm-check input").check();
   const execBtn = page.locator("button", { hasText: "执行变更" }).last();
   await execBtn.click({ force: true }).catch(() => undefined);
-  await expect(page.locator(".apply-task-progress .task-status-success, .apply-task-progress .task-status-failed").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".apply-task-progress .task-status-success").first()).toBeVisible({ timeout: 60_000 });
   const after = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
   // B 侧目标文件是「生产环境 (QA 预演)」变体：应用后 B 侧应呈现 dev 源内容，
   // 但 dev 源自身也含「生产环境」字样（变更单注释行），这里断言应用后 B 侧
