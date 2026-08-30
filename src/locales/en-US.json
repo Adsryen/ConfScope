@@ -180,7 +180,8 @@
     "noSelectedItems": "Select at least one change item.",
     "editTarget": "Edit Target",
     "editTargetHint": "Manually adjust the content that will be written to the target (use when auto-detection is inaccurate or you need to add something). Saving re-validates and updates this diff preview and the execution plan.",
-    "editTargetSave": "Save & Re-validate"
+    "editTargetSave": "Save & Re-validate",
+    "dryRunPreviewNote": "Preview of what the target will look like after execution — nothing has been written yet. It is only applied when you execute the change in step 5."
   },
   "settings": {
     "groupBasic": "General",
