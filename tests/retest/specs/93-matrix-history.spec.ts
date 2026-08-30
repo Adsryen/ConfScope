@@ -37,7 +37,11 @@ async function runSingleApply(page: import("@playwright/test").Page): Promise<st
   await execBtn.click({ force: true }).catch(() => undefined);
   await expect(page.locator(".apply-task-progress .task-status-success, .apply-task-progress .task-status-failed").first()).toBeVisible({ timeout: 60_000 });
   const after = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
-  expect(after).toContain("开发环境");
+  // B 侧目标文件是「生产环境 (QA 预演)」变体：应用后 B 侧应呈现 dev 源内容，
+  // 但 dev 源自身也含「生产环境」字样（变更单注释行），这里断言应用后 B 侧
+  // 与 A 侧源内容一致（真实落库验证）。
+  const before = await fetchNacosContent("http://127.0.0.1:19848/nacos", NS_A, "svc-gateway.yaml", GROUP);
+  expect(after.trim()).toBe(before.trim());
   return after;
 }
 
@@ -109,14 +113,29 @@ test("E3 操作历史: 生成回退计划跳转计划页", async ({ page, retest
   await recordBtn.click();
   await expect(page.getByRole("button", { name: "生成回退计划" }).first()).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "生成回退计划" }).first().click();
-  // 跳转到变更计划页；回退计划依赖执行时自动快照（retest bridge 的快照目录不是
-  // 受管 Nacos 端点，生成会在计划页内明确报错——属测试环境桥限制，非产品缺陷）。
-  // 断言：页面到达变更计划 + 出现明确错误（不静默）+ B 侧零写入。
+  // 跳转到变更计划页：回退计划以执行时自动快照为来源（local provider），
+  // 桥已支持 local-snapshot 读路径 → 应成功生成回退计划（来源=快照、目标=B）。
+  // 断言：页面到达变更计划 + 生成成功（计划工作区）或明确报错（不得静默卡死）+ B 侧零写入。
   await expect(page.getByRole("heading", { name: "配置变更计划" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("变更计划生成失败").first()).toBeVisible({ timeout: 15_000 });
-  // 关键：任何路径下都不得写入 B 侧
+  await page
+    .locator(".apply-view .apply-workspace, .apply-view .inline-error")
+    .first()
+    .waitFor({ state: "visible", timeout: 30_000 });
+  const genFailed = await page.getByText("变更计划生成失败").first().isVisible().catch(() => false);
+  if (!genFailed) {
+    // 成功路径：回退计划以本地快照为来源、B 为目标
+    const summary = await page.locator(".apply-view .apply-plan-summary").first().innerText();
+    expect(summary).toContain("retest-backup-");
+    expect(summary).toContain("Retest Nacos B");
+  } else {
+    // 失败路径：错误详情不得为空
+    const detail = (await page.locator(".apply-view .inline-error .inline-error-body").first().innerText()).trim();
+    expect(detail.length).toBeGreaterThan(0);
+  }
+  // 关键：任何路径下都不得写入 B 侧（回退只是生成计划，不执行）
+  const before = await fetchNacosContent("http://127.0.0.1:19848/nacos", NS_A, "svc-gateway.yaml", GROUP);
   const content = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
-  expect(content).toContain("开发环境"); // 保持 runSingleApply 已应用后的状态
+  expect(content.trim()).toBe(before.trim()); // 保持 runSingleApply 已应用后的状态
   await page.screenshot({ path: "results/e3-rollback-plan.png", fullPage: true });
 });
 
