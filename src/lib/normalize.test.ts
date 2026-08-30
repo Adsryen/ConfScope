@@ -173,7 +173,7 @@ describe("extractDuplicateKeys", () => {
     expect(dupes).toEqual([{ key: "a", lineNumbers: [1, 3] }]);
   });
 
-  it("detects nested-level duplicate keys and merges same key across levels", () => {
+  it("reports nested duplicates by full parent path, not bare key name", () => {
     const content = [
       "svc:",
       "  logging:",
@@ -188,13 +188,62 @@ describe("extractDuplicateKeys", () => {
       "",
     ].join("\n");
     const dupes = extractDuplicateKeys(content);
-    // 同一 key 在不同缩进层重复出现（logging 在 L1/L0、level/other 在 L2）都要报出
+    // 重复按"完整层级路径"报告：svc/logging/svc.logging 各自独立，
+    // 同名 key 在不同父路径下不再互相归并
     expect(dupes).toEqual([
       { key: "svc", lineNumbers: [1, 6] },
-      { key: "logging", lineNumbers: [2, 4, 7, 9] },
-      { key: "level", lineNumbers: [3, 8] },
-      { key: "other", lineNumbers: [5, 10] },
+      { key: "svc.logging", lineNumbers: [2, 7] },
+      { key: "svc.logging.level", lineNumbers: [3, 8] },
+      { key: "logging", lineNumbers: [4, 9] },
+      { key: "logging.other", lineNumbers: [5, 10] },
     ]);
+  });
+
+  it("does NOT report same leaf key under different parents (payment.mock.enabled vs alipay.enabled)", () => {
+    const content = [
+      "payment:",
+      "  mock:",
+      "    enabled: true",
+      "  alipay:",
+      "    enabled: true",
+      "  wechat:",
+      "    enabled: true",
+      "invoice:",
+      "  enabled: true",
+      "",
+    ].join("\n");
+    expect(extractDuplicateKeys(content)).toEqual([]);
+  });
+
+  it("reports the same leaf key repeated under the SAME parent", () => {
+    const content = [
+      "payment:",
+      "  mock:",
+      "    enabled: true",
+      "  mock:",
+      "    enabled: false",
+      "",
+    ].join("\n");
+    expect(extractDuplicateKeys(content)).toEqual([
+      { key: "payment.mock", lineNumbers: [2, 4] },
+      { key: "payment.mock.enabled", lineNumbers: [3, 5] },
+    ]);
+  });
+
+  it("ignores same key inside different list items (array entries)", () => {
+    const content = [
+      "upstreams:",
+      "  - name: a",
+      "    url: http://a",
+      "    pool:",
+      "      max: 1",
+      "  - name: b",
+      "    url: http://b",
+      "    pool:",
+      "      max: 2",
+      "",
+    ].join("\n");
+    expect(extractDuplicateKeys(content)).toEqual([]);
   });
 
   it("returns [] for clean files", () => {

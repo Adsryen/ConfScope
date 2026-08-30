@@ -107,47 +107,68 @@ function normalizeJson(content: string): NormalizeResult {
   }
 }
 
-/** 同一顶层 key 在文件中出现多次（位置不同），按 key 归并出现行号。 */
+/** 同一映射内同名 key 在文件中出现多次（位置不同），按完整路径归并出现行号。 */
 export interface DuplicateKeyInfo {
+  /** 完整层级路径，如 "payment.mock.enabled"（顶层 key 无点）。 */
   key: string;
   lineNumbers: number[];
 }
 
 /**
- * 扫描 YAML 文本中"位置不同的重复键"：顶层 key 与缩进后的父级 key 各成一层，
- * 同一层出现相同 key 即视为重复。返回每个重复 key 及其出现行号（1 起）。
- * 仅依赖行首缩进，不解析完整文档，足够用于可视化提示。
+ * 扫描 YAML 文本中"同一映射内位置不同的重复键"，按**完整层级路径**归并：
+ * 维护"缩进 → 父 key"栈，`payment.mock.enabled` 与 `alipay.enabled` 路径不同，互不误报；
+ * 数组项（`- ` 开头）不入栈，数组元素内部的同名 key（如 list 项的 `url`）不算重复。
+ * 同一父路径下同名 key 出现多次即记录（对应"后值覆盖前值"的真实运行时行为）。
+ * 返回每个重复路径及其出现行号（1 起）。
  */
 export function extractDuplicateKeys(content: string): DuplicateKeyInfo[] {
-  const levelOccurrences = new Map<string, { key: string; lines: number[] }>();
-  content
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .forEach((raw, index) => {
-      const line = raw;
-      if (!line.trim() || line.trimStart().startsWith("#")) return;
-      const indent = line.length - line.trimStart().length;
-      if (indent > 0 && indent % 2 !== 0) return;
-      const level = indent / 2;
-      const m = line.match(new RegExp(`^${String(" ".repeat(indent))}([A-Za-z0-9_.\\-]+):`));
-      if (!m) return;
-      const record = levelOccurrences.get(`${level}::${m[1]}`);
-      if (record) record.lines.push(index + 1);
-      else levelOccurrences.set(`${level}::${m[1]}`, { key: m[1], lines: [index + 1] });
-    });
-  const merged = new Map<string, DuplicateKeyInfo>();
-  for (const record of levelOccurrences.values()) {
-    if (record.lines.length < 2) continue;
-    const existing = merged.get(record.key);
-    if (existing) {
-      for (const line of record.lines) if (!existing.lineNumbers.includes(line)) existing.lineNumbers.push(line);
-      existing.lineNumbers.sort((a, b) => a - b);
-    } else {
-      merged.set(record.key, { key: record.key, lineNumbers: [...record.lines].sort((a, b) => a - b) });
+  const pathStack: string[] = [];
+  const pathIndent: number[] = [];
+  // 最近一次列表项（"- " 行）的缩进；其内部字段属于"该列表项"，跨项同名不算同映射重复
+  let lastListItemIndent: number | null = null;
+  const occurrences = new Map<string, number[]>();
+  for (const [index, raw] of content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").entries()) {
+    const line = raw;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    // 缩进奇数 / tab 缩进无法可靠判定层级，跳过
+    if (indent % 2 !== 0 || line.startsWith("\t")) continue;
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("- ") || trimmed === "-") {
+      lastListItemIndent = indent;
+      continue;
     }
+    const m = trimmed.match(/^([A-Za-z0-9_.\-]+)\s*:(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    const rest = m[2] ?? "";
+    // 弹出比当前缩进深的栈帧，得到当前父路径
+    while (pathIndent.length > 0 && pathIndent[pathIndent.length - 1] >= indent) {
+      pathIndent.pop();
+      pathStack.pop();
+    }
+    // 当前行在某个列表项内部（缩进比该列表项深）：跨列表项的同名 key 不算重复
+    const insideListItem = lastListItemIndent !== null && indent > lastListItemIndent;
+    if (!insideListItem) {
+      const fullKey = pathStack.length > 0 ? `${pathStack.join(".")}.${key}` : key;
+      const lines = occurrences.get(fullKey);
+      if (lines) lines.push(index + 1);
+      else occurrences.set(fullKey, [index + 1]);
+    }
+    // 有子块（冒号后无值）才压栈；"key: value" 是叶子不压栈
+    if (rest.trim() === "") {
+      pathIndent.push(indent);
+      pathStack.push(key);
+    }
+    // 遇到同/更浅缩进的普通行，列表项上下文结束
+    if (lastListItemIndent !== null && indent <= lastListItemIndent) lastListItemIndent = null;
   }
-  return [...merged.values()].sort((a, b) => a.lineNumbers[0] - b.lineNumbers[0]);
+  const result: DuplicateKeyInfo[] = [];
+  for (const [key, lines] of occurrences) {
+    if (lines.length < 2) continue;
+    result.push({ key, lineNumbers: [...lines].sort((a, b) => a - b) });
+  }
+  return result.sort((a, b) => a.lineNumbers[0] - b.lineNumbers[0]);
 }
 
 function normalizeYaml(content: string): NormalizeResult {
