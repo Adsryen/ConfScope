@@ -311,6 +311,7 @@ function ItemDetail({ item, onEditAfterValue }: { item: ApplyPlanItem; onEditAft
         </div>
       )}
       <div className="apply-diff-preview">
+        <div className="apply-dryrun-note">{t("apply.dryRunPreviewNote")}</div>
         <DiffPanel
           leftLabel={t("apply.targetValue")}
           rightLabel={t("apply.afterValue")}

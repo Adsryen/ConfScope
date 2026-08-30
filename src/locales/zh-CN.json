@@ -180,7 +180,8 @@
     "noSelectedItems": "请至少选择一个变更项。",
     "editTarget": "编辑目标内容",
     "editTargetHint": "人工调整将写入目标的内容（机器判定不准/需补充时使用）。保存后会重新校验，并更新此差异预览与执行计划。",
-    "editTargetSave": "保存并重新校验"
+    "editTargetSave": "保存并重新校验",
+    "dryRunPreviewNote": "以下为执行后预览，尚未写入右侧目标；仅在第五步执行变更后才会真正应用。"
   },
   "settings": {
     "groupBasic": "基础信息",

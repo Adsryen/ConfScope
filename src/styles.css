@@ -6771,6 +6771,18 @@ button,
   max-height: none;
 }
 
+.apply-dryrun-note {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+  padding: 6px 9px;
+  color: var(--blue);
+  background: rgba(79, 195, 247, 0.1);
+  border: 1px solid rgba(79, 195, 247, 0.35);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .diff-warnings {
   display: flex;
   flex-direction: column;
