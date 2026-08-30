@@ -617,6 +617,12 @@ export function createRetestInvoke(): RetestInvoke {
         const configs = args[1] as unknown[];
         const id = `retest-snap-${Date.now()}`;
         const name = `retest-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+        // 字段兼容：BackupView 读 cfg.configType，ConfigBrowser 写入的快照项为
+        // {configType, ...}；两者都给一份，避免渲染空白类型列。
+        const normalizedConfigs = (configs as Array<Record<string, unknown>>).map((c) => ({
+          ...c,
+          configType: c.configType ?? c.contentType ?? "text",
+        }));
         const snapshot = {
           schemaVersion: 1,
           toolVersion: "1.8.0",
@@ -627,7 +633,7 @@ export function createRetestInvoke(): RetestInvoke {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           source,
-          configs,
+          configs: normalizedConfigs,
         };
         snapshotCache.set(id, snapshot);
         snapshotsList.push(snapshot);
