@@ -298,7 +298,7 @@ describe("ApplyPlanView", () => {
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
     expect(await screen.findByRole("heading", { name: "Configuration change plan" })).toBeInTheDocument();
-    expect(await screen.findByText("Current: Generate and review plan")).toBeInTheDocument();
+    expect(await screen.findByText(/Current: Generate & review plan/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Execute, verify, and promote/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Execute change" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
