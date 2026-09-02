@@ -37,12 +37,12 @@ export function createRetestStorageSeed(state: RetestState): BrowserStorageSeed[
       key: "cs.settings",
       value: JSON.stringify({
         proxy: { httpProxy: "", httpsProxy: "", noProxy: "127.0.0.1,localhost" },
-        update: { skipVersion: "", lastCheckAt: "2026-08-28T00:00:00.000Z", lastSeenVersion: "1.8.0" },
+        update: { skipVersion: "", lastCheckAt: "2026-08-28T00:00:00.000Z", lastSeenVersion: "1.9.0" },
         compare: { sortConnections: true, sortNamespaces: true },
         startup: {
-          lastOpenedVersion: "1.8.0",
-          lastShownWelcomeVersion: "1.8.0",
-          lastShownChangelogVersion: "1.8.0",
+          lastOpenedVersion: "1.9.0",
+          lastShownWelcomeVersion: "1.9.0",
+          lastShownChangelogVersion: "1.9.0",
         },
       }),
     },
