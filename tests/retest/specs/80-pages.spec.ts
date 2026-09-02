@@ -68,11 +68,13 @@ test("T-CONN-03 SSH 隧道: 测试失败错误路径展示", async ({ page, rete
 
   await page.locator("button", { hasText: "新建 SSH 档案" }).first().click();
   await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('档案名称')") }).locator("input").fill("retest-ssh-tmp");
-  await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('SSH 服务器地址')") }).locator("input").fill("127.0.0.1");
+  // 失败路径：host 用不可达地址（复测桥 TestSSHConnection：127.0.0.1 视为可达并返回成功，
+  // 其他 host 抛 "ssh: no route to host" → UI 红色失败提示）
+  await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('SSH 服务器地址')") }).locator("input").fill("10.255.255.1");
   await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('SSH 用户名')") }).locator("input").fill("nobody");
   await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('SSH 端口')") }).locator("input").fill("2222");
   // 必须填非空密码：authType=password 时前端先做"密码不能为空"前置校验，
-  // 空密码到不了 TestSSHConnection 错误路径（复测桥会抛"SSH 隧道未启用"）。
+  // 空密码到不了 TestSSHConnection 错误路径。
   await page.locator(".ssh-manager-page label.field").filter({ has: page.locator("span:has-text('SSH 密码')") }).locator("input").fill("retest-fake-pw");
   await page.locator(".ssh-manager-page button", { hasText: "测试 SSH" }).first().click();
   // 失败提示是 .test-msg.err（复测桥 TestSSHConnection 直接抛错）

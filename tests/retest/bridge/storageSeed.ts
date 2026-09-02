@@ -11,7 +11,9 @@ function nacosConnection(state: RetestState, id: string, name: string, env: "a" 
     id,
     name,
     projectName: "Retest Project",
-    environmentName: "Development",
+    // retest-b 标记为沙箱：ConfigBrowser「应用到目标环境」的 targetConnections
+    // 需要沙箱/受管目标候选；真实产品里 QA/沙箱环境正是变更首跳目标。
+    environmentName: env === "a" ? "Development" : "Sandbox",
     sourceName: env === "a" ? "Retest Nacos A" : "Retest Nacos B",
     sourceType: "nacos",
     provider: "nacos",
