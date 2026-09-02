@@ -120,6 +120,14 @@ test("E4 晋级全链路: 沙箱验证→晋级→dry-run→执行→目标落�
   const promoteProgress = page.locator(".apply-task-progress").first();
   await expect(promoteProgress).toBeVisible({ timeout: 60_000 });
   await expect(promoteProgress.locator(".task-status-success")).toBeVisible({ timeout: 60_000 });
+  // 晋级执行后 Nacos 写库存在最终一致性窗口：轮询直至目标侧 == 沙箱内容（或超时）。
+  const bSnapshot = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
+  let aAfter = "";
+  for (let i = 0; i < 20; i++) {
+    aAfter = await fetchNacosContent(BASE_A, "retest-qa", "svc-gateway.yaml", GROUP);
+    if (aAfter.trim() === bSnapshot.trim()) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
   const execNotice = page.locator(".apply-execution-notice").first();
   if (await execNotice.count()) {
     const txt = await execNotice.innerText();
@@ -129,9 +137,7 @@ test("E4 晋级全链路: 沙箱验证→晋级→dry-run→执行→目标落�
 
   // 落库验证：晋级目标 A/retest-qa 的 svc-gateway.yaml 必须 == B/retest-qa 沙箱内容
   // （apply A→B 时 B/retest-qa 已等于 A/retest-dev，即沙箱内容；晋级把它带回 A 的目标 ns）。
-  const aAfter = await fetchNacosContent(BASE_A, "retest-qa", "svc-gateway.yaml", GROUP);
-  const bAfter = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
-  expect(aAfter.trim(), "晋级执行后 A/retest-qa 侧必须等于 B/retest-qa 沙箱内容").toBe(bAfter.trim());
+  expect(aAfter.trim(), "晋级执行后 A/retest-qa 侧必须等于 B/retest-qa 沙箱内容").toBe(bSnapshot.trim());
   // 范围控制验证：计划外的 dataId（A 独有标记）不得被误删/误改
   const markerAfter = await fetchNacosContent(BASE_A, "retest-qa", E4_MARKER_CONFIG.dataId, E4_MARKER_CONFIG.group);
   expect(markerAfter, "计划外 dataId 必须保持原样").toContain("e4: promote-marker");
