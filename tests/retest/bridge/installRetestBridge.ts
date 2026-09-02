@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { createRetestInvoke, RETEST_AUDIT_FILE } from "./retestBinding";
+import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
 
@@ -62,6 +63,9 @@ const WAILS_METHODS = [
 ] as const;
 
 export async function installRetestBridge(page: Page, state: RetestState): Promise<void> {
+  // vite 5 对 tests/** 下文件只做 mtime 缓存失效（不校验内容 hash），同文件覆盖写后
+  // 浏览器端可能拿到旧变换 → 先用 bust URL 强制重新取变换（见 ui.ts bumpRetestBridgeBust）。
+  await bumpRetestBridgeBust(page);
   const invoke = createRetestInvoke();
   await page.exposeFunction("__confscopeRetestInvoke", (method: string, args: unknown[]) => invoke(method, args));
   await page.addInitScript(
@@ -87,10 +91,16 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
         window.localStorage.setItem(item.key, item.value);
       }
       window.localStorage.setItem("retest.bridge.marker", "1");
+      // 关键：manual-bridge-sync.js（head classic script）在页面上下文先于本 init script 的
+      // 页面脚本阶段执行，若它已内联安装 window.go，必须在覆盖前清掉——否则 UI 的
+      // wailsjs 绑定 import 到的 go.main.App 永远是内联旧版（旧版 TestSSHConnection
+      // 直接 throw「SSH 隧道未启用」），retest 桥接管不生效。
+      delete (window as Record<string, unknown>).go;
       const app: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
       for (const item of methods) {
         app[item] = (...args: unknown[]) => target.__confscopeRetestInvoke(item, args);
       }
+      // S7 诊断：包一层 wailsjs 绑定入口，确认 UI 层调用是否到达桥
       target.go = { main: { App: app } };
       // 审计桥：前端 auditBootstrap 安装 window.__auditBridge（web 手动桥模式同样注入）。
       // retest 桥在这里接管 AppendAuditEvent → /tmp 的 audit-trail.jsonl（只追加，跨 run 保留）。

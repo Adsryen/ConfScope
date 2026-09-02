@@ -17,6 +17,11 @@ function endpointFor(baseUrl: string): NacosEndpoint | null {
   return null;
 }
 
+function normalizeSSHConfigLike(input: unknown): Record<string, unknown> {
+  const c = (input ?? {}) as Record<string, unknown>;
+  return c;
+}
+
 function v1(ep: NacosEndpoint, path: string, query: Record<string, string>): string {
   const qs = Object.entries(query)
     .filter(([, v]) => v !== undefined)
@@ -60,8 +65,6 @@ function nacosTime(ms: number): string {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
 }
 
-import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const bridgeListeners: Array<(line: string) => void> = [];
 
@@ -80,13 +83,9 @@ const bridgeLog = (...parts: unknown[]) => {
 export const RETEST_AUDIT_DIR = "/tmp/confscope-retest/audit";
 export const RETEST_AUDIT_FILE = `${RETEST_AUDIT_DIR}/audit-trail.jsonl`;
 const auditSessions = new Map<string, { kind: string; status: string }>();
+const auditLines: string[] = [];
 function appendAuditEventNode(raw: string): void {
-  try {
-    mkdirSync(RETEST_AUDIT_DIR, { recursive: true });
-    appendFileSync(RETEST_AUDIT_FILE, `${raw.replace(/\n/g, " ")}\n`, "utf8");
-  } catch {
-    // 审计失败不阻断主流程
-  }
+  bridgeLog("audit", raw.slice(0, 400));
 }
 
 /** 进程级共享的发布时间戳（key: `${baseUrl}|${ns}|${group}|${dataId}`，value: 毫秒）。
@@ -99,7 +98,12 @@ function appendAuditEventNode(raw: string): void {
  */
 
 function md5Of(text: string): string {
-  return createHash("md5").update(text, "utf8").digest("hex");
+  // 浏览器侧无 node:crypto：djb2 十六进制指纹，仅用于缓存键/去重，非密码学用途
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 interface RawNamespace {
@@ -326,6 +330,11 @@ export function createRetestInvoke(): RetestInvoke {
 
       // ── 新版 ConfigCenter 门面（profile + ref/req 结构体） ──
       case "ConfigCenterTestConnection": {
+        // 快照来源连接（baseUrl=/tmp/...）不走 Nacos 端点探测，直接成功（与 Go 侧 local provider 行为一致）。
+        const profileConn = (args[0] ?? {}) as Record<string, unknown>;
+        if (String(profileConn?.id ?? "").startsWith("snapshot:") || String(profileConn?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")) {
+          return null;
+        }
         const ep = getEndpoint(args);
         // 与 Go 侧 NacosProvider.TestConnection 行为一致：探测命名空间接口。
         // 注意：v2.5.2 容器没有 /console/health/readiness（那是 2.4+ 的 8080 端口），
@@ -389,8 +398,32 @@ export function createRetestInvoke(): RetestInvoke {
         };
       }
       case "ConfigCenterGetConfig": {
-        const ep = getEndpoint(args);
         const ref = normalizeRefLike(args[1]);
+        // 快照来源（local-snapshot）：连接 baseUrl 是 /tmp 快照路径，不命中任何 Nacos 端点。
+        // 回退计划执行链路（S8b）的 freshness/before 快照读取会走这里，从内存快照缓存取内容。
+        const profile0 = (args[0] ?? {}) as Record<string, unknown>;
+        if (ref.provider === "local" || String(profile0?.id ?? "").startsWith("snapshot:") || String(profile0?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")) {
+          const snapshotId = String(profile0?.id ?? "").replace(/^snapshot:/, "");
+          const snap = snapshotCache.get(snapshotId) as { configs?: Array<Record<string, unknown>> } | undefined;
+          const match = (snap?.configs ?? []).find(
+            (c) =>
+              String(c.dataId) === ref.dataId &&
+              (String(c.group) === ref.group || (ref.group === "" && !c.group))
+          );
+          if (!match) throw new Error(`404 config not found in snapshot ${snapshotId}: ${ref.dataId}`);
+          const content = String(match.content ?? "");
+          const type = (ref.dataId.split(".").pop() ?? "").toLowerCase();
+          bridgeLog("GetConfig(snapshot)", snapshotId, ref.namespace, ref.dataId, "ok", content.length);
+          return {
+            ref: { ...ref, provider: "local" },
+            content,
+            format: ["yaml", "yml", "json", "properties", "txt"].includes(type) ? type : "txt",
+            version: md5Of(content),
+            source: "local-snapshot",
+            updateTime: String(match.updateTime ?? ""),
+          };
+        }
+        const ep = getEndpoint(args);
         // 复测扩展：tenant 参数 "retest:envB" 让浏览/编辑/历史 UI 可切换同一 dataId
         // 的 B 侧(prod 版)内容 —— 用于大文件(330 行)编辑器回归等测试。
         // 生产程序不经过本桥, 不受影响; 普通 tenant(retest-dev/retest-qa)行为不变。
@@ -604,8 +637,20 @@ export function createRetestInvoke(): RetestInvoke {
       // ── 未纳入本次复测范围的能力（SSH/快照/WebDAV/备份）：返回安全默认值 ──
       case "CreateSSHTunnel":
         throw new Error("retest bridge: SSH 隧道未启用");
-      case "TestSSHConnection":
-        throw new Error("retest bridge: SSH 隧道未启用");
+      case "TestSSHConnection": {
+        // S5：模拟真实 SSH 测试。UI 侧（SSHManagerView.testSSHProfile）只消费
+        // latencyText(result)，不检查 ok 字段：host 命中本地容器 sshd → 成功；
+        // 否则 throw（UI catch → 「SSH 连接失败：…（…ms）」红色反馈）。
+        const cfg = normalizeSSHConfigLike(args[0]);
+        const host = String(cfg?.host ?? "");
+        const state = loadRetestState();
+        if (state.ssh && host === state.ssh.host) {
+          bridgeLog("ssh-test", host, "ok");
+          return { latencyMs: 12 };
+        }
+        bridgeLog("ssh-test", host || "(empty)", "fail");
+        throw new Error(`ssh: no route to host ${host || "(空)"}`);
+      }
       case "StopSSHTunnel":
       case "StopAllSSHTunnels":
         return null;
@@ -645,7 +690,13 @@ export function createRetestInvoke(): RetestInvoke {
         return snap;
       }
       case "ListSnapshots":
-        return snapshotsList;
+        // 按 createdAt 倒序（新→旧），与 Go 侧 ListSnapshots 排序语义一致；
+        // UI 首项即最新快照，测试/人工操作都依赖这个顺序。
+        return [...snapshotsList].sort((a, b) =>
+          String((b as { createdAt?: string })?.createdAt ?? "").localeCompare(
+            String((a as { createdAt?: string })?.createdAt ?? "")
+          )
+        );
       case "DeleteSnapshot":
         snapshotCache.delete(String(args[0]));
         return null;
@@ -662,11 +713,87 @@ export function createRetestInvoke(): RetestInvoke {
       case "ListAppDataWebDAVBackups":
       case "UploadAppDataWebDAVBackup":
       case "DownloadAppDataWebDAVBackup":
-      case "TestSnapshotWebDAV":
-      case "ListSnapshotWebDAVPackages":
-      case "UploadSnapshotWebDAVPackage":
-      case "ImportSnapshotWebDAVPackage":
+      case "TestSnapshotWebDAV": {
+        // S7：target {url, username, password}。url 非空 → 通过；空 → 抛错（UI 展示 inline-error）。
+        const target = (args[0] ?? {}) as Record<string, unknown>;
+        const url = String(target?.url ?? "").trim();
+        if (!url) throw new Error("retest bridge: WebDAV 地址不能为空");
+        if (url.includes("unreachable")) {
+          throw new Error(`WebDAV 连接失败: ${url}（连接超时）`);
+        }
         return null;
+      }
+      case "ListSnapshotWebDAVPackages": {
+        // S7：返回一个 mock 远端快照包，供「刷新远端快照」列表渲染断言。
+        return [
+          {
+            name: "retest-remote-snap.cssnapshot",
+            path: "/snapshots/retest-remote-snap.cssnapshot",
+            size: 20480,
+            modifiedAt: "2026-08-30T10:00:00+08:00",
+            snapshotId: "retest-remote-snap",
+            snapshotName: "retest-remote-backup",
+            provider: "nacos",
+            connectionId: "retest-b",
+            connectionName: "Retest Nacos B",
+            configCount: 13,
+            createdAt: "2026-08-30T09:00:00+08:00",
+          },
+        ];
+      }
+      case "UploadSnapshotWebDAVPackage": {
+        // S7：返回上传后的远端快照包（UI 用 remote.path/name 渲染列表 + 「快照包已上传」toast）。
+        return {
+          name: "retest-uploaded.cssnapshot",
+          path: "/snapshots/retest-uploaded.cssnapshot",
+          size: 20480,
+          modifiedAt: new Date().toISOString(),
+          snapshotId: String(args[1] ?? ""),
+          snapshotName: "retest-uploaded",
+          provider: "nacos",
+          connectionId: "retest-b",
+          connectionName: "Retest Nacos B",
+          configCount: 13,
+          createdAt: new Date().toISOString(),
+        };
+      }
+      case "ImportSnapshotWebDAVPackage": {
+        // S7：导入一个最小本地快照（含 1 条配置），UI 展示「快照已导入」toast 并刷新列表。
+        const id = "retest-imported-snap";
+        const snapshot = {
+          schemaVersion: 1,
+          toolVersion: "1.8.0",
+          id,
+          path: `/tmp/confscope-retest-snapshots/${id}`,
+          name: "retest-imported",
+          description: "retest imported from mock WebDAV",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          source: {
+            provider: "nacos",
+            connectionId: "retest-b",
+            connectionName: "Retest Nacos B",
+            namespace: "retest-qa",
+            namespaceId: "retest-qa",
+          },
+          configs: [
+            {
+              namespace: "retest-qa",
+              dataId: "svc-billing.yaml",
+              group: "RETEST-PROD",
+              configType: "yaml",
+              contentType: "yaml",
+              content: "billing:\n  cycle: daily\n",
+              updateTime: new Date().toISOString(),
+            },
+          ],
+          importedFrom: { type: "webdav", remotePath: "/snapshots/retest-remote-snap.cssnapshot", importedAt: new Date().toISOString() },
+        };
+        snapshotCache.set(id, snapshot);
+        snapshotsList.push(snapshot);
+        // UI 用返回值渲染 toast/刷新列表：必须返回完整 Snapshot（与 CreateSnapshot 契约一致）
+        return snapshot;
+      }
       case "AppendAuditEvent": {
         // raw 为单行 JSON（JSONL）
         const line = String(args[0] ?? "");
@@ -683,22 +810,12 @@ export function createRetestInvoke(): RetestInvoke {
         return null;
       }
       case "ReadAuditLogLines": {
-        try {
-          const limit = Number(args[0] ?? 5000);
-          const text = readFileSync(RETEST_AUDIT_FILE, "utf8");
-          const lines = text.split("\n").filter((l) => l.trim() !== "");
-          return lines.slice(-Math.max(1, limit));
-        } catch {
-          return [];
-        }
+        const limit = Number(args[0] ?? 5000);
+        return auditRead().slice(-Math.max(1, limit));
       }
       case "ClearAuditTrail": {
-        // 模拟 Go ClearAuditTrail：truncate 审计文件（幂等；不存在则 no-op）
-        try {
-          writeFileSync(RETEST_AUDIT_FILE, "");
-        } catch {
-          // 审计文件缺失等场景：静默跳过
-        }
+        // 模拟 Go ClearAuditTrail：清空（幂等）
+        auditWrite([]);
         return null;
       }
       default:

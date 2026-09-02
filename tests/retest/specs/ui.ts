@@ -1,8 +1,31 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+// 模块级计数：每次 installRetestBridge 前递增（spec import 本模块一次 = 每测试一次）。
+// 解决 vite 5 对 tests/** 下模块图的变换缓存问题（同文件 mtime 变化不触发重变换，
+// 浏览器端拿到旧版 bridge 代码 → 新增 case 分支不生效）。
+let retestBust = 0;
+
 /** 侧边栏导航（真人点击路径）。 */
 export async function navigate(page: Page, label: string): Promise<void> {
   await page.locator(".side-nav-item", { hasText: label }).first().click();
+}
+
+/** 在 installRetestBridge 之前调用：强制浏览器对 retest bridge 模块用新 URL 重新取变换。 */
+export async function bumpRetestBridgeBust(page: Page): Promise<void> {
+  retestBust += 1;
+  await page.addInitScript(() => {
+    const origFetch = window.fetch;
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      let url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/tests/retest/bridge/retestBinding.ts") && !url.includes("retestBust=")) {
+        url += (url.includes("?") ? "&" : "?") + "retestBust=" + window.__retestBust;
+      }
+      return origFetch(url as RequestInfo, init);
+    };
+  });
+  await page.evaluate((bust) => {
+    (window as unknown as Record<string, number>).__retestBust = bust;
+  }, retestBust);
 }
 
 /** 关闭可能出现的启动欢迎/更新弹窗（防御性；正常播种下不应出现）。 */

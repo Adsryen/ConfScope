@@ -209,6 +209,7 @@ tenants:
 
 # ============ 2. svc-billing.yaml — B 侧注释掉未启用模块（语义差异）+ 空值 ============
 A_YAML_BILLING = """# 计费服务配置 - 开发
+# 平台组统一巡检标记: 每季度复核 (开发环境)
 # 模块开关: 所有模块默认开启, 便于联调
 
 billing:
@@ -229,6 +230,9 @@ payment:
     # 开发用沙箱
     app-id: 2021000000000001
     gateway: https://openapi-sandbox.dl.alipaydev.com/gateway.do
+    # 开发环境限流阈值（生产在下方独立配置, 值不同; 同名键不同父路径, 不应误报重复 key）
+    rate-limit:
+      qps: 20
   wechat:
     enabled: true
     mch-id: 1900000001
@@ -280,6 +284,9 @@ payment:
     # 生产正式网关
     app-id: 2021000000000099
     gateway: https://openapi.alipay.com/gateway.do
+    # 生产环境限流阈值（比开发高; 与开发侧 payment.alipay.rate-limit 同名不同父路径）
+    rate-limit:
+      qps: 200
   wechat:
     enabled: true
     mch-id: 1900009999
@@ -314,6 +321,7 @@ settlement:
 
 # ============ 3. svc-search.yaml — 类型差异（bool vs 字符串）+ 注释行移动 ============
 A_YAML_SEARCH = """# 搜索服务 - 开发
+# 平台组统一巡检标记: 每季度复核 (开发环境)
 app:
   name: search-svc
   # 环境标记
