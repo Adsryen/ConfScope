@@ -48,6 +48,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.4",
+    "ssh2": "^1.17.0",
     "typescript": "^5",
     "vite": "^5",
     "vitest": "^2.1.9"
