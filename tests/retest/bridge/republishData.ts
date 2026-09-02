@@ -42,8 +42,15 @@ export async function publishNacosContent(
   const body = await res.text();
   if (!res.ok || body !== "true") throw new Error(`publish ${dataId} failed: ${body}`);
   const qs = new URLSearchParams({ dataId, group, tenant: namespace }).toString();
-  const got = await (await fetch(`${baseUrl}/v1/cs/configs?${qs}`)).text();
-  if (got !== content) throw new Error(`readback mismatch for ${dataId}: ${got.slice(0, 120)}`);
+  // Nacos v1 写入存在最终一致性：POST 返回 true 后读回可能短暂返回旧值
+  // （retest 容器单实例，已验证非多实例问题；轮询重试直至一致或超时）。
+  let got = "";
+  for (let i = 0; i < 10; i++) {
+    got = await (await fetch(`${baseUrl}/v1/cs/configs?${qs}`)).text();
+    if (got === content) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`readback mismatch for ${dataId} after 5s: ${got.slice(0, 120)}`);
 }
 
 export async function publishAExtraMarker(baseUrl: string, namespace: string): Promise<void> {
