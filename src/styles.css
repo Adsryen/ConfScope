@@ -7293,3 +7293,19 @@ button,
   color: #9a9aa8;
   white-space: nowrap;
 }
+
+.data-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #9a9aa8;
+  text-align: right;
+  min-width: 0;
+}
+
+.data-file-info code {
+  font-size: 11px;
+  color: #c8c8d2;
+  word-break: break-all;
+}

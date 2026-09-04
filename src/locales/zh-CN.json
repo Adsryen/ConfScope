@@ -90,7 +90,11 @@
     "navGroupData": "数据管理",
     "navGroupSystem": "系统设置",
     "logViewer": "审计日志",
-    "logViewerPlanned": "会话审计日志"
+    "logViewerPlanned": "会话审计日志",
+    "dataFileImported": "已导入 {count} 条连接到本地数据文件",
+    "dataFileRestored": "已从本地数据文件恢复 {count} 条连接",
+    "dataFileCorruptTitle": "本地数据文件已损坏",
+    "dataFileCorruptMessage": "数据文件读取失败，已隔离为 {file} 并回退到浏览器缓存数据；下次数据保存时将自动重建数据文件。"
   },
   "apply": {
     "title": "配置变更计划",
@@ -241,7 +245,13 @@
     "proxyOnlyForUpdate": "代理仅用于应用更新检查（Nacos 连接不走代理）",
     "settingsSaved": "设置已保存",
     "dangerZone": "危险操作",
-    "clearHistoryHint": "清空所有本地操作记录，此操作不可恢复。"
+    "clearHistoryHint": "清空所有本地操作记录，此操作不可恢复。",
+    "dataFile": "本地数据文件",
+    "dataFileDescription": "应用主数据（连接、设置、计划、历史等）的唯一事实源；浏览器缓存仅作热缓存，文件损坏或丢失缓存时自动回退。",
+    "dataFilePath": "文件位置",
+    "dataFileLastSaved": "最后保存",
+    "dataFileLastBackup": "最后备份",
+    "dataFileNone": "尚未生成（首次数据变更时自动创建）"
   },
   "appDataBackup": {
     "title": "应用数据备份",

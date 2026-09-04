@@ -26,6 +26,7 @@ import LogViewer from "./components/LogViewer";
 import StartupDialog from "./components/StartupDialog";
 import ApplyPlanView from "./components/ApplyPlanView";
 import { reportError, reportMessage } from "./lib/errorCenter";
+import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
@@ -212,6 +213,26 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  // 主数据文件引导提示：迁移导入 / 从文件恢复 / 损坏回退
+  useEffect(() => {
+    const notice = consumeAppDataDocNotice();
+    if (!notice) return;
+    if (notice.kind === "corrupt-fallback") {
+      reportMessage({
+        level: "error",
+        title: t("app.dataFileCorruptTitle"),
+        source: "本地数据",
+        message: t("app.dataFileCorruptMessage", { file: notice.detail }),
+      });
+      return;
+    }
+    toast(
+      notice.kind === "restored-from-file"
+        ? t("app.dataFileRestored", { count: notice.connections })
+        : t("app.dataFileImported", { count: notice.connections })
+    );
+  }, [t]);
 
   // 记住上次的连接、浏览筛选与模式。
   useEffect(() => {
