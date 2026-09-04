@@ -21,6 +21,7 @@
     "dist": "wails build",
     "build:win": "wails build -clean -nsis",
     "build:web": "vite build",
+    "check:bundle": "node scripts/check-production-bundle.mjs",
     "preview": "vite preview",
     "wails": "wails",
     "dev:portable-data": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-portable-data.ps1",

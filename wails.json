@@ -4,7 +4,7 @@
   "outputfilename": "ConfScope",
   "build:tags": "webkit2_41",
   "frontend:install": "pnpm install",
-  "frontend:build": "pnpm build:web",
+  "frontend:build": "pnpm build:web && pnpm check:bundle",
   "frontend:dev:watcher": "pnpm dev:web",
   "frontend:dev:serverUrl": "http://127.0.0.1:1420",
   "author": {
