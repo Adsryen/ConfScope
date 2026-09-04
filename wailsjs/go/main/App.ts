@@ -128,6 +128,9 @@ type GoApp = {
   ListSnapshotWebDAVPackages(target: any): Promise<any[]>;
   UploadSnapshotWebDAVPackage(target: any, snapshotId: string, password: string): Promise<any>;
   ImportSnapshotWebDAVPackage(target: any, remotePath: string, password: string): Promise<any>;
+  // 主数据文档（[数据根]/app-data/confscope-data.json）
+  GetAppDataDocument(): Promise<AppDataDocumentStatus>;
+  SaveAppDataDocument(document: AppDataDocument): Promise<AppDataDocumentStatus>;
 };
 
 export interface CredentialStorePoCResult {
@@ -149,6 +152,26 @@ export interface SecureSecretWriteResult {
   targetName: string;
   valueSize: number;
   verified: boolean;
+}
+
+export interface AppDataDocument {
+  schemaVersion: number;
+  savedAt: string;
+  appVersion: string;
+  data: any;
+}
+
+export interface AppDataDocumentStatus {
+  exists: boolean;
+  valid: boolean;
+  path: string;
+  schemaVersion: number;
+  savedAt: string;
+  appVersion: string;
+  sizeBytes: number;
+  corruptFile: string;
+  document: AppDataDocument;
+  error: string;
 }
 
 declare global {
@@ -353,6 +376,10 @@ export const UploadAppDataWebDAVBackup = (target: any, plaintextJson: string, pa
 
 export const DownloadAppDataWebDAVBackup = (target: any, remotePath: string, password: string) =>
   app().DownloadAppDataWebDAVBackup(target, remotePath, password);
+
+export const GetAppDataDocument = () => app().GetAppDataDocument();
+
+export const SaveAppDataDocument = (document: AppDataDocument) => app().SaveAppDataDocument(document);
 
 export const TestSnapshotWebDAV = (target: any) => app().TestSnapshotWebDAV(target);
 
