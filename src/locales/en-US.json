@@ -90,7 +90,11 @@
     "navGroupData": "Data",
     "navGroupSystem": "System",
     "logViewer": "Audit Log",
-    "logViewerPlanned": "Session audit log"
+    "logViewerPlanned": "Session audit log",
+    "dataFileImported": "Imported {count} connections into the local data file",
+    "dataFileRestored": "Restored {count} connections from the local data file",
+    "dataFileCorruptTitle": "Local data file is corrupted",
+    "dataFileCorruptMessage": "The data file could not be read. It was quarantined as {file} and browser cache data is being used. The file will be rebuilt on the next save."
   },
   "apply": {
     "title": "Configuration change plan",
@@ -241,7 +245,13 @@
     "proxyOnlyForUpdate": "Use proxy only for update checks (Nacos connections bypass proxy)",
     "settingsSaved": "Settings saved",
     "dangerZone": "Danger Zone",
-    "clearHistoryHint": "Clear all local operation records. This action cannot be undone."
+    "clearHistoryHint": "Clear all local operation records. This action cannot be undone.",
+    "dataFile": "Local Data File",
+    "dataFileDescription": "Single source of truth for app data (connections, settings, plans, history, etc.). Browser storage is only a hot cache; it falls back automatically when the file is corrupt or the cache is lost.",
+    "dataFilePath": "File location",
+    "dataFileLastSaved": "Last saved",
+    "dataFileLastBackup": "Last backup",
+    "dataFileNone": "Not created yet (auto-created on first data change)"
   },
   "appDataBackup": {
     "title": "App Data Backup",

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearAppCache } from "../lib/cacheCleanup";
+import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
+import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
@@ -10,6 +12,12 @@ import LanguageSwitch from "./LanguageSwitch";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatDocTime(iso: string): string {
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return iso;
+  return new Date(time).toLocaleString();
 }
 
 export default function SettingsView() {
@@ -22,6 +30,7 @@ export default function SettingsView() {
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheResult, setCacheResult] = useState<"" | "ok" | "fail">("");
+  const [docInfo, setDocInfo] = useState<AppDataDocInfo | null>(null);
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -58,6 +67,16 @@ export default function SettingsView() {
         window.clearTimeout(savedTimerRef.current);
         savedTimerRef.current = null;
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void getAppDataDocInfo().then((info) => {
+      if (alive) setDocInfo(info);
+    });
+    return () => {
+      alive = false;
     };
   }, []);
 
@@ -249,6 +268,32 @@ export default function SettingsView() {
               <h4>{t("settings.backup")}</h4>
               <div className="settings-panel-description">{t("settings.backupDescription")}</div>
             </div>
+            {docInfo && (
+              <div className="settings-setting-row settings-data-file-row">
+                <div>
+                  <strong>{t("settings.dataFile")}</strong>
+                  <div className="settings-panel-description">{t("settings.dataFileDescription")}</div>
+                </div>
+                <div className="data-file-info">
+                  <div>
+                    {t("settings.dataFilePath")}: <code>{docInfo.path || t("settings.dataFileNone")}</code>
+                  </div>
+                  {docInfo.savedAt && (
+                    <div>
+                      {t("settings.dataFileLastSaved")}: {formatDocTime(docInfo.savedAt)}
+                    </div>
+                  )}
+                  {(() => {
+                    const lastBackupAt = loadAppDataBackupState().activities.find((item) => item.status === "success")?.createdAt ?? "";
+                    return lastBackupAt ? (
+                      <div>
+                        {t("settings.dataFileLastBackup")}: {formatDocTime(lastBackupAt)}
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+              </div>
+            )}
             <AppDataBackupPanel />
             <div className="settings-setting-row settings-danger-zone">
               <div>
