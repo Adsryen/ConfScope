@@ -106,3 +106,6 @@ tests/retest/results-run/
 
 # 本机便携启动脚本（含个人路径，仅本地保留）
 /scripts/launch-confscope-portable.vbs
+
+# NSIS 构建时下载的 WebView2 安装器缓存
+build/windows/installer/tmp/
