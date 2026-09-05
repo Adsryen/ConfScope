@@ -314,8 +314,8 @@ async function installApplySafetyMock(page: Page) {
       },
     };
 
-    (window as unknown as { go: { main: { App: typeof app } }; __applySafetyDebug: () => ApplySafetyDebug }).go = {
-      main: { App: app },
+    (window as unknown as { go: { app: { App: typeof app } }; __applySafetyDebug: () => ApplySafetyDebug }).go = {
+      app: { App: app },
     };
     (window as unknown as { __applySafetyDebug: () => ApplySafetyDebug }).__applySafetyDebug = () => ({
       calls,

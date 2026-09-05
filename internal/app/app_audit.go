@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"errors"
@@ -6,20 +6,21 @@ import (
 	"path/filepath"
 
 	"confscope/internal/audit"
+	"confscope/internal/portabledata"
 )
 
 // auditDataDir 返回审计 JSONL 所在目录：portable 数据根目录（CONFSCOPE_DATA_DIR
 // 可重定向；默认 exe 同级 ConfScopeData/）。与 webview/snapshots 同级，
 // 便携分发时随目录一起迁移。
 func auditDataDir() string {
-	if override := os.Getenv(portableDataDirEnvName); override != "" {
+	if override := os.Getenv(portabledata.DataDirEnvName); override != "" {
 		return filepath.Clean(override)
 	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(filepath.Dir(exePath), portableDataDirName)
+	return filepath.Join(filepath.Dir(exePath), portabledata.DataDirName)
 }
 
 // AppendAuditEvent 持久化一条前端审计事件（单行 JSON）。

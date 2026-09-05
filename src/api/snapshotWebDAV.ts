@@ -3,7 +3,7 @@ import {
   ListSnapshotWebDAVPackages,
   TestSnapshotWebDAV,
   UploadSnapshotWebDAVPackage,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import type { Snapshot } from "./snapshot";
 import type { SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
 import { hydrateSnapshotWebDAVSettings } from "../lib/credentialSecrets";

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TestSSHConnection } from "../../wailsjs/go/main/App";
+import { TestSSHConnection } from "../../wailsjs/go/app/App";
 import { useTranslation } from "../i18n";
 import { loadConnections, type SSHConfig } from "../store/connections";
 import {

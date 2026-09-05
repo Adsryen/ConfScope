@@ -3,7 +3,7 @@
 // 静默降级（window.__retestBinding 不存在时）。
 // 必须在 main.tsx 最前面 import（side-effect），保证先于任何组件
 // 记录事件时 bridge 已就位。
-import { AppendAuditEvent } from "../../wailsjs/go/main/App";
+import { AppendAuditEvent } from "../../wailsjs/go/app/App";
 
 type AuditBridgeWindow = Window & {
   __auditBridge?: { appendAuditEvent: (payload: unknown) => void };

@@ -6,7 +6,7 @@ import {
   CreateSSHTunnel,
   GetSSHTunnelLocalPort,
   StopSSHTunnel,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import {
   getConfig as configCenterGetConfig,
   getHistoryDetail as configCenterGetHistoryDetail,

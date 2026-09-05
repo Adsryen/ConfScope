@@ -71,7 +71,7 @@ test("creates and reads an Apollo OpenAPI connection through the UI", async ({ p
             apolloCluster: apollo.cluster,
             apolloNamespaceName: apollo.namespaceName,
           };
-          const doc = await window.go.main.App.ConfigCenterGetConfig(profile, {
+          const doc = await window.go.app.App.ConfigCenterGetConfig(profile, {
             provider: "apollo",
             connectionId: "smoke-apollo",
             namespace: apollo.appId,

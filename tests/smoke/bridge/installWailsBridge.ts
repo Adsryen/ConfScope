@@ -65,7 +65,7 @@ export async function installWailsBridge(page: Page, state: SmokeState): Promise
     ({ methods, storage }) => {
       const target = window as unknown as {
         __confscopeSmokeInvoke: (method: string, args: unknown[]) => Promise<unknown>;
-        go: { main: { App: Record<string, (...args: unknown[]) => Promise<unknown>> } };
+        go: { app: { App: Record<string, (...args: unknown[]) => Promise<unknown>> } };
         runtime: {
           EventsOn: (eventName: string, callback: (payload: unknown) => void) => void;
           EventsOff: (eventName: string) => void;
@@ -80,7 +80,7 @@ export async function installWailsBridge(page: Page, state: SmokeState): Promise
       for (const method of methods) {
         app[method] = (...args: unknown[]) => target.__confscopeSmokeInvoke(method, args);
       }
-      target.go = { main: { App: app } };
+      target.go = { app: { App: app } };
       target.runtime = {
         EventsOn: () => undefined,
         EventsOff: () => undefined,

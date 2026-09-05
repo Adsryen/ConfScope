@@ -120,7 +120,7 @@ async function prepareEnglishUi(native: NativeControlClient): Promise<void> {
 async function verifyCredentialStorePoC(native: NativeControlClient, smoke: SmokeState): Promise<void> {
   const result = await native.eval<CredentialStorePoCResult>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app || typeof app.RunCredentialStorePoC !== "function") {
       throw new Error("RunCredentialStorePoC binding not found");
     }
@@ -327,7 +327,7 @@ async function verifyNativeApolloApplyPlanBinding(
 ): Promise<{ directWriteBlocked: boolean; published: boolean; deleted: boolean }> {
   return native.eval<{ directWriteBlocked: boolean; published: boolean; deleted: boolean }>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app) throw new Error("Wails App binding not found");
     const profile = {
       id: "native-apollo-apply",
@@ -408,7 +408,7 @@ async function verifyNativeConsulApplyPlanBinding(
 ): Promise<{ directWriteBlocked: boolean; created: boolean; updated: boolean; staleBlocked: boolean; deleted: boolean }> {
   return native.eval<{ directWriteBlocked: boolean; created: boolean; updated: boolean; staleBlocked: boolean; deleted: boolean }>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app) throw new Error("Wails App binding not found");
     const profile = {
       id: "native-consul-apply",
@@ -693,7 +693,7 @@ async function verifyNativeSSHProfileAndTunnel(native: NativeControlClient, smok
 
   const tunnelResult = await native.eval<{ localPort: number; content: string }>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app || typeof app.CreateSSHTunnel !== "function" || typeof app.NacosGetConfig !== "function") {
       throw new Error("SSH tunnel or Nacos binding not found");
     }
@@ -1141,7 +1141,7 @@ async function verifyCredentialSecretRefMigration(native: NativeControlClient, s
   }));
   const secureReadChecks = await native.eval<number>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app || typeof app.ReadSecureSecret !== "function") {
       throw new Error("ReadSecureSecret binding not found");
     }
@@ -1356,7 +1356,7 @@ async function cleanupCredentialSecretRefs(native: NativeControlClient, refs: Cr
   if (refs.length === 0) return;
   await native.eval<boolean>(
     `
-    const app = window.go && window.go.main && window.go.main.App;
+    const app = window.go && window.go.app && window.go.app.App;
     if (!app || typeof app.DeleteSecureSecret !== "function") return true;
     const refs = ${JSON.stringify(refs)};
     for (const ref of refs) {

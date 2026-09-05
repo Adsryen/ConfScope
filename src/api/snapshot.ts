@@ -1,5 +1,5 @@
 // 快照 API 封装
-import { CreateSnapshot, GetSnapshot, ListSnapshots, DeleteSnapshot, ValidateSnapshot } from "../../wailsjs/go/main/App";
+import { CreateSnapshot, GetSnapshot, ListSnapshots, DeleteSnapshot, ValidateSnapshot } from "../../wailsjs/go/app/App";
 
 /** 快照来源。 */
 export interface SnapshotSource {

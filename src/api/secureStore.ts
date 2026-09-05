@@ -4,7 +4,7 @@ import {
   WriteSecureSecret,
   type SecureSecretRef,
   type SecureSecretWriteResult,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 
 export type { SecureSecretRef, SecureSecretWriteResult };
 

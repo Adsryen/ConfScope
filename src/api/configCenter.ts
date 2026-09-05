@@ -7,7 +7,7 @@ import {
   ConfigCenterListNamespaces,
   ConfigCenterPublishConfigFromApplyPlan,
   ConfigCenterTestConnection,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import { translate } from "../locales";
 
 export type ProviderType = "nacos" | "apollo" | "consul" | "local";

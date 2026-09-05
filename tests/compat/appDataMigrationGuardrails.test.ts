@@ -133,7 +133,7 @@ describe("local data migration guardrails", () => {
 describe("main data document (app-data/confscope-data.json)", () => {
   function installFakeBindings(fake: { get: unknown; save?: (document: unknown) => unknown; saveError?: unknown; saveCalls?: unknown[] }): void {
     (globalThis as Record<string, unknown>).go = {
-      main: {
+      app: {
         App: {
           GetAppDataDocument: () => Promise.resolve(fake.get),
           SaveAppDataDocument: (document: unknown) => {

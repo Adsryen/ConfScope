@@ -4,7 +4,7 @@
 // 模式下 __auditBridge 缺失时只显示实时缓冲（页面说明里写明）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
-import { ReadAuditLogLines } from "../../wailsjs/go/main/App";
+import { ReadAuditLogLines } from "../../wailsjs/go/app/App";
 import {
   listAuditSessions,
   onAuditSessionUpdate,

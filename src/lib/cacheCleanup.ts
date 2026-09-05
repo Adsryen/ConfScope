@@ -42,7 +42,7 @@ export async function clearAuditTrail(): Promise<boolean> {
       return await clearAuditTrailWeb();
     }
     // 原生：走 Go 绑定
-    const { ClearAuditTrail } = await import("../../wailsjs/go/main/App");
+    const { ClearAuditTrail } = await import("../../wailsjs/go/app/App");
     await ClearAuditTrail();
     return true;
   } catch {

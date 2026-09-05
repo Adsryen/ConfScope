@@ -14,12 +14,12 @@ import {
   __resetAuditSessionsForTest,
 } from "../lib/auditSessionLog";
 
-vi.mock("../../wailsjs/go/main/App", () => ({
+vi.mock("../../wailsjs/go/app/App", () => ({
   ReadAuditLogLines: vi.fn().mockResolvedValue([]),
   GetAppInfo: vi.fn().mockResolvedValue({ name: "ConfScope", version: "1.8.0", updateSources: [] }),
 }));
 
-import { ReadAuditLogLines } from "../../wailsjs/go/main/App";
+import { ReadAuditLogLines } from "../../wailsjs/go/app/App";
 
 describe("LogViewer", () => {
   beforeEach(() => {

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"confscope/internal/portabledata"
 	"time"
 )
 
@@ -51,7 +53,7 @@ func (a *App) appDataRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get executable path: %w", err)
 	}
-	return portableDataRootFor(exePath), nil
+	return portabledata.DataRootFor(exePath), nil
 }
 
 // GetAppDataDocument 读取并校验主数据文档。

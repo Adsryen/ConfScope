@@ -69,7 +69,7 @@ test("creates and reads a Consul KV connection through the UI", async ({ page, s
             consulDatacenter: consul.datacenter,
             consulKeyPrefix: consul.keyPrefix,
           };
-          const doc = await window.go.main.App.ConfigCenterGetConfig(profile, {
+          const doc = await window.go.app.App.ConfigCenterGetConfig(profile, {
             provider: "consul",
             connectionId: "smoke-consul",
             namespace: consul.datacenter,

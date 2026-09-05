@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"confscope/internal/appbackup"
 	"confscope/internal/nacos"
+	"confscope/internal/portabledata"
 	"confscope/internal/provider"
 	"confscope/internal/snapshotwebdav"
 	"confscope/internal/ssh"
@@ -420,13 +421,13 @@ func (a *App) DownloadAppDataWebDAVBackup(target appbackup.WebDAVTarget, remoteP
 }
 
 // startup 保存 Wails 运行上下文，供后续需要调用运行时能力时使用。
-func (a *App) startup(ctx context.Context) {
+func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startNativeSmokeControl(ctx)
 }
 
 // shutdown 停止所有 SSH 隧道。
-func (a *App) shutdown(ctx context.Context) {
+func (a *App) Shutdown(ctx context.Context) {
 	a.stopNativeSmokeControl()
 	a.sshMgr.StopAll()
 }
@@ -687,7 +688,7 @@ func snapshotStorageDir() (string, error) {
 }
 
 func snapshotStorageDirFor(exePath string, homeDir string) (string, error) {
-	snapshotDir, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	snapshotDir, err := portabledata.PrepareSnapshotDataFor(exePath, homeDir)
 	if err != nil {
 		return "", fmt.Errorf("准备快照目录失败: %w", err)
 	}
@@ -703,7 +704,7 @@ func appDataRecoveryPointStorageDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取用户目录失败: %w", err)
 	}
-	recoveryDir, err := preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+	recoveryDir, err := portabledata.PrepareAppDataRecoveryPointDataFor(exePath, homeDir)
 	if err != nil {
 		return "", fmt.Errorf("准备应用数据恢复点目录失败: %w", err)
 	}

@@ -72,7 +72,7 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
     ({ methods, storage }) => {
       const target = window as unknown as {
         __confscopeRetestInvoke: (method: string, args: unknown[]) => Promise<unknown>;
-        go: { main: { App: Record<string, (...args: unknown[]) => Promise<unknown>> } };
+        go: { app: { App: Record<string, (...args: unknown[]) => Promise<unknown>> } };
         runtime: {
           EventsOn: (eventName: string, callback: (payload: unknown) => void) => void;
           EventsOff: (eventName: string, callback: (payload: unknown) => void) => void;
@@ -93,7 +93,7 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
       window.localStorage.setItem("retest.bridge.marker", "1");
       // 关键：manual-bridge-sync.js（head classic script）在页面上下文先于本 init script 的
       // 页面脚本阶段执行，若它已内联安装 window.go，必须在覆盖前清掉——否则 UI 的
-      // wailsjs 绑定 import 到的 go.main.App 永远是内联旧版（旧版 TestSSHConnection
+      // wailsjs 绑定 import 到的 go.app.App 永远是内联旧版（旧版 TestSSHConnection
       // 直接 throw「SSH 隧道未启用」），retest 桥接管不生效。
       delete (window as Record<string, unknown>).go;
       const app: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
@@ -101,7 +101,7 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
         app[item] = (...args: unknown[]) => target.__confscopeRetestInvoke(item, args);
       }
       // S7 诊断：包一层 wailsjs 绑定入口，确认 UI 层调用是否到达桥
-      target.go = { main: { App: app } };
+      target.go = { app: { App: app } };
       // 审计桥：前端 auditBootstrap 安装 window.__auditBridge（web 手动桥模式同样注入）。
       // retest 桥在这里接管 AppendAuditEvent → /tmp 的 audit-trail.jsonl（只追加，跨 run 保留）。
       (target as { __auditBridge?: unknown }).__auditBridge = {

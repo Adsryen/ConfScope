@@ -177,14 +177,14 @@ export interface AppDataDocumentStatus {
 declare global {
   interface Window {
     go: {
-      main: {
+      app: {
         App: GoApp;
       };
     };
   }
 }
 
-const app = () => window.go.main.App;
+const app = () => window.go.app.App;
 
 export const GetAppInfo = () => app().GetAppInfo();
 

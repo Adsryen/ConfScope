@@ -1,4 +1,4 @@
-// 复测 bridge：把 UI 的 Wails 绑定（go.main.App.*）转发到 Node 侧，
+// 复测 bridge：把 UI 的 Wails 绑定（go.app.App.*）转发到 Node 侧，
 // 直接调用持久化 Nacos 容器的 v1 OpenAPI（与 internal/nacos 客户端行为一致），
 // 使整条前端 UI 链路（浏览/对比/搜索/编辑/ApplyPlan/历史）真实打到 Docker Nacos。
 import { loadRetestState, type RetestNacosEndpoint } from "../state";

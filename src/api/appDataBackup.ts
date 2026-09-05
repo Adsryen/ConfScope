@@ -10,7 +10,7 @@ import {
   TestAppDataWebDAV,
   UploadAppDataWebDAVBackup,
   WriteAppDataBackupFile,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import type { AppDataWebDAVSettings } from "../store/appDataBackup";
 import { hydrateAppDataWebDAVSettings } from "../lib/credentialSecrets";
 

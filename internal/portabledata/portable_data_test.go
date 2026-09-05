@@ -1,4 +1,4 @@
-package main
+package portabledata
 
 import (
 	"os"
@@ -25,9 +25,9 @@ func TestPreparePortableWebviewDataCopiesLegacyAppDataWhenTargetIsEmpty(t *testi
 		t.Fatalf("WriteFile exe: %v", err)
 	}
 
-	target, err := preparePortableWebviewDataFor(exePath, appData)
+	target, err := PrepareWebviewDataFor(exePath, appData)
 	if err != nil {
-		t.Fatalf("preparePortableWebviewDataFor returned error: %v", err)
+		t.Fatalf("PrepareWebviewDataFor returned error: %v", err)
 	}
 
 	wantTarget := filepath.Join(filepath.Dir(exePath), "ConfScopeData", "webview")
@@ -65,9 +65,9 @@ func TestPreparePortableWebviewDataDoesNotOverwriteExistingPortableData(t *testi
 		t.Fatalf("WriteFile legacy: %v", err)
 	}
 
-	_, err := preparePortableWebviewDataFor(exePath, appData)
+	_, err := PrepareWebviewDataFor(exePath, appData)
 	if err != nil {
-		t.Fatalf("preparePortableWebviewDataFor returned error: %v", err)
+		t.Fatalf("PrepareWebviewDataFor returned error: %v", err)
 	}
 	kept, err := os.ReadFile(targetFile)
 	if err != nil {
@@ -93,9 +93,9 @@ func TestPreparePortableSnapshotDataCopiesLegacyBackupsWhenTargetIsEmpty(t *test
 		t.Fatalf("MkdirAll exe dir: %v", err)
 	}
 
-	target, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	target, err := PrepareSnapshotDataFor(exePath, homeDir)
 	if err != nil {
-		t.Fatalf("preparePortableSnapshotDataFor returned error: %v", err)
+		t.Fatalf("PrepareSnapshotDataFor returned error: %v", err)
 	}
 
 	wantTarget := filepath.Join(filepath.Dir(exePath), "ConfScopeData", "snapshots")
@@ -133,9 +133,9 @@ func TestPreparePortableSnapshotDataDoesNotOverwriteExistingPortableSnapshots(t 
 		t.Fatalf("WriteFile legacy snapshot: %v", err)
 	}
 
-	target, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	target, err := PrepareSnapshotDataFor(exePath, homeDir)
 	if err != nil {
-		t.Fatalf("preparePortableSnapshotDataFor returned error: %v", err)
+		t.Fatalf("PrepareSnapshotDataFor returned error: %v", err)
 	}
 
 	kept, err := os.ReadFile(filepath.Join(target, "snap_existing", "metadata.json"))
@@ -162,9 +162,9 @@ func TestPreparePortableAppDataRecoveryPointDataCopiesLegacyWhenTargetIsEmpty(t 
 		t.Fatalf("WriteFile legacy recovery point: %v", err)
 	}
 
-	target, err := preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+	target, err := PrepareAppDataRecoveryPointDataFor(exePath, homeDir)
 	if err != nil {
-		t.Fatalf("preparePortableAppDataRecoveryPointDataFor returned error: %v", err)
+		t.Fatalf("PrepareAppDataRecoveryPointDataFor returned error: %v", err)
 	}
 
 	wantTarget := filepath.Join(filepath.Dir(exePath), "ConfScopeData", "app-data-recovery-points")
@@ -186,30 +186,30 @@ func TestPreparePortableAppDataRecoveryPointDataCopiesLegacyWhenTargetIsEmpty(t 
 func TestPreparePortableDataUsesConfiguredRoot(t *testing.T) {
 	root := t.TempDir()
 	configuredRoot := filepath.Join(root, "shared", "ConfScopeData")
-	t.Setenv(portableDataDirEnvName, configuredRoot)
+	t.Setenv(DataDirEnvName, configuredRoot)
 	exePath := filepath.Join(root, "build", "bin", "ConfScope.exe")
 	appData := filepath.Join(root, "AppData", "Roaming")
 	homeDir := filepath.Join(root, "Users", "tester")
 
-	webviewDir, err := preparePortableWebviewDataFor(exePath, appData)
+	webviewDir, err := PrepareWebviewDataFor(exePath, appData)
 	if err != nil {
-		t.Fatalf("preparePortableWebviewDataFor returned error: %v", err)
+		t.Fatalf("PrepareWebviewDataFor returned error: %v", err)
 	}
 	if webviewDir != filepath.Join(configuredRoot, portableWebviewDirName) {
 		t.Fatalf("webviewDir = %q, want configured data root", webviewDir)
 	}
 
-	snapshotDir, err := preparePortableSnapshotDataFor(exePath, homeDir)
+	snapshotDir, err := PrepareSnapshotDataFor(exePath, homeDir)
 	if err != nil {
-		t.Fatalf("preparePortableSnapshotDataFor returned error: %v", err)
+		t.Fatalf("PrepareSnapshotDataFor returned error: %v", err)
 	}
 	if snapshotDir != filepath.Join(configuredRoot, portableSnapshotDirName) {
 		t.Fatalf("snapshotDir = %q, want configured data root", snapshotDir)
 	}
 
-	recoveryDir, err := preparePortableAppDataRecoveryPointDataFor(exePath, homeDir)
+	recoveryDir, err := PrepareAppDataRecoveryPointDataFor(exePath, homeDir)
 	if err != nil {
-		t.Fatalf("preparePortableAppDataRecoveryPointDataFor returned error: %v", err)
+		t.Fatalf("PrepareAppDataRecoveryPointDataFor returned error: %v", err)
 	}
 	if recoveryDir != filepath.Join(configuredRoot, portableAppDataRecoveryPointDirName) {
 		t.Fatalf("recoveryDir = %q, want configured data root", recoveryDir)

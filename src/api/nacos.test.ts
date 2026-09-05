@@ -129,13 +129,13 @@ describe("nacos api compatibility bridge", () => {
     });
     goApp.ReadSecureSecret.mockImplementation(async (ref: { field: string }) => `stored-${ref.field}`);
     vi.stubGlobal("go", {
-      main: {
+      app: {
         App: goApp,
       },
     });
     vi.stubGlobal("window", {
       go: {
-        main: {
+        app: {
           App: goApp,
         },
       },

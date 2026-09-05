@@ -4,7 +4,7 @@ test("uses Wails bridge bindings against real Docker Nacos and local snapshots",
   await page.goto("/");
 
   const result = await page.evaluate(async (state) => {
-    const app = window.go.main.App;
+    const app = window.go.app.App;
     const devProfile = {
       id: "smoke-dev",
       name: "Dev Nacos",

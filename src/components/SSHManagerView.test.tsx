@@ -10,7 +10,7 @@ const goApp = vi.hoisted(() => ({
   TestSSHConnection: vi.fn(),
 }));
 
-vi.mock("../../wailsjs/go/main/App", () => goApp);
+vi.mock("../../wailsjs/go/app/App", () => goApp);
 
 class MemoryStorage {
   private values = new Map<string, string>();

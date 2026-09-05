@@ -9,7 +9,7 @@ import {
   SelectConfigSourceExportDirectory,
   SelectLocalSnapshotDirectory,
   ValidateLocalSnapshotDirectory,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import type { ProxySettings } from "../store/settings";
 import type { ConfigItem } from "./nacos";
 

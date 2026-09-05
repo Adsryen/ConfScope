@@ -3,6 +3,9 @@ package main
 import (
 	"embed"
 
+	"confscope/internal/app"
+	"confscope/internal/portabledata"
+
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -16,16 +19,16 @@ var assets embed.FS
 
 // main 启动 Wails 桌面应用并绑定 Go 后端服务。
 func main() {
-	app := NewApp()
-	webviewDataPath, err := preparePortableWebviewData()
+	appInstance := app.NewApp()
+	webviewDataPath, err := portabledata.PrepareWebviewData()
 	if err != nil {
 		println("Prepare portable data error:", err.Error())
 	}
-	if _, err := preparePortableSnapshotData(); err != nil {
-		println("Prepare portable snapshot data error:", err.Error())
+	if _, err := portabledata.PrepareSnapshotData(); err != nil {
+		println("Prepare portable snapshot data error:", err)
 	}
-	if _, err := preparePortableAppDataRecoveryPointData(); err != nil {
-		println("Prepare portable app data recovery point data error:", err.Error())
+	if _, err := portabledata.PrepareAppDataRecoveryPointData(); err != nil {
+		println("Prepare portable app data recovery point error:", err)
 	}
 
 	err = wails.Run(&options.App{
@@ -41,10 +44,10 @@ func main() {
 		Windows: &windows.Options{
 			WebviewUserDataPath: webviewDataPath,
 		},
-		OnStartup:  app.startup,
-		OnShutdown: app.shutdown,
+		OnStartup:  appInstance.Startup,
+		OnShutdown: appInstance.Shutdown,
 		Bind: []interface{}{
-			app,
+			appInstance,
 		},
 	})
 	if err != nil {
