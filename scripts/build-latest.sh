@@ -2,9 +2,10 @@
 # build-latest.sh — 一键用最新代码重编 ConfScope（Linux / WSL）
 #
 # 用法:
-#   scripts/build-latest.sh             # 安装依赖 + 构建前端(含生产守卫) + wails build
-#   scripts/build-latest.sh --launch    # 构建后启动（默认数据目录 portable/ConfScopeData）
-#   scripts/build-latest.sh --clean     # 先删除 node_modules 再重装（Windows 侧构建后链接损坏时用）
+#   scripts/build-latest.sh                 # 安装依赖 + 构建前端(含生产守卫) + wails build
+#   scripts/build-latest.sh --skip-frontend # 快速编译：跳过前端构建，仅重编 Go 侧（仅改 Go 代码时用）
+#   scripts/build-latest.sh --launch        # 构建后启动（默认数据目录 portable/ConfScopeData）
+#   scripts/build-latest.sh --clean         # 先删除 node_modules 再重装（Windows 侧构建后链接损坏时用）
 #
 # 说明:
 #   - 前端构建链路为 pnpm build:web && pnpm check:bundle，
@@ -20,13 +21,16 @@ cd "$(dirname "$0")/.."
 
 LAUNCH=0
 CLEAN=0
+SKIP_FRONTEND=0
 for arg in "$@"; do
   case "$arg" in
     --launch) LAUNCH=1 ;;
     --clean) CLEAN=1 ;;
-    *) echo "未知参数: $arg（支持 --launch / --clean）" >&2; exit 2 ;;
+    --skip-frontend) SKIP_FRONTEND=1 ;;
+    *) echo "未知参数: $arg（支持 --skip-frontend / --launch / --clean）" >&2; exit 2 ;;
   esac
 done
+START_SECONDS=$SECONDS
 
 # 1) Go：优先 /usr/local/go（>=1.25），其次 PATH 上的 go
 if [ -x /usr/local/go/bin/go ]; then
@@ -65,13 +69,19 @@ echo ">> 安装依赖 (pnpm install) ..."
 pnpm install --frozen-lockfile
 
 # 4) 构建（frontend:build 内含生产守卫 check:bundle）
-echo ">> wails build ..."
-wails build
+if [ "$SKIP_FRONTEND" -eq 1 ]; then
+  [ -d dist ] || { echo "错误: 未找到 dist/，请先完整构建一次（不加 --skip-frontend）。" >&2; exit 1; }
+  echo ">> wails build -s（快速编译：复用现有前端 dist，仅重编 Go 侧）..."
+  wails build -s
+else
+  echo ">> wails build ..."
+  wails build
+fi
 
 BIN="build/bin/ConfScope"
 [ -x "$BIN" ] || { echo "错误: 未找到产物 $BIN" >&2; exit 1; }
 echo ""
-echo "构建完成: $BIN ($(stat -c '%y' "$BIN" | cut -d. -f1))"
+echo "构建完成: $BIN（耗时 ${SECONDS}s）"
 echo "直接运行: ./$BIN   （数据目录: exe 旁 ConfScopeData，或 CONFSCOPE_DATA_DIR 指定）"
 
 if [ "$LAUNCH" -eq 1 ]; then
