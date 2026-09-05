@@ -1,5 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, RETEST_AUDIT_FILE } from "./retestBinding";
+import { createRetestInvoke, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -63,6 +64,16 @@ const WAILS_METHODS = [
 ] as const;
 
 export async function installRetestBridge(page: Page, state: RetestState): Promise<void> {
+  // 审计落盘恢复（node 侧）：retestBinding 为浏览器兼容不再直接 import node:fs，
+  // 改由本 node 专属文件注入 sink，写回 /tmp 的 audit-trail.jsonl（只追加）。
+  setRetestAuditLineSink((line) => {
+    try {
+      mkdirSync(RETEST_AUDIT_DIR, { recursive: true });
+      appendFileSync(RETEST_AUDIT_FILE, `${line.replace(/\n/g, " ")}\n`, "utf8");
+    } catch {
+      // 审计失败不阻断主流程
+    }
+  });
   // vite 5 对 tests/** 下文件只做 mtime 缓存失效（不校验内容 hash），同文件覆盖写后
   // 浏览器端可能拿到旧变换 → 先用 bust URL 强制重新取变换（见 ui.ts bumpRetestBridgeBust）。
   await bumpRetestBridgeBust(page);

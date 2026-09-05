@@ -84,8 +84,17 @@ export const RETEST_AUDIT_DIR = "/tmp/confscope-retest/audit";
 export const RETEST_AUDIT_FILE = `${RETEST_AUDIT_DIR}/audit-trail.jsonl`;
 const auditSessions = new Map<string, { kind: string; status: string }>();
 const auditLines: string[] = [];
+let auditLineSink: ((line: string) => void) | null = null;
+
+/** node 侧落盘回调（由 installRetestBridge 注入）；
+ * 浏览器内联桥环境无 node:fs（见 e12e4f7 的浏览器兼容改造），审计仅日志。 */
+export function setRetestAuditLineSink(sink: ((line: string) => void) | null): void {
+  auditLineSink = sink;
+}
 function appendAuditEventNode(raw: string): void {
+  auditLines.push(raw);
   bridgeLog("audit", raw.slice(0, 400));
+  auditLineSink?.(raw);
 }
 
 /** 进程级共享的发布时间戳（key: `${baseUrl}|${ns}|${group}|${dataId}`，value: 毫秒）。
