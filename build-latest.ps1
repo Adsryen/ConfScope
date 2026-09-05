@@ -10,7 +10,7 @@ build-latest.ps1 — 一键用最新代码重编 ConfScope.exe（Windows）
   - 前端构建链路为 pnpm build:web && pnpm check:bundle，
     生产 bundle 含 retest/manual-bridge 脚手架时构建直接失败。
   - 产物: build\bin\ConfScope.exe（桌面快捷方式指向同一文件，重编即生效）。
-  - 数据目录: portable\ConfScopeData（由 scripts\launch-confscope-portable.vbs 注入）。
+  - 数据目录: portable\ConfScopeData（经 CONFSCOPE_DATA_DIR 环境变量注入；Windows 可用本地启动脚本）。
   - 若在 WSL/Linux 侧运行过 build-latest.sh，Windows 侧 node_modules 可能损坏，
     报 EACCES/ENOENT 时加 -ForceClean 重试。
 #>
