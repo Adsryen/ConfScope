@@ -3,7 +3,7 @@ import type { Connection } from "../store/connections";
 import type { ConfigDocument } from "../api/nacos";
 import type { OperationRecord } from "../store/operationHistory";
 import type { Task, TaskManager } from "./taskmanager";
-import { buildApplyPlan, type ApplyPlan, type ApplyPlanEndpoint, type BuildApplyPlanInput } from "./applyPlan";
+import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type ApplyPlanEndpoint, type ApplyPlanRef, type BuildApplyPlanInput } from "./applyPlan";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "./applyPlanExecution";
 
 const baseConnection: Connection = {
@@ -734,5 +734,98 @@ describe("executeApplyPlan", () => {
     expect(runDeps.deleteConfigRef).not.toHaveBeenCalled();
     expect(runDeps.recordOperation).not.toHaveBeenCalled();
     expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", true);
+  });
+});
+
+
+describe("content-replace 风格计划（source override + 原文基线指纹）", () => {
+  const devRef: ApplyPlanRef = {
+    provider: "nacos",
+    connectionId: "conn-dev",
+    namespace: "public",
+    group: "DEFAULT_GROUP",
+    dataId: "app.yaml",
+    key: "__document",
+  };
+  const ORIGINAL = "server:\n  port: 8080";
+  const REPLACED = "server:\n  port: 9090";
+  const baselineFingerprint = fingerprintApplyPlanValue(devRef, {
+    exists: true,
+    value: ORIGINAL,
+    valueType: "text",
+    format: "YAML",
+    parseStatus: "ok",
+  });
+
+  /** 模拟 buildApplyPlanFromEntry 对内容替换条目的产物：sourceValue=替换后 override，sourceFingerprint=原文基线。 */
+  function contentReplacePlan(targetConnectionId: "conn-dev" | "conn-prod"): ApplyPlan {
+    const targetConn = targetConnectionId === "conn-dev" ? sourceConnection : targetConnection;
+    const targetLabel = targetConnectionId === "conn-dev" ? "Dev / public" : "Prod / public";
+    return buildApplyPlan({
+      id: "plan-cr-1",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "batch",
+      source: planEndpoint(sourceConnection, "Dev / public"),
+      target: planEndpoint(targetConn, targetLabel),
+      inputSummary: {
+        sourceType: "manual",
+        scope: "batch",
+        sourceLabel: "Dev / public",
+        targetLabel,
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: { ...devRef, connectionId: targetConnectionId },
+          sourceRef: devRef,
+          sourceValue: { exists: true, value: REPLACED, valueType: "text", format: "YAML", parseStatus: "ok", content: REPLACED },
+          targetValue: documentValue(ORIGINAL),
+          sourceFingerprint: baselineFingerprint,
+        },
+      ],
+    });
+  }
+
+  it("来源文档未变时执行成功，发布替换后内容", async () => {
+    const plan = contentReplacePlan("conn-prod");
+    const runDeps = deps({
+      "conn-dev:app.yaml": doc(ORIGINAL),
+      "conn-prod:app.yaml": doc(ORIGINAL),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.publishConfig).toHaveBeenCalledWith(targetConnection, "public", "app.yaml", "DEFAULT_GROUP", REPLACED, "yaml");
+    expect(runDeps.createBackupSnapshot).toHaveBeenCalled();
+  });
+
+  it("来源文档在计划生成后被改动时报 source stale 且不写入", async () => {
+    const plan = contentReplacePlan("conn-prod");
+    const runDeps = deps({
+      "conn-dev:app.yaml": doc("server:\n  port: 9999"),
+      "conn-prod:app.yaml": doc(ORIGINAL),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("stale") });
+    if (result.ok) throw new Error("expected execution to fail");
+    expect(result.error).toContain("/source");
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("来源与目标为同一连接时原地执行成功（issue #2 场景）", async () => {
+    const plan = contentReplacePlan("conn-dev");
+    const runDeps = deps({
+      "conn-dev:app.yaml": doc(ORIGINAL),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(runDeps.publishConfig).toHaveBeenCalledWith(sourceConnection, "public", "app.yaml", "DEFAULT_GROUP", REPLACED, "yaml");
+    expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
   });
 });

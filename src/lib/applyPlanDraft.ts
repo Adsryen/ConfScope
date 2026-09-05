@@ -274,6 +274,10 @@ async function buildPlanItems(
         targetRef: plannedTargetRef,
         sourceValue: item.sourceValueOverride ?? enrichedSourceValue,
         targetValue: enrichedTargetValue,
+        // 物化 override（内容替换/批量合并）代表"替换意图"，其指纹不能当 freshness 基线：
+        // 执行期重读来源仍是替换前原文，绑定 override 必然误判 stale。
+        // 基线用构建计划时实时读到的原始来源文档指纹（原文未变→可执行；被改过→stale）。
+        ...(item.sourceValueOverride ? { sourceFingerprint: enrichedSourceValue.fingerprint } : {}),
       });
     } catch (error) {
       return errorText(error);
