@@ -43,7 +43,7 @@ server:
 # ---- 上游服务列表（顺序即优先级, 故障时按序切换）----
 upstreams:
   - name: user-service
-    url: http://10.0.1.11:9001
+    url: http://192.0.2.11:9001
     # 连接池
     pool:
       max: 50
@@ -53,7 +53,7 @@ upstreams:
       failure-ratio: 0.5
       window-size: 10
   - name: order-service
-    url: http://10.0.1.12:9002
+    url: http://192.0.2.12:9002
     pool:
       max: 30
       idle-timeout: 120
@@ -118,7 +118,7 @@ B_YAML_GW = """# =============================================================
 upstreams:
   # 生产连接池更大
   - name: user-service
-    url: http://10.0.2.11:9001
+    url: http://192.0.2.21:9001
     pool:
       max: 200
       idle-timeout: 30
@@ -126,7 +126,7 @@ upstreams:
       failure-ratio: 0.2
       window-size: 30
   - name: order-service
-    url: http://10.0.2.12:9002
+    url: http://192.0.2.22:9002
     pool:
       max: 100
       idle-timeout: 60
@@ -135,7 +135,7 @@ upstreams:
       window-size: 30
   # 生产多一个库存服务
   - name: inventory-service
-    url: http://10.0.2.13:9003
+    url: http://192.0.2.23:9003
     pool:
       max: 50
       idle-timeout: 60
