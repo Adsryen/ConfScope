@@ -1,2 +1,6 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# 统一使用 LF 换行符：提交时一律规范化为 LF，检出时各平台均写 LF，
+# 避免 Windows/WSL 混合开发时 CRLF 反复污染提交。
+* text=auto eol=lf
+
+# 例外：Windows PowerShell 5.1 对 LF-only 的 .ps1 解析有兼容性问题，脚本保留 CRLF。
+*.ps1 text eol=crlf
