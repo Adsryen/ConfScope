@@ -96,3 +96,13 @@ results/
 /public/manual-bridge-*.js
 scripts/retest-data/generated/
 scripts/retest-data/__pycache__/
+
+# 复测运行产物（Playwright 输出）
+tests/retest/results-run/
+
+# 复测 SSH 测试密钥（本地自生成，禁止提交）
+/tests/retest/ssh-keys/id_ed25519
+/tests/retest/ssh-keys/id_ed25519.pub
+
+# 本机便携启动脚本（含个人路径，仅本地保留）
+/scripts/launch-confscope-portable.vbs
