@@ -340,9 +340,9 @@ async function chooseSourceBEnvironment(page: Page, environment: string) {
 }
 
 async function confirmProtectedApply(page: Page) {
-  const text = (await page.locator(".apply-confirmation-code").textContent())?.trim();
-  expect(text).toBeTruthy();
-  await page.getByLabel("Confirmation text").fill(text || "");
+  // 生产强确认只需输入固定关键字 APPLY（容忍大小写与首尾空格）
+  await page.getByLabel("Production confirmation").fill("APPLY");
+  await expect(page.getByText("✓ Execution conditions met")).toBeVisible();
 }
 
 test("diff to sandbox, promote to production, then rollback through ApplyPlan-only writes", async ({ page }) => {
@@ -356,9 +356,9 @@ test("diff to sandbox, promote to production, then rollback through ApplyPlan-on
   await expect(page.getByText("Generated 1 file comparisons")).toBeVisible();
   await page.getByRole("button", { name: "Generate Batch Apply Plan" }).click();
 
-  await expect(page.getByRole("button", { name: "Execute apply" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Execute change" })).toBeVisible();
   await page.getByLabel("I reviewed this dry-run plan and understand it will write to the target.").check();
-  await page.getByRole("button", { name: "Execute apply" }).click();
+  await page.getByRole("button", { name: "Execute change" }).click();
   await waitForApplyWriteCount(page, 1);
 
   await page.getByRole("button", { name: "Operation History" }).click();
@@ -370,7 +370,7 @@ test("diff to sandbox, promote to production, then rollback through ApplyPlan-on
   await page.getByRole("button", { name: "Promote to selected target" }).click();
 
   await confirmProtectedApply(page);
-  await page.getByRole("button", { name: "Execute apply" }).click();
+  await page.getByRole("button", { name: "Execute change" }).click();
   await waitForApplyWriteCount(page, 2);
 
   await page.getByRole("button", { name: "Operation History" }).click();
@@ -379,7 +379,7 @@ test("diff to sandbox, promote to production, then rollback through ApplyPlan-on
   await page.getByRole("button", { name: "Generate rollback plan" }).click();
 
   await confirmProtectedApply(page);
-  await page.getByRole("button", { name: "Execute apply" }).click();
+  await page.getByRole("button", { name: "Execute change" }).click();
   await waitForApplyWriteCount(page, 3);
 
   const state = await debugState(page);

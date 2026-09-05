@@ -8,7 +8,6 @@ import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import type { Task } from "../lib/taskmanager";
 import { buildApplyPlan, type ApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
-import { applyConfirmationText } from "../lib/applyPlanExecution";
 import ApplyPlanView from "./ApplyPlanView";
 
 const draftMocks = vi.hoisted(() => ({
@@ -260,6 +259,18 @@ function renderView(entry: ApplyEntryPayload | null = entryPayload, connections:
   return { onBack };
 }
 
+/** 构造生产目标（protected）计划并 mock 草稿加载成功，返回该计划。 */
+function makeProtectedPlan(items: BuildApplyPlanInput["items"] = [item("__document", value("server.port=8080"), value("server.port=9090"))]): ApplyPlan {
+  const plan = makePlan(items, { targetId: "conn-prod", targetLabel: "Production / public" });
+  draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+    ok: true,
+    plan,
+    sourceConnection: sourceConn,
+    targetConnection: targetConn,
+  });
+  return plan;
+}
+
 describe("ApplyPlanView", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -400,7 +411,7 @@ describe("ApplyPlanView", () => {
     expect(executeButton).toBeEnabled();
   });
 
-  it("requires exact confirmation text for protected targets", async () => {
+  it("requires the APPLY keyword for protected targets and shows the blocker reason", async () => {
     const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
       targetId: "conn-prod",
       targetLabel: "Production / public",
@@ -415,14 +426,119 @@ describe("ApplyPlanView", () => {
     renderView();
 
     const executeButton = await screen.findByRole("button", { name: "Execute change" });
-    expect(screen.getByText(applyConfirmationText(plan))).toBeInTheDocument();
+    // 目标环境与计划 ID 仅作信息展示，不再要求用户输入
+    expect(screen.getByText("Target: Production / public")).toBeInTheDocument();
+    expect(screen.getByText("Plan ID: plan-preview-1")).toBeInTheDocument();
+    // 未输入确认词：按钮禁用并明确显示原因，而不是只变灰
     expect(executeButton).toBeDisabled();
+    expect(screen.getByText("Cannot execute: Type APPLY to confirm the production change")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Confirmation text"), { target: { value: "APPLY something else" } });
-    expect(executeButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Production confirmation"), { target: { value: "APPLY" } });
 
-    fireEvent.change(screen.getByLabelText("Confirmation text"), { target: { value: applyConfirmationText(plan) } });
     expect(executeButton).toBeEnabled();
+    expect(screen.getByText("✓ Execution conditions met")).toBeInTheDocument();
+  });
+
+  it("accepts the APPLY keyword with case and whitespace tolerance", async () => {
+    makeProtectedPlan();
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    const input = screen.getByLabelText("Production confirmation");
+    for (const text of ["apply", "Apply", " APPLY "]) {
+      fireEvent.change(input, { target: { value: text } });
+      expect(executeButton).toBeEnabled();
+      expect(screen.getByText("✓ Execution conditions met")).toBeInTheDocument();
+    }
+  });
+
+  it("rejects wrong confirmation words and keeps the reason visible", async () => {
+    makeProtectedPlan();
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    const input = screen.getByLabelText("Production confirmation");
+    for (const text of ["YES", "CONFIRM", "APP"]) {
+      fireEvent.change(input, { target: { value: text } });
+      expect(executeButton).toBeDisabled();
+      expect(screen.getByText("Cannot execute: Type APPLY to confirm the production change")).toBeInTheDocument();
+    }
+  });
+
+  it("explains empty selection as an execution blocker", async () => {
+    makeProtectedPlan();
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    fireEvent.click(screen.getByRole("button", { name: "Select none" }));
+
+    expect(executeButton).toBeDisabled();
+    expect(screen.getByText("Cannot execute: No change items selected")).toBeInTheDocument();
+
+    // 补上确认词后，空选择仍是独立禁用原因
+    fireEvent.change(screen.getByLabelText("Production confirmation"), { target: { value: "APPLY" } });
+    expect(executeButton).toBeDisabled();
+    expect(screen.getByText("Cannot execute: No change items selected")).toBeInTheDocument();
+  });
+
+  it("keeps blocked items unselectable so blocked presence alone does not gate execution", async () => {
+    makeProtectedPlan([
+      item("changed.key", value("from-source"), value("from-target")),
+      item("broken.key", { ...value("{"), parseStatus: "error", parseError: "bad properties" }, value("old")),
+    ]);
+    renderView();
+
+    // 阻断项勾选框禁用：选中集里进不去被阻断项，阻断项存在本身不禁用按钮
+    expect(await screen.findByText("broken.key")).toBeInTheDocument();
+    const itemChecks = document.querySelectorAll(".apply-item-check");
+    expect(itemChecks).toHaveLength(2);
+    expect(itemChecks[1]).toBeDisabled();
+
+    // 默认只选中可执行项（2 选 1），按钮按选中数显示
+    const executeButton = await screen.findByRole("button", { name: "Execute selected (1)" });
+    fireEvent.change(screen.getByLabelText("Production confirmation"), { target: { value: "APPLY" } });
+    expect(executeButton).toBeEnabled();
+  });
+
+  it("enables execution after a passing dry-run once APPLY is typed", async () => {
+    makeProtectedPlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({ ok: true, dryRun: true, taskId: "task-dry", plannedWrites: 1 });
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    fireEvent.click(screen.getByRole("button", { name: "Dry-run check" }));
+    expect(await screen.findByText("Dry-run passed. Planned writes: 1")).toBeInTheDocument();
+
+    // Dry-run 通过后仍需输入 APPLY 才能执行
+    expect(executeButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Production confirmation"), { target: { value: "APPLY" } });
+    expect(executeButton).toBeEnabled();
+
+    fireEvent.click(executeButton);
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
+    // 第二次调用是正式执行，不带 dryRun 标记
+    expect(executionMocks.executeApplyPlan.mock.calls[1][2]).not.toHaveProperty("dryRun", true);
+  });
+
+  it("explains running and already-succeeded executions as blockers", async () => {
+    makeProtectedPlan();
+    // 任务执行中：按钮禁用并显示原因（在异步执行体内捕获瞬时状态）
+    executionMocks.executeApplyPlan.mockImplementationOnce(async () => {
+      await waitFor(() =>
+        expect(screen.getByText("Cannot execute: A task is already running")).toBeInTheDocument()
+      );
+      return { ok: true, taskId: "task-1", historyId: "history-1" };
+    });
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    fireEvent.change(screen.getByLabelText("Production confirmation"), { target: { value: "APPLY" } });
+    fireEvent.click(executeButton);
+
+    // 执行成功后：当前计划不允许再次执行，并显示原因
+    expect(await screen.findByText("Change executed. Applied items: 1")).toBeInTheDocument();
+    expect(executeButton).toBeDisabled();
+    expect(screen.getByText("Cannot execute: This change plan has already executed successfully")).toBeInTheDocument();
   });
 
   it("executes the saved plan snapshot instead of recalculating from entry", async () => {

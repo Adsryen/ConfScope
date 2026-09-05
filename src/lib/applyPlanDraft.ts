@@ -274,6 +274,12 @@ async function buildPlanItems(
         targetRef: plannedTargetRef,
         sourceValue: item.sourceValueOverride ?? enrichedSourceValue,
         targetValue: enrichedTargetValue,
+        // override（批量替换等）会把 source 值替换为"替换后内容"，
+        // 但 freshness 校验的基准必须是生成计划时读到的【原始】来源值，
+        // 否则执行前重读来源与替换后内容必然不一致，计划会被误判 stale。
+        ...(item.sourceValueOverride
+          ? { sourceFingerprint: enrichedSourceValue.fingerprint ?? fingerprintApplyPlanValue(plannedSourceRef, enrichedSourceValue) }
+          : {}),
       });
     } catch (error) {
       return errorText(error);

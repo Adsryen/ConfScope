@@ -84,6 +84,17 @@ export function applyConfirmationText(plan: Pick<ApplyPlan, "id" | "target">): s
   return `APPLY ${plan.id} TO ${plan.target.label}`;
 }
 
+/** 生产确认关键字：用户只需输入这个词即可解锁执行（不再要求完整长文本）。 */
+export const APPLY_CONFIRMATION_KEYWORD = "APPLY";
+
+/**
+ * 生产确认输入校验（带容错）：忽略首尾空白（含全角空格）与大小写，
+ * 例如 "apply" / "Apply" / " APPLY " 均视为有效确认。
+ */
+export function isApplyConfirmationAccepted(text: string): boolean {
+  return text.trim().toUpperCase() === APPLY_CONFIRMATION_KEYWORD;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

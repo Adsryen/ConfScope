@@ -259,19 +259,22 @@ describe("buildApplyPlanFromEntry", () => {
     expect(item.action).toBe("overwrite");
     expect(item.sourceValue.content).toBe(mergedContent);
     expect(item.afterValue.content).toBe(mergedContent);
-    // 物化 override 自带 content：指纹按 override 全文计算（含 content），
-    // 并与快照预计算指纹一致（value.fingerprint 同值，freshness 口径统一）。
+    // 物化 override 会替换 source 值内容，但 freshness 指纹必须绑定生成计划时
+    // 读到的【原始】来源文档，否则执行前重读来源（内容未变）也会被误判 stale，
+    // 批量替换的计划将永远无法通过 dry-run（回归保护：e62ab35 曾丢失此绑定）。
     expect(item.sourceFingerprint).toBe(
       fingerprintApplyPlanValue(sourceRef, {
         exists: true,
-        value: mergedContent,
+        value: "server:\n  port: 8080",
         valueType: "text",
         format: "YAML",
         parseStatus: "ok",
-        content: mergedContent,
+        content: "server:\n  port: 8080",
+        version: "source-t1-version",
+        updateTime: "source-t1",
       })
     );
-    expect(item.sourceFingerprint).toBe(item.sourceValue.fingerprint);
+    expect(item.sourceFingerprint).not.toBe(item.sourceValue.fingerprint);
   });
 
   it("keeps a full-file diff as an overwrite when key-level values look identical but file contents differ", async () => {

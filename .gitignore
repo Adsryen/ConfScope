@@ -6,6 +6,8 @@ vendor/
 dist/
 dist-test/
 build/bin/
+# NSIS 安装器脚本与运行时为 wails build -nsis 每次生成的构建产物
+build/windows/installer/
 *.exe
 *.dll
 *.so
@@ -49,6 +51,8 @@ pnpm-debug.log*
 # Playwright
 test-results/
 playwright-report/
+# playwright-cli 会话快照（本地调试产物）
+/.playwright-cli/
 
 # Local history
 .history/

@@ -13,7 +13,7 @@ import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
-import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
+import { APPLY_CONFIRMATION_KEYWORD, executeApplyPlan, isApplyConfirmationAccepted, isProtectedApplyTarget } from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
@@ -369,14 +369,24 @@ function ConfirmationPanel({
   onDryRun: () => void;
 }) {
   const { t } = useTranslation();
-  const requiredText = applyConfirmationText(plan);
-  const ready = protectedTarget ? confirmationText === requiredText : confirmed;
+  // 生产确认只需输入固定关键字 APPLY（容错首尾空白与大小写）；
+  // planId / targetLabel 仅作信息展示与审计，不再作为输入校验内容。
+  const ready = protectedTarget ? isApplyConfirmationAccepted(confirmationText) : confirmed;
   const anyRunning = executionMode !== null;
   const dryRunDisabled = anyRunning || executionSucceeded || selectedCount === 0;
   // 执行守卫基于「已勾选且可执行」的项：存在 blocked 项本身不再全局禁用按钮，
   // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
   const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
   const executeDisabled = !ready || anyRunning || executionSucceeded || selectedCount === 0 || selectedHasBlocked;
+  // 明确列出按钮禁用原因，避免用户只看到按钮变灰却不知道缺哪个条件
+  const disabledReasons: string[] = [];
+  if (!ready) {
+    disabledReasons.push(protectedTarget ? t("apply.disabledReason.confirmation") : t("apply.disabledReason.confirmCheck"));
+  }
+  if (anyRunning) disabledReasons.push(t("apply.disabledReason.running"));
+  if (executionSucceeded) disabledReasons.push(t("apply.disabledReason.succeeded"));
+  if (selectedCount === 0) disabledReasons.push(t("apply.disabledReason.emptySelection"));
+  if (selectedHasBlocked) disabledReasons.push(t("apply.disabledReason.blockedSelection"));
   const executeLabel =
     executionMode === "apply"
       ? t("apply.executing")
@@ -402,13 +412,17 @@ function ConfirmationPanel({
           <label className="field-label" htmlFor="apply-confirmation-text">
             {t("apply.confirmationTextLabel")}
           </label>
+          <div className="field-hint">{t("apply.protectedTargetLine", { label: plan.target.label })}</div>
+          <div className="field-hint">{t("apply.protectedPlanIdLine", { id: plan.id })}</div>
           <div className="field-hint">{t("apply.protectedInstruction")}</div>
-          <code className="apply-confirmation-code">{requiredText}</code>
           <input
             id="apply-confirmation-text"
             className="search-input wide mono"
             value={confirmationText}
             onChange={(event) => onConfirmationTextChange(event.target.value)}
+            placeholder={APPLY_CONFIRMATION_KEYWORD}
+            autoComplete="off"
+            spellCheck={false}
           />
         </div>
       ) : (
@@ -417,6 +431,17 @@ function ConfirmationPanel({
           <span>{t("apply.confirmNormal")}</span>
         </label>
       )}
+      <div className={`apply-execute-gate${executeDisabled ? "" : " ok"}`} role="status">
+        {executeDisabled ? (
+          disabledReasons.map((reason) => (
+            <div key={reason} className="apply-execute-gate-item">
+              {t("apply.executeBlocked", { reason })}
+            </div>
+          ))
+        ) : (
+          <div className="apply-execute-gate-item">{"✓"} {t("apply.executeReady")}</div>
+        )}
+      </div>
       <div className="apply-confirmation-actions">
         <button className="btn btn-ghost" type="button" disabled={dryRunDisabled} onClick={onDryRun}>
           {dryRunLabel}

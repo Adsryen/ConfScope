@@ -893,7 +893,6 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           </div>
           <div className="browser-action-row">
             <div className="browse-scope-field" title={t("config.groupFilter")}>
-              <span className="browse-scope-label">{t("config.groupFilter")}</span>
               <Select
                 className="browser-group-select"
                 value={selectedGroup}

@@ -4,7 +4,13 @@ import type { ConfigDocument } from "../api/nacos";
 import type { OperationRecord } from "../store/operationHistory";
 import type { Task, TaskManager } from "./taskmanager";
 import { buildApplyPlan, type ApplyPlan, type ApplyPlanEndpoint, type BuildApplyPlanInput } from "./applyPlan";
-import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "./applyPlanExecution";
+import {
+  APPLY_CONFIRMATION_KEYWORD,
+  applyConfirmationText,
+  executeApplyPlan,
+  isApplyConfirmationAccepted,
+  isProtectedApplyTarget,
+} from "./applyPlanExecution";
 
 const baseConnection: Connection = {
   id: "conn-safe",
@@ -100,7 +106,19 @@ describe("apply plan execution confirmation helpers", () => {
     expect(applyConfirmationText(plan)).toBe("APPLY plan-confirm-1 TO Prod / public");
   });
 
+  it("accepts the APPLY keyword with case and whitespace tolerance", () => {
+    expect(APPLY_CONFIRMATION_KEYWORD).toBe("APPLY");
+    // 大小写与首尾空白（含全角空格）容错
+    for (const accepted of ["APPLY", "apply", "Apply", " APPLY ", "aPpLy", "　apply　"]) {
+      expect(isApplyConfirmationAccepted(accepted)).toBe(true);
+    }
+  });
 
+  it("rejects confirmation inputs that are not exactly the APPLY keyword", () => {
+    for (const rejected of ["", "YES", "CONFIRM", "APP", "APPLY PLAN", "APPLYX", "AP PL Y"]) {
+      expect(isApplyConfirmationAccepted(rejected)).toBe(false);
+    }
+  });
 });
 
 function planEndpoint(connection: Connection, label: string): ApplyPlanEndpoint {
