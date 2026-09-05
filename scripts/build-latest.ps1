@@ -2,9 +2,9 @@
 build-latest.ps1 — 一键用最新代码重编 ConfScope.exe（Windows）
 
 用法:
-  .\build-latest.ps1              # 安装依赖 + 构建前端(含生产守卫) + wails build
-  .\build-latest.ps1 -Launch      # 构建后用 portable\ConfScopeData 数据目录启动应用
-  .\build-latest.ps1 -ForceClean  # 先删除 node_modules 再重装（Linux 侧构建后链接损坏时用）
+  scripts\build-latest.ps1              # 安装依赖 + 构建前端(含生产守卫) + wails build
+  scripts\build-latest.ps1 -Launch      # 构建后用 portable\ConfScopeData 数据目录启动应用
+  scripts\build-latest.ps1 -ForceClean  # 先删除 node_modules 再重装（Linux 侧构建后链接损坏时用）
 
 说明:
   - 前端构建链路为 pnpm build:web && pnpm check:bundle，
@@ -19,7 +19,7 @@ param(
   [switch]$ForceClean
 )
 $ErrorActionPreference = "Stop"
-Set-Location -LiteralPath $PSScriptRoot
+Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 $env:CI = "true"
 
 if ($ForceClean) {
@@ -35,7 +35,7 @@ Write-Host ">> 构建前端 + 生产守卫 + wails build ..." -ForegroundColor C
 wails build
 if ($LASTEXITCODE -ne 0) { throw "wails build 失败（生产守卫失败时会在此中断）" }
 
-$exe = Join-Path $PSScriptRoot "build\bin\ConfScope.exe"
+$exe = Join-Path (Split-Path -Parent $PSScriptRoot) "build\bin\ConfScope.exe"
 if (-not (Test-Path $exe)) { throw "未找到产物 $exe" }
 $stamp = (Get-Item $exe).LastWriteTime
 Write-Host ""
@@ -43,11 +43,11 @@ Write-Host "构建完成: $exe" -ForegroundColor Green
 Write-Host "构建时间: $stamp"
 
 if ($Launch) {
-  $dataDir = Join-Path $PSScriptRoot "portable\ConfScopeData"
+  $dataDir = Join-Path (Split-Path -Parent $PSScriptRoot) "portable\ConfScopeData"
   if (-not (Test-Path $dataDir)) { throw "数据目录不存在: $dataDir" }
   $env:CONFSCOPE_DATA_DIR = $dataDir
   Start-Process -FilePath $exe
   Write-Host "已启动应用（数据目录: $dataDir）" -ForegroundColor Green
 } else {
-  Write-Host "启动方式: 桌面快捷方式，或 .\build-latest.ps1 -Launch"
+  Write-Host "启动方式: 桌面快捷方式，或 scripts\build-latest.ps1 -Launch"
 }

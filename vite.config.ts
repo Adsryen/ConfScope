@@ -69,6 +69,6 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, "e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", "tests/retest/specs/**", "tests/smoke/bridge/**", "tests/smoke/global-teardown.test.ts", "tests/smoke/native/global-setup.test.ts", "tests/smoke/native/global-teardown.test.ts", ".tmp/**"],
+    exclude: [...configDefaults.exclude, "tests/e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", "tests/retest/specs/**", "tests/smoke/bridge/**", "tests/smoke/global-teardown.test.ts", "tests/smoke/native/global-setup.test.ts", "tests/smoke/native/global-teardown.test.ts", ".tmp/**"],
   },
 });

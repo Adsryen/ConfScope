@@ -2,9 +2,9 @@
 # build-latest.sh — 一键用最新代码重编 ConfScope（Linux / WSL）
 #
 # 用法:
-#   ./build-latest.sh             # 安装依赖 + 构建前端(含生产守卫) + wails build
-#   ./build-latest.sh --launch    # 构建后启动（默认数据目录 portable/ConfScopeData）
-#   ./build-latest.sh --clean     # 先删除 node_modules 再重装（Windows 侧构建后链接损坏时用）
+#   scripts/build-latest.sh             # 安装依赖 + 构建前端(含生产守卫) + wails build
+#   scripts/build-latest.sh --launch    # 构建后启动（默认数据目录 portable/ConfScopeData）
+#   scripts/build-latest.sh --clean     # 先删除 node_modules 再重装（Windows 侧构建后链接损坏时用）
 #
 # 说明:
 #   - 前端构建链路为 pnpm build:web && pnpm check:bundle，
@@ -16,7 +16,7 @@
 #   - 若在 Windows 侧运行过 build-latest.ps1，本侧 node_modules 可能损坏，
 #     报错时加 --clean 重试。
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 LAUNCH=0
 CLEAN=0
