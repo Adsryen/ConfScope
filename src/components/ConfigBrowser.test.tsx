@@ -351,6 +351,59 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
+  it("allows the source connection itself as an apply target (in-place batch replace)", async () => {
+    const sourceConn: Connection = { ...conn, projectName: "订单", environmentName: "Development", sourceName: "云上" };
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([{ dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }])
+    );
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: "gateway:\n  host: dev.internal\n",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    });
+
+    renderBrowser("zh-CN", sourceConn, "public", { connections: [sourceConn], onStartApply });
+
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "dev.internal" } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "批量替换" }));
+    fireEvent.change(screen.getByLabelText("替换为"), { target: { value: "local.internal" } });
+    expect(screen.getByText("将影响 1 个配置，共 1 处替换")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "选择应用目标" }));
+
+    // 目标下拉里应出现来源连接本身，并带"来源"标记
+    await screen.findByText("当前来源");
+    const field = screen.getByText("目标来源").closest(".field") as HTMLElement;
+    fireEvent.click(field.querySelector("button") as HTMLButtonElement);
+    const option = await screen.findAllByText(/订单 \/ Development \/ 云上 · 来源/);
+    expect(option.some((el) => el.classList.contains("sel-option"))).toBe(true);
+
+    // 默认选中唯一候选（来源连接）即可生成计划：target.connectionId === 来源
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划（1 项）" }));
+    expect(onStartApply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: "manual",
+        scope: "batch",
+        source: expect.objectContaining({ connectionId: "dev" }),
+        target: expect.objectContaining({ connectionId: "dev", namespace: "public" }),
+        items: [
+          expect.objectContaining({
+            sourceValueOverride: expect.objectContaining({ content: "gateway:\n  host: local.internal\n" }),
+          }),
+        ],
+      })
+    );
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+  });
+
   it("searches content across every config-list page", async () => {
     apiMocks.listConfigs.mockImplementation(async (_conn: Connection, _tenant: string, _dataId: string, _group: string, page: number) => ({
       totalCount: 2,

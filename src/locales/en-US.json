@@ -638,6 +638,7 @@
     "targetNamespace": "Target namespace",
     "noApplyTarget": "No writable target in this project",
     "sandboxDefault": "Default sandbox",
+    "sourceDefault": "Source",
     "applyPlanRequired": "A change plan is generated first. Every target needs confirmation; UAT and production require typed confirmation.",
     "generateApplyPlan": "Generate change plan ({count})",
     "refresh": "Refresh list",

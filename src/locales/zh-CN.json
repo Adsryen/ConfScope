@@ -638,6 +638,7 @@
     "targetNamespace": "目标命名空间",
     "noApplyTarget": "没有可写入的同项目目标",
     "sandboxDefault": "默认沙箱",
+    "sourceDefault": "来源",
     "applyPlanRequired": "将先生成变更计划；所有环境都需确认，UAT 和生产还需输入强确认文本。",
     "generateApplyPlan": "生成变更计划（{count} 项）",
     "refresh": "刷新列表",

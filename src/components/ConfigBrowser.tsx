@@ -178,7 +178,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       connections
         .filter(
           (candidate) =>
-            connectionProjectName(candidate) === connectionProjectName(conn) && candidate.id !== conn.id && isWritableTarget(candidate)
+            connectionProjectName(candidate) === connectionProjectName(conn) && isWritableTarget(candidate)
         )
         .sort(
           (left, right) =>
@@ -1235,7 +1235,13 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   placeholder={t("config.noApplyTarget")}
                   options={targetConnections.map((candidate) => ({
                     value: candidate.id,
-                    label: `${connectionDisplayLabel(candidate)}${isSandboxEnvironment(candidate) ? ` · ${t("config.sandboxDefault")}` : ""}`,
+                    label: `${connectionDisplayLabel(candidate)}${
+                      candidate.id === conn.id
+                        ? ` · ${t("config.sourceDefault")}`
+                        : isSandboxEnvironment(candidate)
+                          ? ` · ${t("config.sandboxDefault")}`
+                          : ""
+                    }`,
                   }))}
                   onChange={setTargetConnectionId}
                 />
