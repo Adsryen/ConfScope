@@ -21,9 +21,15 @@ $resolvedDataDir = (Resolve-Path -LiteralPath $DataDir).Path
 if (-not $SkipBackup) {
   $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
   $backupRoot = Join-Path $repo "local-backups\before-dev-portable-data-$timestamp"
-  New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
-  Copy-Item -LiteralPath $resolvedDataDir -Destination (Join-Path $backupRoot "ConfScopeData") -Recurse -Force
-  Write-Host "Data backup created: $backupRoot"
+  $backupDest = Join-Path $backupRoot "ConfScopeData"
+  # 数据目录含 WebView2 深层缓存树（如 EBWebView\component_crx_cache\<64位哈希>），
+  # 拼上备份前缀后会超过 Windows MAX_PATH(260)，Copy-Item 直接 DirectoryNotFound；
+  # robocopy 走 Win32 长路径无此限制，备份一律用 robocopy（退出码 >=8 才算失败）。
+  $null = robocopy $resolvedDataDir $backupDest /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+  if ($LASTEXITCODE -ge 8) {
+    throw "robocopy backup failed (exit code $LASTEXITCODE): $resolvedDataDir -> $backupDest"
+  }
+  Write-Host "Data backup created: $backupDest"
 }
 
 $env:CONFSCOPE_DATA_DIR = $resolvedDataDir
