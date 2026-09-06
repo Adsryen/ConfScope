@@ -124,21 +124,27 @@ describe("DiffView", () => {
       </I18nProvider>
     );
 
-    expect(screen.getByText("Configuration compare workflow")).toBeInTheDocument();
+    // 顶栏极简进度条：五步 + 当前高亮，不可点击（进度指示不与 tab 语义混淆）
+    const workflow = screen.getByRole("navigation", { name: "Configuration compare workflow" });
+    expect(workflow.querySelectorAll(".diff-workflow-step")).toHaveLength(5);
     const direction = screen.getByLabelText("Apply direction");
     expect(direction.querySelector(".diff-source-direction-label")).not.toBeInTheDocument();
     // 应用方向箭头是一个可点击的按钮：对比完成前点击只提示先加载
     expect(direction).toBeInstanceOf(HTMLButtonElement);
     expect(direction).toHaveTextContent("→");
-    expect(screen.getByText("Current: Confirm direction")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Confirm direction/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Select changes/ })).toBeInTheDocument();
-    expect(screen.getByText(/confirmation is required before writing to the right target/)).toBeInTheDocument();
+    expect(screen.getByText("Confirm direction")).toBeInTheDocument();
+    expect(screen.getByText("Select changes")).toBeInTheDocument();
+    expect(screen.getByText("Execute, verify, and promote")).toBeInTheDocument();
+    const currentStep = document.querySelector(".diff-workflow-step.current");
+    expect(currentStep).toHaveAttribute("aria-current", "step");
+    expect(currentStep).toHaveTextContent("Confirm direction");
+    expect(currentStep?.querySelector("button")).not.toBeInTheDocument();
+    // 步骤说明改为 hover 气泡（title），安全文案保留在气泡内
+    const planStep = screen.getByText("Generate & review plan (dry-run, no writes)").closest("li");
+    expect(planStep).toHaveAttribute("title", expect.stringContaining("the right-side target is NOT modified at this point"));
+    const verifyStep = screen.getByText("Execute, verify, and promote").closest("li");
+    expect(verifyStep).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
     expect(screen.getByText(/To use a sandbox/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Execute, verify, and promote/ }));
-    expect(screen.getByText("Step details: Execute, verify, and promote")).toBeInTheDocument();
-    expect(screen.getByText(/After sandbox verification/)).toBeInTheDocument();
   });
 
   it("restores the last compared sources and mode from localStorage", async () => {
@@ -777,8 +783,9 @@ describe("DiffView", () => {
 
     expect(await screen.findByText("8080")).toBeInTheDocument();
     expect(await screen.findByText("9090")).toBeInTheDocument();
-    expect(screen.getByText("Current: Select changes")).toBeInTheDocument();
-    expect(document.querySelector(".diff-workflow-step.current")).toHaveTextContent("Select changes");
+    const currentWorkflowStep = document.querySelector(".diff-workflow-step.current");
+    expect(currentWorkflowStep).toHaveAttribute("aria-current", "step");
+    expect(currentWorkflowStep).toHaveTextContent("Select changes");
 
     fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan" }));
 

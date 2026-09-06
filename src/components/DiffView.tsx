@@ -716,7 +716,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [mergeSelectionScope, setMergeSelectionScope] = useState<MergeSelectionScope>("block");
   const [notice, setNotice] = useState<string | null>(null);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
-  const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
   const sourcesRef = useRef<HTMLDivElement>(null);
@@ -1576,6 +1575,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           <h3>{t("app.diff")}</h3>
           <div className="page-subtitle">{t("diff.pageSubtitle")}</div>
         </div>
+        <DiffWorkflowCard currentStep={currentWorkflowStep} />
         <div className="page-actions">
           <label className="diff-project-select">
             <span>{t("connection.project")}</span>
@@ -1585,8 +1585,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       </div>
 
       <div className="diff-workspace">
-        <DiffWorkflowCard currentStep={currentWorkflowStep} detailStep={workflowDetailStep} onDetailStepChange={setWorkflowDetailStep} />
-
         <div className="diff-main-column">
           <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
             <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>

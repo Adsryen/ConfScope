@@ -2231,7 +2231,7 @@ button,
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
 }
@@ -2248,202 +2248,77 @@ button,
 }
 
 .diff-workflow-card {
-  align-self: stretch;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)), var(--bg2);
-  overflow: hidden;
-}
-
-.diff-workflow-head {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.diff-workflow-title-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  min-width: 0;
-}
-
-.diff-workflow-title {
-  color: var(--text-hi);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.diff-workflow-current {
-  display: inline-flex;
   align-items: center;
-  max-width: 100%;
-  padding: 3px 7px;
-  border: 1px solid rgba(79, 195, 247, 0.28);
-  border-radius: 5px;
-  background: rgba(79, 195, 247, 0.08);
-  color: #9ad7ff;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.diff-workflow-safety,
-.diff-workflow-note {
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.5;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .diff-workflow-steps {
-  counter-reset: diff-step;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
+  min-width: 0;
 }
 
-.diff-workflow-steps li {
-  counter-increment: diff-step;
+.diff-workflow-step {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  color: var(--text);
-  font-size: 12px;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
-.diff-workflow-step button {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  grid-template-areas:
-    "mark status"
-    "mark label";
-  align-items: center;
-  column-gap: 8px;
-  min-height: 42px;
-  padding: 6px 8px 6px 6px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease;
+.diff-workflow-steps li + li::before {
+  content: "";
+  width: 12px;
+  height: 1px;
+  margin: 0 4px;
+  background: var(--border);
 }
 
-.diff-workflow-step button:hover,
-.diff-workflow-step.focused button {
-  border-color: rgba(79, 195, 247, 0.3);
-  background: rgba(79, 195, 247, 0.08);
-  color: var(--text-hi);
-}
-
-.diff-workflow-step.current button {
-  border-color: rgba(79, 195, 247, 0.42);
-  background: linear-gradient(90deg, rgba(79, 195, 247, 0.15), rgba(79, 195, 247, 0.035));
-  box-shadow: inset 3px 0 0 var(--accent);
-  color: var(--text-hi);
-}
-
-.diff-workflow-step.completed button {
-  color: var(--text);
-}
-
-.diff-workflow-step button::before {
-  content: counter(diff-step);
-  grid-area: mark;
+.diff-workflow-step-mark {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-hi);
-  font-size: 11px;
+  color: var(--text-dim);
+  font-size: 10px;
   font-weight: 700;
 }
 
-.diff-workflow-step.completed button::before {
-  content: "✓";
-  border-color: rgba(34, 197, 94, 0.38);
-  background: rgba(34, 197, 94, 0.1);
+.diff-workflow-step-label {
+  font-weight: 600;
+}
+
+.diff-workflow-step.completed .diff-workflow-step-mark {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.12);
   color: #86efac;
 }
 
-.diff-workflow-step.current button::before {
-  border-color: rgba(79, 195, 247, 0.78);
+.diff-workflow-step.current {
+  color: var(--text-hi);
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.diff-workflow-step.current .diff-workflow-step-mark {
+  border-color: rgba(79, 195, 247, 0.8);
   background: var(--accent);
   color: #071016;
 }
 
-.diff-workflow-step-status {
-  grid-area: status;
-  min-width: 0;
-  color: var(--text-dim);
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.diff-workflow-step.current .diff-workflow-step-status {
-  color: #bfdbfe;
-}
-
-.diff-workflow-step-label {
-  grid-area: label;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.diff-workflow-steps li:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  left: 17px;
-  top: 36px;
-  bottom: -12px;
-  width: 1px;
-  background: var(--border);
-  pointer-events: none;
-}
-
-.diff-workflow-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 9px 10px;
-  border: 1px solid rgba(79, 195, 247, 0.16);
-  border-radius: 6px;
-  background: rgba(79, 195, 247, 0.055);
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-.diff-workflow-detail-title {
-  color: var(--text-hi);
-  font-weight: 700;
-}
 
 @media (max-width: 980px) {
   .diff-workspace {
@@ -2456,26 +2331,6 @@ button,
     overflow: visible;
   }
 
-  .diff-workflow-card {
-    flex-shrink: 0;
-  }
-
-  .diff-workflow-head {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .diff-workflow-title-wrap {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .diff-workflow-steps {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
 
   .diff-sources {
     grid-template-columns: 1fr;
@@ -2491,10 +2346,10 @@ button,
   }
 
   .diff-workflow-step {
-    flex: 1 1 150px;
+    padding: 3px 5px;
   }
 
-  .diff-workflow-steps li:not(:last-child)::after {
+  .diff-workflow-step-label {
     display: none;
   }
 }
@@ -6476,7 +6331,7 @@ button,
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
   padding: 0 22px 18px;

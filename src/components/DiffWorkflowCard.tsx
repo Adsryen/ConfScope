@@ -8,14 +8,16 @@ export const WORKFLOW_STEP_IDS: WorkflowStepId[] = ["choose", "compare", "plan",
 interface Props {
   currentStep: WorkflowStepId;
   completed?: boolean;
-  detailStep?: WorkflowStepId | null;
-  onDetailStepChange?: (step: WorkflowStepId) => void;
 }
 
-export default function DiffWorkflowCard({ currentStep, completed = false, detailStep, onDetailStepChange }: Props) {
+/**
+ * 极简工作流进度条（顶栏内联）：只保留五步与当前高亮。
+ * - 步骤说明放在 hover 气泡（title）里，不再常驻 detail 框。
+ * - 进度指示不可点击，避免与 tab 点击产生语义混淆。
+ */
+export default function DiffWorkflowCard({ currentStep, completed = false }: Props) {
   const { t } = useTranslation();
   const currentIndex = WORKFLOW_STEP_IDS.indexOf(currentStep);
-  const focusStep = detailStep ?? currentStep;
   const stepLabel = (step: WorkflowStepId) => t(`diff.workflowStep${WORKFLOW_STEP_IDS.indexOf(step) + 1}`);
   const stepDetail = (step: WorkflowStepId) => t(`diff.workflowStep${WORKFLOW_STEP_IDS.indexOf(step) + 1}Detail`);
   const stepStatus = (step: WorkflowStepId): WorkflowStepStatus => {
@@ -27,35 +29,25 @@ export default function DiffWorkflowCard({ currentStep, completed = false, detai
   };
 
   return (
-    <aside className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
-      <div className="diff-workflow-head">
-        <div className="diff-workflow-title-wrap">
-          <span className="diff-workflow-title">{t("diff.workflowTitle")}</span>
-          <span className="diff-workflow-current">
-            {completed ? t("diff.workflowComplete") : t("diff.workflowCurrent", { step: stepLabel(currentStep) })}
-          </span>
-        </div>
-        <span className="diff-workflow-safety">{t("diff.workflowSafety")}</span>
-      </div>
+    <nav className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
       <ol className="diff-workflow-steps">
-        {WORKFLOW_STEP_IDS.map((step) => {
+        {WORKFLOW_STEP_IDS.map((step, index) => {
           const status = stepStatus(step);
-          const label = stepLabel(step);
           return (
-            <li className={`diff-workflow-step ${status}${focusStep === step ? " focused" : ""}`} key={step}>
-              <button type="button" aria-current={status === "current" ? "step" : undefined} onClick={() => onDetailStepChange?.(step)}>
-                <span className="diff-workflow-step-status">{t(`diff.workflowStatus.${status}`)}</span>
-                <span className="diff-workflow-step-label">{label}</span>
-              </button>
+            <li
+              key={step}
+              className={`diff-workflow-step ${status}`}
+              title={`${stepLabel(step)}: ${stepDetail(step)}`}
+              aria-current={status === "current" ? "step" : undefined}
+            >
+              <span className="diff-workflow-step-mark" aria-hidden="true">
+                {status === "completed" ? "✓" : index + 1}
+              </span>
+              <span className="diff-workflow-step-label">{stepLabel(step)}</span>
             </li>
           );
         })}
       </ol>
-      <div className="diff-workflow-detail">
-        <span className="diff-workflow-detail-title">{t("diff.workflowDetailTitle", { step: stepLabel(focusStep) })}</span>
-        <span>{stepDetail(focusStep)}</span>
-      </div>
-      <div className="diff-workflow-note">{t("diff.workflowSandbox")}</div>
-    </aside>
+    </nav>
   );
 }

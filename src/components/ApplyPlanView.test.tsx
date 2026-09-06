@@ -298,8 +298,9 @@ describe("ApplyPlanView", () => {
     renderView(entryPayload, [sourceConn, safeTargetConn]);
 
     expect(await screen.findByRole("heading", { name: "Configuration change plan" })).toBeInTheDocument();
-    expect(await screen.findByText(/Current: Generate & review plan/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Execute, verify, and promote/ })).toBeInTheDocument();
+    const planStepLabel = await screen.findByText("Generate & review plan (dry-run, no writes)");
+    expect(planStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("Execute, verify, and promote")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Execute change" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
   });
@@ -447,8 +448,10 @@ describe("ApplyPlanView", () => {
     fireEvent.click(executeButton);
 
     expect(await screen.findAllByText("plan-saved-1")).toHaveLength(2);
-    expect(await screen.findByText("Change plan complete")).toBeInTheDocument();
+    // 计划完成后五步全部标记 completed，且不再有当前高亮
     expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(5);
+    expect(document.querySelectorAll(".diff-workflow-step-mark")).toHaveLength(5);
+    expect(document.querySelector(".diff-workflow-step.current")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(executionMocks.executeApplyPlan).toHaveBeenCalledWith(
         savedPlan,
@@ -616,8 +619,10 @@ describe("ApplyPlanView", () => {
     fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
     fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
 
-    expect(await screen.findByText("Current: Execute, verify, and promote")).toBeInTheDocument();
-    expect(screen.queryByText("Change plan complete")).not.toBeInTheDocument();
+    const verifyStepLabel = await screen.findByText("Execute, verify, and promote");
+    expect(verifyStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
+    // 前四步已完成，第五步仍为当前（沙箱执行后未整体完结）
+    expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(4);
   });
 
   it("includes resolved runtime source connections when executing rollback plans", async () => {

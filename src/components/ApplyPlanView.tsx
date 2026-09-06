@@ -477,7 +477,6 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [executionTask, setExecutionTask] = useState<Task | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
-  const [workflowDetailStep, setWorkflowDetailStep] = useState<WorkflowStepId | null>(null);
   const taskManager = getTaskManager();
   const trackedTaskIdRef = useRef<string | null>(null);
   // 变更会话 id：进入计划时创建，整个组件生命周期内五步事件共用
@@ -504,7 +503,6 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteNotice(null);
-    setWorkflowDetailStep(null);
     if (!entry) {
       setDraftState({ status: "idle" });
       setSelectedId("");
@@ -858,6 +856,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           <h3>{t("apply.title")}</h3>
           <div className="page-subtitle">{entry ? t("apply.subtitle") : t("apply.missingEntry")}</div>
         </div>
+        {plan && (
+          <DiffWorkflowCard currentStep={workflowCurrentStep} completed={executionCompleted} />
+        )}
         <div className="page-actions">
           <button className="btn btn-ghost" type="button" onClick={onBack}>
             {t("apply.back")}
@@ -883,12 +884,6 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
 
       {plan && (
         <div className="apply-workspace">
-          <DiffWorkflowCard
-            currentStep={workflowCurrentStep}
-            completed={executionCompleted}
-            detailStep={workflowDetailStep}
-            onDetailStepChange={setWorkflowDetailStep}
-          />
           <div className="apply-main-column">
             <div className="apply-plan-summary">
               <div className="data-info-grid">

@@ -770,16 +770,6 @@
     "workflowStep3Detail": "Select rows or blocks to bring from the left source into the right target, then enter the configuration change plan.",
     "workflowStep4Detail": "The system loads the latest content to build a dry-run plan; the right-side target is NOT modified at this point. The \"After\" column previews what the right side will look like after execution. Only step 5 (Execute) actually writes to the right side. Select the files to execute, then confirm and run.",
     "workflowStep5Detail": "After sandbox verification, go to Operation History, mark the sandbox as verified, and promote to the real target.",
-    "workflowCurrent": "Current: {step}",
-    "workflowDetailTitle": "Step details: {step}",
-    "workflowStatus": {
-      "completed": "Done",
-      "current": "Current",
-      "upcoming": "Next"
-    },
-    "workflowComplete": "Change plan complete",
-    "workflowSafety": "Step 3 carries a change draft forward; step 4 generates the plan, and confirmation is required before writing to the right target.",
-    "workflowSandbox": "Sandbox follow-up lives in Operation History: mark the sandbox as verified, then promote it to the real target.",
     "batchCompareDetailSummary": "Batch compare result: success {successCount}/{total}, failed {failCount}/{total}",
     "batchFailureList": "Failure list:",
     "batchCompareAllSuccessTitle": "Batch compare complete: {successCount}/{total} all succeeded",
