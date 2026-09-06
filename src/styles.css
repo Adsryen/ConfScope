@@ -1614,7 +1614,7 @@ button,
 }
 
 .browser-group-select {
-  flex: 1 1 160px;
+  width: 100%;
   min-width: 0;
 }
 
