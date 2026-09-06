@@ -621,8 +621,36 @@ describe("ApplyPlanView", () => {
 
     const verifyStepLabel = await screen.findByText("Execute, verify, and promote");
     expect(verifyStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
+    // 当前步的 hover 气泡含步骤说明（安全语义保留在气泡内）
+    expect(verifyStepLabel.closest("li")).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
     // 前四步已完成，第五步仍为当前（沙箱执行后未整体完结）
     expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(4);
+  });
+
+  it("stepper navigation: back steps return to diff with focus; verify locked before execution", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    const { onBack } = renderView();
+    // 计划加载完成后 stepper 出现
+    await screen.findByText("Generate & review plan (dry-run, no writes)");
+    const steps = Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
+    expect(steps).toHaveLength(5);
+    // 前三步可点（回退到对比页并携带聚焦提示）
+    expect(steps[0].querySelector("button")).toBeInTheDocument();
+    expect(steps[1].querySelector("button")).toBeInTheDocument();
+    expect(steps[2].querySelector("button")).toBeInTheDocument();
+    // 第 4 步为当前（不可点），第 5 步锁定（须先执行变更，绝不自动执行）
+    expect(steps[3].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[4].classList.contains("locked")).toBe(true);
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("Execute the change first"));
+    fireEvent.click(steps[2].querySelector("button")!);
+    expect(onBack).toHaveBeenCalledWith("plan");
+    fireEvent.click(steps[0].querySelector("button")!);
+    expect(onBack).toHaveBeenLastCalledWith("choose");
   });
 
   it("includes resolved runtime source connections when executing rollback plans", async () => {

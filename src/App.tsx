@@ -25,6 +25,7 @@ import TaskCenter from "./components/TaskCenter";
 import LogViewer from "./components/LogViewer";
 import StartupDialog from "./components/StartupDialog";
 import ApplyPlanView from "./components/ApplyPlanView";
+import type { WorkflowStepId } from "./components/DiffWorkflowCard";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
@@ -180,6 +181,8 @@ export default function App() {
   const [appVersion, setAppVersion] = useState("");
   const [startupDialog, setStartupDialog] = useState<StartupDialogKind | null>(null);
   const [pendingApplyEntry, setPendingApplyEntry] = useState<ApplyEntryPayload | null>(null);
+  // stepper 导航回退到对比页时的聚焦提示
+  const [diffFocusStep, setDiffFocusStep] = useState<WorkflowStepId | null>(null);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（AuditView → DiffView）
@@ -604,6 +607,8 @@ export default function App() {
       initialParams={diffInitialParams}
       onInitialParamsConsumed={() => setDiffInitialParams(null)}
       onStartApply={startApply}
+      focusStep={diffFocusStep}
+      onFocusStepConsumed={() => setDiffFocusStep(null)}
     />
   );
   const diffApplyRoute = (
@@ -612,7 +617,14 @@ export default function App() {
         {diffPage}
       </div>
       {mode === "apply" && (
-        <ApplyPlanView entry={pendingApplyEntry} connections={diffConnections} onBack={() => setMode(applyReturnTarget)} />
+        <ApplyPlanView
+          entry={pendingApplyEntry}
+          connections={diffConnections}
+          onBack={(focusStep) => {
+            setDiffFocusStep(focusStep ?? null);
+            setMode(applyReturnTarget);
+          }}
+        />
       )}
     </div>
   );

@@ -21,12 +21,12 @@ import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
-import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
+import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 
 interface Props {
   entry: ApplyEntryPayload | null;
   connections: Connection[];
-  onBack: () => void;
+  onBack: (focusStep?: WorkflowStepId) => void;
 }
 
 type DraftState =
@@ -611,6 +611,32 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const selectedCount = selectedIds.size;
   const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
 
+  // ── 工作流 stepper 导航：回退回 DiffView（进度保留）；4→5 未执行前锁定，绝不自动执行 ──
+  const onWorkflowStepClick = useCallback(
+    (step: WorkflowStepId) => {
+      const curIdx = executionCompleted ? WORKFLOW_STEP_IDS.length : WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep);
+      const idx = WORKFLOW_STEP_IDS.indexOf(step);
+      if (idx >= curIdx) return;
+      onBack(step);
+    },
+    [executionCompleted, workflowCurrentStep, onBack]
+  );
+  const isWorkflowStepLocked = useCallback(
+    (step: WorkflowStepId): boolean => !executionCompleted && workflowCurrentStep === "execute" && step === "verify",
+    [executionCompleted, workflowCurrentStep]
+  );
+  const workflowLockReason = useCallback(
+    (step: WorkflowStepId): string => {
+      if (!executionCompleted && workflowCurrentStep === "execute" && step === "verify") {
+        return t("diff.workflowNeedExecuted");
+      }
+      return t("diff.workflowNeedPrevious", {
+        step: t(`diff.workflowStep${WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep) + 1}`),
+      });
+    },
+    [executionCompleted, workflowCurrentStep, t]
+  );
+
   const selectAllItems = () => {
     if (!plan) return;
     // 只增减可执行项，不取消已勾选项：
@@ -857,10 +883,16 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           <div className="page-subtitle">{entry ? t("apply.subtitle") : t("apply.missingEntry")}</div>
         </div>
         {plan && (
-          <DiffWorkflowCard currentStep={workflowCurrentStep} completed={executionCompleted} />
+          <DiffWorkflowCard
+            currentStep={workflowCurrentStep}
+            completed={executionCompleted}
+            onStepClick={onWorkflowStepClick}
+            isStepLocked={isWorkflowStepLocked}
+            lockReason={workflowLockReason}
+          />
         )}
         <div className="page-actions">
-          <button className="btn btn-ghost" type="button" onClick={onBack}>
+          <button className="btn btn-ghost" type="button" onClick={() => onBack()}>
             {t("apply.back")}
           </button>
         </div>

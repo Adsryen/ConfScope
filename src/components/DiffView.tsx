@@ -28,7 +28,7 @@ import Combobox from "./Combobox"
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
-import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
+import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 
@@ -48,6 +48,9 @@ interface Props {
   initialParams?: DiffJumpParams | null;
   onInitialParamsConsumed?: () => void;
   onStartApply?: (payload: ApplyEntryPayload) => void;
+  /** 从变更计划页回退时的聚焦提示（stepper 导航） */
+  focusStep?: WorkflowStepId | null;
+  onFocusStepConsumed?: () => void;
 }
 
 interface Source {
@@ -688,7 +691,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply }: Props) {
+export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const initialDiffStateRef = useRef<InitialDiffState | null>(null);
@@ -719,6 +722,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
   const sourcesRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const loadBothRef = useRef<(() => Promise<void>) | null>(null);
   const auditSessionRef = useRef<AuditSession | null>(null);
   const projectNames = useMemo(
@@ -1563,6 +1567,63 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     startBatchApply();
   };
 
+  // ── 工作流 stepper 导航（相邻前进 / 任意回退，不跳节点；回退保留状态） ──
+  const workflowIndex = WORKFLOW_STEP_IDS.indexOf(currentWorkflowStep);
+  const focusWorkflowStep = useCallback((step: WorkflowStepId) => {
+    const scroll = (el: HTMLElement | null) => {
+      if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    if (step === "choose") {
+      setSourcesCollapsed(false);
+      scroll(sourcesRef.current);
+    } else {
+      scroll(resultsRef.current);
+    }
+  }, []);
+  useEffect(() => {
+    if (!focusStep) return;
+    focusWorkflowStep(focusStep);
+    onFocusStepConsumed?.();
+  }, [focusStep, focusWorkflowStep, onFocusStepConsumed]);
+  const isWorkflowStepLocked = (step: WorkflowStepId): boolean => {
+      const target = WORKFLOW_STEP_IDS.indexOf(step);
+      if (target < workflowIndex) return false; // 回退不锁定
+      if (target !== workflowIndex + 1) return true; // 跳节点 / 当前步
+      if (currentWorkflowStep === "choose") return loading || matchLoading;
+      if (currentWorkflowStep === "compare") {
+        if (loading || matchLoading || batchLoading) return true;
+        return selectedIds.size === 0;
+      }
+      return false; // plan → execute：ready || batchResults 已由 current 推导保证
+  };
+  const onWorkflowStepClick = (step: WorkflowStepId) => {
+      const target = WORKFLOW_STEP_IDS.indexOf(step);
+      if (target < workflowIndex) {
+        focusWorkflowStep(step);
+        return;
+      }
+      if (target !== workflowIndex + 1 || isWorkflowStepLocked(step)) return;
+      if (currentWorkflowStep === "choose") {
+        void loadBoth();
+      } else if (currentWorkflowStep === "compare") {
+        void loadBatch();
+      } else if (currentWorkflowStep === "plan") {
+        if (batchResults.length > 0) startApplyFromCurrentDiff();
+        else startSingleApply();
+      }
+  };
+  const workflowLockReason = (step: WorkflowStepId): string => {
+      const target = WORKFLOW_STEP_IDS.indexOf(step);
+      const prevLabel = t(`diff.workflowStep${workflowIndex + 1}`);
+      if (target > workflowIndex + 1) {
+        return t("diff.workflowNeedPrevious", { step: prevLabel });
+      }
+      if (target === workflowIndex + 1) {
+        if (currentWorkflowStep === "compare" && selectedIds.size === 0) return t("diff.workflowNeedSelectFiles");
+        if (currentWorkflowStep === "choose" || loading || matchLoading || batchLoading) return t("diff.workflowComparing");
+      }
+      return t("diff.workflowNeedPrevious", { step: prevLabel });
+  };
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
@@ -1575,7 +1636,12 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           <h3>{t("app.diff")}</h3>
           <div className="page-subtitle">{t("diff.pageSubtitle")}</div>
         </div>
-        <DiffWorkflowCard currentStep={currentWorkflowStep} />
+        <DiffWorkflowCard
+          currentStep={currentWorkflowStep}
+          onStepClick={onWorkflowStepClick}
+          isStepLocked={isWorkflowStepLocked}
+          lockReason={workflowLockReason}
+        />
         <div className="page-actions">
           <label className="diff-project-select">
             <span>{t("connection.project")}</span>
@@ -1800,7 +1866,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             )}
           </div>
 
-          <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`}>
+          <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`} ref={resultsRef}>
             {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
               <div className="match-list">
                 <div className="match-list-head">

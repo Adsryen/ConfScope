@@ -139,12 +139,91 @@ describe("DiffView", () => {
     expect(currentStep).toHaveAttribute("aria-current", "step");
     expect(currentStep).toHaveTextContent("Confirm direction");
     expect(currentStep?.querySelector("button")).not.toBeInTheDocument();
-    // 步骤说明改为 hover 气泡（title），安全文案保留在气泡内
+    // 步骤说明在 hover 气泡（title）：当前步显示步骤说明，跳步锁定的步骤显示锁定原因
+    const currentStepEl = document.querySelector(".diff-workflow-step.current") as HTMLElement;
+    expect(currentStepEl).toHaveAttribute("title", expect.stringContaining("safer trial path"));
     const planStep = screen.getByText("Generate & review plan (dry-run, no writes)").closest("li");
-    expect(planStep).toHaveAttribute("title", expect.stringContaining("the right-side target is NOT modified at this point"));
-    const verifyStep = screen.getByText("Execute, verify, and promote").closest("li");
-    expect(verifyStep).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
+    expect(planStep).toHaveAttribute("title", expect.stringContaining("Finish the previous steps first"));
     expect(screen.getByText(/To use a sandbox/)).toBeInTheDocument();
+  });
+
+  it("stepper navigation: forward runs the next step, back keeps state, skip is locked", async () => {
+    const onStartApply = vi.fn();
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+
+    const stepEls = () => Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
+    // choose 状态：当前步不可点；相邻下一步可点；跳步一律锁定
+    let steps = stepEls();
+    expect(steps).toHaveLength(5);
+    expect(steps[0].querySelector("button")).not.toBeInTheDocument();
+    const compareBtn = steps[1].querySelector("button");
+    expect(compareBtn).toHaveTextContent("Load & compare");
+    expect(steps[2].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[2].classList.contains("locked")).toBe(true);
+    expect(steps[3].classList.contains("locked")).toBe(true);
+    expect(steps[4].classList.contains("locked")).toBe(true);
+    // 跳步锁定气泡说明原因
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("Finish the previous steps first"));
+
+    // 点击第 2 步 = 进入对比（与「加载并对比」按钮同逻辑）
+    fireEvent.click(compareBtn!);
+    expect(await screen.findByText("8080")).toBeInTheDocument();
+
+    // plan 状态：第 4 步可点（进入变更计划），第 5 步锁定
+    steps = stepEls();
+    const planBtn = steps[3].querySelector("button");
+    expect(planBtn).toHaveTextContent("Generate & review plan");
+    expect(steps[4].classList.contains("locked")).toBe(true);
+    // 点击第 4 步 = 进入变更计划（与按钮行为一致）
+    fireEvent.click(planBtn!);
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(onStartApply.mock.calls[0][0].sourceType).toBe("diff");
+
+    // 回退：第 1 步可点（回到来源选择），不触发任何计划动作
+    steps = stepEls();
+    const backBtn = steps[0].querySelector("button");
+    expect(backBtn).toBeInTheDocument();
+    expect(steps[0]).toHaveAttribute("title", expect.stringContaining("Back to"));
+    fireEvent.click(backBtn!);
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+  });
+
+  it("stepper back navigation: consumes focusStep hint from plan page", () => {
+    const onFocusStepConsumed = vi.fn();
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+          }}
+          focusStep="choose"
+          onFocusStepConsumed={onFocusStepConsumed}
+        />
+      </I18nProvider>
+    );
+    expect(onFocusStepConsumed).toHaveBeenCalledTimes(1);
   });
 
   it("restores the last compared sources and mode from localStorage", async () => {
