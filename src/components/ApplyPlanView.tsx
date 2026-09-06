@@ -611,31 +611,13 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const selectedCount = selectedIds.size;
   const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
 
-  // ── 工作流 stepper 导航：回退回 DiffView（进度保留）；4→5 未执行前锁定，绝不自动执行 ──
-  const onWorkflowStepClick = useCallback(
-    (step: WorkflowStepId) => {
-      const curIdx = executionCompleted ? WORKFLOW_STEP_IDS.length : WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep);
-      const idx = WORKFLOW_STEP_IDS.indexOf(step);
-      if (idx >= curIdx) return;
-      onBack(step);
-    },
-    [executionCompleted, workflowCurrentStep, onBack]
-  );
-  const isWorkflowStepLocked = useCallback(
-    (step: WorkflowStepId): boolean => !executionCompleted && workflowCurrentStep === "execute" && step === "verify",
-    [executionCompleted, workflowCurrentStep]
-  );
-  const workflowLockReason = useCallback(
-    (step: WorkflowStepId): string => {
-      if (!executionCompleted && workflowCurrentStep === "execute" && step === "verify") {
-        return t("diff.workflowNeedExecuted");
-      }
-      return t("diff.workflowNeedPrevious", {
-        step: t(`diff.workflowStep${WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep) + 1}`),
-      });
-    },
-    [executionCompleted, workflowCurrentStep, t]
-  );
+  // ── 工作流 stepper 导航（仅回退：任意回退到 DiffView 并聚焦目标步骤，进度保留；前进走页面内操作按钮） ──
+  const onWorkflowStepClick = (step: WorkflowStepId) => {
+    const curIdx = executionCompleted ? WORKFLOW_STEP_IDS.length : WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep);
+    const idx = WORKFLOW_STEP_IDS.indexOf(step);
+    if (idx >= curIdx) return; // 防御：stepper 只暴露更早的步骤
+    onBack(step);
+  };
 
   const selectAllItems = () => {
     if (!plan) return;
@@ -887,8 +869,6 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             currentStep={workflowCurrentStep}
             completed={executionCompleted}
             onStepClick={onWorkflowStepClick}
-            isStepLocked={isWorkflowStepLocked}
-            lockReason={workflowLockReason}
           />
         )}
         <div className="page-actions">

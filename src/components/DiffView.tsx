@@ -28,7 +28,7 @@ import Combobox from "./Combobox"
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
-import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
+import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 
@@ -1567,17 +1567,25 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     startBatchApply();
   };
 
-  // ── 工作流 stepper 导航（相邻前进 / 任意回退，不跳节点；回退保留状态） ──
-  const workflowIndex = WORKFLOW_STEP_IDS.indexOf(currentWorkflowStep);
+  // ── 工作流 stepper 导航（仅回退：任意回退保留状态；前进走页面内操作按钮） ──
+  // 回退 = 滚动到目标区域 + 目标区域高亮闪烁（已停留在目标区域时，滚动本身无可见变化）
+  const flashTimerRef = useRef<number | null>(null);
   const focusWorkflowStep = useCallback((step: WorkflowStepId) => {
-    const scroll = (el: HTMLElement | null) => {
-      if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-    if (step === "choose") {
-      setSourcesCollapsed(false);
-      scroll(sourcesRef.current);
-    } else {
-      scroll(resultsRef.current);
+    const target = step === "choose" ? sourcesRef.current : resultsRef.current;
+    if (step === "choose") setSourcesCollapsed(false);
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (target) {
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+      target.classList.remove("workflow-flash");
+      // 强制 reflow，连续点击同一目标时重新触发动画
+      void target.offsetWidth;
+      target.classList.add("workflow-flash");
+      flashTimerRef.current = window.setTimeout(() => {
+        target.classList.remove("workflow-flash");
+        flashTimerRef.current = null;
+      }, 1200);
     }
   }, []);
   useEffect(() => {
@@ -1585,45 +1593,6 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     focusWorkflowStep(focusStep);
     onFocusStepConsumed?.();
   }, [focusStep, focusWorkflowStep, onFocusStepConsumed]);
-  const isWorkflowStepLocked = (step: WorkflowStepId): boolean => {
-      const target = WORKFLOW_STEP_IDS.indexOf(step);
-      if (target < workflowIndex) return false; // 回退不锁定
-      if (target !== workflowIndex + 1) return true; // 跳节点 / 当前步
-      if (currentWorkflowStep === "choose") return loading || matchLoading;
-      if (currentWorkflowStep === "compare") {
-        if (loading || matchLoading || batchLoading) return true;
-        return selectedIds.size === 0;
-      }
-      return false; // plan → execute：ready || batchResults 已由 current 推导保证
-  };
-  const onWorkflowStepClick = (step: WorkflowStepId) => {
-      const target = WORKFLOW_STEP_IDS.indexOf(step);
-      if (target < workflowIndex) {
-        focusWorkflowStep(step);
-        return;
-      }
-      if (target !== workflowIndex + 1 || isWorkflowStepLocked(step)) return;
-      if (currentWorkflowStep === "choose") {
-        void loadBoth();
-      } else if (currentWorkflowStep === "compare") {
-        void loadBatch();
-      } else if (currentWorkflowStep === "plan") {
-        if (batchResults.length > 0) startApplyFromCurrentDiff();
-        else startSingleApply();
-      }
-  };
-  const workflowLockReason = (step: WorkflowStepId): string => {
-      const target = WORKFLOW_STEP_IDS.indexOf(step);
-      const prevLabel = t(`diff.workflowStep${workflowIndex + 1}`);
-      if (target > workflowIndex + 1) {
-        return t("diff.workflowNeedPrevious", { step: prevLabel });
-      }
-      if (target === workflowIndex + 1) {
-        if (currentWorkflowStep === "compare" && selectedIds.size === 0) return t("diff.workflowNeedSelectFiles");
-        if (currentWorkflowStep === "choose" || loading || matchLoading || batchLoading) return t("diff.workflowComparing");
-      }
-      return t("diff.workflowNeedPrevious", { step: prevLabel });
-  };
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
@@ -1638,9 +1607,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         </div>
         <DiffWorkflowCard
           currentStep={currentWorkflowStep}
-          onStepClick={onWorkflowStepClick}
-          isStepLocked={isWorkflowStepLocked}
-          lockReason={workflowLockReason}
+          onStepClick={focusWorkflowStep}
         />
         <div className="page-actions">
           <label className="diff-project-select">

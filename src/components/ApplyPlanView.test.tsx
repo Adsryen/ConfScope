@@ -627,7 +627,7 @@ describe("ApplyPlanView", () => {
     expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(4);
   });
 
-  it("stepper navigation: back steps return to diff with focus; verify locked before execution", async () => {
+  it("stepper navigation: back steps return to diff with focus; verify step not clickable before execution", async () => {
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
       ok: true,
       plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]),
@@ -643,10 +643,11 @@ describe("ApplyPlanView", () => {
     expect(steps[0].querySelector("button")).toBeInTheDocument();
     expect(steps[1].querySelector("button")).toBeInTheDocument();
     expect(steps[2].querySelector("button")).toBeInTheDocument();
-    // 第 4 步为当前（不可点），第 5 步锁定（须先执行变更，绝不自动执行）
+    // 第 4 步为当前（不可点）；第 5 步未完成（不可点，须先用页面按钮执行变更，绝不自动执行）
     expect(steps[3].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[4].querySelector("button")).not.toBeInTheDocument();
     expect(steps[4].classList.contains("locked")).toBe(true);
-    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("Execute the change first"));
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
     fireEvent.click(steps[2].querySelector("button")!);
     expect(onBack).toHaveBeenCalledWith("plan");
     fireEvent.click(steps[0].querySelector("button")!);

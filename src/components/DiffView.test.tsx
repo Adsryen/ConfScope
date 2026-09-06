@@ -139,15 +139,15 @@ describe("DiffView", () => {
     expect(currentStep).toHaveAttribute("aria-current", "step");
     expect(currentStep).toHaveTextContent("Confirm direction");
     expect(currentStep?.querySelector("button")).not.toBeInTheDocument();
-    // 步骤说明在 hover 气泡（title）：当前步显示步骤说明，跳步锁定的步骤显示锁定原因
+    // 每步 hover 气泡展示「步骤名: 步骤说明」（stepper 仅回退，无前进锁定气泡）
     const currentStepEl = document.querySelector(".diff-workflow-step.current") as HTMLElement;
     expect(currentStepEl).toHaveAttribute("title", expect.stringContaining("safer trial path"));
     const planStep = screen.getByText("Generate & review plan (dry-run, no writes)").closest("li");
-    expect(planStep).toHaveAttribute("title", expect.stringContaining("Finish the previous steps first"));
+    expect(planStep).toHaveAttribute("title", expect.stringContaining("the right-side target is NOT modified at this point"));
     expect(screen.getByText(/To use a sandbox/)).toBeInTheDocument();
   });
 
-  it("stepper navigation: forward runs the next step, back keeps state, skip is locked", async () => {
+  it("stepper navigation: only back steps are clickable; forward goes through page actions", async () => {
     const onStartApply = vi.fn();
     apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
       conn.id === "left-nacos" ? "server:\n  port: 8080" : "server:\n  port: 9090"
@@ -169,40 +169,44 @@ describe("DiffView", () => {
     );
 
     const stepEls = () => Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
-    // choose 状态：当前步不可点；相邻下一步可点；跳步一律锁定
+    // choose 状态：没有更早的步骤 → 整个 stepper 不可点（前进走页面内「加载并对比」按钮）
     let steps = stepEls();
     expect(steps).toHaveLength(5);
-    expect(steps[0].querySelector("button")).not.toBeInTheDocument();
-    const compareBtn = steps[1].querySelector("button");
-    expect(compareBtn).toHaveTextContent("Load & compare");
-    expect(steps[2].querySelector("button")).not.toBeInTheDocument();
-    expect(steps[2].classList.contains("locked")).toBe(true);
-    expect(steps[3].classList.contains("locked")).toBe(true);
-    expect(steps[4].classList.contains("locked")).toBe(true);
-    // 跳步锁定气泡说明原因
-    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("Finish the previous steps first"));
+    for (const stepEl of steps) {
+      expect(stepEl.querySelector("button")).not.toBeInTheDocument();
+    }
+    // hover 气泡：每步展示「步骤名: 步骤说明」
+    expect(steps[1]).toHaveAttribute("title", expect.stringContaining("Click Load & Compare"));
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
 
-    // 点击第 2 步 = 进入对比（与「加载并对比」按钮同逻辑）
-    fireEvent.click(compareBtn!);
+    // 前进 = 点页面内操作按钮（stepper 不提供前进入口）
+    fireEvent.click(screen.getByRole("button", { name: "Load & Compare" }));
     expect(await screen.findByText("8080")).toBeInTheDocument();
 
-    // plan 状态：第 4 步可点（进入变更计划），第 5 步锁定
+    // plan 状态：第 1/2 步可点（回退）；当前步 3 与后续步 4/5 不可点
     steps = stepEls();
-    const planBtn = steps[3].querySelector("button");
-    expect(planBtn).toHaveTextContent("Generate & review plan");
+    expect(steps[0].querySelector("button")).toBeInTheDocument();
+    expect(steps[1].querySelector("button")).toBeInTheDocument();
+    expect(steps[1]).toHaveAttribute("title", expect.stringContaining("Back to"));
+    expect(steps[2].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[3].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[4].querySelector("button")).not.toBeInTheDocument();
+    expect(steps[3].classList.contains("locked")).toBe(true);
     expect(steps[4].classList.contains("locked")).toBe(true);
-    // 点击第 4 步 = 进入变更计划（与按钮行为一致）
-    fireEvent.click(planBtn!);
-    expect(onStartApply).toHaveBeenCalledTimes(1);
-    expect(onStartApply.mock.calls[0][0].sourceType).toBe("diff");
 
-    // 回退：第 1 步可点（回到来源选择），不触发任何计划动作
+    // 回退到第 2 步：滚动到对比结果区 + 目标区闪烁高亮，不触发任何计划动作
+    fireEvent.click(steps[1].querySelector("button")!);
+    expect(onStartApply).not.toHaveBeenCalled();
+    const resultEl = document.querySelector(".diff-result") as HTMLElement;
+    expect(resultEl.classList.contains("workflow-flash")).toBe(true);
+
+    // 回退到第 1 步：来源面板闪烁高亮（来源面板保持展开）
     steps = stepEls();
-    const backBtn = steps[0].querySelector("button");
-    expect(backBtn).toBeInTheDocument();
-    expect(steps[0]).toHaveAttribute("title", expect.stringContaining("Back to"));
-    fireEvent.click(backBtn!);
-    expect(onStartApply).toHaveBeenCalledTimes(1);
+    fireEvent.click(steps[0].querySelector("button")!);
+    expect(onStartApply).not.toHaveBeenCalled();
+    const sourcesEl = document.querySelector(".diff-sources") as HTMLElement;
+    expect(sourcesEl.classList.contains("workflow-flash")).toBe(true);
+    expect(document.querySelector(".diff-source-panel")?.classList.contains("collapsed")).toBe(false);
   });
 
   it("stepper back navigation: consumes focusStep hint from plan page", () => {
