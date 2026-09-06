@@ -23,6 +23,15 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 $env:CI = "true"
+
+# wails CLI 不在 PATH 时自动补 Go 标准 bin 目录（避免要求用户改系统环境）
+if (-not (Get-Command wails -ErrorAction SilentlyContinue)) {
+  $goBin = Join-Path $env:USERPROFILE "go\bin"
+  if (Test-Path $goBin) { $env:Path = "$goBin;$env:Path" }
+}
+if (-not (Get-Command wails -ErrorAction SilentlyContinue)) {
+  throw "wails CLI not found. Install it first: go install github.com/wails-framework/wails/v2/cmd/wails@latest (or add your Go bin dir to PATH)."
+}
 $startTime = Get-Date
 
 if ($ForceClean) {
