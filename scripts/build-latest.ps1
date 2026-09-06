@@ -1,4 +1,4 @@
-<#
+﻿<#
 build-latest.ps1 — 一键用最新代码重编 ConfScope.exe（Windows）
 
 用法:
@@ -26,36 +26,36 @@ $env:CI = "true"
 $startTime = Get-Date
 
 if ($ForceClean) {
-  Write-Host ">> 清理 node_modules ..." -ForegroundColor Yellow
+  Write-Host ">> cleaning node_modules ..." -ForegroundColor Yellow
   if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }
 }
 
-Write-Host ">> 安装依赖 (pnpm install) ..." -ForegroundColor Cyan
+Write-Host ">> installing dependencies (pnpm install) ..." -ForegroundColor Cyan
 pnpm install --frozen-lockfile
-if ($LASTEXITCODE -ne 0) { throw "pnpm install 失败。若为权限/链接问题（EACCES），请在 WSL 中 rm -rf node_modules 后加 -ForceClean 重试。" }
+if ($LASTEXITCODE -ne 0) { throw "pnpm install failed. If it is a permission/link issue (EACCES), delete node_modules and retry with -ForceClean." }
 
 if ($SkipFrontend) {
-  if (-not (Test-Path dist)) { throw "未找到 dist/，请先完整构建一次（不加 -SkipFrontend）" }
-  Write-Host ">> wails build -s（快速编译：复用现有前端 dist，仅重编 Go 侧）..." -ForegroundColor Cyan
+  if (-not (Test-Path dist)) { throw "dist/ not found. Run a full build once first (without -SkipFrontend)." }
+  Write-Host ">> wails build -s (fast build: reuse existing frontend dist, rebuild Go side only)..." -ForegroundColor Cyan
   wails build -s
 } else {
-  Write-Host ">> 构建前端 + 生产守卫 + wails build ..." -ForegroundColor Cyan
+  Write-Host ">> building frontend + production guard + wails build ..." -ForegroundColor Cyan
   wails build
 }
 
 $exe = Join-Path (Split-Path -Parent $PSScriptRoot) "build\bin\ConfScope.exe"
-if (-not (Test-Path $exe)) { throw "未找到产物 $exe" }
+if (-not (Test-Path $exe)) { throw "build output not found: $exe" }
 $stamp = (Get-Item $exe).LastWriteTime
 Write-Host ""
-Write-Host "构建完成: $exe" -ForegroundColor Green
-Write-Host ("构建耗时: " + [math]::Floor(((Get-Date) - $startTime).TotalSeconds) + "s")
+Write-Host "Build finished: $exe" -ForegroundColor Green
+Write-Host ("Build took " + [math]::Floor(((Get-Date) - $startTime).TotalSeconds) + "s")
 
 if ($Launch) {
   $dataDir = Join-Path (Split-Path -Parent $PSScriptRoot) "portable\ConfScopeData"
-  if (-not (Test-Path $dataDir)) { throw "数据目录不存在: $dataDir" }
+  if (-not (Test-Path $dataDir)) { throw "data dir not found: $dataDir" }
   $env:CONFSCOPE_DATA_DIR = $dataDir
   Start-Process -FilePath $exe
-  Write-Host "已启动应用（数据目录: $dataDir）" -ForegroundColor Green
+  Write-Host "App launched (data dir: $dataDir)" -ForegroundColor Green
 } else {
-  Write-Host "启动方式: 桌面快捷方式，或 scripts\build-latest.ps1 -Launch"
+  Write-Host "Launch via the desktop shortcut, or: scripts\build-latest.ps1 -Launch"
 }
