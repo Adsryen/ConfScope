@@ -8,7 +8,7 @@
 #   scripts/build-latest.sh --clean         # 先删除 node_modules 再重装（Windows 侧构建后链接损坏时用）
 #
 # 说明:
-#   - 前端构建链路为 pnpm build:web && pnpm check:bundle，
+#   - 前端构建链路为 pnpm build:web（内含生产守卫 check:bundle），
 #     生产 bundle 含 retest/manual-bridge 脚手架时构建直接失败。
 #   - 产物: build/bin/ConfScope（WSLg/桌面环境可直接运行）。
 #   - 数据目录: 默认 exe 旁 ConfScopeData，可用 CONFSCOPE_DATA_DIR 覆盖。

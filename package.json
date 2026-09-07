@@ -20,7 +20,7 @@
     "build": "wails build",
     "dist": "wails build",
     "build:win": "wails build -clean -nsis",
-    "build:web": "vite build",
+    "build:web": "vite build && node scripts/check-production-bundle.mjs",
     "check:bundle": "node scripts/check-production-bundle.mjs",
     "preview": "vite preview",
     "wails": "wails",

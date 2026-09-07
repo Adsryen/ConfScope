@@ -8,7 +8,7 @@ build-latest.ps1 — 一键用最新代码重编 ConfScope.exe（Windows）
   scripts\build-latest.ps1 -ForceClean     # 先删除 node_modules 再重装（Linux 侧构建后链接损坏时用）
 
 说明:
-  - 前端构建链路为 pnpm build:web && pnpm check:bundle，
+  - 前端构建链路为 pnpm build:web（内含生产守卫 check:bundle），
     生产 bundle 含 retest/manual-bridge 脚手架时构建直接失败。
   - 产物: build\bin\ConfScope.exe（桌面快捷方式指向同一文件，重编即生效）。
   - 数据目录: portable\ConfScopeData（经 CONFSCOPE_DATA_DIR 环境变量注入；Windows 可用本地启动脚本）。
