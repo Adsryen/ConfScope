@@ -8,6 +8,7 @@ import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
 import CopyButton from "./CopyButton";
+import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
 
 function toErrorMessage(error: unknown): string {
@@ -31,6 +32,9 @@ export default function SettingsView() {
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheResult, setCacheResult] = useState<"" | "ok" | "fail">("");
   const [docInfo, setDocInfo] = useState<AppDataDocInfo | null>(null);
+  const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
+  const [openFolderBusy, setOpenFolderBusy] = useState(false);
+  const [openFolderError, setOpenFolderError] = useState("");
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -40,6 +44,7 @@ export default function SettingsView() {
     { id: "settings-compare", label: t("settings.comparePreferences") },
     { id: "settings-credentials", label: t("settings.credentials") },
     { id: "settings-backup", label: t("settings.backup") },
+    { id: "settings-data-locations", label: t("settings.dataLocations") },
     { id: "settings-developer", label: t("settings.developer") },
   ];
 
@@ -80,6 +85,26 @@ export default function SettingsView() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    try {
+      GetDataLocations()
+        .then((locs) => {
+          if (alive && locs && Array.isArray(locs.entries) && locs.entries.length > 0) {
+            setDataLocations(locs);
+          }
+        })
+        .catch(() => {
+          // 绑定缺失（降级环境）时区块显示不可用提示，不报错
+        });
+    } catch {
+      // 绑定对象缺失该方法（同步异常，如前后端版本错配）同样降级，不整树崩溃
+    }
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const scrollToSection = (id: string) => {
     const container = panelsRef.current;
     const target = document.getElementById(id);
@@ -107,6 +132,17 @@ export default function SettingsView() {
     }
   };
 
+  const runOpenDataFolder = async (key: string) => {
+    setOpenFolderError("");
+    setOpenFolderBusy(true);
+    try {
+      await OpenDataFolder(key);
+    } catch (e) {
+      setOpenFolderError(toErrorMessage(e));
+    } finally {
+      setOpenFolderBusy(false);
+    }
+  };
 
   const runClearCache = async () => {
     setCacheBusy(true);
@@ -133,12 +169,7 @@ export default function SettingsView() {
       <div className="settings-workbench">
         <aside className="settings-rail" aria-label={t("app.settings")}>
           {sectionLinks.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="settings-rail-item"
-              onClick={() => scrollToSection(item.id)}
-            >
+            <button key={item.id} type="button" className="settings-rail-item" onClick={() => scrollToSection(item.id)}>
               {item.label}
             </button>
           ))}
@@ -314,6 +345,50 @@ export default function SettingsView() {
             </div>
           </section>
 
+          <section id="settings-data-locations" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.dataLocations")}</h4>
+              <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
+            </div>
+            {dataLocations ? (
+              <div className="settings-data-locations">
+                {dataLocations.entries.map((entry) => (
+                  <div key={entry.key} className="settings-setting-row">
+                    <div>
+                      <strong>
+                        {t(`settings.dataLoc${entry.key.charAt(0).toUpperCase()}${entry.key.slice(1)}`)}
+                        {!entry.exists && <span className="settings-data-location-missing">{t("settings.dataLocMissing")}</span>}
+                      </strong>
+                      <div className="settings-data-location-path" title={entry.path}>
+                        <code>{entry.path}</code>
+                      </div>
+                    </div>
+                    <div className="settings-data-location-actions">
+                      <CopyButton text={entry.path} />
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={openFolderBusy || !entry.exists}
+                        onClick={() => {
+                          if (openFolderBusy || !entry.exists) return;
+                          void runOpenDataFolder(entry.key);
+                        }}
+                      >
+                        {t("settings.openFolder")}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>
+            )}
+            {openFolderError && (
+              <div className="inline-error" role="alert">
+                {t("settings.openFolderFailed", { error: openFolderError })}
+              </div>
+            )}
+          </section>
           <section id="settings-developer" className="settings-panel">
             <div className="settings-panel-head">
               <h4>{t("settings.developer")}</h4>
@@ -339,7 +414,11 @@ export default function SettingsView() {
               </button>
             </div>
             {cacheResult === "ok" && <div className="test-msg ok">{t("settings.clearCacheSuccess")}</div>}
-            {cacheResult === "fail" && <div className="inline-error" role="alert">{t("settings.clearCacheFailed")}</div>}
+            {cacheResult === "fail" && (
+              <div className="inline-error" role="alert">
+                {t("settings.clearCacheFailed")}
+              </div>
+            )}
           </section>
         </div>
       </div>

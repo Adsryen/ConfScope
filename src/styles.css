@@ -880,6 +880,34 @@ button,
   font-size: 13px;
 }
 
+/* 设置页·数据位置：路径展示与操作按钮 */
+.settings-data-location-path {
+  min-width: 0;
+}
+
+.settings-data-location-path code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.settings-data-location-missing {
+  margin-left: 6px;
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.settings-data-location-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .settings-proxy-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

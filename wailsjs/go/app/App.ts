@@ -131,7 +131,22 @@ type GoApp = {
   // 主数据文档（[数据根]/app-data/confscope-data.json）
   GetAppDataDocument(): Promise<AppDataDocumentStatus>;
   SaveAppDataDocument(document: AppDataDocument): Promise<AppDataDocumentStatus>;
+  // 数据位置（设置页展示，可打开文件管理器定位）
+  GetDataLocations(): Promise<DataLocations>;
+  OpenDataFolder(key: string): Promise<void>;
 };
+
+export interface DataLocationEntry {
+  key: string;
+  path: string;
+  isFile: boolean;
+  exists: boolean;
+}
+
+export interface DataLocations {
+  dataRoot: string;
+  entries: DataLocationEntry[];
+}
 
 export interface CredentialStorePoCResult {
   ok: boolean;
@@ -380,6 +395,10 @@ export const DownloadAppDataWebDAVBackup = (target: any, remotePath: string, pas
 export const GetAppDataDocument = () => app().GetAppDataDocument();
 
 export const SaveAppDataDocument = (document: AppDataDocument) => app().SaveAppDataDocument(document);
+
+// 数据位置
+export const GetDataLocations = () => app().GetDataLocations();
+export const OpenDataFolder = (key: string) => app().OpenDataFolder(key);
 
 export const TestSnapshotWebDAV = (target: any) => app().TestSnapshotWebDAV(target);
 

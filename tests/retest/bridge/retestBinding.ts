@@ -850,6 +850,28 @@ export function createRetestInvoke(): RetestInvoke {
         auditWrite([]);
         return null;
       }
+      case "GetDataLocations": {
+        // 模拟 Go GetDataLocations：retest 数据根固定路径（仅展示用）
+        const root = "/tmp/confscope-retest/data";
+        const entry = (key: string, path: string, isFile: boolean) => ({ key, path, isFile, exists: true });
+        return {
+          dataRoot: root,
+          entries: [
+            entry("dataRoot", root, false),
+            entry("appDataFile", `${root}/app-data/confscope-data.json`, true),
+            entry("webview", `${root}/webview`, false),
+            entry("snapshots", `${root}/snapshots`, false),
+            entry("recoveryPoints", `${root}/app-data-recovery-points`, false),
+            entry("audit", `${root}/audit-trail.jsonl`, true),
+          ],
+        };
+      }
+      case "OpenDataFolder":
+        // retest 无文件管理器：仅校验白名单 key，模拟成功
+        if (!["dataRoot", "appDataFile", "webview", "snapshots", "recoveryPoints", "audit"].includes(String(args[0]))) {
+          throw new Error(`unknown data location key: ${args[0]}`);
+        }
+        return null;
       default:
         throw new Error(`retest bridge: 未实现绑定 ${method}`);
     }

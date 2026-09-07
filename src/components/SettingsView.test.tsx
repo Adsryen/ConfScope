@@ -20,6 +20,32 @@ vi.mock("../lib/credentialSecrets", async () => {
   };
 });
 
+const dataLocMocks = vi.hoisted(() => ({
+  GetDataLocations: vi.fn(),
+  OpenDataFolder: vi.fn(),
+}));
+
+vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../wailsjs/go/app/App")>();
+  return {
+    ...actual,
+    GetDataLocations: dataLocMocks.GetDataLocations,
+    OpenDataFolder: dataLocMocks.OpenDataFolder,
+  };
+});
+
+const testDataLocations = {
+  dataRoot: "/tmp/confscope-retest/data",
+  entries: [
+    { key: "dataRoot", path: "/tmp/confscope-retest/data", isFile: false, exists: true },
+    { key: "appDataFile", path: "/tmp/confscope-retest/data/app-data/confscope-data.json", isFile: true, exists: true },
+    { key: "webview", path: "/tmp/confscope-retest/data/webview", isFile: false, exists: true },
+    { key: "snapshots", path: "/tmp/confscope-retest/data/snapshots", isFile: false, exists: false },
+    { key: "recoveryPoints", path: "/tmp/confscope-retest/data/app-data-recovery-points", isFile: false, exists: false },
+    { key: "audit", path: "/tmp/confscope-retest/data/audit-trail.jsonl", isFile: true, exists: true },
+  ],
+};
+
 class MemoryStorage {
   private values = new Map<string, string>();
 
@@ -47,6 +73,10 @@ describe("SettingsView", () => {
     credentialMocks.countMigratableStoredCredentials.mockReset();
     credentialMocks.countMigratableStoredCredentials.mockReturnValue(0);
     credentialMocks.migrateStoredCredentials.mockReset();
+    dataLocMocks.GetDataLocations.mockReset();
+    dataLocMocks.GetDataLocations.mockResolvedValue(testDataLocations);
+    dataLocMocks.OpenDataFolder.mockReset();
+    dataLocMocks.OpenDataFolder.mockResolvedValue(undefined);
   });
 
   it("renders a grouped settings workbench without empty standalone sections", () => {
@@ -136,5 +166,54 @@ describe("SettingsView", () => {
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 520, behavior: "smooth" });
     expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("shows data locations with copy and open actions", async () => {
+    renderSettings("en-US");
+
+    expect(await screen.findByRole("heading", { name: "Data Locations" })).toBeInTheDocument();
+    // 六个位置：根目录、主数据文件、WebView、快照、恢复点、审计
+    expect(screen.getByText("Data root").closest(".settings-setting-row")).toHaveTextContent("/tmp/confscope-retest/data");
+    expect(screen.getByText("Main data file (connections, plans, history, and all local data)")).toBeInTheDocument();
+    expect(screen.getByText("Audit log")).toBeInTheDocument();
+    // 未创建的位置标注“尚未创建”且打开按钮禁用
+    const snapshotsRow = screen.getByText("Backup snapshots").closest(".settings-setting-row");
+    expect(snapshotsRow).toHaveTextContent("(not created yet)");
+    const openButtons = screen.getAllByRole("button", { name: "Open" });
+    expect(openButtons).toHaveLength(6);
+    expect(openButtons[3]).toBeDisabled(); // snapshots
+    expect(openButtons[0]).toBeEnabled(); // dataRoot
+    // 点击「打开」调用 Go 绑定（按 key）
+    fireEvent.click(openButtons[1]); // appDataFile
+    await waitFor(() => expect(dataLocMocks.OpenDataFolder).toHaveBeenCalledWith("appDataFile"));
+  });
+
+  it("shows an error message when opening a data location fails", async () => {
+    dataLocMocks.OpenDataFolder.mockRejectedValueOnce(new Error("no file manager"));
+    renderSettings("en-US");
+
+    const openButtons = await screen.findAllByRole("button", { name: "Open" });
+    fireEvent.click(openButtons[0]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to open: no file manager");
+  });
+
+  it("falls back to an unavailable note when the binding is missing", async () => {
+    dataLocMocks.GetDataLocations.mockRejectedValueOnce(new Error("binding missing"));
+    renderSettings("en-US");
+
+    expect(await screen.findByText("Data locations are not available in this environment.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to an unavailable note when the binding method throws synchronously", async () => {
+    // 模拟桥方法表缺失该方法（前后端版本错配）：调用本身同步抛错，需同样降级
+    dataLocMocks.GetDataLocations.mockImplementation(() => {
+      throw new Error("GetDataLocations is not a function");
+    });
+    renderSettings("en-US");
+
+    expect(await screen.findByText("Data locations are not available in this environment.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
   });
 });

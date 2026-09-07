@@ -9,9 +9,9 @@ import (
 )
 
 const DataDirName = "ConfScopeData"
-const portableWebviewDirName = "webview"
-const portableSnapshotDirName = "snapshots"
-const portableAppDataRecoveryPointDirName = "app-data-recovery-points"
+const WebviewDirName = "webview"
+const SnapshotDirName = "snapshots"
+const AppDataRecoveryPointDirName = "app-data-recovery-points"
 const DataDirEnvName = "CONFSCOPE_DATA_DIR"
 
 func PrepareWebviewData() (string, error) {
@@ -51,7 +51,7 @@ func PrepareAppDataRecoveryPointData() (string, error) {
 }
 
 func PrepareWebviewDataFor(exePath string, appData string) (string, error) {
-	target := filepath.Join(DataRootFor(exePath), portableWebviewDirName)
+	target := filepath.Join(DataRootFor(exePath), WebviewDirName)
 	if hasDirectoryEntries(target) {
 		return target, nil
 	}
@@ -71,12 +71,12 @@ func PrepareWebviewDataFor(exePath string, appData string) (string, error) {
 }
 
 func PrepareSnapshotDataFor(exePath string, homeDir string) (string, error) {
-	target := filepath.Join(DataRootFor(exePath), portableSnapshotDirName)
+	target := filepath.Join(DataRootFor(exePath), SnapshotDirName)
 	return preparePortableDirectoryFromLegacy(target, legacySnapshotUserDataPath(homeDir), "snapshots")
 }
 
 func PrepareAppDataRecoveryPointDataFor(exePath string, homeDir string) (string, error) {
-	target := filepath.Join(DataRootFor(exePath), portableAppDataRecoveryPointDirName)
+	target := filepath.Join(DataRootFor(exePath), AppDataRecoveryPointDirName)
 	return preparePortableDirectoryFromLegacy(target, legacyAppDataRecoveryPointUserDataPath(homeDir), "app data recovery points")
 }
 

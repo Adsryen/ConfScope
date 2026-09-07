@@ -195,7 +195,7 @@ func TestPreparePortableDataUsesConfiguredRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareWebviewDataFor returned error: %v", err)
 	}
-	if webviewDir != filepath.Join(configuredRoot, portableWebviewDirName) {
+	if webviewDir != filepath.Join(configuredRoot, WebviewDirName) {
 		t.Fatalf("webviewDir = %q, want configured data root", webviewDir)
 	}
 
@@ -203,7 +203,7 @@ func TestPreparePortableDataUsesConfiguredRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareSnapshotDataFor returned error: %v", err)
 	}
-	if snapshotDir != filepath.Join(configuredRoot, portableSnapshotDirName) {
+	if snapshotDir != filepath.Join(configuredRoot, SnapshotDirName) {
 		t.Fatalf("snapshotDir = %q, want configured data root", snapshotDir)
 	}
 
@@ -211,7 +211,7 @@ func TestPreparePortableDataUsesConfiguredRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareAppDataRecoveryPointDataFor returned error: %v", err)
 	}
-	if recoveryDir != filepath.Join(configuredRoot, portableAppDataRecoveryPointDirName) {
+	if recoveryDir != filepath.Join(configuredRoot, AppDataRecoveryPointDirName) {
 		t.Fatalf("recoveryDir = %q, want configured data root", recoveryDir)
 	}
 }
