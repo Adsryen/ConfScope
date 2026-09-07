@@ -311,11 +311,11 @@ export function createRetestInvoke(): RetestInvoke {
     switch (method) {
       case "GetAppInfo":
         // 与存储播种的 startup.lastShown* 版本一致 → 不触发欢迎弹窗
-        return { name: "ConfScope", version: "1.9.0", updateSources: [] };
+        return { name: "ConfScope", version: "1.9.1", updateSources: [] };
       case "GetCurrentPlatform":
         return "linux";
       case "CheckForUpdates":
-        return { hasUpdate: false, latestVersion: "1.9.0", currentVersion: "1.9.0", sourceName: "", releaseNotes: "", mandatory: false, error: "" };
+        return { hasUpdate: false, latestVersion: "1.9.1", currentVersion: "1.9.1", sourceName: "", releaseNotes: "", mandatory: false, error: "" };
       case "GetDownloadProgress":
         // 复测环境无真实下载任务；返回 done 状态，供 About 页轮询使用
         return { downloaded: 0, total: 0, percent: 0, done: true, error: "" };
@@ -679,7 +679,7 @@ export function createRetestInvoke(): RetestInvoke {
         }));
         const snapshot = {
           schemaVersion: 1,
-          toolVersion: "1.9.0",
+          toolVersion: "1.9.1",
           id,
           path: `/tmp/confscope-retest-snapshots/${id}`,
           name,
@@ -771,7 +771,7 @@ export function createRetestInvoke(): RetestInvoke {
         const id = "retest-imported-snap";
         const snapshot = {
           schemaVersion: 1,
-          toolVersion: "1.9.0",
+          toolVersion: "1.9.1",
           id,
           path: `/tmp/confscope-retest-snapshots/${id}`,
           name: "retest-imported",
