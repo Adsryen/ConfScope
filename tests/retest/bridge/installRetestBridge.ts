@@ -1,6 +1,6 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditLineSink } from "./retestBinding";
+import { createRetestInvoke, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -74,6 +74,25 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
       // 审计失败不阻断主流程
     }
   });
+  // 审计文件读取/清空（node 侧）：ReadAuditLogLines / ClearAuditTrail 经桥落盘，
+  // 与 Go 侧 audit.Read/Clear 行为对齐（清空幂等，文件不存在 no-op）。
+  setRetestAuditFsHooks(
+    () => {
+      try {
+        if (!existsSync(RETEST_AUDIT_FILE)) return [];
+        return readFileSync(RETEST_AUDIT_FILE, "utf8").split("\n").filter((l) => l.trim() !== "");
+      } catch {
+        return [];
+      }
+    },
+    () => {
+      try {
+        if (existsSync(RETEST_AUDIT_FILE)) writeFileSync(RETEST_AUDIT_FILE, "", "utf8");
+      } catch {
+        // 清空失败不阻断主流程
+      }
+    }
+  );
   // vite 5 对 tests/** 下文件只做 mtime 缓存失效（不校验内容 hash），同文件覆盖写后
   // 浏览器端可能拿到旧变换 → 先用 bust URL 强制重新取变换（见 ui.ts bumpRetestBridgeBust）。
   await bumpRetestBridgeBust(page);

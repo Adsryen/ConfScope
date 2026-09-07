@@ -85,11 +85,34 @@ export const RETEST_AUDIT_FILE = `${RETEST_AUDIT_DIR}/audit-trail.jsonl`;
 const auditSessions = new Map<string, { kind: string; status: string }>();
 const auditLines: string[] = [];
 let auditLineSink: ((line: string) => void) | null = null;
+let auditReadSource: (() => string[]) | null = null;
+let auditClearSink: (() => void) | null = null;
 
 /** node 侧落盘回调（由 installRetestBridge 注入）；
  * 浏览器内联桥环境无 node:fs（见 e12e4f7 的浏览器兼容改造），审计仅日志。 */
 export function setRetestAuditLineSink(sink: ((line: string) => void) | null): void {
   auditLineSink = sink;
+}
+
+/** node 侧审计文件读取/清空钩子（由 installRetestBridge 注入，e12e4f7 浏览器兼容改造
+ * 移除了 node:fs 后 ReadAuditLogLines/ClearAuditTrail 依赖的落盘能力由此恢复）；
+ * 纯浏览器环境无注入时：读取回退进程内行、清空 no-op。 */
+export function setRetestAuditFsHooks(read: () => string[], clear: () => void): void {
+  auditReadSource = read;
+  auditClearSink = clear;
+}
+
+function auditRead(): string[] {
+  if (auditReadSource) return auditReadSource();
+  return auditLines;
+}
+function auditWrite(lines: string[]): void {
+  if (lines.length === 0) {
+    auditClearSink?.();
+    auditLines.length = 0;
+    return;
+  }
+  for (const line of lines) appendAuditEventNode(line);
 }
 function appendAuditEventNode(raw: string): void {
   auditLines.push(raw);
