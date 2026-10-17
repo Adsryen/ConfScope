@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
+import { busyProps } from "../lib/busyRegion";
 import { useTranslation } from "../i18n";
 import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
 import {
@@ -330,7 +331,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
   };
 
   return (
-    <div className="page-surface data-page backup-view">
+    <div className="page-surface data-page backup-view" {...busyProps(loading)}>
       <div className="page-header">
         <div>
           <h3>{t("app.backup")}</h3>

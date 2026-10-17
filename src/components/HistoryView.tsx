@@ -7,6 +7,7 @@ import {
   listHistory,
 } from "../api/nacos";
 import { Format, nacosType } from "../lib/format";
+import { busyProps } from "../lib/busyRegion";
 import { reportError } from "../lib/errorCenter";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
@@ -260,6 +261,10 @@ export default function HistoryView({
   const rightNid = sorted[1];
   const itemOf = (nid: string) => items.find((i) => i.id === nid);
 
+  // 对比要用的两份版本内容是按需拉取的：没回来之前这一整块正在被异步替换（波36 R55）。
+  const missingContent = (nid: string) => !!nid && contents[nid] === undefined;
+  const comparePending = comparing && (missingContent(leftNid) || missingContent(rightNid));
+
   return (
     <div className="history-view">
       <div className="history-list">
@@ -267,7 +272,7 @@ export default function HistoryView({
           {t('history.title')}（{total}）
           <span className="history-hint">{t('history.pickHint')}</span>
         </div>
-        <div className="history-items">
+        <div className="history-items" {...busyProps(loading)}>
         {loading && (
           <div className="pad-msg" role="status" aria-live="polite">
             {t("common.loading")}
@@ -311,7 +316,7 @@ export default function HistoryView({
         <Pager page={pageNo} pages={pages} loading={loading} onPage={(p) => loadHistory(p)} />
       </div>
 
-      <div className="history-detail">
+      <div className="history-detail" {...busyProps(comparePending)}>
         {comparing ? (
           (leftNid && contents[leftNid] === undefined) ||
           (rightNid && contents[rightNid] === undefined) ? (
@@ -347,7 +352,7 @@ export default function HistoryView({
               contents[dv] !== undefined &&
               (!prev || contents[prev.id] !== undefined);
             return (
-              <div className="content-box">
+              <div className="content-box" {...busyProps(!ready)}>
                 <div className="content-box-head">
                   <span>
                     nid {viewing} · {formatTime(itemOf(viewing)?.lastModifiedTime ?? "")}

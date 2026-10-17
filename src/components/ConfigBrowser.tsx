@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as Reac
 import { Connection, connectionDisplayLabel, connectionProjectName } from "../store/connections";
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
+import { busyProps } from "../lib/busyRegion";
 import {
   buildContentReplaceApplyEntry,
   replacementImpact,
@@ -1067,7 +1068,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             )}
           </div>
         )}
-        <div className="browser-items">
+        <div className="browser-items" {...busyProps(listLoading || contentSearching)}>
           {listLoading && (
             <div className="pad-msg" role="status" aria-live="polite">
               {t("config.loading")}
@@ -1173,7 +1174,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             </div>
 
             {tab === "content" ? (
-              <div className="content-box">
+              <div className="content-box" {...busyProps(contentLoading)}>
                 {contentLoading && (
                   <div className="pad-msg" role="status" aria-live="polite">
                     {t("config.loading")}

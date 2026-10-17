@@ -9,6 +9,7 @@ import {
 import { createSnapshot, getSnapshot } from "../api/snapshot";
 import { useTranslation } from "../i18n";
 import { withEditedAfterValue, type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
+import { busyProps } from "../lib/busyRegion";
 import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
@@ -949,7 +950,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   };
 
   return (
-    <div className="page-surface data-page apply-view">
+    <div className="page-surface data-page apply-view" {...busyProps(draftState.status === "loading")}>
       <div className="page-header">
         <div>
           <h3>{t("apply.title")}</h3>

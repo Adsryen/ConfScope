@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { Connection } from "../store/connections";
 import { reportError } from "../lib/errorCenter";
+import { busyProps } from "../lib/busyRegion";
 import { formatDateTime } from "../lib/formatDateTime";
 import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
@@ -312,7 +313,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   };
 
   return (
-    <div className="page-surface data-page history-page">
+    <div className="page-surface data-page history-page" {...busyProps(loading)}>
       <div className="page-header">
         <div>
           <h3>{t("app.history")}</h3>
