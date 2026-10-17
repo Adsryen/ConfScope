@@ -2343,6 +2343,7 @@ textarea {
   transition: opacity 0.12s ease;
 }
 .code-body:hover .code-find-open,
+.code-editor:hover .code-find-open,
 .code-find-open:focus-visible {
   opacity: 1;
 }
@@ -4218,7 +4219,14 @@ button.diff-workflow-step-btn:hover {
   border-radius: 4px;
   overflow: hidden;
 }
+/* 编辑态与浏览态共用同一套几何变量（--code-row-h / --code-gutter-w / --code-pad-top），
+   CodeEditor.tsx 里的 ROW_H / GUTTER_W / PAD_TOP 必须与这里逐值相等，
+   由 tests/ux/codeEditorGeometry.test.ts 读磁盘守着。 */
 .code-editor {
+  --code-row-h: 20px;
+  --code-gutter-w: 52px;
+  --code-pad-top: 12px;
+  --code-pad-left: calc(var(--code-gutter-w) + 14px);
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -4229,11 +4237,12 @@ button.diff-workflow-step-btn:hover {
   margin: 0;
   position: absolute;
   inset: 0;
-  padding: 12px 14px;
+  /* 左侧让出行号槽：滚动时文本从槽下面穿过，不会压住行号 */
+  padding: var(--code-pad-top) 14px 12px var(--code-pad-left);
   border: 0;
   font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: var(--code-row-h); /* 必须与 JS ROW_H 严格一致 */
   tab-size: 2;
   white-space: pre;
   overflow: auto;
@@ -4241,6 +4250,8 @@ button.diff-workflow-step-btn:hover {
 .code-editor-pre {
   pointer-events: none;
   color: var(--text);
+  z-index: 1;
+  background: transparent; /* 让命中行底色（z-index 更低的 .code-lines）透出 */
 }
 .code-editor-ta {
   width: 100%;
@@ -4250,10 +4261,30 @@ button.diff-workflow-step-btn:hover {
   color: transparent;
   caret-color: var(--text-hi);
   outline: none;
+  z-index: 2;
 }
 .code-editor-ta::placeholder {
   color: var(--text-dim);
   -webkit-text-fill-color: var(--text-dim);
+}
+/* 编辑态的行号槽要压在横向滚动的文本之上（浏览态同款规则，这里只提层） */
+.code-editor .code-gutter {
+  z-index: 3;
+}
+.code-editor .code-find,
+.code-editor .code-find-open {
+  z-index: 4;
+}
+/* 隐形探针：只用来量等宽字符的像素宽（长行命中要按列横向定位），不参与布局 */
+.code-editor-probe {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
 }
 
 .conn-mgr {
@@ -4833,6 +4864,55 @@ button.diff-workflow-step-btn:hover {
   max-width: none;
 }
 
+/* 表单数字输入（R24）：与 .search-input 解耦。搜索框带着列表页的 max-width:220px 等约束，
+   表单里的端口框要的是「撑满字段 + 越界变红 + 下面一行错误」，两套混用迟早互相拖改。
+   .number-field / .field-input / .field-error 由 tests/ux/numberFieldCss.test.ts 读磁盘守着。 */
+.number-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.field-input {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.field-input:focus {
+  border-color: var(--accent);
+}
+.field-input::placeholder {
+  color: var(--text-dim);
+}
+.field-input:focus-visible {
+  box-shadow: var(--focus-ring-shadow);
+}
+.field-input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+.field-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.field-error {
+  color: var(--red-h);
+  font-size: 11px;
+  line-height: 1.4;
+}
+/* 禁用状态的按钮不响应鼠标事件，title 挂在自己身上弹不出来；
+   包一层的 .btn-guard 承接 title，鼠标才有「为什么现在不能保存」的解释（R19）。 */
+.btn-guard {
+  display: inline-flex;
+}
+
 .btn-sm {
   padding: 4px 8px;
   font-size: 11px;
@@ -4855,6 +4935,21 @@ button.diff-workflow-step-btn:hover {
   color: var(--red-h);
   line-height: 1.5;
   word-break: break-all;
+}
+/* 校验错误行的「跳到第 N 行」：文字按钮，跟错误文案同色阶但用强调色区分动作 */
+.alert-jump {
+  margin-left: 6px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--accent-h);
+  font-size: 12.5px;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.alert-jump:hover {
+  color: var(--accent);
 }
 
 /* ── Toast ── */

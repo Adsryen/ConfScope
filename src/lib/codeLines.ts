@@ -18,7 +18,16 @@ export interface CodeHit {
   length: number;
 }
 
-/** 按 \n 切行，保留每行原有的 \r（CRLF 文件行尾偏移才能还原）。 */
+/**
+ * textarea 的 value getter 会把 \r\n 和孤立 \r 归一成 \n（Chromium 与 jsdom 实测一致），
+ * 所以 DOM 侧的偏移只能在归一后的字符串上算：否则「跳到第 N 行」「选中命中」会整体后移
+ * “该位置之前的 \r 个数”个字符，Tab 缩进也会插错位置。
+ */
+export function normalizeLineEndings(code: string): string {
+  return code.includes("\r") ? code.replace(/\r\n?/g, "\n") : code;
+}
+
+/** 按 \n 切行，保留每行原有的 \r（浏览态 <pre> 不走 DOM 归一，行尾偏移仍按原文还原）。 */
 export function splitLines(code: string): string[] {
   if (code === "") return [];
   return code.split("\n");
@@ -55,7 +64,8 @@ export function findCodeHits(code: string, term: string): CodeHit[] {
   return hits;
 }
 
-function lineIndexOfOffset(offsets: number[], offset: number): number {
+/** 行首偏移表 → 某偏移所在行（0 基），二分查找。 */
+export function lineIndexOfOffset(offsets: number[], offset: number): number {
   let lo = 0;
   let hi = offsets.length - 1;
   while (lo < hi) {
@@ -64,6 +74,22 @@ function lineIndexOfOffset(offsets: number[], offset: number): number {
     else hi = mid - 1;
   }
   return lo;
+}
+
+/**
+ * 把整文档偏移换算成 1 基行列号，供校验报错定位（R28）与「跳到第 N 行」使用。
+ * 口径与 splitLines/lineOffsets 一致：CRLF 文件行尾的 \r 记在本行内，
+ * 因此列号与用户在编辑器里数出来的位置一致。偏移越界按末尾夹取，
+ * 空文档返回 null（V8 偶尔会报出大于长度的 position）。
+ */
+export function offsetToLineColumn(code: string, offset: number): { line: number; column: number } | null {
+  if (!Number.isFinite(offset) || offset < 0) return null;
+  const lines = splitLines(code);
+  if (!lines.length) return null;
+  const offsets = lineOffsets(lines);
+  const clamped = Math.min(offset, code.length);
+  const line = lineIndexOfOffset(offsets, clamped);
+  return { line: line + 1, column: clamped - (offsets[line] ?? 0) + 1 };
 }
 
 /** 命中行集合（用于行高亮 / 缩略图标记）。 */

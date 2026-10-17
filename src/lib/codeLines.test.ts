@@ -11,6 +11,7 @@ import {
   hitLines,
   lineOffsets,
   markHighlightedHtml,
+  normalizeLineEndings,
   splitLines,
 } from "./codeLines";
 
@@ -27,6 +28,16 @@ function baseHtml(code: string, fmt: Parameters<typeof highlightCode>[1]): strin
   const base = highlightCode(code, fmt);
   return code.endsWith("\n") ? base + "<span></span>" : base;
 }
+
+describe("normalizeLineEndings", () => {
+  it("CRLF 与孤立 CR 都归一成 LF，与 textarea.value 的口径一致", () => {
+    expect(normalizeLineEndings("a\r\nb\rc\n")).toBe("a\nb\nc\n");
+  });
+
+  it("纯 LF 内容原样返回，不额外改动文本", () => {
+    expect(normalizeLineEndings("a\nb\n")).toBe("a\nb\n");
+  });
+});
 
 describe("splitLines / lineOffsets", () => {
   it("splits on \\n and keeps \\r, reconstructing whole-doc offsets", () => {

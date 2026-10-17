@@ -85,6 +85,27 @@ describe("ConfigEditor", () => {
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
+  it("校验错误带行号时可一键跳到出错行（R28）", async () => {
+    renderEditor();
+    const content = "server:\n  port: 8080\n  port: 9090\n";
+
+    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
+    fireEvent.change(editorTextarea(), { target: { value: content } });
+    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+
+    const jump = await screen.findByRole("button", { name: /跳到第 \d+ 行/ });
+    fireEvent.click(jump);
+
+    const ta = editorTextarea();
+    expect(ta.value).toBe(content); // 跳转不改草稿
+    const line = Number.parseInt(/跳到第 (\d+) 行/.exec(jump.textContent ?? "")?.[1] ?? "", 10);
+    const rows = content.split("\n");
+    const start = rows.slice(0, line - 1).reduce((acc, row) => acc + row.length + 1, 0);
+    expect(ta.selectionStart).toBe(start);
+    expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe(rows[line - 1]);
+    expect(document.activeElement).toBe(ta); // 焦点回到编辑区，可以直接改
+  });
+
   it("blocks publish when the content fails format validation", async () => {
     renderEditor();
 

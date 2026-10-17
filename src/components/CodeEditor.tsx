@@ -1,32 +1,336 @@
-import { useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Format } from "../lib/format";
 import { isImeComposing } from "../lib/useEscape";
 import { highlightCode } from "../lib/highlight";
+import {
+  activeLineOf,
+  activeOffsetOf,
+  findCodeHits,
+  hitLines,
+  lineOffsets,
+  markHighlightedHtml,
+  normalizeLineEndings,
+  splitLines,
+  type CodeHit,
+} from "../lib/codeLines";
+import { useTranslation } from "../i18n";
 
 interface Props {
   value: string;
   onChange: (v: string) => void;
   format: Format;
   placeholder?: string;
+  /** 外部内容搜索词：进入编辑态后仍保持标红，与浏览态一致。 */
+  searchTerm?: string;
+  /** 是否启用编辑态视图内查找（Ctrl+F / F3）。 */
+  enableFind?: boolean;
+  /**
+   * 宿主页面是否在前台。被保活隐藏的页面里的编辑器不能再挂全局 Ctrl+F 监听，
+   * 否则隐藏的查找栏会抢走前台页面的快捷键。
+   */
+  active?: boolean;
+}
+
+/** 对外暴露的编辑器命令式入口（父组件用它打开查找、跳到指定行）。 */
+export interface CodeEditorHandle {
+  openFind: () => void;
+  /** 跳到 1 基行号：选区落到该行并把焦点交回编辑区。校验错误「跳到第 N 行」用它。 */
+  revealLine: (lineOneBased: number) => void;
+}
+
+// 几何常量：与 styles.css 里 .code-editor 的 CSS 变量严格同源（读磁盘静态守卫盯着）。
+// 行 i 在滚动内容中的 top = PAD_TOP + i * ROW_H 是行号、命中行底色、跳转定位共同的依据。
+const ROW_H = 20;
+const GUTTER_W = 52;
+const PAD_TOP = 12;
+const PAD_LEFT_EXTRA = 14;
+const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
+const PROBE_CHARS = 20; // 隐形探针里放多少个等宽字符用来量字宽
+
+function clamp(value: number, min: number, max: number): number {
+  if (max < min) return min;
+  return Math.min(max, Math.max(min, value));
 }
 
 /** 带语法高亮的可编辑代码框:透明 textarea 叠在高亮 <pre> 之上,
- *  光标/选区来自 textarea,着色来自下层 pre,滚动同步。配色与 CodeView 一致。 */
-export default function CodeEditor({ value, onChange, format, placeholder }: Props) {
+ *  光标/选区来自 textarea,着色来自下层 pre,滚动同步。配色与 CodeView 一致。
+ *
+ *  与浏览态对齐的三件事（R22）：行号槽、搜索词标红与命中行高亮、视图内 Ctrl+F 查找。
+ *  刻意不做缩略图：编辑态内容一直在变，重算成本换来的收益低于风险。
+ *  不变式：查找定位只改 textarea 的选区与滚动，绝不改 value。 */
+const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
+  { value, onChange, format, placeholder, searchTerm = "", enableFind = true, active = true }: Props,
+  ref
+) {
+  const { t } = useTranslation();
+
+  const rootRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const gutterInnerRef = useRef<HTMLDivElement>(null);
+  const linesInnerRef = useRef<HTMLDivElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  const [findOpen, setFindOpen] = useState(false);
+  const [findTerm, setFindTerm] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [metrics, setMetrics] = useState({ scrollTop: 0, clientHeight: 0 });
+  // 「跳到第 N 行」落点：不在查找态时也要能高亮那一行
+  const [pinnedLine, setPinnedLine] = useState<number | null>(null);
+
+  // 归一到 DOM 真正承载的文本（textarea.value 会吃掉 \r），后续所有偏移、行数组、高亮层都用它，
+  // 保证选区、Tab 缩进、高亮标记落在同一套坐标上（R28 修正）。
+  const doc = useMemo(() => normalizeLineEndings(value), [value]);
+  const lines = useMemo(() => splitLines(doc), [doc]);
+  const totalLines = lines.length;
+
+  // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（只标红，不区分当前命中）。
+  const effectiveTerm = findOpen ? findTerm : searchTerm;
+  const hits = useMemo(() => findCodeHits(doc, effectiveTerm.trim()), [doc, effectiveTerm]);
+  const hitSet = useMemo(() => hitLines(hits), [hits]);
+
+  const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
+  const currentLine = findOpen ? activeLineOf(hits, activeIdx) : pinnedLine;
+
   // 末尾只在原文本身以换行结尾时才补一个换行,保证高亮层与 textarea 行数严格一致
   // (无条件补 "\n" 会让高亮层多出一行空行,拖拽选区/滚动同步在长文档上发生偏移)
   // 高亮层用 HTML 表示,而 HTML 解析会把“片段末尾的换行”再补一个换行
   // (<div>x\n</div> 解析后 textContent 为 x\n\n),导致 pre 比 textarea 多一行、
   // 拖拽选区/滚动同步偏移。因此末尾换行不用裸 "\n" 表示,而是放在一个空 span 里
   // (解析后不产生额外文本),保证高亮层文本与 textarea 值严格一致。
-  const html = value.endsWith("\n") ? highlightCode(value, format) + "<span></span>" : highlightCode(value, format);
+  const html = useMemo(() => {
+    const base = highlightCode(doc, format);
+    const withTail = doc.endsWith("\n") ? base + "<span></span>" : base;
+    // 只在已转义 HTML 的文本区按整文档偏移插标记，标签结构原样保留，
+    // 高亮层的 textContent 仍与 textarea 的值逐字相等（retest 依赖这条）。
+    return markHighlightedHtml(withTail, hits, activeOffset);
+  }, [doc, format, hits, activeOffset]);
 
-  const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+  const syncScroll = useCallback(() => {
+    const ta = taRef.current;
     const pre = preRef.current;
+    if (!ta) return;
+    const top = ta.scrollTop;
     if (pre) {
-      pre.scrollTop = e.currentTarget.scrollTop;
-      pre.scrollLeft = e.currentTarget.scrollLeft;
+      pre.scrollTop = top;
+      pre.scrollLeft = ta.scrollLeft;
+    }
+    // 行号 / 命中行用 transform 直接跟手，不等 React 重渲染。
+    const transform = `translateY(${-top}px)`;
+    if (gutterInnerRef.current) gutterInnerRef.current.style.transform = transform;
+    if (linesInnerRef.current) linesInnerRef.current.style.transform = transform;
+    setMetrics({ scrollTop: top, clientHeight: ta.clientHeight });
+  }, []);
+
+  /** 量一个等宽字符的像素宽度；首帧或 jsdom（无布局）量不到时返回 0。 */
+  const measureCharWidth = useCallback((): number => {
+    const probe = probeRef.current;
+    if (!probe) return 0;
+    const width = probe.getBoundingClientRect().width / PROBE_CHARS;
+    return Number.isFinite(width) && width > 0 ? width : 0;
+  }, []);
+
+  const scrollLineIntoView = useCallback(
+    (line: number) => {
+      const ta = taRef.current;
+      if (!ta) return;
+      const y = PAD_TOP + line * ROW_H;
+      ta.scrollTop = clamp(y - ta.clientHeight / 2, 0, Math.max(0, ta.scrollHeight - ta.clientHeight));
+      // 直接调一次同步：程序化滚动在 jsdom 里不触发 scroll 事件，真机也要保证当帧对齐
+      syncScroll();
+    },
+    [syncScroll]
+  );
+
+  /** 长行里的命中可能横向滚出视口，按列宽把水平位置也带过去。 */
+  const scrollColumnIntoView = useCallback(
+    (hit: CodeHit) => {
+      const ta = taRef.current;
+      if (!ta) return;
+      const charW = measureCharWidth();
+      if (!charW) return; // 量不到字宽就不动水平滚动，避免把用户已有的横向偏移清掉
+      const x = hit.column * charW;
+      ta.scrollLeft = clamp(x - ta.clientWidth / 2, 0, Math.max(0, ta.scrollWidth - ta.clientWidth));
+      syncScroll();
+    },
+    [measureCharWidth, syncScroll]
+  );
+
+  /** 把选区与滚动落到一次命中上。注意：只动选区，不动 value。 */
+  const revealHit = useCallback(
+    (hit: CodeHit) => {
+      const ta = taRef.current;
+      if (ta) {
+        // 未聚焦时选区不渲染，靠 <mark class="search-hit-current"> 和命中行底色表达当前位置；
+        // 关闭查找栏后用户接着输入/替换时，这个选区已经就位。
+        ta.setSelectionRange(hit.offset, hit.offset + hit.length);
+      }
+      setPinnedLine(hit.line);
+      scrollLineIntoView(hit.line);
+      scrollColumnIntoView(hit);
+    },
+    [scrollColumnIntoView, scrollLineIntoView]
+  );
+
+  const openFind = useCallback(() => {
+    setPinnedLine(null);
+    setFindOpen(true);
+    setFindTerm((prev) => prev || searchTerm);
+    const focusInput = () => {
+      const input = findInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    };
+    // 等查找条挂载后再聚焦；rAF 不可用（如 jsdom 首帧）时退到微任务。
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(focusInput);
+    else setTimeout(focusInput, 0);
+  }, [searchTerm]);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindTerm("");
+    setActiveIdx(0);
+    // 查找结束回到编辑：把焦点还给文本区，用户不用重新点一下才能继续打字
+    taRef.current?.focus();
+  }, []);
+
+  const navigate = useCallback(
+    (delta: number) => {
+      if (!hits.length) return;
+      const next = (activeIdx + delta + hits.length) % hits.length;
+      setActiveIdx(next);
+      revealHit(hits[next]);
+    },
+    [activeIdx, hits, revealHit]
+  );
+
+  const revealLine = useCallback(
+    (lineOneBased: number) => {
+      if (!totalLines) return;
+      const line = clamp(lineOneBased - 1, 0, totalLines - 1);
+      const start = lineOffsets(lines)[line] ?? 0;
+      // doc 已归一，行内不再有 \r，选区长度就是这一行可见文本的长度
+      const textLength = lines[line].length;
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(start, start + textLength);
+      }
+      setFindOpen(false);
+      setFindTerm("");
+      setPinnedLine(line);
+      scrollLineIntoView(line);
+    },
+    [lines, scrollLineIntoView, totalLines]
+  );
+
+  useImperativeHandle(ref, () => ({ openFind, revealLine }), [openFind, revealLine]);
+
+  // 搜索词 / 内容变化：重置当前命中序号，避免越界或指向改动前的位置。
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [effectiveTerm, doc]);
+
+  // 打开 / 改变查找词后，把选区与滚动落到当前命中（前后导航在 navigate 里即时做）。
+  useEffect(() => {
+    if (!findOpen || !hits.length) return;
+    revealHit(hits[clamp(activeIdx, 0, hits.length - 1)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, effectiveTerm]);
+
+  // 内容整体换掉（切文件/切草稿）时收起查找栏，防止旧关键词污染新内容。
+  useEffect(() => {
+    setFindOpen(false);
+    setFindTerm("");
+    setPinnedLine(null);
+  }, [format]);
+
+  useEffect(() => {
+    syncScroll();
+    // 挂载后尺寸才稳定，再测一次，保证首屏行号不是兜底的那几十行
+    const raf = (window as unknown as { requestAnimationFrame?: (cb: () => void) => number }).requestAnimationFrame;
+    if (raf) raf(syncScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const visibleRange = useMemo(() => {
+    const { scrollTop, clientHeight } = metrics;
+    if (clientHeight <= 0) return { start: 0, end: Math.min(totalLines, MAX_FALLBACK_ROWS) };
+    const start = clamp(Math.floor((scrollTop - PAD_TOP) / ROW_H) - 1, 0, totalLines);
+    const end = clamp(Math.ceil((scrollTop + clientHeight - PAD_TOP) / ROW_H) + 1, 0, totalLines);
+    return { start, end };
+  }, [metrics, totalLines]);
+
+  const lineNumbers = useMemo(() => {
+    const out: number[] = [];
+    for (let i = visibleRange.start; i < visibleRange.end; i += 1) out.push(i);
+    return out;
+  }, [visibleRange]);
+
+  const hitRows = useMemo(() => {
+    const seen = new Set<number>();
+    const out: number[] = [];
+    const { start, end } = visibleRange;
+    for (const hit of hits) {
+      if (hit.line >= start && hit.line < end && !seen.has(hit.line)) {
+        seen.add(hit.line);
+        out.push(hit.line);
+      }
+    }
+    if (pinnedLine !== null && pinnedLine >= start && pinnedLine < end && !seen.has(pinnedLine)) out.push(pinnedLine);
+    out.sort((a, b) => a - b);
+    return out;
+  }, [hits, pinnedLine, visibleRange]);
+
+  // Ctrl+F / Cmd+F / F3：编辑态必须自己接管。浏览态 CodeView 的监听在焦点落到
+  // textarea 这类可编辑控件时故意不接管（不抢输入框的查找），所以光脚按 Ctrl+F 以前是死键。
+  useEffect(() => {
+    if (!enableFind || !active) return;
+    const handler = (e: KeyboardEvent) => {
+      // 组合态期间不劫持 Ctrl+F / F3：此刻按键属于输入法候选，不该被查找栏抢走
+      if (isImeComposing(e)) return;
+      const key = e.key;
+      const isFindKey = (e.ctrlKey || e.metaKey) && (key === "f" || key === "F");
+      const isF3 = key === "F3";
+      if (!isFindKey && !isF3) return;
+      // F3 只有在查找栏已打开时才导航，否则把系统原生行为留给调用方
+      if (isF3 && !findOpen) return;
+
+      const root = rootRef.current;
+      const target = e.target as EventTarget | null;
+      const inRoot = !!root && target instanceof Node && root.contains(target);
+      const focused = document.activeElement as HTMLElement | null;
+      const onBody = !focused || focused === document.body || focused === document.documentElement;
+      // 焦点在本编辑器内 → 接管；焦点在别处的输入框 → 让给它。
+      const mine = inRoot || focused === taRef.current;
+      // 没有焦点时也要能按出来，但页面里存在浏览态 CodeView（它自己监听 Ctrl+F）就不抢，
+      // 避免同一快捷键被两个视图同时接管。
+      const fallback = onBody && !document.querySelector(".code-view");
+      if (!mine && !fallback) return;
+
+      e.preventDefault();
+      if (isF3) {
+        navigate(e.shiftKey ? -1 : 1);
+        return;
+      }
+      openFind();
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [active, enableFind, findOpen, navigate, openFind]);
+
+  const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」；Esc 也交回 IME 取消候选
+    if (isImeComposing(e)) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      navigate(e.shiftKey ? -1 : 1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeFind();
     }
   };
 
@@ -38,7 +342,7 @@ export default function CodeEditor({ value, onChange, format, placeholder }: Pro
       e.preventDefault();
       const ta = e.currentTarget;
       const { selectionStart: s, selectionEnd: end } = ta;
-      const next = value.slice(0, s) + "  " + value.slice(end);
+      const next = doc.slice(0, s) + "  " + doc.slice(end);
       onChange(next);
       requestAnimationFrame(() => {
         ta.selectionStart = ta.selectionEnd = s + 2;
@@ -46,14 +350,36 @@ export default function CodeEditor({ value, onChange, format, placeholder }: Pro
     }
   };
 
+  const vars = {
+    "--code-row-h": `${ROW_H}px`,
+    "--code-gutter-w": `${GUTTER_W}px`,
+    "--code-pad-top": `${PAD_TOP}px`,
+    "--code-pad-left": `${GUTTER_W + PAD_LEFT_EXTRA}px`,
+  } as CSSProperties;
+
   return (
-    <div className="code-editor">
+    <div className="code-editor" ref={rootRef} style={vars}>
+      {/* 命中行底色层：与文本共享同一 ROW_H 网格，位于文本之下 */}
+      <div className="code-lines" aria-hidden="true">
+        <div className="code-lines-layer" ref={linesInnerRef}>
+          {hitRows.map((line) => (
+            <div
+              key={`line-${line}`}
+              className={`code-line${line === currentLine ? " is-current" : " is-hit"}`}
+              style={{ top: PAD_TOP + line * ROW_H }}
+            />
+          ))}
+        </div>
+      </div>
+
       <pre ref={preRef} className="code-editor-pre mono hljs" aria-hidden="true">
         <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
+
       <textarea
+        ref={taRef}
         className="code-editor-ta mono"
-        value={value}
+        value={doc}
         placeholder={placeholder}
         spellCheck={false}
         autoCapitalize="off"
@@ -63,6 +389,90 @@ export default function CodeEditor({ value, onChange, format, placeholder }: Pro
         onScroll={syncScroll}
         onKeyDown={onKeyDown}
       />
+
+      {/* 行号槽：与浏览态复用同一套 .code-gutter/.code-ln 与 CSS 变量 */}
+      {totalLines > 0 && (
+        <div className="code-gutter" aria-hidden="true">
+          <div className="code-gutter-layer" ref={gutterInnerRef}>
+            {lineNumbers.map((i) => (
+              <div
+                key={`ln-${i}`}
+                className={`code-ln${i === currentLine ? " is-current" : hitSet.has(i) ? " is-hit" : ""}`}
+                style={{ top: PAD_TOP + i * ROW_H }}
+              >
+                {i + 1}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 隐形探针：量等宽字符像素宽（wrap=off 的横向定位要用），不参与布局与命中 */}
+      <span ref={probeRef} className="code-editor-probe mono" aria-hidden="true">
+        {"0".repeat(PROBE_CHARS)}
+      </span>
+
+      {enableFind && !findOpen && (
+        <button type="button" className="code-find-open" onClick={openFind} title={t("config.openFind")} aria-label={t("config.openFind")}>
+          ⌕
+        </button>
+      )}
+
+      {enableFind && findOpen && (
+        <div className="code-find" role="search">
+          <input
+            ref={findInputRef}
+            className="code-find-input mono"
+            type="text"
+            value={findTerm}
+            placeholder={t("config.findPlaceholder")}
+            aria-label={t("config.findPlaceholder")}
+            onChange={(e) => {
+              setFindTerm(e.target.value);
+              setActiveIdx(0);
+            }}
+            onKeyDown={onFindKeyDown}
+          />
+          <span className="code-find-count" aria-live="polite">
+            {hits.length
+              ? t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })
+              : effectiveTerm
+                ? t("config.findNone")
+                : t("config.findHint")}
+          </span>
+          <button
+            type="button"
+            className="code-find-btn"
+            onClick={() => navigate(-1)}
+            disabled={!hits.length}
+            title={t("config.findPrev")}
+            aria-label={t("config.findPrev")}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="code-find-btn"
+            onClick={() => navigate(1)}
+            disabled={!hits.length}
+            title={t("config.findNext")}
+            aria-label={t("config.findNext")}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="code-find-btn"
+            onClick={closeFind}
+            title={t("config.findClose")}
+            aria-label={t("config.findClose")}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
-}
+});
+
+export default CodeEditor;

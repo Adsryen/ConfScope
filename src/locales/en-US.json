@@ -35,7 +35,10 @@
     "xmlFormatError": "XML format error:{message}",
     "xmlTagMismatch": "Tag mismatch:{name}",
     "parseFailed": "Parse failed",
-    "jsonParseFailed": "JSON parse failed:{message}"
+    "jsonParseFailed": "JSON parse failed:{message}",
+    "atLineColumn": " (line {line}, column {column})",
+    "atLine": " (line {line})",
+    "duplicateKeyLines": " (first on line {first}, duplicated on lines {lines})"
   },
   "export": {
     "unsupportedFormat": "Unsupported export format: {format}"
@@ -478,6 +481,9 @@
     "addressHelp": "Use the real Nacos URL, for example http://host:8848/nacos. With SSH tunnel, still enter the Nacos URL the tunnel should reach.",
     "port": "Port",
     "portPlaceholder": "Local SSH port, default 22",
+    "portRequired": "{label} is required",
+    "portInteger": "{label} must be an integer",
+    "portRange": "{label} must be between {min} and {max} (current: {value})",
     "username": "Username",
     "usernamePlaceholder": "Enter username",
     "usernameHelp": "Use this for open-source Nacos username/password auth. Leave empty for no-auth.",
@@ -602,6 +608,7 @@
     "sshPasswordHelp": "SSH password for the jump host.",
     "localPort": "Local Port (optional, auto-assign if empty)",
     "localPortPlaceholder": "Leave empty for auto-assign",
+    "localPortShort": "Local port",
     "localPortHelp": "Temporary local listening port. Leave empty for automatic assignment in most cases.",
     "privateKeyHelp": "Private key used to log in to the jump host.",
     "privateKeyPasswordHelp": "Fill this only when the private key has a passphrase.",
@@ -712,7 +719,8 @@
     "findClose": "Close find",
     "findCount": "{current} of {total}",
     "findNone": "No matches",
-    "minimap": "Minimap"
+    "minimap": "Minimap",
+    "jumpToLine": "Jump to line {line}"
   },
   "diff": {
     "title": "Smart Config Compare",

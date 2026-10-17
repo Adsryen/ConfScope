@@ -12,7 +12,7 @@ import {
 import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
-import { validateConfig } from "../lib/validate";
+import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import { createSnapshotFromConfigs } from "../api/snapshot";
@@ -20,8 +20,8 @@ import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../a
 import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
-import AlertModal from "./AlertModal";
-import CodeEditor from "./CodeEditor";
+import AlertModal, { type AlertItem } from "./AlertModal";
+import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
@@ -169,7 +169,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [snapshotSaving, setSnapshotSaving] = useState(false);
   // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
-  const [validateErrs, setValidateErrs] = useState<string[]>([]);
+  const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
+  // 编辑态命令式入口：查找栏、以及校验错误「跳到第 N 行」的落点（R22 / R28）
+  const editorRef = useRef<CodeEditorHandle>(null);
   const dirty = editing && draft !== content;
   const isLocalSnapshot = conn.sourceType === "local-snapshot";
   const isContentSearchActive = searchMode === "content" && Boolean(contentTerm);
@@ -548,9 +550,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
   const saveEdit = async () => {
     if (!selected) return;
-    const problems = validateConfig(draft, fmt);
+    const problems = validateConfigIssues(draft, fmt);
     if (problems.length) {
-      setValidateErrs(problems); // 弹框提示并禁止保存
+      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止保存
       return;
     }
     setSaving(true);
@@ -1094,7 +1096,14 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       </button>
                     </div>
                     <div className="editor-host grow">
-                      <CodeEditor value={draft} onChange={setDraft} format={fmt} />
+                      <CodeEditor
+                        ref={editorRef}
+                        value={draft}
+                        onChange={setDraft}
+                        format={fmt}
+                        active={active}
+                        searchTerm={isContentSearchActive ? contentTerm : undefined}
+                      />
                     </div>
                   </>
                 )}
@@ -1331,7 +1340,17 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       )}
 
       {validateErrs.length > 0 && (
-        <AlertModal title={t("config.validateFailed")} messages={validateErrs} onClose={() => setValidateErrs([])} active={active} />
+        <AlertModal
+          title={t("config.validateFailed")}
+          messages={validateErrs}
+          onClose={() => setValidateErrs([])}
+          active={active}
+          onJumpToLine={(line) => {
+            // 先关弹框再跳：弹框还开着就把焦点抢回编辑器，用户看不到落点
+            setValidateErrs([]);
+            editorRef.current?.revealLine(line);
+          }}
+        />
       )}
     </div>
   );

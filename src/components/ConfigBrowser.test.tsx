@@ -928,6 +928,25 @@ describe("ConfigBrowser", () => {
     expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
   });
 
+  it("校验错误带「跳到第 N 行」：点一下就把选区落到出错行（R28）", async () => {
+    const broken = '{\n  "a": 1\n  "b": 2\n}';
+    await enterEditMode(broken);
+    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+
+    const jump = await screen.findByRole("button", { name: /跳到第 \d+ 行/ });
+    fireEvent.click(jump);
+
+    await waitFor(() => expect(screen.queryByText("格式校验未通过")).not.toBeInTheDocument());
+    const ta = document.querySelector("textarea") as HTMLTextAreaElement;
+    // 跳转只动选区与滚动，草稿内容一个字符都不能变
+    expect(ta.value).toBe(broken);
+    const line = Number.parseInt(/跳到第 (\d+) 行/.exec(jump.textContent ?? "")?.[1] ?? "", 10);
+    const rows = broken.split("\n");
+    const start = rows.slice(0, line - 1).reduce((acc, row) => acc + row.length + 1, 0);
+    expect(ta.selectionStart).toBe(start);
+    expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe(rows[line - 1]);
+  });
+
   // ── 保活隐藏（R8 / D3）：整页只是 hidden，不卸载 ──
 
   /** 受控外壳：rerender 切 active，模拟 App 把配置浏览整页隐藏 / 显示。 */

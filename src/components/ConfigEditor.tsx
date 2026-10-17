@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
-import { validateConfig } from "../lib/validate";
+import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
-import AlertModal from "./AlertModal";
-import CodeEditor from "./CodeEditor";
+import AlertModal, { type AlertItem } from "./AlertModal";
+import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CopyButton from "./CopyButton";
 import Select from "./Select";
 
@@ -33,7 +33,8 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [validateErrs, setValidateErrs] = useState<string[]>([]);
+  const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
+  const editorRef = useRef<CodeEditorHandle>(null);
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = namespace || "public";
 
@@ -46,9 +47,9 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
       setError(t('config.dataIdRequired'));
       return;
     }
-    const problems = validateConfig(content, fmt);
+    const problems = validateConfigIssues(content, fmt);
     if (problems.length) {
-      setValidateErrs(problems); // 弹框提示并禁止发布
+      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止发布
       return;
     }
     setSaving(true);
@@ -133,10 +134,12 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
             <span>{t('config.contentLabel')}</span>
             <div className="editor-host fixed">
               <CodeEditor
+                ref={editorRef}
                 value={content}
                 onChange={setContent}
                 format={fmt}
-                placeholder={t('config.contentPlaceholder')}
+                placeholder={t("config.contentPlaceholder")}
+                active={active}
               />
             </div>
           </label>
@@ -159,10 +162,14 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
 
       {validateErrs.length > 0 && (
         <AlertModal
-          title={t('config.validateFailed')}
+          title={t("config.validateFailed")}
           messages={validateErrs}
           onClose={() => setValidateErrs([])}
           active={active}
+          onJumpToLine={(line) => {
+            setValidateErrs([]);
+            editorRef.current?.revealLine(line);
+          }}
         />
       )}
     </div>
