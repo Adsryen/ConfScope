@@ -1093,9 +1093,13 @@ describe("ConfigBrowser", () => {
     expect(screen.getByText("Data ID")).toBeInTheDocument();
     expect(dataIdInput).toHaveValue("app.yaml");
 
-    // 切回前台：Esc 重新由新建弹层负责
+    // 切回前台：Esc 重新由新建弹层负责；草稿在手，先问一句才关（轮5 R36 / 波13）
     shell.setActive(true);
     fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+    expect(screen.getByText("Data ID")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃内容" }));
     await waitFor(() => expect(screen.queryByText("Data ID")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "新建配置" })).toBeInTheDocument();
   });

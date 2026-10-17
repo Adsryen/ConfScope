@@ -179,4 +179,113 @@ describe("ConfigEditor", () => {
       actionLabel: "Retry Publish",
     });
   });
+
+  // ---- 波13 / 轮5 R36：新建配置是「手写 YAML 的唯一落点」，关掉它不能再不问一句 ----
+
+  function overlays(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>(".modal-overlay"));
+  }
+
+  it("草稿写过后点遮罩先问一句，确认才真关（R36）", () => {
+    const { onClose } = renderEditor();
+    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+
+    fireEvent.click(overlays()[0]);
+
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+    expect(screen.getByText(/配置 app\.yaml 尚未发布/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(editorTextarea().value).toBe("server:\n  port: 8080"); // 只是问，内容还在
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃内容" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("四处出口都要拦住：底部「取消」也先问", () => {
+    const { onClose } = renderEditor();
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("内容写过后点 × 也先问一句", () => {
+    const { onClose } = renderEditor();
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".modal-x")!);
+
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("什么都没写时点 × 直接关，不多问一句", () => {
+    const { onClose } = renderEditor();
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".modal-x")!);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("放弃未发布的内容？")).not.toBeInTheDocument();
+  });
+
+  it("只改格式或分组不算脏，关编辑器不用确认", () => {
+    const { onClose } = renderEditor();
+
+    fireEvent.change(document.querySelector<HTMLInputElement>('input[value="DEFAULT_GROUP"]')!, { target: { value: "DEV_GROUP" } });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("放弃未发布的内容？")).not.toBeInTheDocument();
+  });
+
+  it("确认框自己的遮罩不冒泡：关掉它不会又被外层重新问一遍", () => {
+    const { onClose } = renderEditor();
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+    fireEvent.click(overlays()[0]);
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+
+    // 第二层遮罩铺满视口，点空白处本该只关确认框、留在编辑器里继续写。
+    fireEvent.click(overlays()[1]);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText("放弃未发布的内容？")).not.toBeInTheDocument();
+    expect(editorTextarea().value).toBe("server:\n  port: 8080");
+  });
+
+  it("Esc 走同一道闸门：先问一句，再按一次只收掉提问", () => {
+    const { onClose } = renderEditor();
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // 第二次 Esc 归确认框（分层注册表里优先级更高）：只关提问，草稿还在。
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("放弃未发布的内容？")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(editorTextarea().value).toBe("server:\n  port: 8080");
+
+    // 想真走人还得再按一次并确认。
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "放弃内容" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("discard guard reads English in en-US", () => {
+    const { onClose } = renderEditor({}, "en-US");
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+
+    fireEvent.click(overlays()[0]);
+
+    expect(screen.getByText("Discard the unpublished content?")).toBeInTheDocument();
+    expect(screen.getByText(/unnamed draft/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard content" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

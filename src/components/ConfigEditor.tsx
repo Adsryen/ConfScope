@@ -7,6 +7,7 @@ import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
 import AlertModal, { type AlertItem } from "./AlertModal";
+import ConfirmModal from "./ConfirmModal";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CopyButton from "./CopyButton";
 import Select from "./Select";
@@ -35,12 +36,24 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   const [error, setError] = useState<string | null>(null);
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
   const editorRef = useRef<CodeEditorHandle>(null);
+  // 打开瞬间的内容快照：判「脏」只比 dataId 与正文（轮5 登记的 R36，波13 落地）。
+  // group/fmt 的改动不算——那是下拉一拨就有的动作，拦住只会被用户当成「怎么关不掉了」。
+  const initialRef = useRef({ dataId, content });
+  const [askDiscard, setAskDiscard] = useState(false);
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = namespace || "public";
 
+  const isDirty = () => dataId !== initialRef.current.dataId || content !== initialRef.current.content;
+  // 四处出口（Esc / 点遮罩 / × / 底部「取消」）都必须走这里，不许再留直连 onClose 的旁路：
+  // 手写半天的 YAML 以前点一下遮罩就永久没了，没有撤销也没有确认。
+  const attemptClose = () => {
+    if (isDirty()) setAskDiscard(true);
+    else onClose();
+  };
+
   // 编辑器自身的 Esc：交给分层注册表。内部的校验提示（confirm）与自绘下拉（dropdown）
   // 优先级更高，打开时先吃掉 Esc，不会再出现「一次 Esc 同时关下拉和编辑器」。
-  useEscape(active, onClose, EscapePriority.overlay);
+  useEscape(active, attemptClose, EscapePriority.overlay);
 
   const save = () => {
     if (!dataId.trim()) {
@@ -86,11 +99,21 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        // 只认落在这层遮罩自身上的点击。
+        // 「放弃草稿」确认框和校验错误框都渲染在本层内部，它们自己的 .modal-overlay
+        // 铺满视口、点空白处就会关自己；这一点击若不挡掉还会继续冒泡到这里，
+        // 于是「关掉确认框」立刻又被 attemptClose 重新问一遍，看起来像点了没反应。
+        if (e.target !== e.currentTarget) return;
+        attemptClose();
+      }}
+    >
       <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{t("config.newConfigTitle")}</h3>
-          <button className="modal-x" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>
+          <button className="modal-x" onClick={attemptClose} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>
@@ -151,14 +174,26 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>
-            {t('common.cancel')}
+          <button className="btn btn-ghost" onClick={attemptClose}>
+            {t("common.cancel")}
           </button>
           <button className="btn btn-primary" onClick={save} disabled={saving}>
-            {saving ? t('config.publishing') : t('config.publish')}
+            {saving ? t("config.publishing") : t("config.publish")}
           </button>
         </div>
       </div>
+
+      {askDiscard && (
+        <ConfirmModal
+          active={active}
+          danger
+          title={t("config.discardDraftTitle")}
+          message={t("config.discardDraftMessage", { dataId: dataId.trim() || t("config.unnamedDraft") })}
+          confirmLabel={t("config.discardDraftConfirm")}
+          onConfirm={onClose}
+          onCancel={() => setAskDiscard(false)}
+        />
+      )}
 
       {validateErrs.length > 0 && (
         <AlertModal
