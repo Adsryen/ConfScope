@@ -650,6 +650,81 @@ describe("ConnectionManager", () => {
     expect(screen.getByTitle("SSH 隧道配置")).toBeInTheDocument();
   });
 
+  it("SSH 端口越界时行内报错、保存禁用并说明原因（R24）", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "ssh-dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 端口"), { target: { value: "999999" } });
+
+    const portField = fieldByLabel("SSH 端口").closest("label")!;
+    expect(within(portField).getByRole("alert")).toHaveTextContent("SSH 端口需在 1–65535 之间（当前 999999）");
+
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    // disabled 按钮自己弹不出 title，原因必须挂在包裹它的 .btn-guard 上（R19）
+    expect(save.closest(".btn-guard")).toHaveAttribute("title", "SSH 端口需在 1–65535 之间（当前 999999）");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("端口越界时「连接测试」同样被拦住并给出同一句理由（R24）", async () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "ssh-dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 端口"), { target: { value: "999999" } });
+
+    // 保存按钮点不动，这条可点路径才是拦截逻辑的真守卫；少了它，越界端口会直接发给后端。
+    const testButton = screen.getByRole("button", { name: "连接测试" });
+    expect(testButton).not.toBeDisabled();
+    fireEvent.click(testButton);
+
+    // 同一句话在输入框下方和结果条上各出现一次，这里只关心结果条那一份（证明拦截真的可见）。
+    expect(await screen.findByText("SSH 端口需在 1–65535 之间（当前 999999）", { selector: ".test-msg-text" })).toBeInTheDocument();
+    expect(apiMocks.testConnection).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("越界端口时回车提交也被 save() 的拦截兜住（R24）", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "ssh-dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://dev.example.com/nacos" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 端口"), { target: { value: "999999" } });
+
+    // 保存按钮 disabled 拦不住键盘：回车直接调 save()，这条路径才是那三行拦截的真守卫。
+    fireEvent.keyDown(fieldByLabel("来源名称"), { key: "Enter" });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText("SSH 端口需在 1–65535 之间（当前 999999）", { selector: ".test-msg-text" })).toBeInTheDocument();
+  });
+
+  it("SSH 端口填 0 不再被静默吞成 22（R24）", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "连接方式" }), { target: { value: "ssh" } });
+    fireEvent.change(fieldByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(fieldByLabel("SSH 端口"), { target: { value: "0" } });
+
+    expect(fieldByLabel("SSH 端口")).toHaveValue(0); // 旧写法 parseInt("0") || 22 会直接显示 22
+    expect(screen.getByRole("button", { name: "保存为 SSH 配置档案" })).toBeDisabled();
+
+    fireEvent.change(fieldByLabel("SSH 端口"), { target: { value: "2222" } });
+    expect(screen.getByRole("button", { name: "保存为 SSH 配置档案" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled();
+  });
+
   it("localizes the saved connection SSH badge title", () => {
     localStorage.setItem(
       "cs.connections",

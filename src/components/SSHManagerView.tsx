@@ -10,6 +10,8 @@ import {
   upsertSSHProfile,
   type SSHProfile,
 } from "../store/sshProfiles";
+import NumberField from "./NumberField";
+import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 
 type Draft = {
   id?: string;
@@ -21,7 +23,7 @@ const emptyDraft = (): Draft => ({
   name: "",
   config: {
     host: "",
-    port: 22,
+    port: SSH_DEFAULT_PORT,
     username: "root",
     authType: "password",
   },
@@ -98,7 +100,17 @@ export default function SSHManagerView() {
     clearTransient();
   };
 
+  // 端口非法的唯一判据（R24）：与输入框下的行内错误、保存按钮的禁用与 title 同源，不再各写一套
+  const portBlock = sshPortIssues(draft.config, {
+    port: t("connection.sshPort"),
+    localPort: t("connection.localPortShort"),
+  })[0];
+
   const save = () => {
+    if (portBlock) {
+      setMessage({ ok: false, text: portBlock });
+      return;
+    }
     const config = normalizeSSHConfig(draft.config);
     if (!draft.name.trim() || !config.host.trim() || !config.username.trim()) {
       setMessage({ ok: false, text: t('settings.sshProfileRequired') });
@@ -149,6 +161,10 @@ export default function SSHManagerView() {
   };
 
   const testSSHProfile = async () => {
+    if (portBlock) {
+      setMessage({ ok: false, text: portBlock });
+      return;
+    }
     const config = normalizeSSHConfig({ ...draft.config });
     const snapshotKey = sshTestKey(config);
     if (!config.host.trim() || !config.username.trim()) {
@@ -285,11 +301,13 @@ export default function SSHManagerView() {
                   <div className="field-row">
                     <label className="field">
                       <span>{t('connection.sshPort')}</span>
-                      <input
-                        className="search-input mono"
-                        type="number"
-                        value={draft.config.port || 22}
-                        onChange={(e) => setConfig({ port: parseInt(e.target.value) || 22 })}
+                      <NumberField
+                        value={draft.config.port}
+                        min={PORT_MIN}
+                        max={PORT_MAX}
+                        fallback={SSH_DEFAULT_PORT}
+                        validate={(next) => portIssue(next, { label: t("connection.sshPort") })}
+                        onChange={(port) => setConfig({ port })}
                       />
                     </label>
                     <label className="field">
@@ -364,12 +382,13 @@ export default function SSHManagerView() {
                 <div className="ssh-manager-form compact">
                   <label className="field">
                     <span>{t('connection.localPort')}</span>
-                    <input
-                      className="search-input mono"
-                      type="number"
-                      value={draft.config.localPort || ""}
-                      placeholder={t('connection.localPortPlaceholder')}
-                      onChange={(e) => setConfig({ localPort: parseInt(e.target.value) || undefined })}
+                    <NumberField
+                      value={draft.config.localPort}
+                      min={PORT_MIN}
+                      max={PORT_MAX}
+                      placeholder={t("connection.localPortPlaceholder")}
+                      validate={(next) => portIssue(next, { label: t("connection.localPortShort"), optional: true })}
+                      onChange={(localPort) => setConfig({ localPort })}
                     />
                   </label>
                 </div>
@@ -381,9 +400,12 @@ export default function SSHManagerView() {
                 <button className="btn btn-ghost" onClick={testSSHProfile} disabled={testingCurrent}>
                   {testingCurrent ? t('settings.sshProfileTesting') : t('settings.sshProfileTest')}
                 </button>
-                <button className="btn btn-primary" onClick={save}>
-                  {pendingSaveImpact ? t('settings.sshProfileConfirmSave') : t('common.save')}
-                </button>
+                <span className="btn-guard" title={portBlock}>
+                  {/* 越界时禁用保存，但按钮本身收不到鼠标事件，title 挂在外层才看得到原因（R19） */}
+                  <button className="btn btn-primary" onClick={save} disabled={!!portBlock} aria-disabled={!!portBlock}>
+                    {pendingSaveImpact ? t("settings.sshProfileConfirmSave") : t("common.save")}
+                  </button>
+                </span>
               </div>
             </div>
 

@@ -17,6 +17,8 @@ import { clearToken, listNamespaces, testConnection, type Namespace } from "../a
 import { selectLocalSnapshotDirectory, validateLocalSnapshotDirectory, type LocalSnapshotValidation } from "../api/app";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
+import NumberField from "./NumberField";
+import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 
@@ -479,7 +481,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       sshProfileId: "",
       sshConfig: {
         host: "",
-        port: 22,
+        port: SSH_DEFAULT_PORT,
         username: "root",
         authType: "password" as const,
         ...d.sshConfig,
@@ -497,7 +499,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         sshProfileId: "",
         sshConfig: d.sshConfig ?? {
           host: "",
-          port: 22,
+          port: SSH_DEFAULT_PORT,
           username: "root",
           authType: "password",
         },
@@ -520,6 +522,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   };
 
   const saveInlineSSHAsProfile = () => {
+    // 先按原值查端口，再 normalizeSSHConfig：normalize 里 `port || 22` 会把 0 悄悄夹成合法默认值，
+    // 检查顺序反了就等于把刚立的规则又吞回去（R24）
+    const blockedPort = sshPortIssues(draft.sshConfig, { port: t("connection.sshPort"), localPort: t("connection.localPortShort") })[0];
+    if (blockedPort) {
+      setTestMsg({ ok: false, text: blockedPort });
+      return;
+    }
     const config = normalizeSSHConfig(draft.sshConfig);
     if (!config.host.trim() || !config.username.trim()) {
       setTestMsg({ ok: false, text: t("connection.sshProfileRequired") });
@@ -549,7 +558,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         ? undefined
         : (d.sshConfig ?? {
             host: "",
-            port: 22,
+            port: SSH_DEFAULT_PORT,
             username: "root",
             authType: "password",
           }),
@@ -764,7 +773,22 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setRenamingProject(null);
   };
 
+  // 端口非法的唯一判据（R24）：输入框下的行内错误、保存按钮的禁用与 title、save() 的拦截都读它，
+  // 三处不会各说一套。留空不在这一步报错——失焦时会回弹默认端口，用户敲字中途看到红字只会碍事。
+  const portBlock = sshPortIssues(draft.sshConfig, {
+    port: t("connection.sshPort"),
+    localPort: t("connection.localPortShort"),
+  })[0];
+
   const save = () => {
+    // 按钮 disabled 拦不住「单行输入框回车＝保存」那条路径，这里再兜一道；
+    // 清掉旧测试结果，否则这条理由会被当成上一次测试的残留而看不见。
+    if (portBlock) {
+      setTestTrace(null);
+      setTestResultKey(null);
+      setTestMsg({ ok: false, text: portBlock });
+      return;
+    }
     if (!draft.sourceName?.trim() || (draft.provider !== "local" && !draft.baseUrl.trim())) {
       setTestMsg({ ok: false, text: t("connection.nameAndAddressRequired") });
       return;
@@ -857,6 +881,14 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   };
 
   const doTest = async () => {
+    // 保存按钮禁用后用户仍能点「连接测试」，这一道拦截保证越界端口不会静默发给后端。
+    // 顺手清掉 testResultKey，否则上一次测试的 key 还挂着，这条理由会被当成旧结果藏起来看不见。
+    if (portBlock) {
+      setTestTrace(null);
+      setTestResultKey(null);
+      setTestMsg({ ok: false, text: portBlock });
+      return;
+    }
     const startedAt = Date.now();
     const snapshot: Draft = {
       ...draft,
@@ -1874,11 +1906,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           <FieldLabel {...fieldLabelProps} required tip={t("connection.sshPortHelp")}>
                             {t("connection.sshPort")}
                           </FieldLabel>
-                          <input
-                            className="search-input mono"
-                            type="number"
-                            value={draft.sshConfig?.port || 22}
-                            onChange={(e) => setSSH({ port: parseInt(e.target.value) || 22 })}
+                          <NumberField
+                            value={draft.sshConfig?.port}
+                            min={PORT_MIN}
+                            max={PORT_MAX}
+                            fallback={SSH_DEFAULT_PORT}
+                            validate={(next) => portIssue(next, { label: t("connection.sshPort") })}
+                            onChange={(port) => setSSH({ port })}
                           />
                         </label>
                         <label className="field">
@@ -1973,18 +2007,27 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         <FieldLabel {...fieldLabelProps} tip={t("connection.localPortHelp")}>
                           {t("connection.localPort")}
                         </FieldLabel>
-                        <input
-                          className="search-input mono"
-                          type="number"
-                          value={draft.sshConfig?.localPort || ""}
+                        <NumberField
+                          value={draft.sshConfig?.localPort}
+                          min={PORT_MIN}
+                          max={PORT_MAX}
                           placeholder={t("connection.localPortPlaceholder")}
-                          onChange={(e) => setSSH({ localPort: parseInt(e.target.value) || undefined })}
+                          validate={(next) => portIssue(next, { label: t("connection.localPortShort"), optional: true })}
+                          onChange={(localPort) => setSSH({ localPort })}
                         />
                       </label>
 
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={saveInlineSSHAsProfile}>
-                        {t("connection.sshProfileSave")}
-                      </button>
+                      <span className="btn-guard" title={portBlock}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={saveInlineSSHAsProfile}
+                          disabled={!!portBlock}
+                          aria-disabled={!!portBlock}
+                        >
+                          {t("connection.sshProfileSave")}
+                        </button>
+                      </span>
 
                       <button
                         type="button"
@@ -2024,9 +2067,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 {t("connection.new")}
               </button>
             )}
-            <button className="btn btn-primary" onClick={save}>
-              {t("common.save")}
-            </button>
+            <span className="btn-guard" title={portBlock}>
+              <button className="btn btn-primary" onClick={save} disabled={!!portBlock} aria-disabled={!!portBlock}>
+                {t("common.save")}
+              </button>
+            </span>
           </div>
         </div>
       </div>

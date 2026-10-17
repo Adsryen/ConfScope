@@ -1,5 +1,6 @@
 import type { SSHConfig } from "./connections";
 import { connectionDisplayLabel, loadConnections } from "./connections";
+import { SSH_DEFAULT_PORT } from "../lib/ports";
 
 export interface SSHProfile {
   id: string;
@@ -27,7 +28,9 @@ export function sshProfileLabel(profile: Pick<SSHProfile, "name" | "config">): s
 export function normalizeSSHConfig(raw?: Partial<SSHConfig>): SSHConfig {
   return {
     host: raw?.host?.trim() || "",
-    port: raw?.port || 22,
+    // 只有「没填」才回落到默认端口；0 之类非法值原样留着，交给表单报错（R24），
+    // 否则 `|| SSH_DEFAULT_PORT` 会把用户明确敲下的非法值静默夹成一个合法端口。
+    port: Number.isFinite(raw?.port) ? (raw!.port as number) : SSH_DEFAULT_PORT,
     username: raw?.username?.trim() || "root",
     authType: raw?.authType ?? "password",
     password: raw?.password,

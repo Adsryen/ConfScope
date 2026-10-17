@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
+import { fireEvent, render, screen, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import SSHManagerView from "./SSHManagerView";
@@ -81,6 +81,35 @@ describe("SSHManagerView", () => {
         }),
       }),
     ]);
+  });
+
+  it("端口越界时禁用保存、测试连接也只给提示不发请求（R24）", () => {
+    renderSSHManager();
+
+    fireEvent.change(inputByLabel("档案名称"), { target: { value: "公司堡垒机" } });
+    fireEvent.change(inputByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
+    fireEvent.change(inputByLabel("SSH 端口"), { target: { value: "70000" } });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("SSH 端口需在 1–65535 之间（当前 70000）");
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    expect(save.closest(".btn-guard")).toHaveAttribute("title", "SSH 端口需在 1–65535 之间（当前 70000）");
+
+    fireEvent.click(screen.getByRole("button", { name: "测试 SSH" }));
+    expect(goApp.TestSSHConnection).not.toHaveBeenCalled();
+    // 行内错误之外，被点掉的「测试 SSH」还要在消息条里给同一句理由（R19 不留无解释的灰按钮）
+    expect(document.querySelector(".test-msg.err")).toHaveTextContent("SSH 端口需在 1–65535 之间（当前 70000）");
+
+    // 0 不能被数据层的 `port || 22` 悄悄夹成合法值：档案表单每次 setConfig 都过 normalizeSSHConfig，
+    // 一旦回退成 || 写法，0 会变成 22、红字消失、保存重新可点
+    fireEvent.change(inputByLabel("SSH 端口"), { target: { value: "0" } });
+    expect(inputByLabel("SSH 端口")).toHaveValue(0);
+    expect(within(inputByLabel("SSH 端口").closest("label")!).getByRole("alert")).toHaveTextContent("当前 0）");
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+
+    // 本地端口留空是合法的：交给系统自动分配，不能因为「空」就拦着保存
+    fireEvent.change(inputByLabel("SSH 端口"), { target: { value: "22" } });
+    expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled();
   });
 
   it("blocks deleting SSH profiles referenced by connections", () => {
