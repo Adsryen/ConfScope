@@ -2495,7 +2495,10 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  /* 仅底边分隔线。R77：原先这里被操作历史段的 border:1px solid 盖成一圈，
+     相邻行之间是 2px 双线；那一条已删，别再往 .history-item 上写整圈边框。 */
   border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
 }
 .history-item.active {
   background: var(--bg-active);
@@ -2503,12 +2506,19 @@ textarea {
 .history-item.picked {
   background: rgba(0, 122, 204, 0.12);
 }
+/* 从操作历史段搬回本页面（R77 命名空间拆分）。留在 .picked 之后是刻意的：
+   同特异度靠先后分胜负，挪到前面会让「选中行」盖掉悬停反馈。 */
+.history-item:hover {
+  background: var(--bg-hover);
+}
 .history-item input {
   margin-top: 3px;
 }
 .history-item-main {
   flex: 1;
   min-width: 0;
+  /* 可点的是这一块，不是整行（左边是勾选框）。原来手型来自操作历史段整行 cursor 的继承。 */
+  cursor: pointer;
 }
 /* R61：行主体是真正可点的那块（左边是勾选框），焦点环画在它身上。 */
 .history-item-main:focus-visible {
@@ -5985,26 +5995,16 @@ button.diff-workflow-step-btn:hover {
 }
 
 /* 操作列表 */
-.history-list {
+.history-list,
+.op-history-list {
   display: flex;
   flex-direction: column;
 }
 
-.history-item {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.history-item:hover {
-  background: var(--bg-hover);
-}
-
-.history-item.selected {
-  background: rgba(0, 122, 204, 0.12);
-  border-color: rgba(0, 122, 204, 0.25);
-}
+/* R77：这里原先有一条 .history-item { background/border/cursor/transition }，
+   对操作历史而言四个属性都被 .data-list-item 骨架赢掉（纯死代码），
+   对版本历史而言只把「仅底边分隔线」压成了「一圈边框」。两条都已交还各自页面，
+   别再往回写。同名规则的历史见 tests/ux/skeletonRowClassesAreNotReusedOutsideSkeleton.test.ts。 */
 
 .history-item-head {
   display: flex;
@@ -6082,12 +6082,6 @@ button.diff-workflow-step-btn:hover {
   gap: 12px;
   font-size: 12px;
   color: var(--text-dim);
-}
-
-.history-item-detail {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 
 .history-detail-field {
@@ -7435,11 +7429,15 @@ button.diff-workflow-step-btn:hover {
   grid-template-columns: minmax(300px, 42%) minmax(0, 1fr);
 }
 
-.history-list {
+.history-list,
+.op-history-list {
   gap: 0;
 }
 
-.history-item {
+/* R77：18px 左侧是给行首 accent 竖条留的位子，操作历史需要；版本历史没有竖条
+   （左边是勾选框），但沿用同一数值以免这一波顺带动它的间距——是否改小另立一波。 */
+.history-item,
+.op-history-item {
   padding: 12px 14px 12px 18px;
   border-radius: 0;
 }
@@ -7810,6 +7808,7 @@ button.diff-workflow-step-btn:hover {
 .browser-item.active .browser-result-check,
 .history-item.active .history-item-id,
 .history-item.active .history-item-meta,
+.op-history-item.active .history-item-meta,
 .backup-item.active .backup-item-meta,
 .backup-item.active .backup-item-time,
 .backup-item.active .backup-item-source,

@@ -385,7 +385,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
 
       {/* 操作列表 */}
       <div className="data-split history-content">
-        <div className="data-list history-list" ref={listScroll.ref} onScroll={listScroll.onScroll}>
+        <div className="data-list op-history-list" ref={listScroll.ref} onScroll={listScroll.onScroll}>
           {allRecords.length === 0 ? (
             <div className="data-empty-state">
               <div>{t("operationHistory.noRecords")}</div>
@@ -395,7 +395,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
             allRecords.map((record) => (
               <button
                 key={record.id}
-                className={`data-list-item history-item ${selectedVisibleRecord?.id === record.id ? "active" : ""}`}
+                className={`data-list-item op-history-item ${selectedVisibleRecord?.id === record.id ? "active" : ""}`}
                 onClick={() => setSelectedRecord(selectedVisibleRecord?.id === record.id ? null : record)}
               >
                 <span className={`data-item-accent ${record.result === "failure" ? "danger" : record.type}`} />
