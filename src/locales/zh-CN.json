@@ -668,6 +668,7 @@
     "editFormat": "编辑 · 格式",
     "publishing": "发布中…",
     "savePublish": "保存发布",
+    "saveShortcutHint": "保存（Ctrl+S）",
     "format": "配置格式",
     "updateTime": "更新时间",
     "version": "版本",

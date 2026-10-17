@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Format } from "../lib/format";
 import { isImeComposing } from "../lib/useEscape";
+import { isSaveShortcutKey } from "../lib/saveShortcut";
 import { highlightCode } from "../lib/highlight";
 import {
   activeLineOf,
@@ -32,6 +33,12 @@ interface Props {
    * 否则隐藏的查找栏会抢走前台页面的快捷键。
    */
   active?: boolean;
+  /**
+   * Ctrl/Cmd+S 的出口（R47）。焦点在编辑区内时「保存」指的就是这份内容，不能让按键漏出去。
+   * 不传表示宿主没有保存动作（变更计划的目标内容编辑器）：编辑器不装作拥有这个语义，
+   * 交给 App 的全局兜底把原生「保存网页」对话框吞掉。
+   */
+  onSave?: () => void;
 }
 
 /** 对外暴露的编辑器命令式入口（父组件用它打开查找、跳到指定行）。 */
@@ -59,10 +66,11 @@ function clamp(value: number, min: number, max: number): number {
  *  光标/选区来自 textarea,着色来自下层 pre,滚动同步。配色与 CodeView 一致。
  *
  *  与浏览态对齐的三件事（R22）：行号槽、搜索词标红与命中行高亮、视图内 Ctrl+F 查找。
+ *  另有一条编辑态专属快捷键（R47）：Ctrl/Cmd+S 走宿主的 onSave，保存的是这份内容而不是整个网页。
  *  刻意不做缩略图：编辑态内容一直在变，重算成本换来的收益低于风险。
  *  不变式：查找定位只改 textarea 的选区与滚动，绝不改 value。 */
 const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
-  { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, active = true }: Props,
+  { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, active = true, onSave }: Props,
   ref
 ) {
   const { t } = useTranslation();
@@ -341,6 +349,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 组合态的 Tab 属于输入法（部分输入法用 Tab 做整句/候选页切换），不能拦成插空格
     if (isImeComposing(e)) return;
+    // Ctrl/Cmd+S：焦点在编辑区里，保存的就是这份内容（R47）。
+    // 只在 textarea 本地拦——查找栏里的 Ctrl+S 不该被当成保存，浏览态也不归这里管。
+    if (onSave && isSaveShortcutKey(e)) {
+      e.preventDefault();
+      onSave();
+      return;
+    }
     if (e.key === "Tab") {
       e.preventDefault();
       const ta = e.currentTarget;

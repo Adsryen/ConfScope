@@ -668,6 +668,7 @@
     "editFormat": "Edit · Format",
     "publishing": "Publishing…",
     "savePublish": "Save & Publish",
+    "saveShortcutHint": "Save (Ctrl+S)",
     "format": "Format",
     "updateTime": "Update Time",
     "version": "Version",

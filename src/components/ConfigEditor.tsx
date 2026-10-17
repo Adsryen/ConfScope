@@ -179,6 +179,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
                 onChange={setContent}
                 format={fmt}
                 placeholder={t("config.contentPlaceholder")}
+                onSave={save}
                 ariaLabel={t("config.contentLabel")}
                 active={active}
               />
@@ -195,7 +196,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
           <button className="btn btn-ghost" onClick={attemptClose}>
             {t("common.cancel")}
           </button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
+          <button className="btn btn-primary" onClick={save} disabled={saving} title={t("config.saveShortcutHint")}>
             {saving ? t("config.publishing") : t("config.publish")}
           </button>
         </div>

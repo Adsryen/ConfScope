@@ -1228,7 +1228,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       <button className="btn btn-ghost btn-sm" onClick={cancelEditing}>
                         {t("common.cancel")}
                       </button>
-                      <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>
+                      <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving} title={t("config.saveShortcutHint")}>
                         {saving ? t("config.publishing") : t("config.savePublish")}
                       </button>
                     </div>
@@ -1241,6 +1241,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         ariaLabel={t("config.contentLabel")}
                         active={active}
                         searchTerm={isContentSearchActive ? contentTerm : undefined}
+                        onSave={saveEdit}
                       />
                     </div>
                   </>

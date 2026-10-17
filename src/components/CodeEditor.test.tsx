@@ -3,7 +3,7 @@
  */
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { useRef, useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
@@ -321,5 +321,92 @@ describe("CodeEditor 校验错误定位（R28）", () => {
     fireEvent.keyDown(ta, { key: "f", ctrlKey: true });
 
     expect(ta.value).toBe(MULTI);
+  });
+});
+
+function SaveHarness({ onSave }: { onSave?: () => void }) {
+  const [value, setValue] = useState(MULTI);
+  return <CodeEditor value={value} onChange={setValue} format="Properties" onSave={onSave} />;
+}
+
+describe("CodeEditor 保存快捷键（R47）", () => {
+  it("焦点在 textarea 时 Ctrl+S 触发宿主 onSave 恰好一次，并拦下原生默认行为", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+    const ta = textarea(container);
+
+    const notPrevented = fireEvent.keyDown(ta, { key: "s", ctrlKey: true });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(notPrevented).toBe(false);
+  });
+
+  it("Cmd+S（macOS）同样接管", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+
+    fireEvent.keyDown(textarea(container), { key: "s", metaKey: true });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("保存快捷键只触发 onSave，不改动内容、不动选区", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+    const ta = textarea(container);
+    ta.selectionStart = ta.selectionEnd = 5;
+
+    fireEvent.keyDown(ta, { key: "s", ctrlKey: true });
+
+    expect(ta.value).toBe(MULTI);
+    expect(ta.selectionStart).toBe(5);
+  });
+
+  it("宿主没有保存动作时不装作接管：不炸、也不吞键（交给全局兜底）", () => {
+    const { container } = renderEditor(<SaveHarness />);
+
+    const notPrevented = fireEvent.keyDown(textarea(container), { key: "s", ctrlKey: true });
+
+    expect(notPrevented).toBe(true);
+  });
+
+  it("组合态的 Ctrl+S 交给输入法，不当成保存", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+
+    fireEvent.keyDown(textarea(container), { key: "s", ctrlKey: true, isComposing: true });
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("带 alt 的组合不算保存", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+
+    fireEvent.keyDown(textarea(container), { key: "s", ctrlKey: true, altKey: true });
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("查找栏里的 Ctrl+S 不算保存：焦点不在编辑区就不该动宿主的保存", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+
+    fireEvent.keyDown(textarea(container), { key: "f", ctrlKey: true });
+    fireEvent.keyDown(findInput(container) as HTMLInputElement, { key: "s", ctrlKey: true });
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("Tab 缩进不受新拦截影响（判据顺序别把 Tab 吞掉）", () => {
+    const onSave = vi.fn();
+    const { container } = renderEditor(<SaveHarness onSave={onSave} />);
+    const ta = textarea(container);
+    ta.selectionStart = ta.selectionEnd = 0;
+
+    fireEvent.keyDown(ta, { key: "Tab" });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(ta.value).toBe("  " + MULTI);
   });
 });

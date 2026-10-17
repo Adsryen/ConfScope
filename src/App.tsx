@@ -28,6 +28,7 @@ import ApplyPlanView from "./components/ApplyPlanView";
 import type { WorkflowStepId } from "./components/DiffWorkflowCard";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { closeAllPopovers } from "./lib/popoverBus";
+import { useBlockNativeSaveShortcut } from "./lib/saveShortcut";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
@@ -156,6 +157,9 @@ function snapshotCompareResourceName(params: BackupDiffJumpParams): string {
 
 export default function App() {
   const { t } = useTranslation();
+  // Ctrl/Cmd+S 不该被 webview 的原生「保存网页」对话框接走（R47）：
+  // 编辑区里由 CodeEditor 的 onSave 接管，其余位置由这条兜底统一吞掉。
+  useBlockNativeSaveShortcut();
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
   const ui0 = loadUI();
   const [activeConnId, setActiveConnId] = useState<string>(preferredConnection(connections, ui0)?.id ?? "");
