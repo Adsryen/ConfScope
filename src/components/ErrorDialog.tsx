@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { AppErrorItem, closeMessageDetail, subscribeActiveError } from "../lib/errorCenter";
 import { EscapePriority, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import CopyButton from "./CopyButton";
 
 function displayText(item: AppErrorItem): string {
@@ -19,6 +20,11 @@ export default function ErrorDialog() {
   // 错误详情盖在应用内所有弹层之上，Esc 优先关掉它自己。
   useEscape(!!current, closeMessageDetail, EscapePriority.global);
 
+  // 焦点陷阱：错误详情盖在所有弹层之上，焦点进不来时用户只能靠鼠标关它。
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus({ active: !!current, containerRef: modalRef });
+
   if (!current) return null;
 
   const close = () => closeMessageDetail();
@@ -29,10 +35,17 @@ export default function ErrorDialog() {
 
   return (
     <div className="modal-overlay error-overlay" onClick={close}>
-      <div className="modal modal-error" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal modal-error"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header error-header">
           <div>
-            <h3>{current.title}</h3>
+            <h3 id={titleId}>{current.title}</h3>
             {current.source && <div className="error-source">{current.source}</div>}
           </div>
           <button className="modal-x" onClick={close} title={t("common.close")} aria-label={t("common.close")}>

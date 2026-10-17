@@ -288,4 +288,24 @@ describe("ConfigEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard content" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("嵌套的「放弃草稿」确认框自己成环，焦点不被外层编辑器抢走（R38）", () => {
+    renderEditor();
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    const inner = screen.getByRole("dialog", { name: "放弃未发布的内容？" });
+    expect(inner.contains(document.activeElement)).toBe(true);
+
+    const items = [
+      ...inner.querySelectorAll<HTMLElement>(`a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])`),
+    ];
+    const last = items[items.length - 1];
+    last.focus();
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    last.dispatchEvent(event);
+    // 由内层那层陷阱接管这一跳（外层 .modal-lg 根本收不到），焦点始终停在提问框里
+    expect(event.defaultPrevented).toBe(true);
+    expect(inner.contains(document.activeElement)).toBe(true);
+  });
 });

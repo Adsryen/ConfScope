@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { clickableRowProps } from "../lib/clickableRow";
 import {
   Connection,
@@ -23,6 +23,7 @@ import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "
 import { environmentTone } from "../lib/envTone";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 
 interface Props {
   onClose: () => void;
@@ -449,6 +450,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   // Esc 关闭弹框改用分层注册表：表单内的自绘下拉/候选弹层（dropdown 优先级）展开时先吃掉 Esc，
   // 不会再出现「一次 Esc 同时收起下拉并关掉整个连接弹框」；内嵌在设置页时不参与。
   useEscape(!embedded, onClose, EscapePriority.overlay);
+
+  // 焦点陷阱：内嵌在设置页里时不参与，否则会替设置页其余表单吃掉 Tab。
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus({ active: !embedded, containerRef: modalRef });
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -1033,7 +1039,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     <>
       <div className={embedded ? "page-header" : "modal-header"}>
         <div>
-          <h3>{t("connection.title")}</h3>
+          <h3 id={titleId}>{t("connection.title")}</h3>
           {embedded && <div className="page-subtitle">{t("connection.pageSubtitle")}</div>}
         </div>
         {!embedded && (
@@ -2118,7 +2124,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
         {content}
       </div>
     </div>

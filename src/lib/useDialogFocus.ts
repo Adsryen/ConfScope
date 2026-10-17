@@ -25,9 +25,17 @@ function focusableItems(container: HTMLElement): HTMLElement[] {
   const items: HTMLElement[] = [];
   for (const node of nodes) {
     if (node.getAttribute("tabindex") === "-1") continue;
+    // 弹层里又开一层（编辑器里的「放弃草稿」确认框、校验错误框）时，内层元素不属于外层这个环：
+    // 外层要是把它们算进 first/last，Tab 到内层末尾就会被拽回外层的 ×，提问框反倒被跳过。
+    if (ownsDialog(node) !== null && ownsDialog(node) !== container) continue;
     items.push(node);
   }
   return items;
+}
+
+/** 这个元素离得最近的那个 `[role="dialog"]` 祖先——判定「Tab 该由哪一层接管」用的就是它。 */
+function ownsDialog(node: HTMLElement): HTMLElement | null {
+  return node.closest<HTMLElement>('[role="dialog"]');
 }
 
 /**
@@ -63,6 +71,10 @@ export function useDialogFocus({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
+      // 焦点落在更里层的弹层上时，这一层完全不插手，Tab 归内层那个陷阱管。
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const owner = focused ? ownsDialog(focused) : null;
+      if (owner && owner !== container && container.contains(owner)) return;
       const current = focusableItems(container);
       if (current.length === 0) {
         // 无可聚焦元素的极端情况：拦住 Tab，别让它跑到被弹框遮住的下层去。

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Connection, connectionDisplayLabel, connectionProjectName } from "../store/connections";
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
@@ -20,6 +20,7 @@ import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../a
 import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import AlertModal, { type AlertItem } from "./AlertModal";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -682,6 +683,15 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   useEscape(active && showReplace && !showTargetPicker && !pending, () => setShowReplace(false), EscapePriority.overlay);
   useEscape(active && showTargetPicker && !showReplace && !pending, () => setShowTargetPicker(false), EscapePriority.overlay);
 
+  // 这两个内联弹层也要有焦点陷阱：条件与上面两条 Esc 完全对齐，
+  // 两层同时 active 会互相抢焦点（谁后挂载谁赢，Tab 环被拽到看不见的那层）。
+  const replaceModalRef = useRef<HTMLDivElement>(null);
+  const targetModalRef = useRef<HTMLDivElement>(null);
+  const replaceTitleId = useId();
+  const targetTitleId = useId();
+  useDialogFocus({ active: active && showReplace && !showTargetPicker && !pending, containerRef: replaceModalRef });
+  useDialogFocus({ active: active && showTargetPicker && !showReplace && !pending, containerRef: targetModalRef });
+
   // 保活隐藏（切到其他模式）时收敛「一次性、且再出现会很危险」的 UI 态：
   // 待确认的跳转闭包与删除确认框不能藏在后台——切回来突然弹确认、
   // 或对着已经变掉的选中项执行删除，都是事故。
@@ -1296,9 +1306,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
       {showReplace && (
         <div className="modal-overlay" onClick={() => setShowReplace(false)}>
-          <div className="modal modal-md browser-replace-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            ref={replaceModalRef}
+            className="modal modal-md browser-replace-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={replaceTitleId}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="modal-header">
-              <h3>{t("config.batchReplace")}</h3>
+              <h3 id={replaceTitleId}>{t("config.batchReplace")}</h3>
               <button
                 className="modal-x"
                 type="button"
@@ -1365,9 +1382,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
       {showTargetPicker && (
         <div className="modal-overlay" onClick={() => setShowTargetPicker(false)}>
-          <div className="modal modal-md browser-target-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            ref={targetModalRef}
+            className="modal modal-md browser-target-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={targetTitleId}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="modal-header">
-              <h3>{t("config.applyToTarget")}</h3>
+              <h3 id={targetTitleId}>{t("config.applyToTarget")}</h3>
               <button
                 className="modal-x"
                 type="button"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   checkForUpdates,
   downloadUpdate,
@@ -13,6 +13,7 @@ import { reportError } from "../lib/errorCenter";
 import CopyButton from "./CopyButton";
 import { loadSettings, updateUpdateSettings } from "../store/settings";
 import { EscapePriority, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 
 interface AboutProps {
   onClose?: () => void;
@@ -44,6 +45,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   // Esc 关闭弹框改用分层注册表：散装监听会在冒泡阶段抢 Esc，
   // 连带关掉它下面的弹层（下拉/确认框），一次 Esc 只该关最内层。
   useEscape(!embedded, onClose, EscapePriority.overlay);
+
+  // 焦点陷阱：内嵌在设置页里时它不是弹层，不该吃掉页面其余部分的 Tab。
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus({ active: !embedded, containerRef: modalRef });
 
   useEffect(() => {
     let alive = true;
@@ -324,7 +330,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
             }}
           />
         </div>
-        <h2>{appInfo.name}</h2>
+        <h2 id={titleId}>{appInfo.name}</h2>
         <p className="about-tagline">{t("about.tagline")}</p>
         <p className="about-version">v{appInfo.version}</p>
       </div>
@@ -403,7 +409,14 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal about-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
         {content}
       </div>
     </div>

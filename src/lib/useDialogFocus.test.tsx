@@ -186,4 +186,45 @@ describe("useDialogFocus", () => {
 
     expect(document.activeElement).toBe(bgInput);
   });
+  it("嵌套弹层：内层元素不进外层的 Tab 环", () => {
+    render(
+      <Probe active>
+        <button>A</button>
+        <button>B</button>
+        <div role="dialog" aria-modal="true" className="inner">
+          <button>C</button>
+          <button>D</button>
+        </div>
+      </Probe>
+    );
+    const [a, b] = [...document.querySelectorAll<HTMLButtonElement>(".dlg > button")];
+    const [c] = [...document.querySelectorAll<HTMLButtonElement>(".inner button")];
+
+    // B 是外层自己的末位：从它 Tab 应该回到 A，而不是被内层第一个按钮顶掉位置
+    b.focus();
+    fireEvent.keyDown(b, { key: "Tab" });
+    expect(document.activeElement).toBe(a);
+
+    // 内层元素不在外层环里，外层不该把焦点从 C 拽走
+    c.focus();
+    fireEvent.keyDown(c, { key: "Tab" });
+    expect(document.activeElement).toBe(c);
+  });
+
+  it("嵌套弹层：焦点在内层时外层完全不插手（不 preventDefault）", () => {
+    render(
+      <Probe active>
+        <button>A</button>
+        <div role="dialog" aria-modal="true" className="inner">
+          <button>C</button>
+        </div>
+      </Probe>
+    );
+    const c = document.querySelector<HTMLButtonElement>(".inner button")!;
+    c.focus();
+    // 用真事件而不是 fireEvent：它返回的是布尔「有没有被取消」，读不出 defaultPrevented
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    c.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
 });

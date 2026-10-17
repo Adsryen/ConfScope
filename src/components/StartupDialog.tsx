@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "../i18n";
 import type { StartupDialogKind } from "../lib/startupDialog";
+import { useDialogFocus } from "../lib/useDialogFocus";
 
 interface Props {
   kind: StartupDialogKind;
@@ -67,6 +68,7 @@ function createFireworkParticles(kind: StartupDialogKind): FireworkParticle[] {
 export default function StartupDialog({ kind, version, onClose }: Props) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const showFireworks = !prefersReducedMotion();
   const title = kind === "welcome" ? t("startupDialog.welcomeTitle") : t("startupDialog.updateTitle", { version });
   const items =
@@ -79,6 +81,9 @@ export default function StartupDialog({ kind, version, onClose }: Props) {
           "startupDialog.updateItemPolish",
         ];
   const actionLabel = kind === "welcome" ? t("startupDialog.start") : t("startupDialog.gotIt");
+
+  // 焦点陷阱：这个弹层挡住整个应用，Tab 逃出去就是给身后的界面喂键盘。
+  useDialogFocus({ active: true, containerRef: dialogRef });
 
   useEffect(() => {
     if (!showFireworks) return;
@@ -153,7 +158,7 @@ export default function StartupDialog({ kind, version, onClose }: Props) {
 
   return (
     <div className="startup-overlay">
-      <section className={`startup-dialog ${kind}`} role="dialog" aria-modal="true" aria-labelledby="startup-dialog-title">
+      <section ref={dialogRef} className={`startup-dialog ${kind}`} role="dialog" aria-modal="true" aria-labelledby="startup-dialog-title">
         {showFireworks && <canvas ref={canvasRef} className="startup-fireworks" data-testid="startup-fireworks" aria-hidden="true" />}
         <div className="startup-dialog-body">
           <div className="startup-dialog-kicker">{t("startupDialog.kicker")}</div>

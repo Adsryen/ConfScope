@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
 import { EscapePriority, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { validateConfigIssues } from "../lib/validate";
@@ -55,9 +56,15 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   // 优先级更高，打开时先吃掉 Esc，不会再出现「一次 Esc 同时关下拉和编辑器」。
   useEscape(active, attemptClose, EscapePriority.overlay);
 
+  // 焦点陷阱：宿主页面被保活隐藏时（active=false）交出职责，
+  // 里面的「放弃草稿」确认框与校验错误框各自还有一层陷阱，内层优先。
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus({ active, containerRef: modalRef });
+
   const save = () => {
     if (!dataId.trim()) {
-      setError(t('config.dataIdRequired'));
+      setError(t("config.dataIdRequired"));
       return;
     }
     const problems = validateConfigIssues(content, fmt);
@@ -110,9 +117,16 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
         attemptClose();
       }}
     >
-      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal modal-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>{t("config.newConfigTitle")}</h3>
+          <h3 id={titleId}>{t("config.newConfigTitle")}</h3>
           <button className="modal-x" onClick={attemptClose} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
@@ -127,6 +141,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
                 value={dataId}
                 placeholder={t('config.dataIdPlaceholder')}
                 autoFocus
+                data-dialog-autofocus=""
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}

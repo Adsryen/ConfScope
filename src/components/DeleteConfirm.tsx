@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { reportError } from "../lib/errorCenter";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 
@@ -22,6 +23,12 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
 
   // Esc 走分层注册表：确认框盖在别的弹层上时一次只关这一层，删除进行中（busy）不放行。
   useEscape(!busy, onCancel, EscapePriority.confirm);
+
+  // 焦点陷阱：本组件只在父层决定要确认时才挂载，所以 active 恒为 true。
+  // 删除进行中（busy）不交出陷阱——那时只剩「取消」还能走，Tab 更不该逃到被遮住的下层。
+  const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus({ active: true, containerRef: modalRef });
 
   const confirm = async () => {
     if (!match || busy) return;
@@ -46,9 +53,16 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
 
   return (
     <div className="modal-overlay" onClick={() => !busy && onCancel()}>
-      <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="modal modal-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>{t("config.deleteTitle")}</h3>
+          <h3 id={titleId}>{t("config.deleteTitle")}</h3>
           <button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
@@ -68,6 +82,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             value={input}
             placeholder={name}
             autoFocus
+            data-dialog-autofocus=""
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}

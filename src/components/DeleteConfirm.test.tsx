@@ -118,4 +118,22 @@ describe("DeleteConfirm", () => {
 
     expect(onCancel).not.toHaveBeenCalled();
   });
+
+  it("打开即把焦点送进输入格，Tab 关在弹框里出不去（R38）", () => {
+    renderDeleteConfirm();
+    const input = screen.getByPlaceholderText("app.json");
+    // 删除确认必须靠输入名字来防误删：焦点若在 × 上，用户得先 Tab 一格才能打字
+    expect(document.activeElement).toBe(input);
+
+    // 末位（「删除」此刻还禁用，环里的末位是「取消」）Tab 出去时拽回首项 ×，不落回背景
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const items = [
+      ...dialog.querySelectorAll<HTMLElement>(`a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])`),
+    ];
+    const last = items[items.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(items[0]);
+  });
 });

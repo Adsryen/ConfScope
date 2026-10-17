@@ -288,4 +288,22 @@ describe("About", () => {
     expect(screen.queryByText("Apollo 🔜")).not.toBeInTheDocument();
     expect(screen.queryByText("Consul Planned")).not.toBeInTheDocument();
   });
+
+  it("关于弹层是真 dialog，Tab 走一圈留在框内（R38）", async () => {
+    disableAutoUpdateCheck();
+    renderAbout();
+    await screen.findByText("v1.0.0");
+
+    // 标题（<h2>ConfScope</h2>）通过 aria-labelledby 成为可播报名称，读屏进得来说得出这是什么
+    const dialog = screen.getByRole("dialog", { name: "ConfScope" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    const items = [
+      ...dialog.querySelectorAll<HTMLElement>(`a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])`),
+    ];
+    expect(items.length).toBeGreaterThan(0);
+    items[items.length - 1].focus();
+    fireEvent.keyDown(items[items.length - 1], { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
 });
