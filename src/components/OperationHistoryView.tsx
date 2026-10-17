@@ -27,6 +27,7 @@ import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
 import { errorText } from "../lib/errorText";
+import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 
 interface Props {
   connections: Connection[];
@@ -157,6 +158,11 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const selectedVisibleRecord = selectedRecord && allRecords.some((record) => record.id === selectedRecord.id) ? selectedRecord : null;
   const failedCount = allRecords.filter((record) => record.result === "failure").length;
   const sourceCount = new Set(allRecords.map((record) => record.connectionId)).size;
+  // 详情正文与错误两块 <pre> 在切换记录时复用同一节点，不归零就停在上一份记录的偏移处（轮13 波29 / R49）。
+  const contentRef = useRef<HTMLPreElement>(null);
+  useScrollResetOnContentChange(contentRef, [selectedVisibleRecord?.id ?? "", selectedVisibleRecord?.content ?? ""]);
+  const errorRef = useRef<HTMLPreElement>(null);
+  useScrollResetOnContentChange(errorRef, [selectedVisibleRecord?.id ?? "", selectedVisibleRecord?.error ?? ""]);
 
   // 格式化时间
   const setRecordFollowupError = (record: OperationRecord, detail: string) => {
@@ -561,7 +567,13 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
               {selectedVisibleRecord.content && (
                 <div className="history-detail-field">
                   <label>{t("operationHistory.content")}</label>
-                  <pre className="history-detail-content" tabIndex={0} role="region" aria-label={t("operationHistory.content")}>
+                  <pre
+                    className="history-detail-content"
+                    tabIndex={0}
+                    role="region"
+                    aria-label={t("operationHistory.content")}
+                    ref={contentRef}
+                  >
                     {selectedVisibleRecord.content}
                   </pre>
                 </div>
@@ -572,7 +584,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                     <label>{t("operationHistory.error")}</label>
                     <CopyButton text={selectedVisibleRecord.error} label={t("common.copyError")} />
                   </div>
-                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("operationHistory.error")}>
+                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("operationHistory.error")} ref={errorRef}>
                     {selectedVisibleRecord.error}
                   </pre>
                 </div>

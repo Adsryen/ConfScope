@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import { activeLineOf, activeOffsetOf, buildMinimapRows, findCodeHits, hitLines, markHighlightedHtml, splitLines } from "../lib/codeLines";
 import { useTranslation } from "../i18n";
 import { isImeComposing } from "../lib/useEscape";
+import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 
 interface Props {
   code: string;
@@ -142,18 +143,11 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     setActiveIdx(0);
   }, [effectiveTerm, code]);
 
-  // 换内容时把滚动位置拉回起点（R9）：复用同一实例切换配置或历史版本时，
-  // 不重置就会带着上一份内容的偏移，看起来像"莫名停在中间"。
-  // 依赖同时看 code 与 contentKey：正文变了要归零；正文逐字相同但版本（contentKey）
-  // 变了也要归零，否则相邻无差异版本之间会保留上一版的偏移。
-  // 用 useLayoutEffect 在绘制前完成，避免用户看到滚动跳变的一帧。
-  useLayoutEffect(() => {
-    const el = areaRef.current;
-    if (!el) return;
-    el.scrollTop = 0;
-    el.scrollLeft = 0;
-    syncScroll();
-  }, [code, contentKey, syncScroll]);
+  // 换内容时把滚动位置拉回起点（R9）：正文变了要归零；正文逐字相同但版本（contentKey）
+  // 变了也要归零，否则相邻无差异版本之间会保留上一版的偏移，看起来像"莫名停在中间"。
+  // 口径与实现见 ../lib/useScrollResetOnContentChange。这里仍要传 syncScroll：
+  // 行号与缩略图靠 transform 跟手，归零后不同步一次，侧栏会停在旧偏移。
+  useScrollResetOnContentChange(areaRef, [code, contentKey], syncScroll);
 
   // 切换文件时收起查找栏，防止旧关键词污染新内容。
   useEffect(() => {

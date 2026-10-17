@@ -2,7 +2,7 @@
 // 实时事件来自内存环形缓冲（auditSessionLog），持久化事件来自
 // Go 绑定 ReadAuditLogLines；原生应用显示持久化文件，Web 手动桥
 // 模式下 __auditBridge 缺失时只显示实时缓冲（页面说明里写明）。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { ReadAuditLogLines } from "../../wailsjs/go/app/App";
 import { clickableRowProps } from "../lib/clickableRow";
@@ -14,6 +14,7 @@ import {
   type AuditEventPayload,
   type AuditSession,
 } from "../lib/auditSessionLog";
+import { useScrollResetOnContentChange, useScrollResetRef } from "../lib/useScrollResetOnContentChange";
 import CopyButton from "./CopyButton";
 
 function eventTime(event: AuditEventPayload): number {
@@ -99,6 +100,10 @@ export default function LogViewer() {
   const selected = sessions.find((s) => s.id === selectedId) ?? sessions[0] ?? null;
   const kinds = useMemo(() => [...new Set(sessions.map((s) => s.kind))].sort(), [sessions]);
   const selectedJson = selected ? selected.events.map((e) => JSON.stringify(e)).join("\n") : "";
+  // 原文块与事件载荷块都复用节点：切会话时不归零就会停在上一份日志的偏移处（轮13 波29 / R49）。
+  const jsonlRef = useRef<HTMLPreElement>(null);
+  useScrollResetOnContentChange(jsonlRef, [selected?.id ?? "", selectedJson]);
+  const resetRef = useScrollResetRef([selected?.id ?? ""]);
 
   // scope 来自持久化 JSONL，历史日志里可能出现这里没见过的值；
   // 以前直接拼 key，碰上缺条目就把 "logViewer.kindUnknown" 这种原始键名印到按钮上（轮6 R47）。
@@ -178,7 +183,7 @@ export default function LogViewer() {
                 </div>
                 <CopyButton text={selectedJson} label={t("common.copy")} />
               </div>
-              <pre className="log-jsonl" tabIndex={0} role="region" aria-label={t("logViewer.rawEvents")}>
+              <pre className="log-jsonl" tabIndex={0} role="region" aria-label={t("logViewer.rawEvents")} ref={jsonlRef}>
                 {selected.events.map((e) => JSON.stringify(e)).join("\n")}
               </pre>
               <div className="log-detail-expanded">
@@ -199,7 +204,7 @@ export default function LogViewer() {
                         {e.direction ? <span className="log-event-dir">{e.direction}</span> : null}
                         {e.error ? <span className="danger">{e.error}</span> : null}
                       </summary>
-                      <pre className="log-event-payload" tabIndex={0} role="region" aria-label={t("logViewer.eventPayload")}>
+                      <pre className="log-event-payload" tabIndex={0} role="region" aria-label={t("logViewer.eventPayload")} ref={resetRef}>
                         {JSON.stringify(e, null, 2)}
                       </pre>
                     </details>

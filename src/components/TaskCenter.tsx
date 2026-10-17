@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { useTaskManager, useTaskList, type Task, type TaskStatus } from "../lib/taskmanager";
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
 import { formatClock, formatDateTime } from "../lib/formatDateTime";
+import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 
 interface Props {
   onNavigateToTask?: (taskId: string) => void;
@@ -16,6 +17,9 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
   const manager = useTaskManager();
   const tasks = useTaskList(manager);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // 切换任务时错误详情复用同一节点，不归零就停在上一份报错的偏移处（轮13 波29 / R49）。
+  const errorRef = useRef<HTMLPreElement>(null);
+  useScrollResetOnContentChange(errorRef, [selectedTask?.id ?? "", selectedTask?.error ?? ""]);
 
   useEffect(() => {
     if (selectedTask && tasks.some((task) => task.id === selectedTask.id)) return;
@@ -252,7 +256,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                     <span className="info-label">{t("tasks.errorDetail")}</span>
                     <CopyButton text={selectedTask.error} label={t("common.copyError")} />
                   </div>
-                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("tasks.errorDetail")}>
+                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("tasks.errorDetail")} ref={errorRef}>
                     {selectedTask.error}
                   </pre>
                 </div>

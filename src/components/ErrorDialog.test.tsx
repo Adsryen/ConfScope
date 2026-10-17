@@ -127,3 +127,58 @@ describe("ErrorDialog 只读详情键盘可达（R39）", () => {
     expect(document.activeElement).toBe(region);
   });
 });
+
+describe("ErrorDialog 切换报错滚动复位（波29 R49）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+  });
+
+  /** jsdom 没有布局引擎，scrollTop 恒为 0；挂可读写的实现才能断言"被重置"。 */
+  function stubScroll(el: HTMLElement) {
+    const offsets = { top: 0 };
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => offsets.top,
+      set: (value: number) => {
+        offsets.top = value;
+      },
+    });
+    return offsets;
+  }
+
+  function showDetail(item: { title: string; message: string; detail: string }) {
+    act(() => {
+      const id = reportError({ ...item, level: "error" as const });
+      showMessageDetail(id);
+    });
+  }
+
+  it("从一个报错切到另一个报错，完整错误正文回到顶部", () => {
+    renderErrorDialog();
+    showDetail({ title: "Load failed", message: "first", detail: "stack A\nat foo" });
+
+    const pre = screen.getByRole("region", { name: "完整错误" }) as HTMLElement;
+    const offsets = stubScroll(pre);
+    offsets.top = 180;
+
+    showDetail({ title: "Save failed", message: "second", detail: "stack B\nat bar" });
+
+    expect(pre.textContent).toContain("stack B");
+    expect(offsets.top).toBe(0);
+  });
+
+  it("同一报错重复播报只更新计数，不吞掉用户滚到的位置", () => {
+    renderErrorDialog();
+    showDetail({ title: "Load failed", message: "boom", detail: "stack A\nat foo" });
+
+    const pre = screen.getByRole("region", { name: "完整错误" }) as HTMLElement;
+    const offsets = stubScroll(pre);
+    offsets.top = 120;
+
+    showDetail({ title: "Load failed", message: "boom", detail: "stack A\nat foo" });
+
+    expect(pre.textContent).toContain("stack A");
+    expect(offsets.top).toBe(120);
+  });
+});

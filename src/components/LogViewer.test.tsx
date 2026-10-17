@@ -129,3 +129,57 @@ describe("LogViewer", () => {
     expect(rows[0]).not.toHaveAttribute("aria-current");
   });
 });
+
+describe("LogViewer 切换会话滚动复位（波29 R49）", () => {
+  beforeEach(() => {
+    localStorage.setItem("locale", "zh-CN");
+    __resetAuditSessionsForTest();
+    (ReadAuditLogLines as unknown as Mock).mockResolvedValue([]);
+  });
+
+  /** jsdom 没有布局引擎，scrollTop 恒为 0；挂可读写的实现才能断言"被重置"。 */
+  function stubScroll(el: HTMLElement) {
+    const offsets = { top: 0 };
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => offsets.top,
+      set: (value: number) => {
+        offsets.top = value;
+      },
+    });
+    return offsets;
+  }
+
+  function clickSession(container: HTMLElement, id: string) {
+    const rows = Array.from(container.querySelectorAll<HTMLElement>(".data-list .data-list-item"));
+    const row = rows.find((el) => el.textContent?.includes(id));
+    expect(row, `找不到会话 ${id}`).toBeTruthy();
+    fireEvent.click(row as HTMLElement);
+  }
+
+  it("切换会话时原文块与事件载荷块都回到顶部", async () => {
+    const older = createAuditSession("compare");
+    auditSessionEvent(older, { kind: "compare_start", mode: "text", left: "L1", right: "R1" });
+    endAuditSession(older, "success");
+    const newer = createAuditSession("compare");
+    auditSessionEvent(newer, { kind: "compare_start", mode: "text", left: "L2", right: "R2" });
+    endAuditSession(newer, "success");
+
+    const { container } = renderViewer();
+    await waitFor(() => expect(container.querySelectorAll(".data-list-item").length).toBe(2));
+    clickSession(container, newer);
+    await waitFor(() => expect(container.querySelector(".log-event-payload")).toBeTruthy());
+
+    const jsonl = stubScroll(container.querySelector(".log-jsonl") as HTMLElement);
+    const payload = stubScroll(container.querySelector(".log-event-payload") as HTMLElement);
+    jsonl.top = 140;
+    payload.top = 90;
+
+    clickSession(container, older);
+
+    await waitFor(() => expect(container.querySelector(".log-jsonl")?.textContent).toContain("L1"));
+    expect(jsonl.top).toBe(0);
+    expect((container.querySelector(".log-event-payload") as HTMLElement).textContent).toContain("L1");
+    expect(payload.top).toBe(0);
+  });
+});

@@ -16,6 +16,7 @@ import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/a
 import { readViewState, useRememberedState, useScrollMemory, writeViewState } from "../lib/viewState";
 import Select from "./Select";
 import { errorText } from "../lib/errorText";
+import { useScrollResetRef } from "../lib/useScrollResetOnContentChange";
 
 export interface DiffJumpSideParams {
   tenant?: string;
@@ -200,6 +201,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const [scanCount, setScanCount] = useState(0);
   const auditReqId = useRef(0);
   const [selectedRow, setSelectedRow] = useState<AuditRow | null>(null);
+  // 详情区每个环境一格，切换数据项时这些 <pre> 复用同一批节点，不归零就会让新内容
+  // 停在上一份的偏移处，用户会以为差异就只有滚到的这几行（轮13 波29 / R49）。
+  const resetRef = useScrollResetRef([selectedRow?.dataId ?? "", selectedRow?.key ?? ""]);
   const [baseline, setBaseline] = useState<string>("");
   const [showSettings, setShowSettings] = useRememberedState<boolean>("audit.showSettings", false);
 
@@ -956,7 +960,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   <div className="audit-detail-env-label" id={envLabelId}>
                     {env ? envShortLabel(env) : envId}
                   </div>
-                  <pre className="audit-detail-value" tabIndex={0} role="region" aria-labelledby={envLabelId}>
+                  <pre className="audit-detail-value" tabIndex={0} role="region" aria-labelledby={envLabelId} ref={resetRef}>
                     {cell?.exists ? cell.value : t("audit.detailMissing")}
                   </pre>
                 </div>

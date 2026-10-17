@@ -3,6 +3,7 @@ import { useTranslation } from "../i18n";
 import { AppErrorItem, closeMessageDetail, subscribeActiveError } from "../lib/errorCenter";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import CopyButton from "./CopyButton";
 
 function displayText(item: AppErrorItem): string {
@@ -24,6 +25,9 @@ export default function ErrorDialog() {
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active: !!current, containerRef: modalRef });
+  // 详情块复用同一节点：从一个报错切到另一个报错时不归零，新堆栈会停在旧偏移处（轮13 波29 / R49）。
+  const detailRef = useRef<HTMLPreElement>(null);
+  useScrollResetOnContentChange(detailRef, [current?.id ?? 0, current?.detail ?? ""]);
 
   if (!current) return null;
 
@@ -57,7 +61,7 @@ export default function ErrorDialog() {
           {current.detail && current.detail !== current.message && (
             <>
               <div className="error-detail-title">{t("errorDialog.fullError")}</div>
-              <pre className="error-detail" tabIndex={0} role="region" aria-label={t("errorDialog.fullError")}>
+              <pre className="error-detail" tabIndex={0} role="region" aria-label={t("errorDialog.fullError")} ref={detailRef}>
                 {current.detail}
               </pre>
             </>
