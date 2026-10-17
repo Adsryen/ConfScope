@@ -1,8 +1,10 @@
 import zhCN from "./zh-CN.json";
 import enUS from "./en-US.json";
+import { escapeRegex } from "../lib/textMatch";
 
 export type Locale = "zh-CN" | "en-US";
-type TranslationParams = Record<string, string | number>;
+/** 文案插值参数表：值一律按字符串插入，允许数字。 */
+export type TranslationParams = Record<string, string | number>;
 
 export const locales: Record<Locale, Record<string, unknown>> = {
   "zh-CN": zhCN,
@@ -45,12 +47,26 @@ export function currentLocale(): Locale {
   }
 }
 
+/**
+ * 文案参数插值的唯一实现（轮14 波31 / R52）。
+ *
+ * 两条硬性要求，改动前请先读完：
+ * 1. **必须函数替换**。第二参传字符串时 `String.replace` 会把值里的 `$&` / `` $` `` / `$'` / `$1`
+ *    当特殊序列展开，用户可见文案直接缺字（波24 R43 在 lib 侧踩过，轮14 实测组件侧 `t()` 仍在踩：
+ *    搜索词 `a$&b` 会被渲染成「未找到包含 a{term}b 的配置」，占位符名漏出、原词被吞）。
+ * 2. **必须单趟扫描**。逐个 key 循环时，前一个值里字面出现的 `{otherKey}` 会被后一趟再插一遍，
+ *    「把用户输入原样回显」的文案会二次变形。
+ *
+ * 占位符名按字面量转义后入正则；未知占位符原样保留（与历史行为一致，便于发现漏参）。
+ */
+export function interpolate(text: string, params: TranslationParams = {}): string {
+  const names = Object.keys(params);
+  if (!text || names.length === 0) return text;
+  const pattern = new RegExp(`\\{(${names.map(escapeRegex).join("|")})\\}`, "g");
+  // 只替换传进来的占位符：漏参时 `{name}` 原样留在界面上，比渲染成 undefined 更容易被发现。
+  return text.replace(pattern, (_whole: string, name: string) => String(params[name]));
+}
+
 export function translate(key: string, params: TranslationParams = {}): string {
-  let text = getTranslation(currentLocale(), key);
-  for (const [name, value] of Object.entries(params)) {
-    // 必须用函数替换：直接传字符串时 `$&` / `$'` / `$1` 会被 String.replace 当特殊符号吞掉，
-    // 而 params 里常放底层异常原文、文件路径这类带 `$` 的数据（波24 R43 把 lib 报错接进来后更容易踩到）。
-    text = text.replace(new RegExp(`\\{${name}\\}`, "g"), () => String(value));
-  }
-  return text;
+  return interpolate(getTranslation(currentLocale(), key), params);
 }

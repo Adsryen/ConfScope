@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { Locale, getTranslation } from '../locales';
+import { interpolate, Locale, getTranslation } from '../locales';
 
 interface I18nContextValue {
   locale: Locale;
@@ -25,13 +25,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const t = useCallback(
     (key: string, params?: Record<string, string | number>): string => {
-      let text = getTranslation(locale, key);
-      if (params) {
-        Object.entries(params).forEach(([k, v]) => {
-          text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
-        });
-      }
-      return text;
+      // 插值口径与 lib translate() 同源（轮14 R52）：字符串替换会把值里的 $& / $' / $1 吞掉，
+      // 组件侧 124 个 t(key, {…}) 调用点大量直接回显用户输入与底层异常原文，同样中招。
+      return interpolate(getTranslation(locale, key), params);
     },
     [locale]
   );
