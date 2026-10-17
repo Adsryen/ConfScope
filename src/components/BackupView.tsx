@@ -388,8 +388,10 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   <div className="backup-item-source">
                     {snapshotSourceLabel(snap)}
                   </div>
+                  {/* R80：这里不挂 .btn-sm——它的两条声明在这颗按钮上恒被
+                      .backup-item-delete 覆盖，留着只会造出「同特异度赌文档顺序」的冲突。 */}
                   <button
-                    className="btn btn-ghost btn-sm backup-item-delete"
+                    className="btn btn-ghost backup-item-delete"
                     onClick={(e) => {
                       e.stopPropagation();
                       setShowDeleteConfirm(snap.id);

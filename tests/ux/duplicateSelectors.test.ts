@@ -38,7 +38,8 @@ const BASELINE: Record<string, string[]> = {};
 
 /** R31 合并过的选择器：这些一旦再出现第二份，就是「改了不生效」的坑，直接拦死。 */
 const SINGLE_SOURCE_SELECTORS = [
-  ".btn-sm",
+  ".btn.btn-sm", // R80 起改成复合形式，守卫跟着改名
+
   ".field-error",
   ".history-item:hover",
   ".env-badge",

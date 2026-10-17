@@ -781,7 +781,12 @@ textarea {
   min-width: 0;
 }
 
-.browse-scope-bar {
+/* 浏览范围栏是 .page-actions 的变体：flex-wrap / align-items 与基础类同特异度，此前只靠「写在后面」取胜，
+   谁把这两条挪上去就静默改对齐，所以固化成 .page-actions.browse-scope-bar。
+   R80（本轮统一口径）：跨类覆盖只由特异度决胜，不再赌文档顺序——变体类要么写全
+   「.基础类.变体类」，要么裸类名与复合类名并列（作用面不全相同时），死声明直接删。
+   900px 那条 @media 只覆盖 justify-content/width，不在这里，不受影响。 */
+.page-actions.browse-scope-bar {
   flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -944,7 +949,8 @@ textarea {
   min-width: 0;
 }
 
-.settings-data-file-row {
+/* R80：路径行必须和 .settings-setting-row 一起用（全站唯一用法就是这一处），否则顶对齐不生效。 */
+.settings-setting-row.settings-data-file-row {
   align-items: flex-start;
 }
 
@@ -3208,6 +3214,8 @@ button.diff-workflow-step-btn:hover {
 .diff-loadbar.result-actions .diff-toggle {
   margin-left: 0;
 }
+/* 结果区计数胶囊。R80：color:var(--text) 是死声明——唯一的用法还带着 .batch-diff-count，
+   那条 color:var(--text-dim) 同特异度写在后面恒赢，文字色归 .batch-diff-count。 */
 .result-action-count {
   display: inline-flex;
   align-items: center;
@@ -3216,29 +3224,33 @@ button.diff-workflow-step-btn:hover {
   border-left: 2px solid rgba(79, 195, 247, 0.42);
   border-radius: 5px;
   background: rgba(79, 195, 247, 0.08);
-  color: var(--text);
 }
 .result-action {
   min-height: 28px;
 }
-.result-action-back {
+/* 结果区三个着色按钮：着色属于「结果区」而不是某个 tone，所以复合前缀取 .result-action 而不是
+   .btn-ghost / .btn-primary——将来换 tone 也不会把着色丢掉（R80）。
+   .btn-ghost:hover:not(:disabled) 是 3 类，仍然压过这两条，hover 底色不变。 */
+.result-action.result-action-back {
   border-color: rgba(148, 163, 184, 0.28);
   background: rgba(148, 163, 184, 0.08);
 }
+/* 结果区「只看差异」开关。R80：color:var(--text) 死声明，实际文字色由 .diff-toggle 给（同用法恒赢）。 */
 .result-action-filter {
   min-height: 28px;
   padding: 0 10px;
   border: 1px solid rgba(245, 158, 11, 0.32);
   border-radius: 6px;
   background: rgba(245, 158, 11, 0.08);
-  color: var(--text);
 }
-.result-action-export {
+/* 同 .result-action.result-action-back（R80）。 */
+.result-action.result-action-export {
   border-color: rgba(79, 195, 247, 0.36);
   background: rgba(79, 195, 247, 0.08);
   color: var(--blue);
 }
-.result-action-plan {
+/* 同 .result-action.result-action-back（R80）。 */
+.result-action.result-action-plan {
   border-color: rgba(34, 197, 94, 0.5);
   box-shadow:
     0 0 0 1px rgba(34, 197, 94, 0.12),
@@ -3488,7 +3500,10 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   gap: 8px;
 }
-.check-field {
+/* ConnectionManager.tsx:1707 是裸 .check-field，:1334 是 `field check-field`——
+   .field{flex:1} 和它同特异度，此前靠顺序决胜。裸类名与复合并列（R80），两处作用面都保住。 */
+.check-field,
+.field.check-field {
   flex: 0 0 120px;
   justify-content: flex-end;
 }
@@ -4191,7 +4206,9 @@ button.diff-workflow-step-btn:hover {
 .modal-overlay.error-overlay {
   z-index: 420;
 }
-.error-header {
+/* 错误弹层头部：必须和 .modal-header 同时出现（ErrorDialog 就是这一处），
+   顶对齐改由特异度负责（R80），不再靠谁写在后面。 */
+.modal-header.error-header {
   align-items: flex-start;
   gap: 16px;
 }
@@ -4930,7 +4947,9 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
 }
 
-.ssh-key {
+/* 私钥文本域：两处用法（SSHManagerView / ConnectionManager）都是 `search-input wide mono ssh-key`，
+   所以 font-size 11px 压过 .search-input{13px} 改由特异度负责（R80），不再靠顺序。 */
+.search-input.ssh-key {
   min-height: 80px;
   resize: vertical;
   font-size: 11px;
@@ -5005,8 +5024,11 @@ button.diff-workflow-step-btn:hover {
 }
 
 /* 全站唯一的小按钮尺寸。以前这里有两份 .btn-sm，前一份（padding 4px 10px / font-size 12px）
-   整条被这一份吃掉，写了却永远不生效（R31）。*/
-.btn-sm {
+   整条被这一份吃掉，写了却永远不生效（R31）。
+   R80：padding / font-size 都和 .btn 同特异度，靠文档顺序决胜。这一族 93 处静态用法 +
+   7 处模板串用法（AuditView / ConfigBrowser / HistoryView / LogViewer）全部是 `btn btn-sm` 成对出现，
+   所以提复合不缩作用面。改名要连 duplicateSelectors 守卫的 SINGLE_SOURCE_SELECTORS 一起改。 */
+.btn.btn-sm {
   padding: 4px 8px;
   font-size: 11px;
 }
@@ -5359,13 +5381,16 @@ button.diff-workflow-step-btn:hover {
     background 0.15s;
 }
 
-.badge-success {
+/* 徽标配色变体。R80：此前靠「写在 .badge 后面」赢下 background，而 .badge{background:var(--bg)}
+   对所有徽标恒输——保留它作为「没挂配色类时的兜底色」，但不再让它和变体平级竞争。 */
+.badge.badge-success {
   background: rgba(78, 201, 176, 0.12);
   border-color: rgba(78, 201, 176, 0.35);
   color: var(--green);
 }
 
-.badge-planned {
+/* 同 .badge.badge-success（R80）。 */
+.badge.badge-planned {
   background: rgba(220, 220, 170, 0.08);
   border-color: rgba(220, 220, 170, 0.28);
   color: var(--yellow);
@@ -6205,8 +6230,10 @@ button.diff-workflow-step-btn:hover {
   color: #e57373;
 }
 
-/* 设置页危险操作区 */
-.settings-danger-zone {
+/* 设置页危险操作区
+   R80：padding 与 .settings-setting-row{padding:10px 0} 同特异度，此前只是侥幸写在后面。
+   980px 里的 @media .settings-danger-zone{flex-direction:column} 管的是另一个属性，不受这次提复合影响。 */
+.settings-setting-row.settings-danger-zone {
   margin-top: 16px;
   padding: 12px;
   background: rgba(244, 67, 54, 0.08);
@@ -6221,7 +6248,11 @@ button.diff-workflow-step-btn:hover {
   color: #e57373;
 }
 
-.btn-danger {
+/* 危险按钮配色。DeleteConfirm.tsx 用的是 `btn btn-danger`（没有 .btn-ghost），
+   SettingsView 的两处是 `btn btn-ghost btn-danger`——只把选择器提成 .btn-ghost.btn-danger
+   会打死前者，所以裸类名和复合类名并列写（R80）：两种写法作用面都在，danger 恒赢 ghost。 */
+.btn-danger,
+.btn-ghost.btn-danger {
   color: #e57373;
   border-color: rgba(244, 67, 54, 0.35);
 }
@@ -6293,7 +6324,11 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
 }
 
-.backup-item-delete {
+/* 列表行的删除按钮：唯一用法是 `btn btn-ghost backup-item-delete`（R80 顺手摘掉了那个空挂的 .btn-sm）——
+   padding / font-size / transition 此前同时压着 .btn 和 .btn-sm 两份同特异度规则。
+   注意只提这一条：`.backup-item:hover .backup-item-delete` 是 3 类，仍然压过它（悬停显形不能坏）；
+   段尾还有一条裸 .backup-item-delete{top:10px}，那是另一属性，不参与本轮判定。 */
+.btn.backup-item-delete {
   position: absolute;
   right: 8px;
   padding: 2px 6px;
@@ -6314,9 +6349,10 @@ button.diff-workflow-step-btn:hover {
   overscroll-behavior: contain;
 }
 
+/* R80：align-items:center 是死声明——这个类只出现在 `data-detail-header backup-detail-header`，
+   而共享外壳 .data-detail-header 的 flex-start 同特异度写在后面，恒赢。删掉它，顶对齐归外壳。 */
 .backup-detail-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
 }
 
@@ -6393,10 +6429,9 @@ button.diff-workflow-step-btn:hover {
   border-radius: 6px;
 }
 
-.backup-webdav-head {
-  align-items: flex-start;
-}
-
+/* R80：这个类原来还带一条 align-items:flex-start，但它在唯一的用法
+   （`data-section-head backup-webdav-head`）上恒输给 .data-section-head{align-items:center}，
+   已删；类本身留作下面这条标题规则的钩子。 */
 .backup-webdav-head h4 {
   margin: 0;
   font-size: 13px;
@@ -6636,9 +6671,9 @@ button.diff-workflow-step-btn:hover {
   overscroll-behavior: contain;
 }
 
+/* 同 .backup-detail-header：align-items 恒输给 .data-detail-header，已删（R80）。 */
 .task-detail-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
 }
 
@@ -7440,7 +7475,8 @@ button.diff-workflow-step-btn:hover {
   gap: 8px;
 }
 
-.history-content {
+/* 同 .data-split.backup-content（R80，含段尾 @media 的复合形式）。 */
+.data-split.history-content {
   grid-template-columns: minmax(300px, 42%) minmax(0, 1fr);
 }
 
@@ -7491,7 +7527,9 @@ button.diff-workflow-step-btn:hover {
   max-height: 280px;
 }
 
-.backup-content {
+/* R80：列宽与 margin-top 是相对 .data-split 的差异，提复合后不再靠谁写在后面。
+   900px 的单列覆盖在段尾 @media 里，那边同步写了复合形式，别只改一处。 */
+.data-split.backup-content {
   grid-template-columns: minmax(280px, 32%) minmax(0, 1fr);
   margin-top: 0;
 }
@@ -7553,7 +7591,8 @@ button.diff-workflow-step-btn:hover {
   white-space: nowrap;
 }
 
-.task-center-content {
+/* 同 .data-split.backup-content（R80，含段尾 @media 的复合形式）。 */
+.data-split.task-center-content {
   grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
   margin-top: 0;
 }
@@ -7583,10 +7622,12 @@ button.diff-workflow-step-btn:hover {
     flex: 1 1 150px;
   }
 
+  /* R80：上面那三条变体提成了 .data-split.*，特异度变成 2 类；这里要是还只写裸类名，
+     窄屏的单列覆盖会被反超，两个面板就漏出两列。复合形式必须成对维护。 */
   .data-split,
-  .history-content,
-  .backup-content,
-  .task-center-content {
+  .data-split.history-content,
+  .data-split.backup-content,
+  .data-split.task-center-content {
     grid-template-columns: 1fr;
     overflow-y: auto;
     overscroll-behavior: contain;
