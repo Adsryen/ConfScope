@@ -19,6 +19,7 @@ import { recordOperation } from "../store/operationHistory";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
+import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
@@ -227,33 +228,47 @@ function PlanItemList({
   );
 }
 
-function ItemDetail({ item, onEditAfterValue }: { item: ApplyPlanItem; onEditAfterValue?: (itemId: string, content: string) => void }) {
+/**
+ * 内联「编辑目标内容」面板里还没保存的东西。
+ *
+ * 这份状态以前挂在 ItemDetail 自己的 useState 上：切换选中的配置项时组件不会重置，
+ * 于是 A 项写了一半的内容会带着面板一起显示在 B 项上，点「保存」就把 A 的正文
+ * 塞进了 B 的 afterValue 并落进计划（轮7 R60，真会写坏要发布的内容）。
+ * 提到父层按 itemId 存放后：串行不可能发生，切走再回来草稿还在，
+ * 「返回」有未保存草稿时也能拦一道（R58）。
+ */
+interface TargetEdit {
+  content: string;
+  errors: string[];
+}
+
+function ItemDetail({
+  item,
+  edit,
+  onEditChange,
+  onCommitEdit,
+}: {
+  item: ApplyPlanItem;
+  edit?: TargetEdit;
+  onEditChange: (itemId: string, next: TargetEdit | null) => void;
+  onCommitEdit: (itemId: string, content: string) => void;
+}) {
   const { t } = useTranslation();
   const missingLabel = t("apply.valueMissing");
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [editErrs, setEditErrs] = useState<string[]>([]);
   const diffFormat = item.afterValue.format ?? item.sourceValue.format ?? item.targetValue.format ?? "TEXT";
   const currentAfter = valueText(item.afterValue, missingLabel);
-  const canEdit = Boolean(onEditAfterValue) && item.action !== "delete";
+  const canEdit = item.action !== "delete";
 
-  const startEdit = () => {
-    setDraft(currentAfter);
-    setEditErrs([]);
-    setEditing(true);
-  };
+  const startEdit = () => onEditChange(item.id, { content: currentAfter, errors: [] });
+  const cancelEdit = () => onEditChange(item.id, null);
   const commitEdit = () => {
-    const problems = validateConfig(draft, diffFormat);
+    if (!edit) return;
+    const problems = validateConfig(edit.content, diffFormat);
     if (problems.length > 0) {
-      setEditErrs(problems);
+      onEditChange(item.id, { content: edit.content, errors: problems });
       return;
     }
-    onEditAfterValue?.(item.id, draft);
-    setEditing(false);
-  };
-  const cancelEdit = () => {
-    setEditing(false);
-    setEditErrs([]);
+    onCommitEdit(item.id, edit.content);
   };
   const hasFatalParseError =
     item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
@@ -283,13 +298,13 @@ function ItemDetail({ item, onEditAfterValue }: { item: ApplyPlanItem; onEditAft
       <div className="apply-detail-meta">
         <span>{t("apply.actionLine", { action: item.action })}</span>
         {item.blockReason && <span>{t("apply.blockReasonLine", { reason: item.blockReason })}</span>}
-        {canEdit && !editing && (
+        {canEdit && !edit && (
           <button className="btn btn-ghost btn-sm" type="button" onClick={startEdit}>
             {t("apply.editTarget")}
           </button>
         )}
       </div>
-      {editing && (
+      {edit && (
         <div className="apply-edit-panel">
           <div className="apply-edit-head">
             <span className="apply-edit-hint">{t("apply.editTargetHint")}</span>
@@ -302,15 +317,15 @@ function ItemDetail({ item, onEditAfterValue }: { item: ApplyPlanItem; onEditAft
               </button>
             </div>
           </div>
-          {editErrs.length > 0 && (
+          {edit.errors.length > 0 && (
             <div className="apply-edit-errors">
-              {editErrs.map((err, i) => (
+              {edit.errors.map((err, i) => (
                 <div key={i}>{err}</div>
               ))}
             </div>
           )}
           <div className="apply-edit-editor">
-            <CodeEditor value={draft} onChange={setDraft} format={diffFormat} />
+            <CodeEditor value={edit.content} onChange={(content) => onEditChange(item.id, { content, errors: [] })} format={diffFormat} />
           </div>
         </div>
       )}
@@ -504,6 +519,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [draftState, setDraftState] = useState<DraftState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // 未保存的「编辑目标内容」：itemId -> 草稿。只有本页会写，切选中项不丢，离开前拦一道。
+  const [targetEdits, setTargetEdits] = useState<Record<string, TargetEdit>>({});
+  const [askDiscardEdits, setAskDiscardEdits] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode | null>(null);
@@ -647,12 +665,34 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const selectedCount = selectedIds.size;
   const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
 
+  const updateTargetEdit = useCallback((itemId: string, next: TargetEdit | null) => {
+    setTargetEdits((prev) => {
+      const copy = { ...prev };
+      if (next) copy[itemId] = next;
+      else delete copy[itemId];
+      return copy;
+    });
+  }, []);
+
+  const unsavedEditCount = Object.keys(targetEdits).length;
+  // 「返回」和 stepper 回退都会卸载本页，未保存的目标内容随之消失——有草稿时先问一句。
+  // 记下来时的目标步骤，确认后才带着它走，避免「放弃草稿」把用户丢到别的步骤。
+  const pendingBackStepRef = useRef<WorkflowStepId | undefined>(undefined);
+  const attemptBack = (focusStep?: WorkflowStepId) => {
+    if (unsavedEditCount === 0) {
+      onBack(focusStep);
+      return;
+    }
+    pendingBackStepRef.current = focusStep;
+    setAskDiscardEdits(true);
+  };
+
   // ── 工作流 stepper 导航（仅回退：任意回退到 DiffView 并聚焦目标步骤，进度保留；前进走页面内操作按钮） ──
   const onWorkflowStepClick = (step: WorkflowStepId) => {
     const curIdx = executionCompleted ? WORKFLOW_STEP_IDS.length : WORKFLOW_STEP_IDS.indexOf(workflowCurrentStep);
     const idx = WORKFLOW_STEP_IDS.indexOf(step);
     if (idx >= curIdx) return; // 防御：stepper 只暴露更早的步骤
-    onBack(step);
+    attemptBack(step);
   };
 
   const selectAllItems = () => {
@@ -700,6 +740,15 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       });
     },
     [draftState, selectedIds]
+  );
+
+  // 保存并重新校验：沿用上面写计划的逻辑，成功后收起这一项的草稿。
+  const commitTargetEdit = useCallback(
+    (itemId: string, content: string) => {
+      handleEditAfterValue(itemId, content);
+      updateTargetEdit(itemId, null);
+    },
+    [handleEditAfterValue, updateTargetEdit]
   );
 
   const toggleSelectedItem = (id: string) => {
@@ -909,7 +958,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           />
         )}
         <div className="page-actions">
-          <button className="btn btn-ghost" type="button" onClick={() => onBack()}>
+          <button className="btn btn-ghost" type="button" onClick={() => attemptBack()}>
             {t("apply.back")}
           </button>
         </div>
@@ -976,7 +1025,12 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
                 onSelectNone={selectNoItems}
               />
               {selectedItem ? (
-                <ItemDetail item={selectedItem} onEditAfterValue={handleEditAfterValue} />
+                <ItemDetail
+                  item={selectedItem}
+                  edit={targetEdits[selectedItem.id]}
+                  onEditChange={updateTargetEdit}
+                  onCommitEdit={commitTargetEdit}
+                />
               ) : (
                 <div className="data-empty-state detail-empty">{t("apply.noItems")}</div>
               )}
@@ -1000,6 +1054,20 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             />
           </div>
         </div>
+      )}
+      {askDiscardEdits && (
+        <ConfirmModal
+          danger
+          title={t("apply.discardEditsTitle")}
+          message={t("apply.discardEditsMessage", { count: unsavedEditCount })}
+          confirmLabel={t("apply.discardEditsConfirm")}
+          onConfirm={() => {
+            setAskDiscardEdits(false);
+            setTargetEdits({});
+            onBack(pendingBackStepRef.current);
+          }}
+          onCancel={() => setAskDiscardEdits(false)}
+        />
       )}
     </div>
   );

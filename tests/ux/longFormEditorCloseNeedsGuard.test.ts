@@ -26,10 +26,10 @@ const noopArrow = new RegExp(`\\b(?:${EVENT_ATTRS})=\\{\\s*\\(\\s*\\)\\s*=>\\s*(
 const escapeDirect = /\buseEscape\s*\([^;]*?,\s*(on[A-Z][\w$]*)\s*,\s*EscapePriority/g;
 
 /**
- * 已知未守门的出口（波13 交付时实测就这一条）：见轮7 research R58。
- * 清单按「文件 + prop 名」钉，不带行号——否则上方插一行就误报。
+ * 已知未守门的出口：波13 交付时实测有 1 条（ApplyPlanView 的「返回」，见轮7 research R58），
+ * 波16 修掉后清空。清单按「文件 + prop 名」钉，不带行号——否则上方插一行就误报。
  */
-const KNOWN_UNGUARDED = ["src/components/ApplyPlanView.tsx onBack"];
+const KNOWN_UNGUARDED: string[] = [];
 
 interface Site {
   file: string;

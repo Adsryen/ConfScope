@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
@@ -869,5 +869,136 @@ describe("ApplyPlanView", () => {
     expect(await screen.findByText(succeededReason)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dry-run check" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
     expect(screen.getByRole("button", { name: "Execute change" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
+  });
+
+  // ── 波16：内联「编辑目标内容」的未保存草稿（R60 串内容 / R58 静默丢弃） ──
+  function renderTwoItems() {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([
+        item("first.key", value("server.port=8080"), value("server.port=9090")),
+        item("second.key", value("log.level=info"), value("log.level=warn")),
+      ]),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    return renderView();
+  }
+
+  function itemRows(): HTMLElement[] {
+    return Array.from(document.querySelectorAll(".apply-item-row")) as HTMLElement[];
+  }
+
+  function editorTextarea(): HTMLTextAreaElement | null {
+    return document.querySelector(".apply-edit-panel .code-editor-ta") as HTMLTextAreaElement | null;
+  }
+
+  /** 页头「返回」：确认框打开时也有个同名样式的按钮，必须锁定在 page-actions 里。 */
+  function backButton(): HTMLElement {
+    return document.querySelector(".page-actions button") as HTMLElement;
+  }
+
+  it("keeps an unsaved target edit attached to the item it was written for", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
+
+    // 切到第二项：面板必须收起。以前它跟着组件活下来，第二项上点「保存」会把第一项的正文写进第二项。
+    fireEvent.click(itemRows()[1]);
+    expect(editorTextarea()).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Target" })).toBeInTheDocument();
+
+    // 切回第一项：草稿还在，不因为换行选中就丢
+    fireEvent.click(itemRows()[0]);
+    expect(editorTextarea()!.value).toBe("server.port=8099");
+  });
+
+  it("saves the draft into the item it belongs to, not the newly selected one", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
+    // 切到第二项时不许留着「保存并重新校验」：留着它就等于把第一项的正文写进第二项
+    fireEvent.click(itemRows()[1]);
+    expect(screen.queryByRole("button", { name: "Save & Re-validate" })).not.toBeInTheDocument();
+    fireEvent.click(itemRows()[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+
+    await waitFor(() => expect(storeMocks.saveApplyPlan).toHaveBeenCalled());
+    const saveCalls = storeMocks.saveApplyPlan.mock.calls;
+    const saved = saveCalls[saveCalls.length - 1]?.[0] as ApplyPlan;
+    expect(saved.items.find((candidate) => candidate.ref.key === "first.key")?.afterValue.content).toBe("server.port=8099");
+    expect(saved.items.find((candidate) => candidate.ref.key === "second.key")?.afterValue.content).not.toBe("server.port=8099");
+  });
+
+  it("asks before going back while a target edit is unsaved", async () => {
+    const { onBack } = renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
+
+    fireEvent.click(backButton());
+    const ask = await screen.findByRole("dialog", { name: "Discard unsaved target content?" });
+    expect(ask).toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+
+    // 取消：留在本页，草稿也还在
+    fireEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Discard unsaved target content?" })).not.toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+    expect(editorTextarea()!.value).toBe("server.port=8099");
+
+    // 确认放弃才真的走
+    fireEvent.click(backButton());
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and go back" }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onBack).toHaveBeenCalledWith(undefined);
+  });
+
+  it("returns immediately when nothing is unsaved, and after cancelling the panel", async () => {
+    const { onBack } = renderTwoItems();
+    await screen.findByRole("button", { name: "Edit Target" });
+    fireEvent.click(backButton());
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    // 面板里点「取消」＝草稿作废，之后再按「返回」不该再多问一句
+    fireEvent.click(screen.getByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" })); // 编辑面板自己的「取消」
+    expect(editorTextarea()).not.toBeInTheDocument();
+    fireEvent.click(backButton());
+    expect(onBack).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("the stepper back route goes through the same guard and keeps its focus step", async () => {
+    const { onBack } = renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
+
+    const steps = Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
+    fireEvent.click(steps[0].querySelector("button")!);
+    expect(await screen.findByRole("dialog", { name: "Discard unsaved target content?" })).toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard and go back" }));
+    expect(onBack).toHaveBeenCalledWith("choose");
+  });
+
+  it("keeps the failed validation message with the draft instead of dropping it", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    // Properties 重复 key：validateConfig 报错，面板不许被关掉
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099\nserver.port=9000" } });
+    // 计划加载时已经落过一次盘，这里只关心「校验没过就不许多写一次」
+    const savedCalls = storeMocks.saveApplyPlan.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+    expect(editorTextarea()).toBeInTheDocument();
+    expect(document.querySelector(".apply-edit-errors")).toHaveTextContent(/server\.port/);
+    expect(storeMocks.saveApplyPlan.mock.calls).toHaveLength(savedCalls);
+
+    // 改对之后保存：错误提示随草稿一起消失
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=7000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+    await waitFor(() => expect(storeMocks.saveApplyPlan).toHaveBeenCalled());
+    expect(document.querySelector(".apply-edit-panel")).not.toBeInTheDocument();
   });
 });

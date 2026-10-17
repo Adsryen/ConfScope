@@ -204,6 +204,9 @@
     "editTarget": "Edit Target",
     "editTargetHint": "Manually adjust the content that will be written to the target (use when auto-detection is inaccurate or you need to add something). Saving re-validates and updates this diff preview and the execution plan.",
     "editTargetSave": "Save & Re-validate",
+    "discardEditsTitle": "Discard unsaved target content?",
+    "discardEditsMessage": "{count} item(s) still have unsaved target content. Going back discards it.",
+    "discardEditsConfirm": "Discard and go back",
     "dryRunPreviewNote": "Preview of what the target will look like after execution — nothing has been written yet. It is only applied when you execute the change in step 5."
   },
   "settings": {
