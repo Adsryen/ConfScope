@@ -279,16 +279,17 @@ function ItemDetail({
     item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
   // parseError 现在兼作 warning（如 YAML duplicate key）：fatal 解析失败红色展示；
   // 非 fatal 的 warning（后值覆盖类）用黄色提示，不再完全隐藏。
-  const parseErrors = hasFatalParseError
-    ? [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
+  // create / overwrite 时 afterValue 与 sourceValue 是同一份快照（applyPlan.ts 的 afterValueFor），
+  // 三个槽位里会拿到两条一模一样的串——按内容去重，不同来源各自的提示仍然逐条保留。
+  const parseIssues = [
+    ...new Set(
+      [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
         (error): error is string => Boolean(error)
       )
-    : [];
-  const parseWarnings = hasFatalParseError
-    ? []
-    : [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
-        (error): error is string => Boolean(error)
-      );
+    ),
+  ];
+  const parseErrors = hasFatalParseError ? parseIssues : [];
+  const parseWarnings = hasFatalParseError ? [] : parseIssues;
   return (
     <div className="apply-detail">
       <div className="apply-detail-head">

@@ -366,11 +366,19 @@ describe("ApplyPlanView", () => {
 
   // 轮26 F-5：引擎原文是数据（要随快照持久化、要能被内容搜索命中），
   // 但红字块是给人看的——必须显示本地化框架 + 行列，而不是 `Expected ... in JSON at position 5`。
-  it("renders parse errors as localized copy, not the raw engine sentence", async () => {
+  it("renders parse errors and parse warnings as localized copy, not the raw engine sentence", async () => {
     const plan = makePlan([
       item(
         "broken.json",
         { ...value('{\"a\" 1}'), parseStatus: "error", parseError: "JSON:Expected ':' after property name in JSON at position 5 (line 1 column 6)" },
+        value("old")
+      ),
+      item(
+        "dup.yaml",
+        {
+          ...value("a: 1\na: 2\n"),
+          parseError: "YAML:Map keys must be unique at line 2, column 1:（duplicate key 已按后值覆盖处理，不阻塞同步）",
+        },
         value("old")
       ),
     ]);
@@ -387,6 +395,16 @@ describe("ApplyPlanView", () => {
     fireEvent.click(screen.getByText("broken.json"));
     expect(screen.getByText("JSON parse failed:expected ':' after property name (line 1, column 6)")).toBeInTheDocument();
     expect(screen.queryByText(/in JSON at position/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("dup.yaml"));
+    // afterValue 与 sourceValue 同源，同一条提示只许显示一遍
+    expect(screen.queryAllByText((_, element) => Boolean(element?.classList?.contains("apply-parse-warning")))).toHaveLength(1);
+    const warning = screen.getByText((_, element) => Boolean(element?.classList?.contains("apply-parse-warning")));
+    // 句尾那段中文说明是产出侧的数据（normalize.ts 拼上去的），翻不了但不能被吞
+    expect(warning.textContent).toBe(
+      "\u26A0 YAML parse failed:map keys must be unique（duplicate key 已按后值覆盖处理，不阻塞同步） (line 2, column 1)"
+    );
+    expect(screen.queryByText(/at line 2, column 1:/)).not.toBeInTheDocument();
   });
 
   it("shows a copyable generation error and does not expose execution controls", async () => {
