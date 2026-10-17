@@ -2,9 +2,10 @@
  * @vitest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor } from "../test/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeView from "./CodeView";
+import { clearViewState, writeViewState } from "../lib/viewState";
 import type { Format } from "../lib/format";
 
 function renderView(
@@ -378,5 +379,156 @@ describe("CodeView 键盘可达（R39）", () => {
     // 焦点真能落上：落上之后方向键 / PageDown 就能滚正文
     region.focus();
     expect(document.activeElement).toBe(region);
+  });
+});
+
+describe("CodeView 查找匹配选项（R75）", () => {
+  /** 大小写与整词都在同一份正文里做对照：PORT 行 / port 行 / export 里的 port / ports。 */
+  const CASE_CODE = "PORT = 1\nport = 2\nexport const port = 3\nports = 4\n";
+
+  function openFindWithTerm(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    expect(input, "Ctrl+F 没能打开查找栏（焦点残留在别的输入框上）").toBeTruthy();
+    fireEvent.change(input, { target: { value: term } });
+    return input;
+  }
+
+  function toggles(container: HTMLElement): HTMLButtonElement[] {
+    return [...container.querySelectorAll<HTMLButtonElement>(".code-find-toggle")];
+  }
+
+  function countText(container: HTMLElement): string {
+    return (container.querySelector(".code-find-count") as HTMLElement).textContent ?? "";
+  }
+
+  /** 命中行 = 高亮层里那一行的横条（含「当前命中」那一行，它是 is-current 不是 is-hit）。 */
+  function hitLineNumbers(container: HTMLElement): number[] {
+    return [...container.querySelectorAll<HTMLElement>(".code-gutter .code-ln")]
+      .filter((el) => el.classList.contains("is-hit") || el.classList.contains("is-current"))
+      .map((el) => Number(el.textContent));
+  }
+
+  beforeEach(() => {
+    // 开关走 viewState 记忆层（模块内存），不清掉就会互相污染：每条用例都从默认口径起步
+    clearViewState("codeFind.");
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  it("查找栏里有两个开关，各自将「现在是开还是关」播报给辅助技术", () => {
+    const { container } = renderView(CASE_CODE, "TEXT");
+    openFindWithTerm(container, "port");
+
+    const [caseBtn, wordBtn] = toggles(container);
+    expect(caseBtn).toBeTruthy();
+    expect(wordBtn).toBeTruthy();
+    expect(caseBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(caseBtn);
+    expect(caseBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(wordBtn);
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("勾上区分大小写 / 全词后，命中数与命中行随之收窄", () => {
+    const { container } = renderView(CASE_CODE, "TEXT");
+    openFindWithTerm(container, "port");
+
+    // 不区分大小写子串：PORT / port / export 里的 port / const port / ports 共 5 处、4 行
+    expect(countText(container)).toContain("/5");
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+
+    fireEvent.click(toggles(container)[0]);
+    expect(countText(container)).toContain("/4");
+    expect(hitLineNumbers(container)).toEqual([2, 3, 4]);
+
+    fireEvent.click(toggles(container)[1]);
+    // 全词再把 export 与 ports 里的两处剔掉，只剩独立成词的 port
+    expect(countText(container)).toContain("/2");
+    expect(hitLineNumbers(container)).toEqual([2, 3]);
+  });
+
+  it("中文搜索词开了全词不会被变成死条件（独立成词仍能命中）", () => {
+    const { container } = renderView("数据库端口配置 = 1\n端口 = 2\n", "TEXT");
+    openFindWithTerm(container, "端口");
+    expect(countText(container)).toContain("/2");
+
+    fireEvent.click(toggles(container)[1]);
+    expect(countText(container)).toContain("/1");
+    expect(hitLineNumbers(container)).toEqual([2]);
+  });
+
+  it("点开关不抢走输入框焦点，也不关栏", () => {
+    const { container } = renderView(CASE_CODE, "TEXT");
+    const input = openFindWithTerm(container, "port");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const [caseBtn] = toggles(container);
+    // fireEvent 返回 false 表示有处理器调用了 preventDefault：浏览器据此不移动焦点
+    expect(fireEvent.mouseDown(caseBtn), "开关按下时没挡默认行为：点一下就得重新点输入框").toBe(false);
+
+    fireEvent.click(caseBtn);
+    expect(container.querySelector(".code-find-input")).toBe(input);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("关掉查找栏后外部内容搜索词回到中性口径（与左侧列表命中数同源）", () => {
+    const { container } = renderView(CASE_CODE, "TEXT", { searchTerm: "port" });
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+
+    openFindWithTerm(container, "port"); // 开栏时词沿用外部 searchTerm
+    fireEvent.click(toggles(container)[0]); // 区分大小写
+    expect(hitLineNumbers(container)).toEqual([2, 3, 4]); // PORT 那行退出
+
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Escape" });
+    // 栏一关，开关不参与：外部词必须继续大小写不敏感，否则代码标红和列表命中数分叉
+    expect(container.querySelector(".code-find-input")).toBeNull();
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("开关只改标记层，.code-area 的文本内容逐字不变", () => {
+    const { container } = renderView(CASE_CODE, "TEXT");
+    openFindWithTerm(container, "port");
+    const area = container.querySelector(".code-area") as HTMLElement;
+    expect(area.textContent).toBe(CASE_CODE);
+
+    fireEvent.click(toggles(container)[0]);
+    fireEvent.click(toggles(container)[1]);
+    expect(area.textContent).toBe(CASE_CODE);
+    expect(container.innerHTML).not.toContain("&amp;amp;");
+  });
+
+  it("口径跨挂载记住：新文件的查找栏沿用上次选的口径", () => {
+    const first = renderView(CASE_CODE, "TEXT");
+    openFindWithTerm(first.container, "port");
+    fireEvent.click(toggles(first.container)[0]);
+    fireEvent.click(toggles(first.container)[1]);
+    first.unmount();
+
+    const second = renderView("port = 1\n", "TEXT");
+    openFindWithTerm(second.container, "PORT");
+    const [caseBtn, wordBtn] = toggles(second.container);
+    expect(caseBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("true");
+    // 记忆真的在起作用：区分大小写后大写 PORT 在这个文件里无命中
+    expect(countText(second.container)).toContain("无匹配");
+  });
+
+  it("栏没打开时开关不参与计算：记住的口径不许污染外部搜索词", () => {
+    // 上一次会话遗留「区分大小写 + 全词」：关着查找栏时外部内容搜索词必须继续全量标红，
+    // 否则代码里的命中数会和左侧列表分叉（configContentSearch 的跨模块不变式）。
+    writeViewState("codeFind.caseSensitive", true);
+    writeViewState("codeFind.wholeWord", true);
+    const { container } = renderView(CASE_CODE, "TEXT", { searchTerm: "port" });
+    expect(container.querySelector(".code-find-input")).toBeNull();
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+
+    // 打开查找栏后，记住的口径才接管
+    openFindWithTerm(container, "port");
+    expect(hitLineNumbers(container)).toEqual([2, 3]);
   });
 });

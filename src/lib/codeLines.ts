@@ -4,7 +4,7 @@
 // textContent 契约不被破坏，retest 用它读取文件内容）。
 
 import { escapeHtml } from "./highlight";
-import { matchLiteral, type MatchRange } from "./textMatch";
+import { matchLiteral, type MatchOptions, type MatchRange } from "./textMatch";
 
 /** 代码在整体文本空间里的一次命中。 */
 export interface CodeHit {
@@ -49,14 +49,17 @@ export function lineOffsets(lines: string[]): number[] {
  * 直接在原始文本上匹配（而非高亮后的 HTML），这样跨语法 token 的命中
  * 也能被找到（例如 properties 里被 hljs 拆成两段的 server.port=8080），
  * 与列表端的字面搜索保持完全一致。
+ *
+ * options 只服务查找栏（区分大小写 / 全词）；外部内容搜索词必须留空，
+ * 否则代码里的标红会和左侧列表的命中数分叉（见 configContentSearch.test.ts）。
  */
-export function findCodeHits(code: string, term: string): CodeHit[] {
+export function findCodeHits(code: string, term: string, options: MatchOptions = {}): CodeHit[] {
   const needle = term.trim();
   if (!needle) return [];
   const lines = splitLines(code);
   const offsets = lineOffsets(lines);
   const hits: CodeHit[] = [];
-  for (const { index, length } of matchLiteral(code, needle)) {
+  for (const { index, length } of matchLiteral(code, needle, options)) {
     const line = lineIndexOfOffset(offsets, index);
     const lineStart = offsets[line] ?? 0;
     hits.push({ line, column: index - lineStart, offset: index, length });

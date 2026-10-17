@@ -5,6 +5,8 @@ import { activeLineOf, activeOffsetOf, buildMinimapRows, findCodeHits, hitLines,
 import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
+import { useRememberedState } from "../lib/viewState";
+import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
   code: string;
@@ -38,6 +40,12 @@ const MM_ROW_H = 2.5;
 const MM_MIN_ROWS = 8;
 const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
 
+/**
+ * 查找栏选项的模块级常量：非浏览态必须复用同一个引用，
+ * 否则 hits 的 useMemo 每次渲染都会重算（对象字面量每次都是新 identity）。
+ */
+const NEUTRAL_MATCH_OPTIONS: MatchOptions = {};
+
 function clamp(value: number, min: number, max: number): number {
   if (max < min) return min;
   return Math.min(max, Math.max(min, value));
@@ -65,6 +73,12 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const [findOpen, setFindOpen] = useState(false);
   const [findTerm, setFindTerm] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  // 查找栏的两个匹配开关：浏览态与编辑态共用同一对记忆键（切视图不丢口径）。
+  // 走 viewState 唯一实现、不落 localStorage——用户要的是「这台机器这次会话里记住」，
+  // 不是「重启后所有文件都按全词搜」。
+  const [caseSensitive, setCaseSensitive] = useRememberedState<boolean>("codeFind.caseSensitive", false);
+  const [wholeWord, setWholeWord] = useRememberedState<boolean>("codeFind.wholeWord", false);
+
   const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   const [minimapSize, setMinimapSize] = useState({ width: 0, height: 0 });
 
@@ -73,7 +87,14 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
 
   // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（整体标红，不区分当前命中）。
   const effectiveTerm = findOpen ? findTerm : (searchTerm ?? "");
-  const hits = useMemo(() => findCodeHits(code, effectiveTerm.trim()), [code, effectiveTerm]);
+  // 开关只作用于查找栏自己输入的词。栏一关就退回中性口径：外部内容搜索词必须继续
+  // 「大小写不敏感子串」，否则代码里的标红会和左侧列表的命中数分叉
+  // （configContentSearch.test.ts 钉着这条跨模块不变式）。
+  const matchOptions = useMemo<MatchOptions>(
+    () => (findOpen ? { caseSensitive, wholeWord } : NEUTRAL_MATCH_OPTIONS),
+    [findOpen, caseSensitive, wholeWord]
+  );
+  const hits = useMemo(() => findCodeHits(code, effectiveTerm.trim(), matchOptions), [code, effectiveTerm, matchOptions]);
   const hitSet = useMemo(() => hitLines(hits), [hits]);
 
   const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
@@ -171,10 +192,12 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   // 门控两条：视图被保活隐藏（active=false）与查找栏没开时都不参与，免得看不见的层抢走按键。
   useEscape(active && findOpen, closeFind, EscapePriority.find);
 
-  // 搜索词 / 文件变化：重置当前命中序号，避免越界或指向上一份文件。
+  // 搜索词 / 匹配口径 / 文件变化：重置当前命中序号，避免越界或指向上一份文件。
+  // 口径必须进依赖：勾上「全词」后命中会变少，旧的 activeIdx 可能已经越过新的末尾，
+  // 计数「第 N/M 处」会显示成不存在的位置。
   useEffect(() => {
     setActiveIdx(0);
-  }, [effectiveTerm, code]);
+  }, [effectiveTerm, matchOptions, code]);
 
   // 换内容时把滚动位置拉回起点（R9）：正文变了要归零；正文逐字相同但版本（contentKey）
   // 变了也要归零，否则相邻无差异版本之间会保留上一版的偏移，看起来像"莫名停在中间"。
@@ -272,7 +295,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     if (!findOpen || !hits.length) return;
     scrollLineIntoView(hits[clamp(activeIdx, 0, hits.length - 1)].line);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, effectiveTerm]);
+  }, [findOpen, effectiveTerm, matchOptions]);
 
   // 同一份正文里改外部搜索词（没开查找栏）：也跟着定位新词的首个命中。
   // 依赖数组**只许写 searchTerm**：closeFind 只动 findOpen / findTerm，用户主动关栏后
@@ -476,6 +499,30 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               }}
               onKeyDown={onFindKeyDown}
             />
+            {/* 匹配口径开关。onMouseDown preventDefault：按钮默认会夺走焦点，
+                点一下开关就得再点一次输入框才能继续改词——查找栏的老毛病，这里挡住。 */}
+            <button
+              type="button"
+              className={`code-find-toggle${caseSensitive ? " is-on" : ""}`}
+              aria-pressed={caseSensitive}
+              aria-label={t("config.findCaseSensitive")}
+              title={t("config.findCaseSensitive")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setCaseSensitive((v) => !v)}
+            >
+              Aa
+            </button>
+            <button
+              type="button"
+              className={`code-find-toggle${wholeWord ? " is-on" : ""}`}
+              aria-pressed={wholeWord}
+              aria-label={t("config.findWholeWord")}
+              title={t("config.findWholeWord")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setWholeWord((v) => !v)}
+            >
+              ab|
+            </button>
             <span className="code-find-count" aria-live="polite">
               {hits.length
                 ? t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })

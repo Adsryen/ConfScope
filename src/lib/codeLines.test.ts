@@ -182,3 +182,39 @@ describe("buildMinimapRows", () => {
     expect(rows[0].widthRatio).toBeCloseTo(1, 5);
   });
 });
+
+describe("findCodeHits 查找栏匹配选项（R75）", () => {
+  const code = "PORT\nport\nx\nPORT\nexport const port = 8080;\nports=1\n";
+
+  it("不带选项与空选项完全等价（外部搜索词口径不被动过）", () => {
+    expect(findCodeHits(code, "port", {})).toEqual(findCodeHits(code, "port"));
+  });
+
+  it("caseSensitive 后行列按真命中的那一行重算", () => {
+    const hits = findCodeHits(code, "port", { caseSensitive: true });
+    // 大写 PORT 两行退出，export / ports 里的小写 port 仍按子串命中
+    expect(hits.map((h) => h.line)).toEqual([1, 4, 4, 5]);
+    expect(hits[0].offset).toBe(code.indexOf("port"));
+    expect(hits[0].column).toBe(0);
+    const line4 = code.split("\n")[4];
+    expect(hits[1].column).toBe(line4.indexOf("port")); // export 内部那个
+    expect(hits[2].column).toBe(line4.lastIndexOf("port")); // const port
+  });
+
+  it("wholeWord 不会把 export 里的 port、ports 也算成命中", () => {
+    const hits = findCodeHits(code, "port", { wholeWord: true, caseSensitive: true });
+    expect(hits).toHaveLength(2);
+    expect(code.slice(hits[0].offset, hits[0].offset + hits[0].length)).toBe("port");
+    expect(hits.map((h) => h.line)).toEqual([1, 4]);
+    expect(code.slice(hits[1].offset, hits[1].offset + hits[1].length)).toBe("port");
+  });
+
+  it("选项改变命中集合后，hitLines / activeLineOf 跟着变（行高亮与缩略图同源）", () => {
+    const plain = hitLines(findCodeHits(code, "port"));
+    const ww = hitLines(findCodeHits(code, "port", { wholeWord: true }));
+    expect([...ww].every((line) => plain.has(line))).toBe(true);
+    expect(ww.size).toBeLessThan(plain.size);
+    expect(activeLineOf(findCodeHits(code, "port", { caseSensitive: true }), 0)).toBe(1);
+    expect(activeLineOf(findCodeHits(code, "port"), 0)).toBe(0);
+  });
+});

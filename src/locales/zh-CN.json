@@ -799,6 +799,8 @@
     "findCloseKey": "关闭查找（Esc）",
     "findCount": "第 {current}/{total} 处",
     "findNone": "无匹配",
+    "findCaseSensitive": "区分大小写",
+    "findWholeWord": "全词匹配",
     "minimap": "缩略图",
     "jumpToLine": "跳到第 {line} 行"
   },

@@ -2371,7 +2371,10 @@ textarea {
   z-index: 4;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
+  /* 多两个匹配开关后条子更宽：窄容器里换行而不是把输入框压瘪或被左边缘裁掉 */
+  max-width: calc(100% - 24px);
   padding: 4px 6px;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -2417,6 +2420,38 @@ textarea {
 .code-find-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* 匹配口径开关（Aa 区分大小写 / ab| 全词）：与 .code-find-btn 同尺寸，
+   靠边框和"已启用"底色区分，不加文字说明也不会有人把它当计数看 */
+.code-find-toggle {
+  height: 22px;
+  min-width: 26px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  /* 11px 是全站字号下限（R56）；Aa / ab| 本来就两三个字符，再小就发虚 */
+  font-size: 11px;
+  line-height: 1;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.code-find-toggle:hover:not(.is-on) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.code-find-toggle.is-on {
+  background: var(--bg-active);
+  border-color: var(--accent);
+  color: var(--text-hi);
+}
+.code-find-toggle:focus-visible {
+  outline: 1px solid var(--accent-h);
+  outline-offset: 1px;
 }
 .code-area code {
   font: inherit;

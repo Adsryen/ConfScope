@@ -799,6 +799,8 @@
     "findCloseKey": "Close find (Esc)",
     "findCount": "{current} of {total}",
     "findNone": "No matches",
+    "findCaseSensitive": "Match case",
+    "findWholeWord": "Match whole word",
     "minimap": "Minimap",
     "jumpToLine": "Jump to line {line}"
   },
