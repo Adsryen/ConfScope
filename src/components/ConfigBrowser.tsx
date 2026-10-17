@@ -148,6 +148,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [snapshotSaving, setSnapshotSaving] = useState(false);
+  // 源文件导出要先等用户在本机目录对话框里选路径，这段时间动作仍在途，按钮必须锁住
+  const [sourceExporting, setSourceExporting] = useState(false);
   // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
@@ -791,6 +793,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   };
 
   const exportCurrentList = () => {
+    // 本函数是同步的，连点两次得到两份文件属正常语义；这里只挡与异步源文件导出交错写同一批配置
+    if (sourceExporting) return;
     const taskName = t("config.exportTaskName", { name: connectionName, namespace: namespaceLabel });
     const taskScope = t("config.taskScope", { name: connectionName, namespace: namespaceLabel, count: items.length });
     const task = taskManager.createTask(taskName, "export", { scope: taskScope, cancellable: false });
@@ -851,6 +855,18 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   };
 
   const exportSourceFilesToDirectory = async () => {
+    // 原生目录对话框是异步的：没有这道闸，连点会叠开第二个对话框，
+    // 两个导出任务再往同一目录交错写同一批文件
+    if (sourceExporting) return;
+    setSourceExporting(true);
+    try {
+      await runExportSourceFilesToDirectory();
+    } finally {
+      setSourceExporting(false);
+    }
+  };
+
+  const runExportSourceFilesToDirectory = async () => {
     let targetDir = "";
     try {
       targetDir = await selectConfigSourceExportDirectory();
@@ -1010,8 +1026,17 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             {items.length > 0 && (
               <button
                 className="btn btn-ghost btn-sm browser-icon-btn"
-                title={t("config.exportCurrentList")}
-                aria-label={t("config.exportCurrentList")}
+                title={
+                  sourceExporting
+                    ? t("config.exportInFlight")
+                    : t("config.exportCurrentList")
+                }
+                aria-label={
+                  sourceExporting
+                    ? t("config.exportInFlight")
+                    : t("config.exportCurrentList")
+                }
+                disabled={sourceExporting}
                 onClick={exportCurrentList}
               >
                 <BrowserToolIcon name="download" />
@@ -1020,8 +1045,17 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             {items.length > 0 && (
               <button
                 className="btn btn-ghost btn-sm browser-icon-btn"
-                title={t("config.exportSourceFilesToDirectory")}
-                aria-label={t("config.exportSourceFilesToDirectory")}
+                title={
+                  sourceExporting
+                    ? t("config.exportInFlight")
+                    : t("config.exportSourceFilesToDirectory")
+                }
+                aria-label={
+                  sourceExporting
+                    ? t("config.exportInFlight")
+                    : t("config.exportSourceFilesToDirectory")
+                }
+                disabled={sourceExporting}
                 onClick={exportSourceFilesToDirectory}
               >
                 <BrowserToolIcon name="download" />

@@ -1357,4 +1357,105 @@ describe("ConfigBrowser", () => {
     await waitFor(() => expect(rows[1].getAttribute("aria-selected")).toBe("true"));
     expect(document.querySelector(".browser-item.active .browser-item-id")?.textContent).toBe("c.json");
   });
+
+  describe("导出重入护栏", () => {
+    function deferredPicker() {
+      let resolvePicker: (value: string) => void = () => {};
+      const promise = new Promise<string>((resolve) => {
+        resolvePicker = resolve;
+      });
+      appApiMocks.selectConfigSourceExportDirectory.mockImplementation(() => promise);
+      return { promise, resolvePicker };
+    }
+
+    it("ignores repeated clicks while the native directory dialog is still open", async () => {
+      const { resolvePicker } = deferredPicker();
+      renderBrowser();
+      await screen.findByText("app.json");
+
+      const sourceBtn = screen.getByTitle("导出源文件到目录");
+      const listBtn = screen.getByTitle("导出当前列表");
+      fireEvent.click(sourceBtn);
+      await waitFor(() => expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalledTimes(1));
+
+      // 原生对话框还悬在半空，这段时间里两个导出按钮都得锁住并说明原因
+      expect(sourceBtn).toBeDisabled();
+      expect(listBtn).toBeDisabled();
+      expect(sourceBtn.getAttribute("title")).toBe("导出进行中…");
+      expect(listBtn.getAttribute("title")).toBe("导出进行中…");
+      expect(sourceBtn.getAttribute("aria-label")).toBe("导出进行中…");
+
+      fireEvent.click(sourceBtn);
+      fireEvent.click(sourceBtn);
+      expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalledTimes(1);
+      expect(getTaskManager().listTasks()).toHaveLength(0);
+
+      await act(async () => {
+        resolvePicker("C:\\exports\\nacos");
+      });
+      await waitFor(() => expect(appApiMocks.exportConfigSourceFiles).toHaveBeenCalledTimes(1));
+      expect(getTaskManager().listTasks()).toHaveLength(1);
+      expect(sourceBtn.getAttribute("title")).toBe("导出源文件到目录");
+    });
+
+    it("releases the export lock when the user cancels the directory dialog", async () => {
+      appApiMocks.selectConfigSourceExportDirectory.mockResolvedValue("");
+      renderBrowser();
+      await screen.findByText("app.json");
+
+      const sourceBtn = screen.getByTitle("导出源文件到目录");
+      fireEvent.click(sourceBtn);
+      await waitFor(() => expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalledTimes(1));
+
+      // 取消不是失败，锁必须放开，否则这个按钮就永久废了
+      await waitFor(() => expect(sourceBtn).toBeEnabled());
+      expect(sourceBtn.getAttribute("title")).toBe("导出源文件到目录");
+      fireEvent.click(sourceBtn);
+      await waitFor(() => expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalledTimes(2));
+      expect(appApiMocks.exportConfigSourceFiles).not.toHaveBeenCalled();
+      expect(getTaskManager().listTasks()).toHaveLength(0);
+    });
+
+    it("re-enables the export buttons after a failed source-file export", async () => {
+      appApiMocks.exportConfigSourceFiles.mockRejectedValue(new Error("disk full"));
+      renderBrowser();
+      await screen.findByText("app.json");
+
+      const sourceBtn = screen.getByTitle("导出源文件到目录");
+      const listBtn = screen.getByTitle("导出当前列表");
+      fireEvent.click(sourceBtn);
+      await waitFor(() => expect(latestError()).toMatchObject({ title: "导出源文件到目录", message: "disk full" }));
+
+      await waitFor(() => expect(sourceBtn).toBeEnabled());
+      expect(listBtn).toBeEnabled();
+      expect(getTaskManager().listTasks()).toMatchObject([{ name: "导出源文件目录：dev / public", status: "failed" }]);
+    });
+
+    it("skips the synchronous list export while a source-file export is in flight", async () => {
+      const { resolvePicker } = deferredPicker();
+      renderBrowser();
+      await screen.findByText("app.json");
+
+      const sourceBtn = screen.getByTitle("导出源文件到目录");
+      const listBtn = screen.getByTitle("导出当前列表");
+      fireEvent.click(sourceBtn);
+      await waitFor(() => expect(appApiMocks.selectConfigSourceExportDirectory).toHaveBeenCalledTimes(1));
+
+      // 异步导出在途时点同步导出：不能交错写同一批配置，也不能多出一条任务
+      fireEvent.click(listBtn);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(getTaskManager().listTasks()).toHaveLength(0);
+
+      await act(async () => {
+        resolvePicker("C:\\exports\\nacos");
+      });
+      await waitFor(() => expect(appApiMocks.exportConfigSourceFiles).toHaveBeenCalledTimes(1));
+
+      // 在途结束后同步导出照常可用
+      fireEvent.click(listBtn);
+      expect(URL.createObjectURL).toHaveBeenCalled();
+      expect(getTaskManager().listTasks()).toHaveLength(2);
+    });
+  });
+
 });

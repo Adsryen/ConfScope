@@ -787,6 +787,7 @@
     "exportSourceFilesToDirectory": "Export source files to folder",
     "exportSourceFilesTaskName": "Export source folder: {name} / {namespace}",
     "exportedSourceFiles": "Source files exported to: {path}",
+    "exportInFlight": "Export in progress…",
     "openFind": "Find in this file (Ctrl+F)",
     "findPlaceholder": "Find in current file…",
     "findHint": "Type to find — Enter next · Esc closes",

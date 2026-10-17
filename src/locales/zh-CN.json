@@ -787,6 +787,7 @@
     "exportSourceFilesToDirectory": "导出源文件到目录",
     "exportSourceFilesTaskName": "导出源文件目录：{name} / {namespace}",
     "exportedSourceFiles": "源文件已导出到：{path}",
+    "exportInFlight": "导出进行中…",
     "openFind": "在此文件查找（Ctrl+F）",
     "findPlaceholder": "在当前文件查找…",
     "findHint": "输入关键词，Enter 下一处 · Esc 关闭",
