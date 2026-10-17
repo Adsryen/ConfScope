@@ -490,7 +490,14 @@ function ConfirmationPanel({
               {taskStatusLabel(t, executionTask.status)}
             </span>
           </div>
-          <div className="progress-bar large">
+          <div
+            className="progress-bar large"
+            role="progressbar"
+            aria-label={t("apply.taskProgressLabel")}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={executionTask.progress}
+          >
             <div className="progress-fill" style={{ width: `${executionTask.progress}%` }} />
           </div>
           <div className="apply-task-progress-meta">

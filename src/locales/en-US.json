@@ -672,6 +672,7 @@
     "contentSearchAriaLabel": "Search by config content",
     "contentSearchCount": "{count} matches",
     "contentSearchProgress": "Read {loaded}/{total} configurations",
+    "contentSearchProgressBar": "Config content read progress",
     "contentSearchPartialFailed": "{count} configurations failed to load",
     "contentSearchFailed": "Config content search failed",
     "selectForReplace": "Replace",

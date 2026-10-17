@@ -378,7 +378,11 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
           </pre>
         </div>
       )}
-      {loading && <div className="history-loading">{t("common.loading")}</div>}
+      {loading && (
+        <div className="history-loading" role="status" aria-live="polite">
+          {t("common.loading")}
+        </div>
+      )}
 
       {/* 操作列表 */}
       <div className="data-split history-content">

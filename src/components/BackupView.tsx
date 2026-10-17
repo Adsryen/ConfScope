@@ -358,7 +358,11 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
         </div>
       )}
 
-      {loading && <div className="pad-msg">{t("common.loading")}</div>}
+      {loading && (
+        <div className="pad-msg" role="status" aria-live="polite">
+          {t("common.loading")}
+        </div>
+      )}
 
       {!loading && !error && snapshots.length === 0 && (
         <div className="data-empty-state page-empty">

@@ -273,7 +273,14 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       case "downloading":
         return (
           <div className="update-downloading">
-            <div className="update-progress-bar">
+            <div
+              className="update-progress-bar"
+              role="progressbar"
+              aria-label={t("about.downloadingUpdate")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={downloadProgress?.percent ?? 0}
+            >
               <div className="update-progress-fill" style={{ width: `${downloadProgress?.percent ?? 0}%` }} />
             </div>
             <div className="update-progress-text">

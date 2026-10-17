@@ -583,7 +583,10 @@ function SourcePicker({
 
       <label className="field">
         <span>
-          {t("app.namespace")} {nsLoading ? `(${t("common.loading")})` : ""}
+          {t("app.namespace")}{" "}
+          <span role="status" aria-live="polite">
+            {nsLoading ? `(${t("common.loading")})` : ""}
+          </span>
         </span>
         <div className="namespace-pick-row">
           <Select
@@ -621,7 +624,10 @@ function SourcePicker({
       <div className="field-row">
         <label className="field">
           <span>
-            dataId {cfgLoading ? `(${t("common.loading")} ${t("diff.configListLoaded", { count: cfgLoaded })})` : `(${configs.length})`}
+            dataId{" "}
+            <span role="status" aria-live="polite">
+              {cfgLoading ? `(${t("common.loading")} ${t("diff.configListLoaded", { count: cfgLoaded })})` : `(${configs.length})`}
+            </span>
           </span>
           <Combobox
             value={source.dataId}

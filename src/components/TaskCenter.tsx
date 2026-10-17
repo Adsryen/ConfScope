@@ -138,7 +138,14 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 )}
                 {task.status === "running" && (
                   <div className="task-item-progress">
-                    <div className="progress-bar">
+                    <div
+                      className="progress-bar"
+                      role="progressbar"
+                      aria-label={t("tasks.progress")}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={task.progress}
+                    >
                       <div className="progress-fill" style={{ width: `${task.progress}%` }} />
                     </div>
                     <span className="progress-text">{task.progress}%</span>
@@ -254,7 +261,14 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
 
             {selectedTask.status === "running" && (
               <div className="task-detail-progress">
-                <div className="progress-bar large">
+                <div
+                  className="progress-bar large"
+                  role="progressbar"
+                  aria-label={t("tasks.progress")}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={selectedTask.progress}
+                >
                   <div className="progress-fill" style={{ width: `${selectedTask.progress}%` }} />
                 </div>
                 <div className="progress-stats">

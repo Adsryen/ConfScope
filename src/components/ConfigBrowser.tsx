@@ -1076,14 +1076,31 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         </div>
         {isContentSearchActive && (
           <div className="browser-content-search-status">
-            {t("config.contentSearchProgress", { loaded: contentSearchProgress.loaded, total: contentSearchProgress.total })}
+            {/* 进度宿主只是语义钩子，不挂 class：外观完全沿用 .browser-content-search-status */}
+            <div
+              role="progressbar"
+              aria-label={t("config.contentSearchProgressBar")}
+              aria-valuemin={0}
+              aria-valuemax={contentSearchProgress.total || 1}
+              aria-valuenow={contentSearchProgress.loaded}
+              aria-valuetext={t("config.contentSearchProgress", {
+                loaded: contentSearchProgress.loaded,
+                total: contentSearchProgress.total,
+              })}
+            >
+              {t("config.contentSearchProgress", { loaded: contentSearchProgress.loaded, total: contentSearchProgress.total })}
+            </div>
             {contentSearchProgress.failed > 0 && (
               <span>{t("config.contentSearchPartialFailed", { count: contentSearchProgress.failed })}</span>
             )}
           </div>
         )}
         <div className="browser-items">
-          {listLoading && <div className="pad-msg">{t("config.loading")}</div>}
+          {listLoading && (
+            <div className="pad-msg" role="status" aria-live="polite">
+              {t("config.loading")}
+            </div>
+          )}
           {listError && (
             <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />
           )}
@@ -1187,7 +1204,11 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
             {tab === "content" ? (
               <div className="content-box">
-                {contentLoading && <div className="pad-msg">{t("config.loading")}</div>}
+                {contentLoading && (
+                  <div className="pad-msg" role="status" aria-live="polite">
+                    {t("config.loading")}
+                  </div>
+                )}
                 {contentError && selected && (
                   <InlineError {...inlineErrorLabels} message={contentError} onRetry={() => openConfig(selected)} />
                 )}

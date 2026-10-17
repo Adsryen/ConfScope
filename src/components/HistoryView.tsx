@@ -266,7 +266,11 @@ export default function HistoryView({
           <span className="history-hint">{t('history.pickHint')}</span>
         </div>
         <div className="history-items">
-        {loading && <div className="pad-msg">{t('common.loading')}</div>}
+        {loading && (
+          <div className="pad-msg" role="status" aria-live="polite">
+            {t("common.loading")}
+          </div>
+        )}
         {error && (
           <div className="pad-msg err">
             <span>{error}</span>
@@ -309,7 +313,9 @@ export default function HistoryView({
         {comparing ? (
           (leftNid && contents[leftNid] === undefined) ||
           (rightNid && contents[rightNid] === undefined) ? (
-            <div className="pad-msg">{t('common.loading')}</div>
+            <div className="pad-msg" role="status" aria-live="polite">
+              {t("common.loading")}
+            </div>
           ) : (
             <DiffPanel
               leftLabel={
@@ -369,7 +375,9 @@ export default function HistoryView({
                   </span>
                 </div>
                 {!ready ? (
-                  <div className="pad-msg">{t('common.loading')}</div>
+                  <div className="pad-msg" role="status" aria-live="polite">
+                    {t("common.loading")}
+                  </div>
                 ) : rawView ? (
                   <CodeView
                     code={contents[dv!] ?? ""}

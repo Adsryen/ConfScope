@@ -672,6 +672,7 @@
     "contentSearchAriaLabel": "按内容搜索配置",
     "contentSearchCount": "匹配 {count} 项",
     "contentSearchProgress": "已读取 {loaded}/{total} 项配置",
+    "contentSearchProgressBar": "配置内容读取进度",
     "contentSearchPartialFailed": "{count} 项读取失败",
     "contentSearchFailed": "配置内容搜索失败",
     "selectForReplace": "用于替换",

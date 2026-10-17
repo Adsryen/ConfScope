@@ -252,7 +252,12 @@ describe("DiffView", () => {
       expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 3, 1000);
     });
     // 两侧来源面板都拿到了 3 页各 1 条（单页夹具只会得到 1 条）
-    expect(await screen.findAllByText(/^dataId \(3\)$/, { selector: "span" })).toHaveLength(2);
+    // 波23：计数后缀拆进了带 aria-live 的内层 span（读屏要能播报加载状态），
+    // 字段名与计数不再是同一个文本节点，所以按整段 textContent 判定而不是单节点文本。
+    const dataIdLabels = await screen.findAllByText((_content, element) => /^dataId \(3\)$/.test((element?.textContent ?? "").trim()), {
+      selector: "span",
+    });
+    expect(dataIdLabels).toHaveLength(2);
   });
 
   it("候选列表命中安全上限时显示截断提示并可复制", async () => {
