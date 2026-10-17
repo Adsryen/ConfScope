@@ -11,6 +11,16 @@ export const EscapePriority = {
   page: 0,
   /** 页面内弹层（批量替换、目标选择等） */
   overlay: 10,
+  /**
+   * 弹层内部的瞬时编辑/查找层（代码查找栏、行内重命名输入框）。
+   *
+   * 为什么要单独一档：分派器挂在 window 的**捕获**阶段并 stopPropagation，React 根监听在冒泡阶段，
+   * 所以「组件里写裸 onKeyDown 处理 Escape」在有任意一层注册 active 时形同死代码——
+   * 按键被外层吃掉，用户想收起查找条却取消了整段编辑（轮16 R61）。瞬时层必须自己登记。
+   * 位置卡在 overlay 之上、dropdown 之下：比宿主弹层更内层，但弹层内的下拉、上层确认框、
+   * 全局错误详情仍应优先。登记时必须带可见性门控（`active && 已打开`），隐藏的视图不许抢 Esc。
+   */
+  find: 15,
   /** 弹层内的自绘下拉/候选弹层 */
   dropdown: 20,
   /** 覆盖式确认/提示框（ConfirmModal、AlertModal） */

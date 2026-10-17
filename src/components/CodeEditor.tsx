@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Format } from "../lib/format";
-import { isImeComposing } from "../lib/useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { isSaveShortcutKey } from "../lib/saveShortcut";
 import { highlightCode } from "../lib/highlight";
 import {
@@ -208,6 +208,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     taRef.current?.focus();
   }, []);
 
+  // 查找栏是弹层内部的瞬时层，必须自己登记：ConfigEditor 以 overlay 优先级注册，
+  // 裸 onKeyDown 的 Esc 在捕获阶段就被吃掉，一次 Esc 会直接关掉整个弹层（R61）。
+  useEscape(active && findOpen, closeFind, EscapePriority.find);
+
   const navigate = useCallback(
     (delta: number) => {
       if (!hits.length) return;
@@ -334,15 +338,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   }, [active, enableFind, findOpen, navigate, openFind]);
 
   const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」；Esc 也交回 IME 取消候选
+    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」
     if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       navigate(e.shiftKey ? -1 : 1);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      closeFind();
     }
+    // Esc 不在这里处理：查找栏已登记为 find 优先级的瞬时层（R61），裸分支跑不到。
   };
 
   // Tab 键插入两个空格而不是切换焦点

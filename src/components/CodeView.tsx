@@ -3,7 +3,7 @@ import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import { activeLineOf, activeOffsetOf, buildMinimapRows, findCodeHits, hitLines, markHighlightedHtml, splitLines } from "../lib/codeLines";
 import { useTranslation } from "../i18n";
-import { isImeComposing } from "../lib/useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 
 interface Props {
@@ -138,6 +138,10 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     setActiveIdx(0);
   }, []);
 
+  // 查找栏是宿主弹层内部的瞬时层，必须自己登记，否则 Esc 会被外层吃掉、连带取消编辑（R61）。
+  // 门控两条：视图被保活隐藏（active=false）与查找栏没开时都不参与，免得看不见的层抢走按键。
+  useEscape(active && findOpen, closeFind, EscapePriority.find);
+
   // 搜索词 / 文件变化：重置当前命中序号，避免越界或指向上一份文件。
   useEffect(() => {
     setActiveIdx(0);
@@ -230,15 +234,14 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   }, [findOpen, effectiveTerm]);
 
   const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」；Esc 也交回 IME 取消候选
+    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」
     if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       navigate(e.shiftKey ? -1 : 1);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      closeFind();
     }
+    // Esc 不在这里处理：查找栏已登记为 find 优先级的瞬时层（R61），
+    // 分派器在捕获阶段就吃掉按键，裸分支是永远跑不到的死代码，留着只会误导下一个改这里的人。
   };
 
   const visibleRange = useMemo(() => {

@@ -1108,5 +1108,24 @@ describe("ConnectionManager", () => {
       fireEvent.keyDown(input, { key: "Enter" });
       expect(within(connectionList()).getByText("交易平台")).toBeInTheDocument();
     });
+
+    it("重命名输入框里的 Esc 只退出重命名，不关整个连接管理面板（波37 R61）", () => {
+      const { onChange, onClose } = renderManager();
+      saveConnection({ name: "prod-public", project: "订单系统", source: "云上公网" });
+
+      const title = within(connectionList()).getByText("订单系统").closest(".conn-group-title") as HTMLElement;
+      fireEvent.click(within(title).getByTitle("重命名项目"));
+      const input = within(title).getByDisplayValue("订单系统") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "交易平台" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      // 面板以 overlay 优先级注册，输入框里裸写的 Esc 分支在捕获阶段就被吃掉：
+      // 改前按这一次 Esc 会把整个连接管理关掉，重命名还留在半途。
+      expect(onClose, "瞬时层没登记时 Esc 会穿透去关外层面板").not.toHaveBeenCalled();
+      expect(within(title).queryByDisplayValue("交易平台")).not.toBeInTheDocument();
+      expect(within(connectionList()).getByText("订单系统")).toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalledWith([expect.objectContaining({ projectName: "交易平台" })]);
+    });
   });
 });

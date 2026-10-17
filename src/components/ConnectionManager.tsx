@@ -454,6 +454,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   // 不会再出现「一次 Esc 同时收起下拉并关掉整个连接弹框」；内嵌在设置页时不参与。
   useEscape(!embedded, onClose, EscapePriority.overlay);
 
+  // 行内重命名是面板内部的瞬时编辑层，必须自己登记（R61）：焦点在这个输入框里按 Esc，
+  // 只想退出重命名，不该连整个连接管理面板一起关掉。门控与上面那条对齐——
+  // 面板内嵌在设置页时不参与，否则会替设置页其余表单吃掉 Esc。
+  useEscape(!embedded && !!renamingProject, () => setRenamingProject(null), EscapePriority.find);
+
   // 焦点陷阱：内嵌在设置页里时不参与，否则会替设置页其余表单吃掉 Tab。
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -1078,10 +1083,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     onChange={(e) => setRenamingProject({ ...renamingProject, value: e.target.value })}
                     onBlur={commitProjectRename}
                     onKeyDown={(e) => {
-                      // 组合态的 Enter/Esc 属于输入法（上屏/取消候选），不提交重命名也不退出编辑
+                      // 组合态的 Enter 属于输入法（上屏候选），不能提交重命名；
+                      // Esc 已改由分层注册表接管（R61），这里的裸分支在捕获阶段就被吃掉，是死代码
                       if (isImeComposing(e)) return;
                       if (e.key === "Enter") commitProjectRename();
-                      if (e.key === "Escape") setRenamingProject(null);
                     }}
                   />
                 ) : (
