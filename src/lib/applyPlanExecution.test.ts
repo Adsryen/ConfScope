@@ -254,7 +254,7 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toMatchObject({ ok: false, taskId: "task-apply-1", error: expect.stringContaining("stale") });
+    expect(result).toMatchObject({ ok: false, taskId: "task-apply-1", error: expect.stringContaining("/source") });
     expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
@@ -264,10 +264,10 @@ describe("executeApplyPlan", () => {
         result: "failure",
         planId: "plan-1",
         taskId: "task-apply-1",
-        error: expect.stringContaining("stale"),
+        error: expect.stringContaining("/source"),
       })
     );
-    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", false, expect.stringContaining("stale"));
+    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", false, expect.stringContaining("/source"));
   });
 
   it("stops when before backup fails and does not publish or delete", async () => {
@@ -345,7 +345,7 @@ describe("executeApplyPlan", () => {
     const result = await executeApplyPlan(plan, runDeps);
 
     expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
-    expect(runDeps.taskManager.createTask).toHaveBeenCalledWith("Change plan plan-1", "restore", {
+    expect(runDeps.taskManager.createTask).toHaveBeenCalledWith(expect.stringContaining("plan-1"), "restore", {
       scope: "Prod / public",
       cancellable: false,
     });
@@ -402,14 +402,14 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Cannot materialize") });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("plain.txt/feature.enabled") });
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
     expect(runDeps.recordOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "apply",
         result: "failure",
-        error: expect.stringContaining("Cannot materialize"),
+        error: expect.stringContaining("plain.txt/feature.enabled"),
       })
     );
   });
@@ -809,9 +809,8 @@ describe("content-replace 风格计划（source override + 原文基线指纹）
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("stale") });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("/source") });
     if (result.ok) throw new Error("expected execution to fail");
-    expect(result.error).toContain("/source");
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
   });

@@ -172,13 +172,16 @@ async function resolveSnapshotConnection(
   try {
     snapshot = await deps.getSnapshot(snapshotId);
   } catch (error) {
-    return `Failed to load snapshot ${SNAPSHOT_PREFIX}${snapshotId}: ${errorText(error)}`;
+    return translate("apply.draftLoadSnapshotFailed", { id: `${SNAPSHOT_PREFIX}${snapshotId}`, detail: errorText(error) });
   }
-  if (!snapshot.path) return `Snapshot source ${SNAPSHOT_PREFIX}${snapshotId} is missing path`;
+  if (!snapshot.path) return translate("apply.draftSnapshotMissingPath", { id: `${SNAPSHOT_PREFIX}${snapshotId}` });
 
   const sourceConnection = deps.connections.find((conn) => conn.id === snapshot.source.connectionId);
   if (!sourceConnection) {
-    return `Snapshot source ${SNAPSHOT_PREFIX}${snapshotId} references missing source connection ${snapshot.source.connectionId}`;
+    return translate("apply.draftSnapshotMissingSourceConnection", {
+      id: `${SNAPSHOT_PREFIX}${snapshotId}`,
+      connectionId: snapshot.source.connectionId,
+    });
   }
 
   const snapshotConnection = buildSnapshotConnection(snapshot, sourceConnection);
@@ -191,7 +194,7 @@ async function resolveConnection(connectionId: string, deps: ApplyPlanDraftDeps,
   if (snapshotId) return resolveSnapshotConnection(snapshotId, deps, context);
 
   const conn = deps.connections.find((item) => item.id === connectionId);
-  return conn ?? `Missing connection ${connectionId}`;
+  return conn ?? translate("apply.missingConnection", { id: connectionId });
 }
 
 async function readDocumentContent(

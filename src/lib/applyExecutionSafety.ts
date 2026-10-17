@@ -2,6 +2,7 @@
 import type { ApplyPlan, ApplyPlanItem } from "./applyPlan";
 import type { OperationRecord, OperationResult } from "../store/operationHistory";
 import { errorText } from "./errorText";
+import { translate } from "../locales";
 
 export interface ApplyTargetBeforeSnapshot {
   itemId: string;
@@ -186,7 +187,7 @@ export async function prepareApplyExecutionSafety(
   const blockedItems = plan.items.filter((item) => item.blocked);
   const emptyBackup: ApplyBackupSummary = { backedUpCount: 0, missingBeforeCount: 0 };
   if (blockedItems.length > 0) {
-    const error = `Change plan has ${blockedItems.length} blocked item(s).`;
+    const error = translate("apply.safetyBlockedItems", { count: blockedItems.length });
     return {
       ok: false,
       reason: "plan_blocked",
@@ -203,7 +204,7 @@ export async function prepareApplyExecutionSafety(
 
   const collection = collectApplyBackupConfigs(plan, beforeSnapshots);
   if (collection.missingItemIds.length > 0) {
-    const error = `Missing before snapshot for item(s): ${collection.missingItemIds.join(", ")}`;
+    const error = translate("apply.safetyMissingBeforeSnapshot", { items: collection.missingItemIds.join(", ") });
     return {
       ok: false,
       reason: "missing_before_snapshot",

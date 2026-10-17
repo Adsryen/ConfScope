@@ -201,18 +201,18 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     setFollowupError(null);
     try {
       if (!record.planId) {
-        setRecordFollowupError(record, `Apply record ${record.id} is missing planId.`);
+        setRecordFollowupError(record, t("apply.followupMissingPlanId", { id: record.id }));
         return;
       }
       const plan = getApplyPlan(record.planId);
       if (!plan) {
-        setRecordFollowupError(record, `Configuration change plan ${record.planId} is missing.`);
+        setRecordFollowupError(record, t("apply.followupPlanMissing", { id: record.planId }));
         return;
       }
       const sandboxConnectionId = record.targetConnectionId || plan.target.connectionId || record.connectionId;
       const sandboxConnection = connections.find((conn) => conn.id === sandboxConnectionId);
       if (!sandboxConnection) {
-        setRecordFollowupError(record, `Sandbox connection ${sandboxConnectionId} is missing.`);
+        setRecordFollowupError(record, t("apply.followupSandboxConnectionMissing", { id: sandboxConnectionId }));
         return;
       }
       const verification = saveApplyVerification({
@@ -253,7 +253,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     if (!onStartApply) return;
     const verification = findVerification(verifications, record);
     if (!verification) {
-      setRecordFollowupError(record, `Apply record ${record.id} has no sandbox verification.`);
+      setRecordFollowupError(record, t("apply.followupNoVerification", { id: record.id }));
       return;
     }
     const targetId = selectedPromotionTargetId(record, verification);

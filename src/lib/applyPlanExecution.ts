@@ -92,7 +92,7 @@ function isMissingConfigError(error: unknown): boolean {
 }
 
 function findConnection(deps: ExecuteApplyPlanDeps, connectionId: string): Connection | string {
-  return deps.connections.find((conn) => conn.id === connectionId) ?? `Missing connection ${connectionId}`;
+  return deps.connections.find((conn) => conn.id === connectionId) ?? translate("apply.missingConnection", { id: connectionId });
 }
 
 function summarizeItems(items: ApplyPlanItem[]): ApplyPlan["summary"] {
@@ -346,11 +346,11 @@ function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
   const writes: PlannedWrite[] = [];
   for (const item of plan.items) {
     const ref = targetRef(item);
-    if (item.blocked || item.action === "parse_error") return `Cannot execute blocked item ${item.id}.`;
+    if (item.blocked || item.action === "parse_error") return translate("apply.blockedItem", { id: item.id });
     if (item.action === "skip") continue;
     if (ref.key !== DOCUMENT_KEY) {
       if (!isProviderKeyWriteSupported(item)) {
-        return `Cannot materialize key-level apply for ${ref.dataId}/${ref.key} with format ${formatForWrite(item)}.`;
+        return translate("apply.keyLevelWriteUnsupported", { ref: `${ref.dataId}/${ref.key}`, format: formatForWrite(item) });
       }
       if (item.action === "delete") {
         writes.push({ item, kind: "delete_ref" });
@@ -390,7 +390,10 @@ function emptyBackup(): ApplyBackupSummary {
 
 function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps, onTaskCreated?: (taskId: string) => void): string {
   const taskType = operationTypeForApplyPlan(plan) === "restore" ? "restore" : "apply";
-  const task = deps.taskManager.createTask(`Change plan ${plan.id}`, taskType, { scope: plan.target.label, cancellable: false });
+  const task = deps.taskManager.createTask(translate("apply.planTaskName", { id: plan.id }), taskType, {
+    scope: plan.target.label,
+    cancellable: false,
+  });
   onTaskCreated?.(task.id);
   deps.taskManager.startTask(task.id);
   return task.id;
@@ -427,7 +430,7 @@ export async function executeApplyPlan(
 ): Promise<ExecuteApplyPlanResult> {
   const workingPlan = selectPlanItems(plan, options.selectedItemIds);
   if (options.selectedItemIds && workingPlan.items.length === 0) {
-    return { ok: false, error: "No change plan items selected." };
+    return { ok: false, error: translate("apply.noSelectedItems") };
   }
 
   const taskId = createTask(workingPlan, deps, options.onTaskCreated);
@@ -440,7 +443,7 @@ export async function executeApplyPlan(
     const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
     const freshness = validateApplyPlanFreshness(workingPlan, currentSnapshots);
     if (!freshness.ok) {
-    const error = `Change plan is stale: ${freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ")}`;
+      const error = translate("apply.planStale", { items: freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ") });
       return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), !options.dryRun);
     }
 

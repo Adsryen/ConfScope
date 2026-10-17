@@ -16,6 +16,7 @@ import { detectFormat, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 import { snapshotConnectionId } from "./snapshotConnection";
 import { errorText } from "./errorText";
+import { translate } from "../locales";
 
 const DOCUMENT_KEY = "__document";
 
@@ -89,9 +90,9 @@ function findConnection(connections: Connection[], connectionId: string): Connec
 }
 
 function planFromRecord(record: OperationRecord, deps: ApplyFollowupDeps): ApplyPlan | string {
-  if (!record.planId) return `Apply record ${record.id} is missing planId.`;
+  if (!record.planId) return translate("apply.followupMissingPlanId", { id: record.id });
   const plan = deps.getApplyPlan(record.planId);
-  return plan ?? `Configuration change plan ${record.planId} is missing.`;
+  return plan ?? translate("apply.followupPlanMissing", { id: record.planId });
 }
 
 export function canBuildRollbackEntry(record: OperationRecord): boolean {
@@ -104,18 +105,18 @@ export async function buildRollbackEntryFromApplyRecord(
 ): Promise<ApplyFollowupResult> {
   const plan = planFromRecord(record, deps);
   if (typeof plan === "string") return fail(plan);
-  if (!record.backupSnapshotId) return fail(`Apply record ${record.id} is missing backupSnapshotId.`);
+  if (!record.backupSnapshotId) return fail(translate("apply.followupMissingBackupSnapshot", { id: record.id }));
 
   let snapshot: Snapshot;
   try {
     snapshot = await deps.getSnapshot(record.backupSnapshotId);
   } catch (error) {
-    return fail(`Failed to load backup snapshot ${record.backupSnapshotId}: ${errorText(error)}`);
+    return fail(translate("apply.followupLoadSnapshotFailed", { id: record.backupSnapshotId, detail: errorText(error) }));
   }
-  if (!snapshot.path) return fail(`Backup snapshot ${record.backupSnapshotId} is missing path.`);
+  if (!snapshot.path) return fail(translate("apply.followupSnapshotMissingPath", { id: record.backupSnapshotId }));
 
   const targetConnection = findConnection(deps.connections, plan.target.connectionId);
-  if (!targetConnection) return fail(`Target connection ${plan.target.connectionId} is missing.`);
+  if (!targetConnection) return fail(translate("apply.followupTargetConnectionMissing", { id: plan.target.connectionId }));
 
   const sourceConnectionId = snapshotConnectionId(snapshot.id);
   const items = executableItems(plan).map((item) => {
@@ -244,7 +245,7 @@ async function verifySandboxStillMatches(
     }
     if (current !== expected) staleItems.push(item.id);
   }
-  return staleItems.length > 0 ? `Sandbox verification drift detected for item(s): ${staleItems.join(", ")}` : null;
+  return staleItems.length > 0 ? translate("apply.followupVerificationDrift", { items: staleItems.join(", ") }) : null;
 }
 
 export async function buildPromotionEntryFromVerification(
@@ -253,23 +254,23 @@ export async function buildPromotionEntryFromVerification(
   productionTarget: Connection,
   deps: ApplyFollowupDeps
 ): Promise<ApplyFollowupResult> {
-  if (!verification) return fail(`Apply record ${record.id} has no sandbox verification.`);
+  if (!verification) return fail(translate("apply.followupNoVerification", { id: record.id }));
   const plan = planFromRecord(record, deps);
   if (typeof plan === "string") return fail(plan);
   if (verification.planId !== plan.id || verification.applyHistoryId !== record.id) {
-    return fail(`Sandbox verification ${verification.id} does not match apply record ${record.id}.`);
+    return fail(translate("apply.followupVerificationMismatch", { verificationId: verification.id, id: record.id }));
   }
   if (verification.sandboxConnectionId === productionTarget.id) {
-    return fail("Promotion source and target cannot be the same connection.");
+    return fail(translate("apply.followupSameConnection"));
   }
   const sandboxConnection = findConnection(deps.connections, verification.sandboxConnectionId);
-  if (!sandboxConnection) return fail(`Sandbox connection ${verification.sandboxConnectionId} is missing.`);
+  if (!sandboxConnection) return fail(translate("apply.followupSandboxConnectionMissing", { id: verification.sandboxConnectionId }));
 
   try {
     const drift = await verifySandboxStillMatches(plan, verification, sandboxConnection, deps);
     if (drift) return fail(drift);
   } catch (error) {
-    return fail(`Failed to verify sandbox current state: ${errorText(error)}`);
+    return fail(translate("apply.followupVerifySandboxFailed", { detail: errorText(error) }));
   }
 
   const items = executableItems(plan).map((item) => {

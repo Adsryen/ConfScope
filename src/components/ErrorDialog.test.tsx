@@ -149,7 +149,7 @@ describe("ErrorDialog 切换报错滚动复位（波29 R49）", () => {
 
   function showDetail(item: { title: string; message: string; detail: string }) {
     act(() => {
-      const id = reportError({ ...item, level: "error" as const });
+      const id = reportError(item);
       showMessageDetail(id);
     });
   }

@@ -4,6 +4,7 @@ import type { Snapshot } from "../api/snapshot";
 import type { Connection } from "../store/connections";
 import type { ApplyVerification } from "../store/applyVerifications";
 import type { OperationRecord } from "../store/operationHistory";
+import { translate } from "../locales";
 import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type BuildApplyPlanInput } from "./applyPlan";
 import {
   buildPromotionEntryFromVerification,
@@ -189,21 +190,25 @@ describe("apply follow-up entry builders", () => {
   it("returns copyable rollback errors when plan or backup snapshot is unavailable", async () => {
     await expect(buildRollbackEntryFromApplyRecord(record({ planId: undefined }), deps())).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("planId"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupMissingPlanId", { id: "history-apply-1" }),
     });
     await expect(buildRollbackEntryFromApplyRecord(record({ backupSnapshotId: undefined }), deps())).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("backupSnapshotId"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupMissingBackupSnapshot", { id: "history-apply-1" }),
     });
     await expect(buildRollbackEntryFromApplyRecord(record(), { ...deps(), getApplyPlan: vi.fn(() => null) })).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("plan-apply-1"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupPlanMissing", { id: "plan-apply-1" }),
     });
     await expect(
       buildRollbackEntryFromApplyRecord(record(), { ...deps(), getSnapshot: vi.fn(async () => snapshot({ path: "" })) })
     ).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("path"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupSnapshotMissingPath", { id: "snap-before-1" }),
     });
   });
 
@@ -211,17 +216,20 @@ describe("apply follow-up entry builders", () => {
     const applyPlan = plan();
     await expect(buildPromotionEntryFromVerification(record(), null, prodConn, deps(applyPlan))).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("verification"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupNoVerification", { id: "history-apply-1" }),
     });
     await expect(buildPromotionEntryFromVerification(record(), verification(applyPlan), sandboxConn, deps(applyPlan))).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("same"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupSameConnection"),
     });
     await expect(
       buildPromotionEntryFromVerification(record(), verification(applyPlan), prodConn, deps(applyPlan, vi.fn(async () => document("server:\n  port: 9091"))))
     ).resolves.toMatchObject({
       ok: false,
-      detail: expect.stringContaining("drift"),
+      error: "apply_followup_failed",
+      detail: translate("apply.followupVerificationDrift", { items: applyPlan.items[0].id }),
     });
   });
 

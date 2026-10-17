@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { translate } from "../locales";
 import { buildApplyPlan, type BuildApplyPlanInput } from "./applyPlan";
 import {
   buildApplyOperationHistoryInput,
@@ -183,7 +184,7 @@ describe("prepareApplyExecutionSafety", () => {
         result: "failure",
         planId: "plan-1",
         taskId: "task-1",
-        error: expect.stringContaining("blocked"),
+        error: translate("apply.safetyBlockedItems", { count: 1 }),
       },
     });
   });
