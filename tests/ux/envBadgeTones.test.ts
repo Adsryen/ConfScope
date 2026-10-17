@@ -12,12 +12,8 @@ import { describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CSS = join(PROJECT_ROOT, "src/styles.css");
-/** 文件名 → 该文件里给徽章挑色调的函数名。 */
-const TONE_FN_BY_FILE: Record<string, string> = {
-  "DiffView.tsx": "environmentTone",
-  "ConnectionManager.tsx": "environmentTone",
-  "AuditView.tsx": "environmentToneShort",
-};
+/** 色调函数的唯一事实源（轮6 R44 前各页一份，现在收敛到 lib/envTone.ts）。 */
+const TONE_SOURCE_FILE = "src/lib/envTone.ts";
 /** 徽章一共该有哪几种色调。 */
 const EXPECTED_TONES = ["prod", "staging", "canary", "test", "local", "dev", "other"];
 
@@ -26,8 +22,8 @@ function cssBody(): string {
   return readFileSync(CSS, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-function componentSource(file: string): string {
-  return readFileSync(join(PROJECT_ROOT, "src/components", file), "utf8");
+function toneSource(): string {
+  return readFileSync(join(PROJECT_ROOT, TONE_SOURCE_FILE), "utf8");
 }
 
 /** styles.css 里真正定义过的色调类，例如 `.env-prod {` → "prod"。 */
@@ -36,13 +32,12 @@ function definedTones(): string[] {
 }
 
 /** 色调函数体里 `return "xxx"` 的全部可能值。 */
-function returnedTones(file: string): string[] {
-  const source = componentSource(file);
-  const fnName = TONE_FN_BY_FILE[file];
-  const start = source.indexOf(`function ${fnName}`);
-  expect(start, `${file} 里找不到 ${fnName}，改写法要一起改这条守卫`).toBeGreaterThan(-1);
+function returnedTones(): string[] {
+  const source = toneSource();
+  const start = source.indexOf("export function environmentTone");
+  expect(start, `${TONE_SOURCE_FILE} 里找不到 environmentTone，改写法要一起改这条守卫`).toBeGreaterThan(-1);
   const end = source.indexOf("\n}", start);
-  expect(end, `${fnName} 的函数体收尾找不到`).toBeGreaterThan(start);
+  expect(end, "environmentTone 的函数体收尾找不到").toBeGreaterThan(start);
   return Array.from(source.slice(start, end).matchAll(/return "([a-z]+)"/g), (match) => match[1]);
 }
 
@@ -56,18 +51,21 @@ describe("环境徽章的色调类与样式对得上", () => {
   });
 
   it("色调函数每个返回值都有对应样式", () => {
-    Object.keys(TONE_FN_BY_FILE).forEach((file) => {
-      const produced = returnedTones(file);
-      expect(produced.length, `${file} 的色调函数一个 return 都没抓到`).toBeGreaterThan(0);
-      produced.forEach((tone) => {
-        expect(tones, `${file} 会返回 "${tone}"，但样式里没有 .env-${tone}`).toContain(tone);
-      });
+    const produced = returnedTones();
+    expect(produced.length, "色调函数一个 return 都没抓到").toBeGreaterThan(0);
+    produced.forEach((tone) => {
+      expect(tones, `envTone.ts 会返回 "${tone}"，但样式里没有 .env-${tone}`).toContain(tone);
     });
+    // 七档都要真被函数返回过，少一档就等于「某个环境永远灰」（other 有两条 return：空名与认不出）
+    expect(Array.from(new Set(produced)).sort()).toEqual([...EXPECTED_TONES].sort());
   });
 
   it("写死的 className 必须带一个真实存在的 env- 色调类", () => {
-    const literals = Object.keys(TONE_FN_BY_FILE).flatMap((file) =>
-      Array.from(componentSource(file).matchAll(/className="env-badge([^"]*)"/g), (match) => ({ file, extra: match[1].trim() }))
+    const literals = ["DiffView.tsx", "ConnectionManager.tsx", "AuditView.tsx"].flatMap((file) =>
+      Array.from(readFileSync(join(PROJECT_ROOT, "src/components", file), "utf8").matchAll(/className="env-badge([^"]*)"/g), (match) => ({
+        file,
+        extra: match[1].trim(),
+      }))
     );
     expect(literals.length, "找不到写死的 env-badge 用法，改写法要一起改这条守卫").toBeGreaterThan(0);
     literals.forEach(({ file, extra }) => {
