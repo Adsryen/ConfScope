@@ -15,6 +15,7 @@ import { clickableRowProps } from "../lib/clickableRow";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { readViewState, useRememberedState, useScrollMemory, writeViewState } from "../lib/viewState";
 import Select from "./Select";
+import { errorText } from "../lib/errorText";
 
 export interface DiffJumpSideParams {
   tenant?: string;
@@ -449,7 +450,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         } catch (e) {
           // 作废信号继续上抛，由外层静默处理，不能污染本轮 errors
           if (isStaleRequestError(e)) throw e;
-          errors.push(`${envShortLabel(env)}: ${String(e)}`);
+          errors.push(`${envShortLabel(env)}: ${errorText(e)}`);
         }
       }
 
@@ -488,9 +489,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       }
     } catch (e) {
       if (isStaleRequestError(e)) return;
-      setError(String(e));
-      auditSessionEvent(session, { kind: "audit_run_result", result: "failure", error: String(e) });
-      endAuditSession(session, "failure", String(e));
+      setError(errorText(e));
+      auditSessionEvent(session, { kind: "audit_run_result", result: "failure", error: errorText(e) });
+      endAuditSession(session, "failure", errorText(e));
     } finally {
       setLoading(false);
     }

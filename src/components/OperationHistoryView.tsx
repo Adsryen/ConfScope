@@ -25,6 +25,7 @@ import { getConfigDocument, listHistory } from "../api/nacos";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   connections: Connection[];
@@ -121,7 +122,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
         }
         setCenterRecords((prev) => [...prev, ...records]);
       } catch (e) {
-        setError(String(e));
+        setError(errorText(e));
       } finally {
         setLoading(false);
       }
@@ -179,7 +180,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       }
       onStartApply(result.entry);
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       setRecordFollowupError(record, message);
       reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
     } finally {
@@ -222,7 +223,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
         return current[record.id] || candidates.length === 0 ? current : { ...current, [record.id]: candidates[0].id };
       });
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       setRecordFollowupError(record, message);
       reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
     } finally {
@@ -271,7 +272,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       }
       onStartApply(result.entry);
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       setRecordFollowupError(record, message);
       reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
     } finally {

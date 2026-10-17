@@ -16,6 +16,7 @@ import { detectFormat, type Format } from "./format";
 import { normalizeConfig, type ConfigEntry } from "./normalize";
 import { translate } from "../locales";
 import { buildSnapshotConnection } from "./snapshotConnection";
+import { errorText } from "./errorText";
 
 const DOCUMENT_KEY = "__document";
 const SNAPSHOT_PREFIX = "snapshot:";
@@ -28,10 +29,6 @@ export interface ApplyPlanDraftDeps {
 
 export type ApplyPlanDraftResult =
   { ok: true; plan: ApplyPlan; sourceConnection: Connection; targetConnection: Connection } | { ok: false; error: string; detail: string };
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function fail(detail: string): ApplyPlanDraftResult {
   return {

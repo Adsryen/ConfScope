@@ -23,6 +23,7 @@ import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import DiffPanel from "./DiffPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   entry: ApplyEntryPayload | null;
@@ -638,7 +639,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       })
       .catch((error) => {
         if (!alive) return;
-        setDraftState({ status: "error", detail: error instanceof Error ? error.message : String(error) });
+        setDraftState({ status: "error", detail: errorText(error) });
       });
 
     return () => {
@@ -931,13 +932,13 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       });
       endAuditSession(session, "success");
     } catch (error) {
-      setExecuteError(error instanceof Error ? error.message : String(error));
+      setExecuteError(errorText(error));
       auditSessionEvent(session, {
         kind: "apply_error",
         result: "failure",
         step: dryRun ? "execute" : "verify",
         dryRun,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorText(error),
         payload: JSON.stringify({
           selectedCount: selectedItemIds.length,
           items: plan.items
@@ -951,7 +952,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             })),
         }),
       });
-      endAuditSession(session, "failure", error instanceof Error ? error.message : String(error));
+      endAuditSession(session, "failure", errorText(error));
     } finally {
       setExecutionMode(null);
     }

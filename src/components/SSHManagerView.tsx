@@ -12,6 +12,7 @@ import {
 } from "../store/sshProfiles";
 import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
+import { errorText } from "../lib/errorText";
 
 type Draft = {
   id?: string;
@@ -41,10 +42,6 @@ function latencyText(result: unknown, startedAt: number): string {
     return `${Math.max(1, Math.round(latencyMs))}ms`;
   }
   return fallbackLatencyText(startedAt);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function sshTestKey(config: SSHConfig): string {
@@ -195,7 +192,7 @@ export default function SSHManagerView() {
       setMessage({
         ok: false,
         text: t('settings.sshProfileTestFailed')
-          .replace("{error}", errorMessage(e))
+          .replace("{error}", errorText(e))
           .replace("{time}", fallbackLatencyText(startedAt)),
       });
     } finally {

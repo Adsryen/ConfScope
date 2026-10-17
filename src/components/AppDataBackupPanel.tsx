@@ -37,6 +37,7 @@ import {
 } from "../store/appDataBackup";
 import { deleteStoredSecret, resolveAppDataBackupPassword, saveAppDataBackupPassword } from "../lib/credentialSecrets";
 import CopyButton from "./CopyButton";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   onRestored?: () => void;
@@ -53,10 +54,6 @@ interface PreviewState {
 
 const DEFAULT_PLATFORM = "unknown";
 const DEFAULT_APP_VERSION = "dev";
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function defaultBackupName(): string {
   const stamp = new Date().toISOString().replace(/-/g, "").replace("T", "-").replace(/:/g, "").slice(0, 15);
@@ -250,7 +247,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       manager.completeTask(task.id, true);
       return result;
     } catch (e) {
-      const message = toErrorMessage(e);
+      const message = errorText(e);
       manager.updateProgress(task.id, 0, 1, 1);
       manager.completeTask(task.id, false, message);
       throw e;
@@ -278,7 +275,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setStatus({ ok: true, text: t("appDataBackup.localExported") });
       toast(t("appDataBackup.localExported"), "success");
     } catch (e) {
-      const message = toErrorMessage(e);
+      const message = errorText(e);
       recordActivity("local_export", "failure", "", message);
       setError(message);
     } finally {
@@ -296,7 +293,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         setPreview(null);
       }
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -323,7 +320,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         packageSummary: decrypted.summary,
       });
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -354,7 +351,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         window.location.reload();
       }
     } catch (e) {
-      const message = toErrorMessage(e);
+      const message = errorText(e);
       recordActivity("recovery_point", "failure", preview.target, message);
       setError(message);
     } finally {
@@ -390,7 +387,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setStatus({ ok: true, text: t("appDataBackup.savedPasswordSaved") });
       toast(t("appDataBackup.savedPasswordSaved"), "success");
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -407,7 +404,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setBackupState(next);
       setStatus({ ok: true, text: t("appDataBackup.savedPasswordCleared") });
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -426,7 +423,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setStatus({ ok: true, text: t("appDataBackup.webdavTestPassed") });
       toast(t("appDataBackup.webdavTestPassed"), "success");
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -453,7 +450,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setStatus({ ok: true, text: t("appDataBackup.webdavUploaded") });
       toast(t("appDataBackup.webdavUploaded"), "success");
     } catch (e) {
-      const message = toErrorMessage(e);
+      const message = errorText(e);
       recordActivity("webdav_upload", "failure", target.rootPath, message);
       setError(message);
     } finally {
@@ -473,7 +470,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       setRemoteBackups(await listAppDataWebDAVBackups(target));
       setStatus({ ok: true, text: t("appDataBackup.remoteListLoaded") });
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }
@@ -497,7 +494,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
         packageSummary: decrypted.summary,
       });
     } catch (e) {
-      setError(toErrorMessage(e));
+      setError(errorText(e));
     } finally {
       setBusy("");
     }

@@ -22,6 +22,7 @@ import {
 import { detectFormat, nacosType, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 import { translate } from "../locales";
+import { errorText } from "./errorText";
 
 const PROTECTED_TARGET_MARKERS = ["uat", "prod", "production", "生产", "真实", "线上"] as const;
 const DOCUMENT_KEY = "__document";
@@ -85,12 +86,8 @@ export function applyConfirmationText(plan: Pick<ApplyPlan, "id" | "target">): s
   return `APPLY ${plan.id} TO ${plan.target.label}`;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isMissingConfigError(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase();
+  const message = errorText(error).toLowerCase();
   return message.includes("404") || message.includes("not found") || message.includes("not exist") || message.includes("notexists");
 }
 
@@ -225,7 +222,7 @@ async function readCurrentValue(
       translate("apply.readConfigFailed", {
         role: translate(role === "source" ? "apply.source" : "apply.target"),
         ref: `${ref.namespace}/${ref.group}/${ref.dataId}`,
-        detail: errorMessage(error),
+        detail: errorText(error),
       })
     );
   }
@@ -262,7 +259,7 @@ async function readBeforeSnapshot(
     throw new Error(
       translate("apply.readBeforeSnapshotFailed", {
         ref: `${ref.namespace}/${ref.group}/${ref.dataId}`,
-        detail: errorMessage(error),
+        detail: errorText(error),
       })
     );
   }
@@ -504,7 +501,7 @@ export async function executeApplyPlan(
             await deps.deleteConfigRef(targetConnection, writeRef);
           }
         } catch (e) {
-          itemError = errorMessage(e);
+          itemError = errorText(e);
         }
         completed += 1;
         deps.taskManager.updateProgress(taskId, completed, 0, writes.length);
@@ -525,13 +522,13 @@ export async function executeApplyPlan(
         if (itemError) throw new Error(itemError);
       }
     } catch (error) {
-      return recordFailure(workingPlan, deps, taskId, errorMessage(error), safety.backup);
+      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup);
     }
 
     const history = deps.recordOperation(safety.historyInput);
     deps.taskManager.completeTask(taskId, true);
     return { ok: true, taskId, historyId: history.id };
   } catch (error) {
-    return recordFailure(workingPlan, deps, taskId, errorMessage(error), emptyBackup(), !options.dryRun);
+    return recordFailure(workingPlan, deps, taskId, errorText(error), emptyBackup(), !options.dryRun);
   }
 }

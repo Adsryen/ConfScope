@@ -30,6 +30,7 @@ import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
 import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
+import { errorText } from "../lib/errorText";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
 const tunnelUrlCache = new Map<string, string>();
@@ -131,7 +132,7 @@ function hasSSHConfig(conn: Connection): boolean {
 }
 
 function isLocalTunnelTransportError(error: unknown): boolean {
-  const message = String(error).toLowerCase();
+  const message = errorText(error).toLowerCase();
   const transportMarkers = [
     "wsarecv",
     "forcibly closed",
@@ -301,7 +302,7 @@ async function withAuth<T>(conn: Connection, call: (token: string, apiVersion: A
     try {
       return await call(token, apiVersion);
     } catch (e) {
-      const msg = String(e);
+      const msg = errorText(e);
       if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
         const fresh = await getToken(conn, true);
         return await call(fresh, apiVersion);
@@ -333,7 +334,7 @@ async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfil
     try {
       return await call(toConnectionProfile(credentialConn, baseUrl, accessToken, apiVersion));
     } catch (e) {
-      const msg = String(e);
+      const msg = errorText(e);
       if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
         const fresh = await getToken(conn, true);
         return await call(toConnectionProfile(credentialConn, baseUrl, fresh, apiVersion));

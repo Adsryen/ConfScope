@@ -15,6 +15,7 @@ import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload,
 import { detectFormat, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 import { snapshotConnectionId } from "./snapshotConnection";
+import { errorText } from "./errorText";
 
 const DOCUMENT_KEY = "__document";
 
@@ -31,10 +32,6 @@ export type ApplyFollowupResult =
 
 function fail(detail: string): ApplyFollowupResult {
   return { ok: false, error: "apply_followup_failed", detail };
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function isMissingConfigError(error: unknown): boolean {

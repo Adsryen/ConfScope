@@ -13,10 +13,7 @@ import CopyButton from "./CopyButton";
 import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
 import { scrollBehavior } from "../lib/motion";
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import { errorText } from "../lib/errorText";
 
 export default function SettingsView() {
   const { t } = useTranslation();
@@ -127,7 +124,7 @@ export default function SettingsView() {
       setCredentialSummary(summary);
       setCredentialPending(countMigratableStoredCredentials());
     } catch (e) {
-      setCredentialError(toErrorMessage(e));
+      setCredentialError(errorText(e));
     } finally {
       setCredentialBusy(false);
     }
@@ -139,7 +136,7 @@ export default function SettingsView() {
     try {
       await OpenDataFolder(key);
     } catch (e) {
-      setOpenFolderError(toErrorMessage(e));
+      setOpenFolderError(errorText(e));
     } finally {
       setOpenFolderBusy(false);
     }

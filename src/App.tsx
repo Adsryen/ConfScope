@@ -39,6 +39,7 @@ import { toast } from "./lib/toast";
 import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
 import { recordOperation } from "./store/operationHistory";
 import type { ApplyEntryPayload } from "./lib/applyEntry";
+import { errorText } from "./lib/errorText";
 
 type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "logviewer" | "settings" | "about";
 type Mode = NavigableMode | "apply";
@@ -341,7 +342,7 @@ export default function App() {
       .then((ns) => alive && setNamespaces(ns))
       .catch((e) => {
         if (!alive) return;
-        const message = String(e);
+        const message = errorText(e);
         setNsError(message);
         setNamespaces([]);
         reportError({

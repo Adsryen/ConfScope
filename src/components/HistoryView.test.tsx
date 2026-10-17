@@ -278,7 +278,7 @@ describe("HistoryView", () => {
     apiMocks.listHistory.mockRejectedValueOnce(new Error("history denied"));
     renderHistory({}, "en-US");
 
-    expect(await screen.findByText("Error: history denied")).toBeInTheDocument();
+    expect(await screen.findByText("history denied")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Failed to load history versions",
       actionLabel: "Retry",
@@ -291,7 +291,7 @@ describe("HistoryView", () => {
 
     fireEvent.click(await screen.findByText("nid 2"));
 
-    expect(await screen.findByText("Error: detail denied")).toBeInTheDocument();
+    expect(await screen.findByText("detail denied")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Failed to load history content",
     });

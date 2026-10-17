@@ -10,6 +10,7 @@
 
 import { reportError } from "./errorCenter";
 import { translate } from "../locales";
+import { errorText } from "./errorText";
 
 export const APP_DATA_DOC_SCHEMA_VERSION = 2;
 export const APP_DATA_DOC_FILE_NAME = "confscope-data.json";
@@ -288,7 +289,7 @@ export async function pushAppDataDocument(options: { report?: boolean } = {}): P
         if (!status.error && status.valid) return true;
         lastError = status.error || translate("app.dataFileUnknownSaveFailure");
       } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
+        lastError = errorText(err);
       }
       if (attempt < PUSH_RETRY_DELAYS_MS.length) {
         await sleep(PUSH_RETRY_DELAYS_MS[attempt]);

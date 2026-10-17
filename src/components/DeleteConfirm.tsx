@@ -4,6 +4,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   /** 需要输入以确认的名称（dataId）。 */
@@ -37,7 +38,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
     try {
       await onConfirm();
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errorText(e);
       setError(message);
       reportError({
         title: t("config.deleteConfigFailed"),

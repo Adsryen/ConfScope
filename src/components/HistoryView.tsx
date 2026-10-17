@@ -16,6 +16,7 @@ import { clickableRowProps } from "../lib/clickableRow";
 import DiffPanel from "./DiffPanel";
 import Pager from "./Pager";
 import UnifiedDiff from "./UnifiedDiff";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   conn: Connection;
@@ -87,7 +88,7 @@ export default function HistoryView({
       })
       .catch((e) => {
         if (my !== histReqId.current) return;
-        const message = String(e);
+        const message = errorText(e);
         setError(message);
         setItems([]);
         setPages(1);
@@ -135,7 +136,7 @@ export default function HistoryView({
     try {
       await Promise.all(next.map(ensureContent));
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       setError(message);
       reportError({
         title: t("history.contentLoadFailed"),
@@ -197,7 +198,7 @@ export default function HistoryView({
         onAction: () => rollback(),
       });
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordOperation({
         type: "rollback",
         result: "failure",
@@ -240,7 +241,7 @@ export default function HistoryView({
       ensureContent(nid),
       prev ? ensureContent(prev.id) : Promise.resolve(""),
     ]).catch((e) => {
-      const message = String(e);
+      const message = errorText(e);
       setError(message);
       reportError({
         title: t("history.contentLoadFailed"),

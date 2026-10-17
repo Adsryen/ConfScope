@@ -14,6 +14,7 @@ import CopyButton from "./CopyButton";
 import { loadSettings, updateUpdateSettings } from "../store/settings";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { errorText } from "../lib/errorText";
 
 interface AboutProps {
   onClose?: () => void;
@@ -156,7 +157,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         setUpdatePhase("upToDate");
       }
     } catch (e) {
-      const msg = String(e);
+      const msg = errorText(e);
       setErrorMessage(msg);
       setUpdatePhase("error");
       reportError({
@@ -194,7 +195,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       await downloadUpdate(updateResult.downloadUrl, updateResult.sha256);
       setUpdatePhase("downloaded");
     } catch (e) {
-      const msg = String(e);
+      const msg = errorText(e);
       setErrorMessage(msg);
       setUpdatePhase("error");
       reportError({

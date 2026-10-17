@@ -14,6 +14,7 @@ import {
   type StoredSecretPointer,
 } from "./credentialSecrets";
 import { translate } from "../locales";
+import { errorText } from "./errorText";
 
 export const APP_DATA_BACKUP_SCHEMA_VERSION = 1;
 
@@ -162,7 +163,7 @@ async function resolvePortablePointer(pointer: StoredSecretPointer, deps?: Colle
   try {
     return deps?.resolveSecret ? await deps.resolveSecret(pointer) : await resolveSecret(pointer);
   } catch (e) {
-    throw new Error(translate("appDataBackup.resolveSecretFailed", { ref: pointer.ref, detail: String(e) }));
+    throw new Error(translate("appDataBackup.resolveSecretFailed", { ref: pointer.ref, detail: errorText(e) }));
   }
 }
 

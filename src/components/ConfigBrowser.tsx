@@ -31,6 +31,7 @@ import DeleteConfirm from "./DeleteConfirm";
 import HistoryView from "./HistoryView";
 import Pager from "./Pager";
 import Select from "./Select";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   conn: Connection;
@@ -298,7 +299,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           const document = await getConfigDocument(conn, tenant, item.dataId, item.group);
           return { item, document, error: "" };
         } catch (error) {
-          return { item, document: null, error: String(error) };
+          return { item, document: null, error: errorText(error) };
         } finally {
           if (my === contentSearchReqId.current) {
             setContentSearchProgress((current) => ({
@@ -320,7 +321,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       }
     } catch (error) {
       if (my !== contentSearchReqId.current) return;
-      const message = String(error);
+      const message = errorText(error);
       setContentSearchError(message);
       reportError({
         title: t("config.contentSearchFailed"),
@@ -353,7 +354,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       setPages(Math.max(res.pagesAvailable || 1, 1));
     } catch (e) {
       if (my !== listReqId.current) return;
-      const message = String(e);
+      const message = errorText(e);
       setListError(message);
       setItems([]);
       setTotal(0);
@@ -550,7 +551,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       setFmt(detectFormat(item.dataId, document.format || item.configType, document.content));
     } catch (e) {
       if (my !== reqId.current) return;
-      const message = String(e);
+      const message = errorText(e);
       setContentError(message);
       setContent("");
       setMetadata(null);
@@ -763,7 +764,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           completed += 1;
         } catch (e) {
           failed += 1;
-          lastError = String(e);
+          lastError = errorText(e);
         }
         taskManager.updateProgress(task.id, completed, failed, items.length);
       }
@@ -790,7 +791,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       taskManager.completeTask(task.id, failed === 0, partialError);
       toast(t("config.snapshotCreated", { name: snapshot.name || snapshot.id }), failed > 0 ? "info" : "success");
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordOperation({
         type: "snapshot",
         result: "failure",
@@ -852,7 +853,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       });
       toast(t("config.exportedCurrentList"), "success");
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       taskManager.updateProgress(task.id, 0, 1, items.length || 1);
       taskManager.completeTask(task.id, false, message);
       recordOperation({
@@ -883,7 +884,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       targetDir = await selectConfigSourceExportDirectory();
       if (!targetDir) return;
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       reportError({
         title: t("config.exportSourceFilesToDirectory"),
         source: sourceLabel,
@@ -933,7 +934,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       });
       toast(t("config.exportedSourceFiles", { path: targetDir }), "success");
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       taskManager.updateProgress(task.id, 0, 1, items.length || 1);
       taskManager.completeTask(task.id, false, message);
       recordOperation({

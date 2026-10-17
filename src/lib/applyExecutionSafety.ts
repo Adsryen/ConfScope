@@ -1,6 +1,7 @@
 // 应用执行安全合同：在真实写入前准备 before 备份和操作历史输入。
 import type { ApplyPlan, ApplyPlanItem } from "./applyPlan";
 import type { OperationRecord, OperationResult } from "../store/operationHistory";
+import { errorText } from "./errorText";
 
 export interface ApplyTargetBeforeSnapshot {
   itemId: string;
@@ -98,10 +99,6 @@ function planSummary(plan: ApplyPlan): NonNullable<OperationRecord["planSummary"
     sourceLabel: plan.inputSummary.sourceLabel,
     targetLabel: plan.inputSummary.targetLabel,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function backupConfigFromSnapshot(item: ApplyPlanItem, snapshot: ApplyTargetBeforeSnapshot): ApplyBackupConfig | null {
@@ -241,7 +238,7 @@ export async function prepareApplyExecutionSafety(
       }),
     };
   } catch (e) {
-    const error = errorMessage(e);
+    const error = errorText(e);
     const backup: ApplyBackupSummary = {
       backedUpCount: collection.configs.length,
       missingBeforeCount: collection.missingBeforeCount,

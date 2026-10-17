@@ -252,7 +252,7 @@ describe("About", () => {
     await screen.findByText("v1.0.0");
     fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
 
-    expect(await screen.findByText("Error: network offline")).toBeInTheDocument();
+    expect(await screen.findByText("network offline")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Update check error",
       source: "App Updates",
@@ -269,7 +269,7 @@ describe("About", () => {
     expect(await screen.findByText("New version v1.1.0 available")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Download Update" }));
 
-    expect(await screen.findByText("Error: download timeout")).toBeInTheDocument();
+    expect(await screen.findByText("download timeout")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Update download failed",
       source: "App Updates",

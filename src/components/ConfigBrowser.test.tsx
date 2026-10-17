@@ -656,12 +656,12 @@ describe("ConfigBrowser", () => {
         group: "*",
         dataId: "*",
         rollbackable: false,
-        error: "Error: download denied",
+        error: "download denied",
       });
       expect(latestError()).toMatchObject({
         title: "导出当前列表",
-        message: "Error: download denied",
-        detail: "Error: download denied",
+        message: "download denied",
+        detail: "download denied",
       });
     });
 
@@ -675,7 +675,7 @@ describe("ConfigBrowser", () => {
       total: 1,
       scope: "dev / public / 1 项配置",
       cancellable: false,
-      error: "Error: download denied",
+      error: "download denied",
     });
   });
 
@@ -693,7 +693,7 @@ describe("ConfigBrowser", () => {
     await act(async () => {
       fireEvent.click(within(inlineError).getByRole("button", { name: "复制错误" }));
     });
-    expect(copyText).toHaveBeenCalledWith("Error: Nacos returned 403: Invalid signature");
+    expect(copyText).toHaveBeenCalledWith("Nacos returned 403: Invalid signature");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByTitle("消息中心"));
@@ -709,7 +709,7 @@ describe("ConfigBrowser", () => {
 
     renderBrowser("en-US");
 
-    expect(await screen.findByText("Error: list denied")).toBeInTheDocument();
+    expect(await screen.findByText("list denied")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Failed to load config list",
       actionLabel: "Retry",
@@ -730,7 +730,7 @@ describe("ConfigBrowser", () => {
     await act(async () => {
       fireEvent.click(within(inlineError).getByRole("button", { name: "复制错误" }));
     });
-    expect(copyText).toHaveBeenCalledWith("Error: read config failed: EOF");
+    expect(copyText).toHaveBeenCalledWith("read config failed: EOF");
   });
 
   it("reports content loading errors with localized message-center actions", async () => {
@@ -739,7 +739,7 @@ describe("ConfigBrowser", () => {
     renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
 
-    expect(await screen.findByText("Error: content denied")).toBeInTheDocument();
+    expect(await screen.findByText("content denied")).toBeInTheDocument();
     expect(latestError()).toMatchObject({
       title: "Failed to load config content",
       actionLabel: "Retry",

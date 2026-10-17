@@ -24,6 +24,7 @@ import { environmentTone } from "../lib/envTone";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { errorText } from "../lib/errorText";
 
 interface Props {
   onClose: () => void;
@@ -932,7 +933,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       }
     } catch (e) {
       if (currentTestKeyRef.current !== snapshotKey) return;
-      const message = String(e);
+      const message = errorText(e);
       setTestMsg({ ok: false, text: t("connection.testFailedWithLatency", { message, latency: latencyText(t, startedAt) }) });
       setTestTrace(buildConnectionTrace(snapshot, startedAt, false, message, t));
     } finally {
@@ -969,7 +970,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     } catch (e) {
       if (currentNamespaceKeyRef.current !== snapshotKey) return;
       setNamespaceOptions([]);
-      setNamespaceError(String(e));
+      setNamespaceError(errorText(e));
     } finally {
       setNamespaceLoadingKey((current) => (current === snapshotKey ? null : current));
     }
@@ -999,7 +1000,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       return result;
     } catch (e) {
       if (currentTestKeyRef.current !== resultKey) return null;
-      setTestMsg({ ok: false, text: String(e) });
+      setTestMsg({ ok: false, text: errorText(e) });
       return null;
     } finally {
       setValidatingLocal(false);
@@ -1020,7 +1021,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         await validateLocalSnapshotPath(path.trim(), false, Date.now(), nextKey);
       }
     } catch (e) {
-      setTestMsg({ ok: false, text: String(e) });
+      setTestMsg({ ok: false, text: errorText(e) });
     } finally {
       setSelectingLocalDir(false);
     }

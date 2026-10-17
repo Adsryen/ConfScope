@@ -3,6 +3,7 @@ import { loadAppDataBackupState, saveAppDataBackupState, type AppDataWebDAVSetti
 import { loadConnections, updateConnection, type Connection } from "../store/connections";
 import { loadSnapshotWebDAVState, saveSnapshotWebDAVState, type SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
 import { translate } from "../locales";
+import { errorText } from "./errorText";
 
 export type CredentialSecretNamespace = "connection" | "app-data-webdav" | "snapshot-webdav" | "app-data-backup";
 export type StoredSecretStatus = "stored" | "missing" | "unsupported";
@@ -145,7 +146,7 @@ export async function resolveSecret(pointer: StoredSecretPointer, deps?: Credent
   try {
     return await clientFromDeps(deps).read(refFromPointer(pointer));
   } catch (e) {
-    throw new Error(translate("credentials.missingAfterMigration", { ref: pointer.ref, detail: String(e) }));
+    throw new Error(translate("credentials.missingAfterMigration", { ref: pointer.ref, detail: errorText(e) }));
   }
 }
 
@@ -206,7 +207,7 @@ function recordMigrationItem(
 }
 
 function isUnsupportedError(error: unknown): boolean {
-  const message = String(error).toLowerCase();
+  const message = errorText(error).toLowerCase();
   return message.includes("unsupported") || message.includes("不支持");
 }
 
@@ -314,7 +315,7 @@ async function migrateSecretValue(
     recordMigrationItem(summary, ref, "migrated");
     return pointer;
   } catch (e) {
-    recordMigrationItem(summary, ref, isUnsupportedError(e) ? "unsupported" : "failed", String(e));
+    recordMigrationItem(summary, ref, isUnsupportedError(e) ? "unsupported" : "failed", errorText(e));
     return null;
   }
 }

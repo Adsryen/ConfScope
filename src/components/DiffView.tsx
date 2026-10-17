@@ -34,6 +34,7 @@ import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } fr
 import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
+import { errorText } from "../lib/errorText";
 
 type DiffMode = "text" | "key" | "lines";
 
@@ -233,10 +234,6 @@ function syncDefaultNamespace(source: Source, connections: Connection[]): Source
   if (!source.usesDefaultNamespace) return source;
   if (source.tenant === nextTenant) return source;
   return { ...source, tenant: nextTenant };
-}
-
-function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 function compareText(a: string, b: string): number {

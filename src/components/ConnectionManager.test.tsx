@@ -503,7 +503,7 @@ describe("ConnectionManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "连接测试" }));
 
     expect(await screen.findByText("连接测试失败")).toBeInTheDocument();
-    expect(screen.getByText("Error: 403")).toBeInTheDocument();
+    expect(screen.getByText("403")).toBeInTheDocument();
   });
 
   it("localizes connection test traces and copied trace text", async () => {
@@ -531,7 +531,7 @@ describe("ConnectionManager", () => {
 
     expect(await screen.findByText("Connection test failed")).toBeInTheDocument();
     expect(screen.getByText("Config center API test failed.")).toBeInTheDocument();
-    expect(screen.getByText("Error: 403 forbidden")).toBeInTheDocument();
+    expect(screen.getByText("403 forbidden")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Copy Trace" }));
     expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("[Failed] Nacos API"));
@@ -549,7 +549,7 @@ describe("ConnectionManager", () => {
 
     expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("连接测试失败"));
     expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("Nacos 接口"));
-    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("Error: 403 forbidden"));
+    expect(clipboardMocks.copyText).toHaveBeenCalledWith(expect.stringContaining("403 forbidden"));
   });
 
   it("keeps full long connection test errors in the copied trace", async () => {

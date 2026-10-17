@@ -19,6 +19,7 @@ import { loadSnapshotWebDAVState, recordSnapshotWebDAVActivity, updateSnapshotWe
 import { applyEntryRiskSummary, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
+import { errorText } from "../lib/errorText";
 
 export interface BackupDiffJumpParams {
   snapshot: Snapshot;
@@ -124,7 +125,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       setSnapshots(list || []);
       setSelectedSnapshot((current) => (current && list?.some((snap) => snap.id === current.id) ? current : (list?.[0] ?? null)));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorText(e);
       setError(msg);
       reportError({ title: t("backup.loadFailed"), message: msg, detail: msg });
     } finally {
@@ -163,7 +164,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
           setSelectedSnapshot(null);
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorText(e);
         if (deletingSnapshot) {
           recordOperation({
             type: "snapshot_delete",
@@ -235,7 +236,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       setSnapshotWebDAVStatus(t("backup.webdavTestPassed"));
       toast(t("backup.webdavTestPassed"), "success");
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordSnapshotWebDAVActivity({ type: "test", status: "failure", target: target.url, message });
       setSnapshotWebDAVError(message);
       reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
@@ -256,7 +257,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       recordSnapshotWebDAVActivity({ type: "list", status: "success", target: target.rootPath, message: t("backup.remoteSnapshotsLoaded") });
       setSnapshotWebDAVStatus(t("backup.remoteSnapshotsLoaded"));
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordSnapshotWebDAVActivity({ type: "list", status: "failure", target: target.rootPath, message });
       setSnapshotWebDAVError(message);
       reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
@@ -278,7 +279,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       setSnapshotWebDAVStatus(t("backup.snapshotUploaded"));
       toast(t("backup.snapshotUploaded"), "success");
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordSnapshotWebDAVActivity({ type: "upload", status: "failure", target: selectedSnapshot.id, message });
       setSnapshotWebDAVError(message);
       reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
@@ -300,7 +301,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       await loadSnapshots();
       setSelectedSnapshot(imported);
     } catch (e) {
-      const message = String(e);
+      const message = errorText(e);
       recordSnapshotWebDAVActivity({ type: "import", status: "failure", target: remote.path, message });
       setSnapshotWebDAVError(message);
       reportError({ title: t("backup.webdavOperationFailed"), message, detail: message });
