@@ -12,6 +12,9 @@
  * 2. 组件自己必须带齐无障碍属性与复制按钮（防「抽完了但抽漏了」）；
  * 3. 接线点有数量下限（防守卫永真、也防站点悄悄退回手抄）；
  * 4. styles.css 的 .inline-error* 规则与 zh/en 的 label 文案都还在（反向死钩子保护）。
+ * 5. 波35（R58）：title/retryLabel/copyLabel 的兜底文案只许写在组件里各一次，
+ *    站点再攒一个私有「标签包」（当年的 inlineErrorLabels）即红——同一句「操作失败」被铺 4 遍，
+ *    新站点想复用还得再抄一份。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +33,8 @@ const SHORT_HINT_SITES = [
 ];
 /** 裸容器块：用来区分「短提示」与「又手抄了一整套结构」。 */
 const RAW_BLOCK = /<div className="inline-error[^"]*" role="alert">([\s\S]{0,400}?)<\/div>/g;
+/** 站点私有「标签包」：`const xxxLabels = { title: … }`。波35 起只许依赖组件默认值，命中即红。 */
+const PRIVATE_LABEL_BUNDLE = /const\s+\w*(?:Labels|LABELS)\w*\s*=\s*\{[^}]*\btitle:/g;
 
 function hitsIn(re: RegExp, source: string): number[] {
   const hits: number[] = [];
@@ -124,5 +129,34 @@ describe("内联错误块单一出口（波28 R48）", () => {
         expect(locale[key], `${file} 缺 ${key}`).toBeTruthy();
       }
     });
+  });
+
+  it("三个标签的默认文案只在组件里定义一次", () => {
+    for (const [needle, why] of [
+      ["title ?? t(", "默认标题的兜底写法变了"],
+      ["retryLabel ?? t(", "重试按钮的兜底写法变了"],
+      ["copyLabel ?? t(", "复制按钮的兜底写法变了"],
+    ] as [string, string][]) {
+      expect(component, `${why}：InlineError.tsx 里找不到 ${needle}`).toContain(needle);
+    }
+    expect(component, "默认值一旦生效，title 必须是可选属性").toContain("title?: string;");
+
+    // 站点侧再攒「标签包」就是把同一句文案铺 N 遍（波35 删掉的 inlineErrorLabels 形态）。
+    const bundles = files
+      .filter((file) => file !== IMPLEMENTATION)
+      .flatMap((file) => {
+        const source = readScannedSource(file);
+        return report(file, source, hitsIn(PRIVATE_LABEL_BUNDLE, source));
+      });
+    expect(bundles, `站点又攒了私有标签对象，删掉并依赖组件默认值：\n${bundles.join("\n")}`).toEqual([]);
+  });
+
+  it("ConfigBrowser 的私有标签对象不许长回来", () => {
+    const source = readScannedSource("src/components/ConfigBrowser.tsx");
+    expect(source, "inlineErrorLabels 已被组件默认值取代").not.toContain("inlineErrorLabels");
+    expect(source, "标题由组件兜底，站点不该再自己引 common.operationFailed").not.toContain('t("common.operationFailed")');
+    for (const file of ["zh-CN.json", "en-US.json"]) {
+      expect(loadLocale(file)["common.operationFailed"], `${file} 缺 common.operationFailed，默认标题会渲染成 undefined`).toBeTruthy();
+    }
   });
 });

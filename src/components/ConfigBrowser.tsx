@@ -184,11 +184,6 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     namespace: tenant,
     label: `${connectionDisplayLabel(conn)} / ${namespaceLabel}`,
   };
-  const inlineErrorLabels = {
-    title: t("common.operationFailed"),
-    retryLabel: t("common.retry"),
-    copyLabel: t("common.copyError"),
-  };
   const metadataItems =
     isLocalSnapshot && metadata
       ? [
@@ -1078,11 +1073,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               {t("config.loading")}
             </div>
           )}
-          {listError && (
-            <InlineError {...inlineErrorLabels} message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />
-          )}
+          {listError && <InlineError message={listError} onRetry={() => fetchList(appliedTerm, pageNo, selectedGroup)} />}
           {isContentSearchActive && contentSearchError && (
-            <InlineError {...inlineErrorLabels} message={contentSearchError} onRetry={() => searchAllContent(contentTerm, selectedGroup)} />
+            <InlineError message={contentSearchError} onRetry={() => searchAllContent(contentTerm, selectedGroup)} />
           )}
           {!listLoading && !listError && !contentSearchError && !contentSearching && visibleItems.length === 0 && (
             <div className="pad-msg browser-empty">
@@ -1186,9 +1179,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                     {t("config.loading")}
                   </div>
                 )}
-                {contentError && selected && (
-                  <InlineError {...inlineErrorLabels} message={contentError} onRetry={() => openConfig(selected)} />
-                )}
+                {contentError && selected && <InlineError message={contentError} onRetry={() => openConfig(selected)} />}
                 {!contentLoading && !contentError && editing && (
                   <>
                     <div className="fmt-bar">
@@ -1199,7 +1190,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         options={FORMATS.map((f) => ({ value: f, label: f }))}
                         onChange={(v) => setFmt(v as Format)}
                       />
-                      {saveError && <InlineError {...inlineErrorLabels} message={saveError} onRetry={saveEdit} />}
+                      {saveError && <InlineError message={saveError} onRetry={saveEdit} />}
                       <span className="fmt-spacer" />
                       <button className="btn btn-ghost btn-sm" onClick={cancelEditing}>
                         {t("common.cancel")}

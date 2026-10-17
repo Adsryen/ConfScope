@@ -91,4 +91,25 @@ describe("InlineError", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Error details" })).toBeInTheDocument();
   });
+
+  it("不传 title 时兜底到组件级默认文案", () => {
+    renderError({ message: "boom" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("操作失败");
+    // 兜底不能顺手把重试/复制的默认 label 也带歪。
+    expect(screen.getByRole("button", { name: "复制错误" })).toBeInTheDocument();
+  });
+
+  it("显式传 title 时站点文案优先，默认值不许盖掉", () => {
+    renderError({ title: "命名空间加载失败", message: "boom" });
+
+    expect(screen.getByText("命名空间加载失败")).toBeInTheDocument();
+    expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
+  });
+
+  it("英文语种下默认标题跟着界面语言走", () => {
+    renderError({ message: "boom" }, "en-US");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Operation failed");
+  });
 });
