@@ -81,6 +81,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             className="search-input wide mono"
             value={input}
             placeholder={name}
+            aria-label={t("config.deleteConfirmInput")}
             autoFocus
             data-dialog-autofocus=""
             autoCapitalize="off"

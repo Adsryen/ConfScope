@@ -20,6 +20,9 @@ interface Props {
   onChange: (v: string) => void;
   format: Format;
   placeholder?: string;
+  /** 可访问名兜底：正文编辑器常被单独放置（变更计划的目标内容、配置浏览的编辑抽屉），
+   *  没有包裹式 label 时读屏只能念出「编辑框」。优先取调用方给的名字，退而用 placeholder。 */
+  ariaLabel?: string;
   /** 外部内容搜索词：进入编辑态后仍保持标红，与浏览态一致。 */
   searchTerm?: string;
   /** 是否启用编辑态视图内查找（Ctrl+F / F3）。 */
@@ -59,7 +62,7 @@ function clamp(value: number, min: number, max: number): number {
  *  刻意不做缩略图：编辑态内容一直在变，重算成本换来的收益低于风险。
  *  不变式：查找定位只改 textarea 的选区与滚动，绝不改 value。 */
 const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
-  { value, onChange, format, placeholder, searchTerm = "", enableFind = true, active = true }: Props,
+  { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, active = true }: Props,
   ref
 ) {
   const { t } = useTranslation();
@@ -381,6 +384,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         className="code-editor-ta mono"
         value={doc}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"

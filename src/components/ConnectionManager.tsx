@@ -1067,6 +1067,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   <input
                     type="text"
                     className="conn-inline-input"
+                    aria-label={t("connection.renameProject")}
                     value={renamingProject.value}
                     autoFocus
                     onClick={(e) => e.stopPropagation()}

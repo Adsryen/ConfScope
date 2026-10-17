@@ -25,7 +25,7 @@ export interface NumberFieldProps {
   /** 值非法时返回可直接展示的文案，合法（含允许留空）返回 undefined。文案由调用方本地化。 */
   validate?: (value: number | undefined) => string | undefined;
   disabled?: boolean;
-  /** 外层 label 已提供可见名称时可以不传；否则作为 aria-label 兜底。 */
+  /** 外层 label 已提供可见名称时可以不传；否则作为 aria-label 兜底，再退到 placeholder。 */
   ariaLabel?: string;
 }
 
@@ -83,7 +83,7 @@ export default function NumberField({
         step={step}
         placeholder={placeholder}
         disabled={disabled}
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? placeholder}
         aria-invalid={showError ? true : undefined}
         aria-describedby={showError ? errorId : undefined}
         onFocus={() => {

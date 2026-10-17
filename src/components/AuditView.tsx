@@ -670,6 +670,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreDataIdPlaceholder")}
+                  aria-label={t("audit.ignoreDataIdPlaceholder")}
                   value={ignoreForm.dataId ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, dataId: e.target.value || undefined })}
                 />
@@ -677,6 +678,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreKeyPlaceholder")}
+                  aria-label={t("audit.ignoreKeyPlaceholder")}
                   value={ignoreForm.key ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, key: e.target.value || undefined })}
                 />
@@ -684,6 +686,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreReasonPlaceholder")}
+                  aria-label={t("audit.ignoreReasonPlaceholder")}
                   value={ignoreForm.reason}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, reason: e.target.value })}
                 />
@@ -728,6 +731,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   <div className="field-row">
                     <select
                       className="search-input"
+                      aria-label={t("audit.ruleType")}
                       value={normalizeForm.type}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, type: e.target.value as NormalizeRule["type"] })}
                     >
@@ -740,6 +744,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                       className="search-input mono"
                       spellCheck={false}
                       placeholder={t("audit.matchPattern")}
+                      aria-label={t("audit.matchPattern")}
                       value={normalizeForm.pattern}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
                     />
@@ -748,6 +753,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                       className="search-input mono"
                       spellCheck={false}
                       placeholder={t("audit.replaceTo")}
+                      aria-label={t("audit.replaceTo")}
                       value={normalizeForm.replacement}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, replacement: e.target.value })}
                     />

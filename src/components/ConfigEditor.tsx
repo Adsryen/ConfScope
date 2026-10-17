@@ -179,6 +179,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
                 onChange={setContent}
                 format={fmt}
                 placeholder={t("config.contentPlaceholder")}
+                ariaLabel={t("config.contentLabel")}
                 active={active}
               />
             </div>

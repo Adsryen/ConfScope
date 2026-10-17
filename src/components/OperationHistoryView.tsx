@@ -331,6 +331,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       <div className="data-toolbar history-filters">
         <select
           className="history-filter-select"
+          aria-label={t("operationHistory.filterConnection")}
           value={filterConnection}
           onChange={(e) => {
             const connId = e.target.value;
@@ -345,7 +346,12 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
             </option>
           ))}
         </select>
-        <select className="history-filter-select" value={filterType} onChange={(e) => setFilterType(e.target.value as OperationType | "")}>
+        <select
+          className="history-filter-select"
+          aria-label={t("operationHistory.operationType")}
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value as OperationType | "")}
+        >
           <option value="">{t("operationHistory.allTypes")}</option>
           <option value="publish">{t("operationHistory.opPublish")}</option>
           <option value="delete">{t("operationHistory.opDelete")}</option>
@@ -362,6 +368,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
           type="text"
           className="history-filter-input"
           placeholder={t("operationHistory.dataIdPlaceholder")}
+          aria-label={t("operationHistory.dataIdPlaceholder")}
           value={filterDataId}
           onChange={(e) => setFilterDataId(e.target.value)}
         />

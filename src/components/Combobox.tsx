@@ -20,6 +20,8 @@ interface Props {
   onPick?: (o: ComboOption) => void;
   options: ComboOption[];
   placeholder?: string;
+  /** 可访问名；不传则退回 placeholder，保证框永远有名字（placeholder 会随输入消失）。 */
+  ariaLabel?: string;
   disabled?: boolean;
 }
 
@@ -42,7 +44,7 @@ function fuzzy(query: string, text: string, exactValue?: string): boolean {
 }
 
 /** 输入框 + 候选下拉框（combobox）：支持模糊过滤，并防止被父容器裁剪。 */
-export default function Combobox({ value, onChange, onPick, options, placeholder, disabled }: Props) {
+export default function Combobox({ value, onChange, onPick, options, placeholder, ariaLabel, disabled }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
@@ -159,6 +161,7 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
         className="search-input wide mono"
         value={value}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         disabled={disabled}
         autoCapitalize="off"
         autoCorrect="off"

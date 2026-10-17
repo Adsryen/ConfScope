@@ -7,6 +7,7 @@ export default function LanguageSwitch() {
   return (
     <select
       className="lang-switch"
+      aria-label={t("app.language")}
       value={locale}
       onChange={(e) => setLocale(e.target.value as Locale)}
       title={t("app.language")}

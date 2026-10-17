@@ -285,7 +285,8 @@ export default function HistoryView({
               type="checkbox"
               checked={picked.includes(h.id)}
               onChange={() => togglePick(h.id)}
-              title={t('history.pickForCompare')}
+              aria-label={t("history.pickForCompare")}
+              title={t("history.pickForCompare")}
             />
             <div
               className="history-item-main"

@@ -983,6 +983,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               type="text"
               className="search-input wide"
               placeholder={searchMode === "content" ? t("config.contentSearchPlaceholder") : t("config.searchPlaceholder")}
+              aria-label={searchMode === "content" ? t("config.contentSearchAriaLabel") : t("config.searchAriaLabel")}
               value={search}
               autoCapitalize="off"
               autoCorrect="off"
@@ -1215,6 +1216,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         value={draft}
                         onChange={setDraft}
                         format={fmt}
+                        ariaLabel={t("config.contentLabel")}
                         active={active}
                         searchTerm={isContentSearchActive ? contentTerm : undefined}
                       />

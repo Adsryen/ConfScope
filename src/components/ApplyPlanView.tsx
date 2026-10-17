@@ -325,7 +325,12 @@ function ItemDetail({
             </div>
           )}
           <div className="apply-edit-editor">
-            <CodeEditor value={edit.content} onChange={(content) => onEditChange(item.id, { content, errors: [] })} format={diffFormat} />
+            <CodeEditor
+              value={edit.content}
+              onChange={(content) => onEditChange(item.id, { content, errors: [] })}
+              format={diffFormat}
+              ariaLabel={t("apply.editTarget")}
+            />
           </div>
         </div>
       )}
