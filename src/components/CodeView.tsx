@@ -410,6 +410,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
             onClick={openFind}
             title={t("config.openFind")}
             aria-label={t("config.openFind")}
+            aria-keyshortcuts="Control+F"
             style={padRightVar}
           >
             ⌕
@@ -444,8 +445,9 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               className="code-find-btn"
               onClick={() => navigate(-1)}
               disabled={!hits.length}
-              title={t("config.findPrev")}
+              title={t("config.findPrevKey")}
               aria-label={t("config.findPrev")}
+              aria-keyshortcuts="Shift+Enter"
             >
               ↑
             </button>
@@ -454,8 +456,9 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               className="code-find-btn"
               onClick={() => navigate(1)}
               disabled={!hits.length}
-              title={t("config.findNext")}
+              title={t("config.findNextKey")}
               aria-label={t("config.findNext")}
+              aria-keyshortcuts="Enter"
             >
               ↓
             </button>
@@ -463,8 +466,9 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               type="button"
               className="code-find-btn"
               onClick={closeFind}
-              title={t("config.findClose")}
+              title={t("config.findCloseKey")}
               aria-label={t("config.findClose")}
+              aria-keyshortcuts="Escape"
             >
               ✕
             </button>

@@ -434,7 +434,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       </span>
 
       {enableFind && !findOpen && (
-        <button type="button" className="code-find-open" onClick={openFind} title={t("config.openFind")} aria-label={t("config.openFind")}>
+        <button
+          type="button"
+          className="code-find-open"
+          onClick={openFind}
+          title={t("config.openFind")}
+          aria-label={t("config.openFind")}
+          aria-keyshortcuts="Control+F"
+        >
           ⌕
         </button>
       )}
@@ -467,8 +474,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             className="code-find-btn"
             onClick={() => navigate(-1)}
             disabled={!hits.length}
-            title={t("config.findPrev")}
+            title={t("config.findPrevKey")}
             aria-label={t("config.findPrev")}
+            aria-keyshortcuts="Shift+Enter"
           >
             ↑
           </button>
@@ -477,8 +485,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             className="code-find-btn"
             onClick={() => navigate(1)}
             disabled={!hits.length}
-            title={t("config.findNext")}
+            title={t("config.findNextKey")}
             aria-label={t("config.findNext")}
+            aria-keyshortcuts="Enter"
           >
             ↓
           </button>
@@ -486,8 +495,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             type="button"
             className="code-find-btn"
             onClick={closeFind}
-            title={t("config.findClose")}
+            title={t("config.findCloseKey")}
             aria-label={t("config.findClose")}
+            aria-keyshortcuts="Escape"
           >
             ✕
           </button>
