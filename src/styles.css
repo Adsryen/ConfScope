@@ -6602,6 +6602,8 @@ button.diff-workflow-step-btn:hover {
   color: #e57373;
 }
 
+/* 任务行上的次要动作（取消 / 删除）静止态藏起来，避免整页像按钮墙。
+   opacity 只改可见性不改占位，显形时行高不跳。 */
 .task-item-actions {
   display: flex;
   gap: 4px;
@@ -6610,8 +6612,11 @@ button.diff-workflow-step-btn:hover {
   transition: opacity 0.15s;
 }
 
+/* 三条通道都要有：鼠标悬停、键盘 Tab 进这一行（opacity:0 不摘 Tab 顺序，看不见也得让它显形），
+   以及行被选中——触摸屏没有 hover，选中就是「我要对它动手」的信号（R74 / 波46）。 */
 .task-item:hover .task-item-actions,
-.task-item:focus-within .task-item-actions {
+.task-item:focus-within .task-item-actions,
+.task-item.active .task-item-actions {
   opacity: 1;
 }
 
@@ -7538,10 +7543,6 @@ button.diff-workflow-step-btn:hover {
 .task-center-content {
   grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
   margin-top: 0;
-}
-
-.task-item-actions {
-  opacity: 1;
 }
 
 .task-detail-actions {
