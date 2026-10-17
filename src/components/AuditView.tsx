@@ -591,6 +591,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 <span>{t("app.namespace")}</span>
                 <input
                   className="search-input mono"
+                  spellCheck={false}
                   value={env.namespace}
                   placeholder="public"
                   onChange={(e) => updateSource(index, { namespace: e.target.value })}
@@ -600,6 +601,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 <span>group</span>
                 <input
                   className="search-input mono"
+                  spellCheck={false}
                   value={env.group}
                   placeholder={t("diff.groupPlaceholder")}
                   onChange={(e) => updateSource(index, { group: e.target.value })}
@@ -609,6 +611,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 <span>dataId {t("audit.filter")}</span>
                 <input
                   className="search-input mono"
+                  spellCheck={false}
                   value={env.dataIdFilter}
                   placeholder={t("audit.allConfigs")}
                   onChange={(e) => updateSource(index, { dataIdFilter: e.target.value })}
@@ -725,12 +728,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                     </select>
                     <input
                       className="search-input mono"
+                      spellCheck={false}
                       placeholder={t("audit.matchPattern")}
                       value={normalizeForm.pattern}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
                     />
                     <input
                       className="search-input mono"
+                      spellCheck={false}
                       placeholder={t("audit.replaceTo")}
                       value={normalizeForm.replacement}
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, replacement: e.target.value })}

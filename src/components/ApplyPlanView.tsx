@@ -428,6 +428,7 @@ function ConfirmationPanel({
           <input
             id="apply-confirmation-text"
             className="search-input wide mono"
+            spellCheck={false}
             value={confirmationText}
             onChange={(event) => onConfirmationTextChange(event.target.value)}
           />

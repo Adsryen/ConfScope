@@ -327,6 +327,7 @@ export default function SSHManagerView() {
                       <span>{t('connection.sshUsername')}</span>
                       <input
                         className="search-input mono"
+                        spellCheck={false}
                         value={draft.config.username}
                         onChange={(e) => setConfig({ username: e.target.value })}
                       />
@@ -368,6 +369,7 @@ export default function SSHManagerView() {
                         <span>{t('connection.privateKey')}</span>
                         <textarea
                           className="search-input wide mono ssh-key"
+                          spellCheck={false}
                           value={draft.config.privateKey || ""}
                           placeholder="-----BEGIN RSA PRIVATE KEY-----"
                           onChange={(e) => setConfig({ privateKey: e.target.value })}

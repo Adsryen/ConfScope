@@ -644,7 +644,9 @@ export default function App() {
   );
 
   return (
-    <div className="app-shell">
+    // 全局关掉拼写检查：HTML 的 spellcheck 会向后代继承，配置正文、dataId、IP、
+    // 密钥这类内容不该被红线标成「拼写错误」；个别输入框另有显式声明兜底（守卫见 tests/ux）。
+    <div className="app-shell" spellCheck={false}>
       <div className="app-main">
         <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
           {/* 侧栏是全站唯一的页面切换入口，读屏需要一个地标名（R41） */}

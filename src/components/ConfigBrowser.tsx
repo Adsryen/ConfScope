@@ -1416,6 +1416,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 <input
                   id="config-target-namespace"
                   className="search-input wide mono"
+                  spellCheck={false}
                   value={targetNamespace}
                   placeholder={t("app.namespaceDefault")}
                   onChange={(event) => setTargetNamespace(event.target.value)}

@@ -1919,6 +1919,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           </FieldLabel>
                           <input
                             className="search-input mono"
+                            spellCheck={false}
                             value={draft.sshConfig?.username || ""}
                             placeholder="root"
                             onChange={(e) => setSSH({ username: e.target.value })}
@@ -1948,6 +1949,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           <div className="pwd-field">
                             <input
                               className="search-input wide mono"
+                              spellCheck={false}
                               type={showSSHPwd ? "text" : "password"}
                               value={draft.sshConfig?.password || ""}
                               onChange={(e) => setSSH({ password: e.target.value })}
@@ -1972,6 +1974,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             </FieldLabel>
                             <textarea
                               className="search-input wide mono ssh-key"
+                              spellCheck={false}
                               value={draft.sshConfig?.privateKey || ""}
                               placeholder="-----BEGIN RSA PRIVATE KEY-----"
                               onChange={(e) => setSSH({ privateKey: e.target.value })}
@@ -1984,6 +1987,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             <div className="pwd-field">
                               <input
                                 className="search-input wide mono"
+                                spellCheck={false}
                                 type={showSSHPassphrase ? "text" : "password"}
                                 value={draft.sshConfig?.passphrase || ""}
                                 onChange={(e) => setSSH({ passphrase: e.target.value })}

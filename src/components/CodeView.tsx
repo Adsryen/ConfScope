@@ -409,6 +409,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
             <input
               ref={findInputRef}
               className="code-find-input mono"
+              spellCheck={false}
               type="text"
               value={findTerm}
               placeholder={t("config.findPlaceholder")}
