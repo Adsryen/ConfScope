@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { useTranslation } from "../i18n";
 import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
 import {
@@ -102,7 +103,10 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null);
+  // 切 Tab 不再丢：选中的快照与列表滚动位置记在 lib/viewState（R27）。
+  // 注意只记这两样——打包密码 packagePassword 是敏感输入，绝不进记忆层。
+  const [selectedSnapshot, setSelectedSnapshot] = useRememberedState<Snapshot | null>("backup.selectedSnapshot", null);
+  const listScroll = useScrollMemory("backup.scroll.list", snapshots.length);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [snapshotWebDAV, setSnapshotWebDAV] = useState(() => loadSnapshotWebDAVState().webdav);
   const [packagePassword, setPackagePassword] = useState("");
@@ -125,7 +129,8 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+    // setSelectedSnapshot 来自 lib/viewState 的 hook，引用本身稳定，但 eslint 认不出来，显式列进依赖
+  }, [setSelectedSnapshot, t]);
 
   useEffect(() => {
     void loadSnapshots();
@@ -178,7 +183,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
       }
       setShowDeleteConfirm(null);
     },
-    [loadSnapshots, selectedSnapshot, snapshots, t]
+    [loadSnapshots, selectedSnapshot, setSelectedSnapshot, snapshots, t]
   );
 
   const currentSnapshotWebDAVTarget = useCallback(() => {
@@ -361,7 +366,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
 
       {snapshots.length > 0 && (
         <div className="data-split backup-content">
-          <div className="data-list backup-list">
+          <div className="data-list backup-list" ref={listScroll.ref} onScroll={listScroll.onScroll}>
             {snapshots.map((snap) => {
               const stats = getSnapshotStats(snap);
               const isActive = selectedSnapshot?.id === snap.id;

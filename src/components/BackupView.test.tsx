@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import BackupView from "./BackupView";
+import { clearViewState, readViewState, viewStateKeys } from "../lib/viewState";
 import { I18nProvider } from "../i18n";
 import type { Snapshot } from "../api/snapshot";
 import { loadOperationHistory } from "../store/operationHistory";
@@ -71,6 +72,8 @@ describe("BackupView", () => {
   };
 
   beforeEach(async () => {
+    // 视图状态存在模块内存里（R27）：用例之间必须隔离
+    clearViewState();
     localStorage.clear();
     localStorage.setItem("locale", "zh-CN");
     vi.clearAllMocks();
@@ -419,6 +422,66 @@ describe("BackupView", () => {
       expect(snapshotWebDAV.importSnapshotWebDAVPackage).toHaveBeenCalledWith(expect.anything(), "/snapshots/snap.cssnapshot", "package-pass")
     );
     expect(vi.mocked(listSnapshots).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("切走再回来：选中的快照与列表滚动位置都还在（R27）", async () => {
+    const { listSnapshots } = await import("../api/snapshot");
+    const secondSnapshot: Snapshot = {
+      ...mockSnapshots[0],
+      id: "snap-2",
+      name: "dev-nacos_public_20240102",
+      configs: [
+        {
+          dataId: "gateway.yaml",
+          group: "DEFAULT_GROUP",
+          content: "server:\n  port: 9090",
+          configType: "yaml",
+          updateTime: "2024-01-02 10:00:00",
+        },
+      ],
+    };
+    vi.mocked(listSnapshots).mockResolvedValue([mockSnapshots[0], secondSnapshot]);
+
+    const first = renderWithI18n(<BackupView />);
+    await first.findByText("dev-nacos_public_20240102");
+    const items = Array.from(first.container.querySelectorAll<HTMLElement>(".backup-item"));
+    fireEvent.click(items[1]);
+    await screen.findByText("gateway.yaml");
+    expect(items[1].className).toContain("active");
+
+    const list = first.container.querySelector(".backup-list") as HTMLElement;
+    list.scrollTop = 220;
+    fireEvent.scroll(list);
+    expect(readViewState<Snapshot>("backup.selectedSnapshot")?.id).toBe("snap-2");
+    expect(readViewState<number>("backup.scroll.list")).toBe(220);
+    first.unmount();
+
+    const second = renderWithI18n(<BackupView />);
+    await second.findByText("gateway.yaml");
+    const restoredItems = Array.from(second.container.querySelectorAll<HTMLElement>(".backup-item"));
+    expect(restoredItems[1].className).toContain("active");
+    expect((second.container.querySelector(".backup-list") as HTMLElement).scrollTop).toBe(220);
+  });
+
+  it("快照包密码不进记忆层，切回来要重输（R27）", async () => {
+    const first = renderWithI18n(<BackupView />);
+    // 加载完成后会自动选中第一个快照，详情里的 WebDAV 面板随之出现
+    const passwordInput = await screen.findByLabelText("快照包密码");
+    fireEvent.change(passwordInput, { target: { value: "s3cret" } });
+    expect(readViewState<Snapshot>("backup.selectedSnapshot")?.id).toBe("snap-1");
+
+    const leaked = viewStateKeys().filter((key) => {
+      const value = readViewState(key);
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      return text.includes("s3cret");
+    });
+    expect(leaked).toEqual([]);
+    first.unmount();
+
+    const second = renderWithI18n(<BackupView />);
+    await second.findByLabelText("快照包密码");
+    expect((second.container.querySelector(".backup-item") as HTMLElement).className).toContain("active");
+    expect((screen.getByLabelText("快照包密码") as HTMLInputElement).value).toBe("");
   });
 });
 

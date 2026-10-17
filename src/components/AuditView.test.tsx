@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AuditView from "./AuditView";
+import { clearViewState, readViewState, writeViewState } from "../lib/viewState";
 import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 import type { Connection } from "../store/connections";
 
@@ -128,6 +129,8 @@ function makeConnection(overrides: Partial<Connection> = {}): Connection {
 
 describe("AuditView", () => {
   beforeEach(() => {
+    // 视图状态存在模块内存里（R27）：用例之间必须隔离，否则上一条记住的项目/筛选会污染这一条
+    clearViewState();
     apiMocks.listConfigs.mockReset();
     apiMocks.listAllConfigs.mockReset();
     apiMocks.getConfig.mockReset();
@@ -249,9 +252,7 @@ describe("AuditView", () => {
       pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
       totalCount: 1,
     });
-    apiMocks.getConfig
-      .mockResolvedValueOnce("server:\n  port: 8080")
-      .mockResolvedValueOnce("server:\n  port: 9090");
+    apiMocks.getConfig.mockResolvedValueOnce("server:\n  port: 8080").mockResolvedValueOnce("server:\n  port: 9090");
 
     render(<AuditView connections={conns} onStartApply={onStartApply} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -327,9 +328,7 @@ describe("AuditView", () => {
       pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
       totalCount: 1,
     });
-    apiMocks.getConfig
-      .mockResolvedValueOnce("server:\n  port: 8080")
-      .mockResolvedValueOnce("server:\n  port: 9090");
+    apiMocks.getConfig.mockResolvedValueOnce("server:\n  port: 8080").mockResolvedValueOnce("server:\n  port: 9090");
 
     render(<AuditView connections={conns} onStartApply={onStartApply} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -374,9 +373,7 @@ describe("AuditView", () => {
         pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
         totalCount: 1,
       });
-    apiMocks.getConfig
-      .mockResolvedValueOnce("server:\n  port: 8080")
-      .mockResolvedValueOnce("server:\n  port: 9090");
+    apiMocks.getConfig.mockResolvedValueOnce("server:\n  port: 8080").mockResolvedValueOnce("server:\n  port: 9090");
 
     render(<AuditView connections={conns} onStartApply={onStartApply} />);
     fireEvent.click(screen.getByRole("button", { name: /Ignore Rules/i }));
@@ -427,9 +424,7 @@ describe("AuditView", () => {
       pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
       totalCount: 1,
     });
-    apiMocks.getConfig
-      .mockResolvedValueOnce("server:\n  port: 8080")
-      .mockResolvedValueOnce("server:\n  port: 9090");
+    apiMocks.getConfig.mockResolvedValueOnce("server:\n  port: 8080").mockResolvedValueOnce("server:\n  port: 9090");
 
     render(<AuditView connections={conns} onNavigateToDiff={onNavigate} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -477,7 +472,7 @@ describe("AuditView", () => {
       pageNumber: pageNo,
       pagesAvailable: 3,
     }));
-    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+    apiMocks.getConfig.mockResolvedValue("server:\n  port: 8080");
 
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -501,7 +496,7 @@ describe("AuditView", () => {
       failedPages: [],
       truncated: true,
     });
-    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+    apiMocks.getConfig.mockResolvedValue("server:\n  port: 8080");
 
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -523,7 +518,7 @@ describe("AuditView", () => {
       failedPages: [3],
       truncated: false,
     });
-    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+    apiMocks.getConfig.mockResolvedValue("server:\n  port: 8080");
 
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
@@ -563,5 +558,84 @@ describe("AuditView", () => {
       // 连接未配置默认 group → 留空（表示该命名空间全部 group）
       group: "",
     });
+  });
+  const twoEnvs = () => [
+    makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+    makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+  ];
+
+  const oneRowMatrix = () => {
+    apiMocks.listAllConfigs.mockResolvedValue({
+      items: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+      pagesAvailable: 1,
+      loadedPages: 1,
+      failedPages: [],
+      truncated: false,
+    });
+    apiMocks.getConfig.mockResolvedValue("server:\n  port: 8080");
+  };
+
+  it("切走再回来：环境筛选、状态筛选与排序都还在，下一次审计按原参数请求（R27）", async () => {
+    const conns = twoEnvs();
+    oneRowMatrix();
+
+    const first = render(<AuditView connections={conns} />);
+    fireEvent.change(screen.getAllByPlaceholderText("public")[0], { target: { value: "ns-dev" } });
+    fireEvent.change(screen.getAllByPlaceholderText("All configs")[0], { target: { value: "pay" } });
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+    fireEvent.click(screen.getByRole("button", { name: "Consistent" }));
+    fireEvent.click(screen.getByRole("button", { name: "key" }));
+    first.unmount();
+
+    const second = render(<AuditView connections={conns} />);
+    expect(screen.getAllByPlaceholderText("public")[0]).toHaveValue("ns-dev");
+    expect(screen.getAllByPlaceholderText("All configs")[0]).toHaveValue("pay");
+
+    // 审计结果本来就要手动跑一次（本任务不解决「重发请求」），跑完以后筛选与排序按原样生效
+    apiMocks.listAllConfigs.mockClear();
+    fireEvent.click(screen.getByText("Run Audit"));
+    await waitFor(() =>
+      expect(apiMocks.listAllConfigs).toHaveBeenCalledWith(expect.anything(), "ns-dev", "*pay*", expect.anything(), expect.anything())
+    );
+    await screen.findByText("server.port");
+    expect(screen.getByRole("button", { name: "Consistent" }).className).toContain("btn-primary");
+    expect(screen.getByRole("button", { name: "key ↑" }).className).toContain("btn-primary");
+    // 状态筛选把一致项留下，矩阵不应被清成空
+    expect(second.container.querySelectorAll(".audit-matrix-body .audit-matrix-row").length).toBeGreaterThan(0);
+  });
+
+  it("记住的项目被删掉后回落到可用项目，不留下空白页（R27）", () => {
+    const conns = twoEnvs();
+    const first = render(<AuditView connections={conns} />);
+    first.unmount();
+
+    writeViewState("audit.project", "已不存在的项目");
+    render(<AuditView connections={conns} />);
+
+    expect(readViewState<string>("audit.project")).toBe("test-proj");
+    expect(screen.getAllByPlaceholderText("public")).toHaveLength(2);
+  });
+
+  it("矩阵滚动位置写回，重新挂载并重新出结果后恢复（R27）", async () => {
+    const conns = twoEnvs();
+    oneRowMatrix();
+
+    const first = render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    const body = first.container.querySelector(".audit-matrix-body") as HTMLElement;
+    body.scrollTop = 320;
+    fireEvent.scroll(body);
+    expect(readViewState<number>("audit.scroll.matrix")).toBe(320);
+    first.unmount();
+
+    // jsdom 没有布局引擎，挂载时不会被夹回 0；真实浏览器的夹回与二次恢复由 lib/viewState.test.tsx 的探针覆盖
+    const second = render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    expect((second.container.querySelector(".audit-matrix-body") as HTMLElement).scrollTop).toBe(320);
   });
 });

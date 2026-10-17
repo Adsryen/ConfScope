@@ -1,5 +1,5 @@
 // 操作历史页面：展示配置中心的操作记录和本地执行的操作。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { Connection } from "../store/connections";
 import { reportError } from "../lib/errorCenter";
@@ -21,6 +21,7 @@ import {
   type ApplyVerification,
 } from "../store/applyVerifications";
 import { getConfigDocument, listHistory } from "../api/nacos";
+import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
 
@@ -71,11 +72,11 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 筛选条件
-  const [filterConnection, setFilterConnection] = useState<string>("");
-  const [filterType, setFilterType] = useState<OperationType | "">("");
-  const [filterDataId, setFilterDataId] = useState("");
-  const [selectedRecord, setSelectedRecord] = useState<OperationRecord | null>(null);
+  // 筛选条件（切 Tab 不再丢：记在 lib/viewState，R27）
+  const [filterConnection, setFilterConnection] = useRememberedState<string>("history.filterConnection", "");
+  const [filterType, setFilterType] = useRememberedState<OperationType | "">("history.filterType", "");
+  const [filterDataId, setFilterDataId] = useRememberedState<string>("history.filterDataId", "");
+  const [selectedRecord, setSelectedRecord] = useRememberedState<OperationRecord | null>("history.selectedRecord", null);
   const [verifications, setVerifications] = useState<ApplyVerification[]>(() => loadApplyVerifications());
   const [followupBusy, setFollowupBusy] = useState<string | null>(null);
   const [followupError, setFollowupError] = useState<FollowupError | null>(null);
@@ -127,6 +128,15 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     [connections]
   );
 
+  // 记住的连接筛选要在重新挂载时补拉一次中心历史：否则「筛选还在、列表只剩本地记录」，
+  // 看起来像数据丢了。只补这一次（onChange 里原有的一次不动），不碰在途请求取消那条 backlog。
+  const centerRefetchDone = useRef(false);
+  useEffect(() => {
+    if (centerRefetchDone.current || !filterConnection) return;
+    centerRefetchDone.current = true;
+    void fetchCenterHistory(filterConnection);
+  }, [filterConnection, fetchCenterHistory]);
+
   // 合并并筛选记录
   const allRecords = useMemo(() => {
     const combined = [...localRecords, ...centerRecords];
@@ -137,6 +147,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       dataId: filterDataId || undefined,
     });
   }, [localRecords, centerRecords, filterConnection, filterType, filterDataId]);
+
+  // 列表滚动位置：本地记录要挂载后才同步进来，条数作为列表版本，内容变多时再恢复一次
+  const listScroll = useScrollMemory("history.scroll.list", allRecords.length);
 
   const selectedVisibleRecord = selectedRecord && allRecords.some((record) => record.id === selectedRecord.id) ? selectedRecord : null;
   const failedCount = allRecords.filter((record) => record.result === "failure").length;
@@ -366,7 +379,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
 
       {/* 操作列表 */}
       <div className="data-split history-content">
-        <div className="data-list history-list">
+        <div className="data-list history-list" ref={listScroll.ref} onScroll={listScroll.onScroll}>
           {allRecords.length === 0 ? (
             <div className="data-empty-state">
               <div>{t("operationHistory.noRecords")}</div>

@@ -11,6 +11,7 @@ import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
+import { readViewState, useRememberedState, useScrollMemory, writeViewState } from "../lib/viewState";
 import Select from "./Select";
 
 export interface DiffJumpSideParams {
@@ -37,6 +38,17 @@ type AuditStatus = "consistent" | "partial" | "inconsistent" | "missing" | "pars
 
 export interface EnvSource {
   conn: Connection;
+  namespace: string;
+  group: string;
+  dataIdFilter: string;
+}
+
+type AuditSortKey = "dataId" | "key" | "status";
+type AuditSortDir = "asc" | "desc";
+
+/** lib/viewState 里记的环境来源形状（连接对象不进记忆层，按 id 重新取最新配置）。 */
+interface RememberedEnvSource {
+  connId: string;
   namespace: string;
   group: string;
   dataIdFilter: string;
@@ -127,11 +139,18 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     const names = new Set(connections.map((c) => connectionProjectName(c)));
     return Array.from(names).sort();
   }, [connections]);
-  const [selectedProject, setSelectedProject] = useState(firstProject);
+  // 切 Tab 不再丢：项目、环境筛选、忽略/归一化规则、状态筛选与排序都记在 lib/viewState（R27）
+  const [selectedProject, setSelectedProject] = useRememberedState<string>("audit.project", firstProject);
   const projectConns = useMemo(
     () => connections.filter((c) => connectionProjectName(c) === selectedProject),
     [connections, selectedProject]
   );
+
+  // 记住的项目可能因为连接被删/改名而不复存在，回落到第一个可用项目，避免空白页
+  useEffect(() => {
+    if (projectNames.length === 0 || projectNames.includes(selectedProject)) return;
+    setSelectedProject(projectNames[0]);
+  }, [projectNames, selectedProject, setSelectedProject]);
 
   // 环境来源（最多 6 个）
   // group 默认跟随连接配置的默认 group（留空 = 该命名空间全部 group）
@@ -141,6 +160,16 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   };
   const [envSources, setEnvSources] = useState<EnvSource[]>(() => {
     const nonLocal = projectConns.filter((c) => c.sourceType !== "local-snapshot");
+    // 只记连接 id 与三个筛选值，连接对象本身按最新配置重新取（改过地址/命名空间的连接不会被旧快照钉住）
+    const remembered = readViewState<RememberedEnvSource[]>("audit.envs");
+    const hydrated = (remembered ?? [])
+      .map((item): EnvSource | null => {
+        const conn = nonLocal.find((c) => c.id === item.connId);
+        if (!conn) return null;
+        return { conn, namespace: item.namespace, group: item.group, dataIdFilter: item.dataIdFilter };
+      })
+      .filter((env): env is EnvSource => env !== null);
+    if (hydrated.length > 0) return hydrated.slice(0, 6);
     return nonLocal.slice(0, 4).map((c) => ({
       conn: c,
       namespace: c.defaultNamespace ?? "",
@@ -148,6 +177,13 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       dataIdFilter: "",
     }));
   });
+
+  useEffect(() => {
+    writeViewState(
+      "audit.envs",
+      envSources.map((env) => ({ connId: env.conn.id, namespace: env.namespace, group: env.group, dataIdFilter: env.dataIdFilter }))
+    );
+  }, [envSources]);
 
   useEffect(() => {
     setEnvSources((prev) => {
@@ -169,15 +205,15 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const auditReqId = useRef(0);
   const [selectedRow, setSelectedRow] = useState<AuditRow | null>(null);
   const [baseline, setBaseline] = useState<string>("");
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useRememberedState<boolean>("audit.showSettings", false);
 
   // 忽略规则
-  const [ignoreRules, setIgnoreRules] = useState<IgnoreRule[]>([]);
+  const [ignoreRules, setIgnoreRules] = useRememberedState<IgnoreRule[]>("audit.ignoreRules", []);
   const [ignoreForm, setIgnoreForm] = useState<{ dataId?: string; key?: string; reason: string }>({ reason: "" });
 
   // 名称归一化
-  const [normalizeEnabled, setNormalizeEnabled] = useState(false);
-  const [normalizeRules, setNormalizeRules] = useState<NormalizeRule[]>([]);
+  const [normalizeEnabled, setNormalizeEnabled] = useRememberedState<boolean>("audit.normalizeEnabled", false);
+  const [normalizeRules, setNormalizeRules] = useRememberedState<NormalizeRule[]>("audit.normalizeRules", []);
   const [normalizeForm, setNormalizeForm] = useState<NormalizeRule>({
     id: "", type: "prefix", pattern: "", replacement: "", caseSensitive: false,
   });
@@ -187,10 +223,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const [sanitizeExport, setSanitizeExport] = useState(true);
 
   // 过滤与排序
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
-  const [hideIgnored, setHideIgnored] = useState(false);
-  const [sortKey, setSortKey] = useState<"dataId" | "key" | "status">("dataId");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [statusFilter, setStatusFilter] = useRememberedState<Set<string>>("audit.statusFilter", new Set<string>());
+  const [hideIgnored, setHideIgnored] = useRememberedState<boolean>("audit.hideIgnored", false);
+  const [sortKey, setSortKey] = useRememberedState<AuditSortKey>("audit.sortKey", "dataId");
+  const [sortDir, setSortDir] = useRememberedState<AuditSortDir>("audit.sortDir", "asc");
 
   const genId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -486,6 +522,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     });
   }, [rows, statusFilter, hideIgnored, sortKey, sortDir]);
 
+  // 矩阵滚动位置：审计结果要手动跑一次才有，挂载时列表是空的（真实浏览器会把偏移夹回 0），
+  // 所以按条数作为列表版本，数据到达后再恢复一次（见 lib/viewState）。
+  const matrixScroll = useScrollMemory("audit.scroll.matrix", filteredRows.length);
+
   // 切换状态过滤
   const toggleStatusFilter = (status: string) => {
     setStatusFilter((prev) => {
@@ -497,7 +537,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   };
 
   // 切换排序
-  const toggleSort = (key: "dataId" | "key" | "status") => {
+  const toggleSort = (key: AuditSortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -816,7 +856,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             </div>
           </div>
 
-          <div className="audit-matrix-body">
+          <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
             {filteredRows.map((row) => (
               <div
                 key={row.id}

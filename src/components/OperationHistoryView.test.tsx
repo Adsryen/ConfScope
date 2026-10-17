@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { buildApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
@@ -7,6 +7,7 @@ import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory, type OperationRecord } from "../store/operationHistory";
 import OperationHistoryView from "./OperationHistoryView";
+import { clearViewState, readViewState } from "../lib/viewState";
 
 const nacosMocks = vi.hoisted(() => ({
   listHistory: vi.fn(),
@@ -229,6 +230,8 @@ describe("OperationHistoryView", () => {
   });
 
   beforeEach(() => {
+    // 视图状态存在模块内存里（R27）：用例之间必须隔离
+    clearViewState();
     localStorage.clear();
     localStorage.setItem("locale", "zh-CN");
     nacosMocks.listHistory.mockReset();
@@ -530,5 +533,102 @@ describe("OperationHistoryView", () => {
     expect(screen.queryByRole("button", { name: "Rollback this operation" })).toBeNull();
     expect(nacosMocks.publishConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory().filter((record) => record.type === "rollback")).toHaveLength(0);
+  });
+  it("切走再回来：连接/类型/dataId 筛选与选中记录都还在，并按记住的连接补拉一次中心历史（R27）", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "record-keepalive",
+          type: "delete",
+          result: "failure",
+          timestamp: "2026-07-03T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          error: "permission denied",
+        },
+      ])
+    );
+
+    const first = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+    const selects = screen.getAllByRole("combobox");
+    fireEvent.change(selects[0], { target: { value: "conn-1" } });
+    fireEvent.change(selects[1], { target: { value: "delete" } });
+    fireEvent.change(screen.getByPlaceholderText("输入 dataId 筛选"), { target: { value: "app" } });
+    fireEvent.click(await screen.findByText("app.yaml"));
+    expect(screen.getByText("permission denied")).toBeDefined();
+    first.unmount();
+
+    nacosMocks.listHistory.mockClear();
+    const second = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+
+    expect((screen.getAllByRole("combobox")[0] as HTMLSelectElement).value).toBe("conn-1");
+    expect((screen.getAllByRole("combobox")[1] as HTMLSelectElement).value).toBe("delete");
+    expect((screen.getByPlaceholderText("输入 dataId 筛选") as HTMLInputElement).value).toBe("app");
+
+    // 记住的连接筛选要补拉一次中心历史，且连接数组换引用也不重复拉
+    await waitFor(() => expect(nacosMocks.listHistory).toHaveBeenCalledTimes(1));
+    act(() => {
+      second.rerender(
+        <I18nProvider>
+          <OperationHistoryView connections={[{ ...conn }]} />
+        </I18nProvider>
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(nacosMocks.listHistory).toHaveBeenCalledTimes(1);
+
+    expect(await screen.findByText("permission denied")).toBeDefined();
+  });
+
+  it("列表滚动位置写回并在重新挂载后恢复（R27）", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "record-scroll-1",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-03T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+        },
+      ])
+    );
+
+    const first = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+    const list = (await screen.findByText("app.yaml")).closest(".data-list") as HTMLElement;
+    list.scrollTop = 260;
+    fireEvent.scroll(list);
+    expect(readViewState<number>("history.scroll.list")).toBe(260);
+    first.unmount();
+
+    // jsdom 无布局，挂载时不会把偏移夹回 0；夹回与二次恢复由 lib/viewState.test.tsx 的探针覆盖
+    const second = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[conn]} />
+      </I18nProvider>
+    );
+    await screen.findByText("app.yaml");
+
+    expect((second.container.querySelector(".data-list") as HTMLElement).scrollTop).toBe(260);
   });
 });
