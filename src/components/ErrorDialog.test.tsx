@@ -102,3 +102,28 @@ describe("ErrorDialog", () => {
     expect(within(dialog).getByLabelText("Close")).toHaveAccessibleName("Close");
   });
 });
+
+describe("ErrorDialog 只读详情键盘可达（R39）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+  });
+
+  it("完整错误正文能 Tab 停住，读屏念得出区域名", () => {
+    renderErrorDialog();
+    act(() => {
+      const id = reportError({
+        title: "Load failed",
+        source: "dev / public",
+        message: "Short message",
+        detail: "Full message\nline 2",
+      });
+      showMessageDetail(id);
+    });
+
+    const region = screen.getByRole("region", { name: "完整错误" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    region.focus();
+    expect(document.activeElement).toBe(region);
+  });
+});

@@ -7887,3 +7887,20 @@ button.diff-workflow-step-btn:hover {
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* R39：以下只读正文此前只能靠滚轮浏览，键盘完全滚不到。
+   给它们 tabIndex=0 + role=region 后，Tab 能停在正文里用方向键滚动，
+   焦点环必须看得见；鼠标点击不画环（:focus-visible）。 */
+.code-area:focus-visible,
+.error-detail:focus-visible,
+.history-detail-content:focus-visible,
+.history-detail-error:focus-visible,
+.log-jsonl:focus-visible,
+.log-event-payload:focus-visible,
+.audit-detail-value:focus-visible,
+.inline-error-body:focus-visible,
+.update-release-notes:focus-visible,
+.match-side-scroll:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+}

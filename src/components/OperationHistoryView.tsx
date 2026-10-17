@@ -373,7 +373,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
             <span className="inline-error-title">{t("operationHistory.loadFailed")}</span>
             <CopyButton text={error} label={t("common.copyError")} />
           </div>
-          <pre className="inline-error-body">{error}</pre>
+          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+            {error}
+          </pre>
         </div>
       )}
       {loading && <div className="history-loading">{t("common.loading")}</div>}
@@ -563,7 +565,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                           <CopyButton text={visibleFollowupError} label={t("common.copyError")} />
                         </div>
                       </div>
-                      <pre className="inline-error-body">{visibleFollowupError}</pre>
+                      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+                        {visibleFollowupError}
+                      </pre>
                     </div>
                   )}
                 </div>
@@ -571,7 +575,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
               {selectedVisibleRecord.content && (
                 <div className="history-detail-field">
                   <label>{t("operationHistory.content")}</label>
-                  <pre className="history-detail-content">{selectedVisibleRecord.content}</pre>
+                  <pre className="history-detail-content" tabIndex={0} role="region" aria-label={t("operationHistory.content")}>
+                    {selectedVisibleRecord.content}
+                  </pre>
                 </div>
               )}
               {selectedVisibleRecord.error && (
@@ -580,7 +586,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                     <label>{t("operationHistory.error")}</label>
                     <CopyButton text={selectedVisibleRecord.error} label={t("common.copyError")} />
                   </div>
-                  <pre className="history-detail-error">{selectedVisibleRecord.error}</pre>
+                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("operationHistory.error")}>
+                    {selectedVisibleRecord.error}
+                  </pre>
                 </div>
               )}
                   </>

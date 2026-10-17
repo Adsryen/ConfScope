@@ -59,6 +59,7 @@ type InlineErrorProps = {
 };
 
 function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineErrorProps) {
+  const { t } = useTranslation();
   return (
     <div className="inline-error" role="alert">
       <div className="inline-error-head">
@@ -72,7 +73,9 @@ function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineE
           <CopyButton text={message} label={copyLabel} />
         </div>
       </div>
-      <pre className="inline-error-body">{message}</pre>
+      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+        {message}
+      </pre>
     </div>
   );
 }

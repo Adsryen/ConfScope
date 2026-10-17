@@ -102,7 +102,9 @@ function InlineError({ title, message }: { title: string; message: string }) {
           <CopyButton text={message} label={t("common.copyError")} />
         </div>
       </div>
-      <pre className="inline-error-body">{message}</pre>
+      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+        {message}
+      </pre>
     </div>
   );
 }

@@ -347,7 +347,15 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
           </div>
         </div>
 
-        <pre ref={areaRef} className="code-area mono hljs" onScroll={syncScroll} style={padRightVar}>
+        <pre
+          ref={areaRef}
+          className="code-area mono hljs"
+          tabIndex={0}
+          role="region"
+          aria-label={t("config.content")}
+          onScroll={syncScroll}
+          style={padRightVar}
+        >
           <code dangerouslySetInnerHTML={{ __html: html }} />
         </pre>
 

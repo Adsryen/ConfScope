@@ -298,7 +298,9 @@ export default function SettingsView() {
                     <CopyButton text={credentialError} label={t("common.copyError")} />
                   </div>
                 </div>
-                <pre className="inline-error-body">{credentialError}</pre>
+                <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+                  {credentialError}
+                </pre>
               </div>
             )}
           </section>

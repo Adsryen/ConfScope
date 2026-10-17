@@ -352,7 +352,9 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
             <span className="inline-error-title">{t("backup.loadFailed")}</span>
             <CopyButton text={error} label={t("common.copyError")} />
           </div>
-          <pre className="inline-error-body">{error}</pre>
+          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+            {error}
+          </pre>
         </div>
       )}
 
@@ -451,7 +453,9 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                       <span className="inline-error-title">{t("backup.webdavOperationFailed")}</span>
                       <CopyButton text={snapshotWebDAVError} label={t("common.copyError")} />
                     </div>
-                    <pre className="inline-error-body">{snapshotWebDAVError}</pre>
+                    <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+                      {snapshotWebDAVError}
+                    </pre>
                   </div>
                 )}
 

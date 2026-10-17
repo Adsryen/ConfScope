@@ -247,7 +247,11 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               <div className="test-msg-text">
                 <div>{t("about.updateAvailable", { version: updateResult!.latestVersion })}</div>
                 {updateResult!.sourceName && <div>{t("about.updateSourceHit", { source: updateResult!.sourceName })}</div>}
-                {updateResult!.releaseNotes && <div className="update-release-notes">{updateResult!.releaseNotes}</div>}
+                {updateResult!.releaseNotes && (
+                  <div className="update-release-notes" tabIndex={0} role="region" aria-label={t("about.releaseNotes")}>
+                    {updateResult!.releaseNotes}
+                  </div>
+                )}
               </div>
             </div>
             <div className="update-actions">

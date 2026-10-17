@@ -507,7 +507,9 @@ function ConfirmationPanel({
               <CopyButton text={executeError} label={t("apply.copyError")} />
             </div>
           </div>
-          <pre className="inline-error-body">{executeError}</pre>
+          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+            {executeError}
+          </pre>
         </div>
       )}
     </div>
@@ -976,7 +978,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
               <CopyButton text={draftState.detail} label={t("apply.copyError")} />
             </div>
           </div>
-          <pre className="inline-error-body">{draftState.detail}</pre>
+          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
+            {draftState.detail}
+          </pre>
         </div>
       )}
 

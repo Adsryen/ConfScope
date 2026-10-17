@@ -1,5 +1,6 @@
 {
   "common": {
+    "errorDetail": "错误详情",
     "loading": "加载中…",
     "save": "保存",
     "cancel": "取消",
@@ -1146,6 +1147,7 @@
     "gotIt": "知道了"
   },
   "about": {
+    "releaseNotes": "更新说明",
     "title": "关于",
     "tagline": "统一配置中心管理工具",
     "features": "🎯 功能特性",
@@ -1187,6 +1189,8 @@
     "close": "关闭"
   },
   "logViewer": {
+    "rawEvents": "原始事件流",
+    "eventPayload": "事件内容",
     "subtitle": "audit-trail.jsonl · 对比/审计/应用会话的完整事件流",
     "empty": "暂无审计会话",
     "emptyHint": "在「配置对比」执行对比、在「配置矩阵」执行审计、或执行应用计划后，这里会记录完整过程",

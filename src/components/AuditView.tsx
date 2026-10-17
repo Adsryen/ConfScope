@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Connection, connectionEnvironmentName, connectionProjectName } from "../store/connections";
 import { getConfig, listAllConfigs } from "../api/nacos";
 import { detectFormat } from "../lib/format";
@@ -127,6 +127,8 @@ function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, s
 
 export default function AuditView({ connections, onNavigateToDiff, onStartApply }: Props) {
   const { t } = useTranslation();
+  // 矩阵详情每格的环境标题 id 前缀：让只读的 pre 用 aria-labelledby 指向它（R39）
+  const envLabelIdBase = useId();
   const firstProject = connections[0] ? connectionProjectName(connections[0]) : "";
   const projectNames = useMemo(() => {
     const names = new Set(connections.map((c) => connectionProjectName(c)));
@@ -941,10 +943,15 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             {envIds.map((envId) => {
               const cell = selectedRow.values[envId];
               const env = envSources.find((s) => envKey(s) === envId);
+              const envLabelId = `${envLabelIdBase}-${envId}`;
               return (
                 <div key={envId} className="audit-detail-env">
-                  <div className="audit-detail-env-label">{env ? envShortLabel(env) : envId}</div>
-                  <pre className="audit-detail-value">{cell?.exists ? cell.value : t("audit.detailMissing")}</pre>
+                  <div className="audit-detail-env-label" id={envLabelId}>
+                    {env ? envShortLabel(env) : envId}
+                  </div>
+                  <pre className="audit-detail-value" tabIndex={0} role="region" aria-labelledby={envLabelId}>
+                    {cell?.exists ? cell.value : t("audit.detailMissing")}
+                  </pre>
                 </div>
               );
             })}

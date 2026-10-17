@@ -1,5 +1,6 @@
 {
   "common": {
+    "errorDetail": "Error details",
     "loading": "Loading…",
     "save": "Save",
     "cancel": "Cancel",
@@ -1146,6 +1147,7 @@
     "gotIt": "Got it"
   },
   "about": {
+    "releaseNotes": "Release notes",
     "title": "About",
     "tagline": "Unified Configuration Center Management Tool",
     "features": "🎯 Features",
@@ -1187,6 +1189,8 @@
     "close": "Close"
   },
   "logViewer": {
+    "rawEvents": "Raw event stream",
+    "eventPayload": "Event payload",
     "subtitle": "audit-trail.jsonl · full event stream of compare/audit/apply sessions",
     "empty": "No audit sessions yet",
     "emptyHint": "Run a compare in Config Diff, an audit in Config Matrix, or execute an apply plan — the full process is recorded here",

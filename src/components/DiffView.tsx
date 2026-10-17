@@ -1924,7 +1924,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                   </div>
                   <div className="match-side-list right">
                     <div className="match-side-title">{t("diff.sourceB")}</div>
-                    <div className="match-side-scroll">
+                    <div className="match-side-scroll" tabIndex={0} role="region" aria-label={t("diff.sourceB")}>
                       {matchResults.map((item) => (
                         <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
                           <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`} title={item.dataId}>

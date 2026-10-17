@@ -263,3 +263,16 @@ describe("CodeView 输入法组合态（R11）", () => {
     expect(container.querySelector(".code-find-input")).toBeNull();
   });
 });
+
+describe("CodeView 键盘可达（R39）", () => {
+  it("正文能 Tab 停住，读屏念得出区域名", () => {
+    const { container } = renderView(MULTI, "Properties");
+
+    const region = screen.getByRole("region", { name: "内容" });
+    expect(region).toBe(container.querySelector(".code-area"));
+    expect(region).toHaveAttribute("tabindex", "0");
+    // 焦点真能落上：落上之后方向键 / PageDown 就能滚正文
+    region.focus();
+    expect(document.activeElement).toBe(region);
+  });
+});

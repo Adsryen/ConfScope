@@ -57,7 +57,9 @@ export default function ErrorDialog() {
           {current.detail && current.detail !== current.message && (
             <>
               <div className="error-detail-title">{t("errorDialog.fullError")}</div>
-              <pre className="error-detail">{current.detail}</pre>
+              <pre className="error-detail" tabIndex={0} role="region" aria-label={t("errorDialog.fullError")}>
+                {current.detail}
+              </pre>
             </>
           )}
         </div>

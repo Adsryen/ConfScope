@@ -244,7 +244,9 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                     <span className="info-label">{t("tasks.errorDetail")}</span>
                     <CopyButton text={selectedTask.error} label={t("common.copyError")} />
                   </div>
-                  <pre className="history-detail-error">{selectedTask.error}</pre>
+                  <pre className="history-detail-error" tabIndex={0} role="region" aria-label={t("tasks.errorDetail")}>
+                    {selectedTask.error}
+                  </pre>
                 </div>
               )}
             </div>

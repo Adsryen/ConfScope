@@ -177,7 +177,9 @@ export default function LogViewer() {
                 </div>
                 <CopyButton text={selectedJson} label={t("common.copy")} />
               </div>
-              <pre className="log-jsonl">{selected.events.map((e) => JSON.stringify(e)).join("\n")}</pre>
+              <pre className="log-jsonl" tabIndex={0} role="region" aria-label={t("logViewer.rawEvents")}>
+                {selected.events.map((e) => JSON.stringify(e)).join("\n")}
+              </pre>
               <div className="log-detail-expanded">
                 {/* 先按原始下标建立 DOM 身份，再在渲染时决定显不显示：
                     以前先 filter 再 key={index}，勾掉「显示内容」会让事件整体上移一位，
@@ -196,7 +198,9 @@ export default function LogViewer() {
                         {e.direction ? <span className="log-event-dir">{e.direction}</span> : null}
                         {e.error ? <span className="danger">{e.error}</span> : null}
                       </summary>
-                      <pre className="log-event-payload">{JSON.stringify(e, null, 2)}</pre>
+                      <pre className="log-event-payload" tabIndex={0} role="region" aria-label={t("logViewer.eventPayload")}>
+                        {JSON.stringify(e, null, 2)}
+                      </pre>
                     </details>
                   );
                 })}
