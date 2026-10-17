@@ -136,6 +136,11 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     setFindOpen(false);
     setFindTerm("");
     setActiveIdx(0);
+    // 查找结束，焦点回到被查找的那一层：归还给滚动容器 .code-area（它是 tabIndex=0 + role="region"
+    // 的键盘可达层）。少了这一步，查找输入框随卸载一起消失、activeElement 掉回 body，
+    // 用户接着按方向键 / PageUp / PageDown 代码一动不动，必须先拿鼠标点一下正文（R62）。
+    // preventScroll：这一层可能只露出半截，聚焦不该顺手把整页滚动条拽过来。
+    areaRef.current?.focus({ preventScroll: true });
   }, []);
 
   // 查找栏是宿主弹层内部的瞬时层，必须自己登记，否则 Esc 会被外层吃掉、连带取消编辑（R61）。
@@ -154,6 +159,8 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   useScrollResetOnContentChange(areaRef, [code, contentKey], syncScroll);
 
   // 切换文件时收起查找栏，防止旧关键词污染新内容。
+  // 这里**不许**改成调用 closeFind：换文件是用户在左侧列表里点出来的，焦点该留在他点的位置；
+  // closeFind 的语义是「我刚结束查找，把焦点还给正文」，两条出口别混（R62 口径）。
   useEffect(() => {
     setFindOpen(false);
     setFindTerm("");
