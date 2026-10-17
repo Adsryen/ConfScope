@@ -125,3 +125,69 @@ describe("复制失败的反馈守卫（R51）", () => {
     expect(about).toContain("CopyButton");
   });
 });
+
+/**
+ * lib 层抛给用户的错误文案（波24 R43）。
+ *
+ * lib 里的 `new Error("…")` 不是日志，它们会被 `InlineError`、错误中心、任务详情原样贴到界面上，
+ * 所以「写死一种语言」和可见出口写死中文是同一个 bug：英文界面冒中文、中文界面冒英文。
+ * lib 层没有组件的 `t()`，沿用 `appDataDoc.ts` 的先例用 `translate()`，
+ * 分区名 / ref / 底层异常文本属于数据，按 `{占位}` 透传。
+ */
+/** Error 构造点（含自定义子类，如 `new RangeError(`）。 */
+const ERROR_CTOR = /\bnew\s+\w*Error\s*\(/g;
+/** 已成句的文案至少三个实词；键名（`appDataBackup.missingSection`）拆不出三个词，不会误报。 */
+const MIN_WORDS = 3;
+
+function wordsIn(text: string): number {
+  return (text.match(/[A-Za-z]{3,}/g) ?? []).length;
+}
+
+/** 某个 src/lib 文件里「写死语言」的 Error 实参。 */
+function hardcodedErrorCopy(file: string): string[] {
+  const source = readScannedSource(file);
+  const findings: string[] = [];
+  for (const ctor of Array.from(source.matchAll(ERROR_CTOR))) {
+    const at = ctor.index ?? 0;
+    const open = at + ctor[0].length - 1;
+    const args = argumentWindow(source, open).slice(1, -1);
+    const where = `${file}:${source.slice(0, at).split("\n").length}`;
+    if (CJK.test(args)) {
+      findings.push(`${where} 写死中文 → ${JSON.stringify(args.trim().slice(0, 60))}`);
+      continue;
+    }
+    if (args.includes("translate(")) continue;
+    for (const literal of Array.from(args.matchAll(LITERALS))) {
+      if (wordsIn(literal[2]) >= MIN_WORDS) {
+        findings.push(`${where} 写死英文句子 → ${JSON.stringify(literal[2].trim().slice(0, 60))}`);
+      }
+    }
+  }
+  return findings;
+}
+
+const libFiles = sourceFiles().filter((file) => file.startsWith("src/lib/") && file.endsWith(".ts"));
+
+describe("src/lib 抛出的错误文案必须走 i18n（波24 R43）", () => {
+  it("扫描口径不是空转：src/lib 确实有 Error 构造点", () => {
+    const total = libFiles.reduce((acc, file) => acc + Array.from(readScannedSource(file).matchAll(ERROR_CTOR)).length, 0);
+    expect(total, "一条 Error 都没扫到，说明构造点正则失效了").toBeGreaterThanOrEqual(24);
+  });
+
+  it("已经本地化的站点数量不缩水（防止守卫把整段代码扫没了还亮绿灯）", () => {
+    const localized = libFiles.reduce(
+      (acc, file) =>
+        acc +
+        Array.from(readScannedSource(file).matchAll(ERROR_CTOR)).filter((ctor) =>
+          argumentWindow(readScannedSource(file), (ctor.index ?? 0) + ctor[0].length - 1).includes("translate(")
+        ).length,
+      0
+    );
+    expect(localized).toBeGreaterThanOrEqual(21);
+  });
+
+  it("Error 实参里不许写死中文，也不许写死成句的英文", () => {
+    const leaks = libFiles.flatMap(hardcodedErrorCopy);
+    expect(leaks).toEqual([]);
+  });
+});

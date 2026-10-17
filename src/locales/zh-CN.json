@@ -106,7 +106,9 @@
     "dataFileCorruptTitle": "本地数据文件已损坏",
     "dataFileCorruptMessage": "数据文件读取失败，已隔离为 {file} 并回退到浏览器缓存数据；下次数据保存时将自动重建数据文件。",
     "dataFileSource": "本地数据",
-    "dataFileSaveErrorTitle": "本地数据文件保存失败"
+    "dataFileSaveErrorTitle": "本地数据文件保存失败",
+    "dataFileOperationTimeout": "本地数据文档读写超时",
+    "dataFileUnknownSaveFailure": "本地数据文档保存失败，原因未知"
   },
   "apply": {
     "title": "配置变更计划",
@@ -208,7 +210,12 @@
     "discardEditsTitle": "放弃未保存的目标内容？",
     "discardEditsMessage": "{count} 项配置的「编辑目标内容」还没保存，返回后这些改动会丢失。确认放弃？",
     "discardEditsConfirm": "放弃并返回",
-    "dryRunPreviewNote": "以下为执行后预览，尚未写入右侧目标；仅在第五步执行变更后才会真正应用。"
+    "dryRunPreviewNote": "以下为执行后预览，尚未写入右侧目标；仅在第五步执行变更后才会真正应用。",
+    "readConfigFailed": "读取{role}配置失败 {ref}：{detail}",
+    "readBeforeSnapshotFailed": "读取目标配置的变更前快照失败 {ref}：{detail}",
+    "publishRefBindingMissing": "当前构建不支持按引用发布配置，请重新生成变更计划。",
+    "deleteRefBindingMissing": "当前构建不支持按引用删除配置，请重新生成变更计划。",
+    "consulModifyIndexRequired": "Consul 目标 {dataId} 缺少 ModifyIndex，请重新生成变更计划。"
   },
   "settings": {
     "groupBasic": "基础信息",
@@ -377,7 +384,19 @@
     "activityWebdavUpload": "WebDAV 上传",
     "activityWebdavRestore": "WebDAV 恢复",
     "activityRecoveryPoint": "恢复点",
-    "summarySnapshots": "快照文件：{count}"
+    "summarySnapshots": "快照文件：{count}",
+    "missingSection": "应用数据备份缺少有效分区: {section}",
+    "resolveSecretFailed": "导出应用数据备份前无法解析 {ref}：{detail}",
+    "invalidPayload": "应用数据备份格式无效",
+    "unsupportedSchemaVersion": "不支持的应用数据备份版本",
+    "missingMetadata": "应用数据备份缺少元信息",
+    "missingDataSection": "应用数据备份缺少数据分区"
+  },
+  "credentials": {
+    "writeVerifyFailed": "系统凭据库写入后未通过读回校验",
+    "statusUnresolvable": "凭据 {ref} 当前状态为 {status}，无法从系统凭据库读取",
+    "missingAfterMigration": "凭据已迁移到系统凭据库，但当前系统中找不到 {ref}，请重新输入密码或从应用数据备份恢复：{detail}",
+    "backupPasswordRefInvalid": "备份密码凭据引用无效，请重新设置密码"
   },
   "ssh": {
     "pageSubtitle": "统一管理可复用的 SSH 跳板机档案和引用关系。连接管理页只选择或引用这里的配置。",

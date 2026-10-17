@@ -21,6 +21,7 @@ import {
 } from "./applyExecutionSafety";
 import { detectFormat, nacosType, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
+import { translate } from "../locales";
 
 const PROTECTED_TARGET_MARKERS = ["uat", "prod", "production", "生产", "真实", "线上"] as const;
 const DOCUMENT_KEY = "__document";
@@ -220,7 +221,13 @@ async function readCurrentValue(
     return valueFromDocument(item, document, ref);
   } catch (error) {
     if (isMissingConfigError(error)) return missingValue(item, ref);
-    throw new Error(`Failed to read ${role} config ${ref.namespace}/${ref.group}/${ref.dataId}: ${errorMessage(error)}`);
+    throw new Error(
+      translate("apply.readConfigFailed", {
+        role: translate(role === "source" ? "apply.source" : "apply.target"),
+        ref: `${ref.namespace}/${ref.group}/${ref.dataId}`,
+        detail: errorMessage(error),
+      })
+    );
   }
 }
 
@@ -252,7 +259,12 @@ async function readBeforeSnapshot(
         exists: false,
       };
     }
-    throw new Error(`Failed to read before snapshot ${ref.namespace}/${ref.group}/${ref.dataId}: ${errorMessage(error)}`);
+    throw new Error(
+      translate("apply.readBeforeSnapshotFailed", {
+        ref: `${ref.namespace}/${ref.group}/${ref.dataId}`,
+        detail: errorMessage(error),
+      })
+    );
   }
 }
 
@@ -329,7 +341,7 @@ function providerWriteRef(item: ApplyPlanItem): ApplyPlanWriteRef | string {
   const ref = targetRef(item);
   if (ref.provider !== "consul") return ref;
   const expectedVersion = consulExpectedVersion(item);
-  if (!expectedVersion) return `Consul target ModifyIndex is required for ${ref.dataId}. Regenerate the ApplyPlan.`;
+  if (!expectedVersion) return translate("apply.consulModifyIndexRequired", { dataId: ref.dataId });
   return { ...ref, expectedVersion };
 }
 
@@ -481,12 +493,12 @@ export async function executeApplyPlan(
           } else if (write.kind === "delete") {
             await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
           } else if (write.kind === "publish_ref") {
-            if (!deps.publishConfigRef) throw new Error("Provider ref publish binding is not available.");
+            if (!deps.publishConfigRef) throw new Error(translate("apply.publishRefBindingMissing"));
             const writeRef = providerWriteRef(write.item);
             if (typeof writeRef === "string") throw new Error(writeRef);
             await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
           } else {
-            if (!deps.deleteConfigRef) throw new Error("Provider ref delete binding is not available.");
+            if (!deps.deleteConfigRef) throw new Error(translate("apply.deleteRefBindingMissing"));
             const writeRef = providerWriteRef(write.item);
             if (typeof writeRef === "string") throw new Error(writeRef);
             await deps.deleteConfigRef(targetConnection, writeRef);

@@ -120,13 +120,13 @@ describe("local data migration guardrails", () => {
 
   it("keeps schema v1 app-data backup validation strict for missing sections", () => {
     const { applyVerifications: _applyVerifications, ...dataWithoutSection } = legacyAppDataBackupPayload.data;
+    const withoutSection = { ...legacyAppDataBackupPayload, data: dataWithoutSection };
 
-    expect(() =>
-      validateAppDataBackupPayload({
-        ...legacyAppDataBackupPayload,
-        data: dataWithoutSection,
-      })
-    ).toThrow("应用数据备份缺少有效分区: applyVerifications");
+    // 分区缺失的报错文案走 i18n（波24 R43）：这里显式钉住语言，免得断言跟着运行环境的默认语言飘。
+    localStorage.setItem("locale", "zh-CN");
+    expect(() => validateAppDataBackupPayload(withoutSection)).toThrow("应用数据备份缺少有效分区: applyVerifications");
+    localStorage.setItem("locale", "en-US");
+    expect(() => validateAppDataBackupPayload(withoutSection)).toThrow("App data backup is missing a valid section: applyVerifications");
   });
 });
 

@@ -294,7 +294,7 @@ describe("appDataBackup lib", () => {
         { appVersion: "1.4.2", sourcePlatform: "windows", createdAt: "2026-07-07T08:00:00.000Z" },
         { resolveSecret: async () => Promise.reject(new Error("missing secret")) }
       )
-    ).rejects.toThrow("导出应用数据备份前无法解析 connection.conn-1.password");
+    ).rejects.toThrow("Cannot resolve connection.conn-1.password before exporting the app data backup");
   });
 
   it("summarizes section counts for restore preview", () => {
@@ -326,7 +326,7 @@ describe("appDataBackup lib", () => {
   });
 
   it("rejects invalid payloads before restore", () => {
-    expect(() => validateAppDataBackupPayload({ schemaVersion: 99 })).toThrow("不支持的应用数据备份版本");
+    expect(() => validateAppDataBackupPayload({ schemaVersion: 99 })).toThrow("Unsupported app data backup schema version.");
     expect(() =>
       validateAppDataBackupPayload({
         schemaVersion: 1,
@@ -335,7 +335,7 @@ describe("appDataBackup lib", () => {
         sourcePlatform: "windows",
         data: { connections: "not-array" },
       })
-    ).toThrow("应用数据备份缺少有效分区: connections");
+    ).toThrow("App data backup is missing a valid section: connections");
 
     const legacyPayload = {
       ...collectAppDataBackupPayload({
@@ -353,6 +353,24 @@ describe("appDataBackup lib", () => {
     };
     delete legacyPayload.data.snapshots;
     expect(validateAppDataBackupPayload(legacyPayload).data.snapshots).toEqual([]);
+  });
+
+  it("localizes backup validation errors instead of hardcoding one language（波24 R43）", () => {
+    localStorage.setItem("locale", "zh-CN");
+    expect(() => validateAppDataBackupPayload({ schemaVersion: 99 })).toThrow("不支持的应用数据备份版本");
+    expect(() =>
+      validateAppDataBackupPayload({
+        schemaVersion: 1,
+        createdAt: "2026-07-07T08:00:00.000Z",
+        appVersion: "1.4.2",
+        sourcePlatform: "windows",
+        data: { connections: "not-array" },
+      })
+    ).toThrow("应用数据备份缺少有效分区: connections");
+
+    localStorage.setItem("locale", "en-US");
+    expect(() => validateAppDataBackupPayload({ schemaVersion: 99 })).toThrow("Unsupported app data backup schema version.");
+    expect(() => validateAppDataBackupPayload("not-an-object")).toThrow("The app data backup payload is invalid.");
   });
 
   it("restores by fully replacing known localStorage keys", () => {

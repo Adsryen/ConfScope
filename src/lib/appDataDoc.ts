@@ -130,7 +130,7 @@ function localeValue(value: unknown): string {
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("app data doc operation timeout")), ms);
+    const timer = setTimeout(() => reject(new Error(translate("app.dataFileOperationTimeout"))), ms);
     promise.then(
       (value) => {
         clearTimeout(timer);
@@ -286,7 +286,7 @@ export async function pushAppDataDocument(options: { report?: boolean } = {}): P
         const raw = await withTimeout(bindings.SaveAppDataDocument(document), SAVE_TIMEOUT_MS);
         const status = normalizeStatus(raw);
         if (!status.error && status.valid) return true;
-        lastError = status.error || "unknown save failure";
+        lastError = status.error || translate("app.dataFileUnknownSaveFailure");
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
       }

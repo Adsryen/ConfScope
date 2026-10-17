@@ -48,7 +48,9 @@ export function currentLocale(): Locale {
 export function translate(key: string, params: TranslationParams = {}): string {
   let text = getTranslation(currentLocale(), key);
   for (const [name, value] of Object.entries(params)) {
-    text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+    // 必须用函数替换：直接传字符串时 `$&` / `$'` / `$1` 会被 String.replace 当特殊符号吞掉，
+    // 而 params 里常放底层异常原文、文件路径这类带 `$` 的数据（波24 R43 把 lib 报错接进来后更容易踩到）。
+    text = text.replace(new RegExp(`\\{${name}\\}`, "g"), () => String(value));
   }
   return text;
 }

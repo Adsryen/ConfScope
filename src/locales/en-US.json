@@ -106,7 +106,9 @@
     "dataFileCorruptTitle": "Local data file is corrupted",
     "dataFileCorruptMessage": "The data file could not be read. It was quarantined as {file} and browser cache data is being used. The file will be rebuilt on the next save.",
     "dataFileSource": "Local data",
-    "dataFileSaveErrorTitle": "Failed to save the local data file"
+    "dataFileSaveErrorTitle": "Failed to save the local data file",
+    "dataFileOperationTimeout": "The local data document operation timed out.",
+    "dataFileUnknownSaveFailure": "The local data document failed to save for an unknown reason."
   },
   "apply": {
     "title": "Configuration change plan",
@@ -208,7 +210,12 @@
     "discardEditsTitle": "Discard unsaved target content?",
     "discardEditsMessage": "{count} item(s) still have unsaved target content. Going back discards it.",
     "discardEditsConfirm": "Discard and go back",
-    "dryRunPreviewNote": "Preview of what the target will look like after execution — nothing has been written yet. It is only applied when you execute the change in step 5."
+    "dryRunPreviewNote": "Preview of what the target will look like after execution — nothing has been written yet. It is only applied when you execute the change in step 5.",
+    "readConfigFailed": "Failed to read {role} config {ref}: {detail}",
+    "readBeforeSnapshotFailed": "Failed to read the before-change snapshot for {ref}: {detail}",
+    "publishRefBindingMissing": "Publishing configuration by reference is not available in this build. Regenerate the ApplyPlan.",
+    "deleteRefBindingMissing": "Deleting configuration by reference is not available in this build. Regenerate the ApplyPlan.",
+    "consulModifyIndexRequired": "Consul target ModifyIndex is required for {dataId}. Regenerate the ApplyPlan."
   },
   "settings": {
     "groupBasic": "General",
@@ -377,7 +384,19 @@
     "activityWebdavUpload": "WebDAV upload",
     "activityWebdavRestore": "WebDAV restore",
     "activityRecoveryPoint": "Recovery point",
-    "summarySnapshots": "Snapshot files: {count}"
+    "summarySnapshots": "Snapshot files: {count}",
+    "missingSection": "App data backup is missing a valid section: {section}",
+    "resolveSecretFailed": "Cannot resolve {ref} before exporting the app data backup: {detail}",
+    "invalidPayload": "The app data backup payload is invalid.",
+    "unsupportedSchemaVersion": "Unsupported app data backup schema version.",
+    "missingMetadata": "The app data backup is missing metadata.",
+    "missingDataSection": "The app data backup is missing its data section."
+  },
+  "credentials": {
+    "writeVerifyFailed": "The system credential store failed read-back verification after writing.",
+    "statusUnresolvable": "Credential {ref} is currently {status} and cannot be read from the system credential store.",
+    "missingAfterMigration": "The credential was migrated to the system credential store, but {ref} cannot be found on this machine. Re-enter the password or restore it from an app data backup: {detail}",
+    "backupPasswordRefInvalid": "The backup password credential reference is invalid. Set the password again."
   },
   "ssh": {
     "pageSubtitle": "Manage reusable SSH jump-host profiles and references in one place. Connection Manager only selects or references these profiles.",

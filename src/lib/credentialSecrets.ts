@@ -2,6 +2,7 @@ import { deleteSecureSecret, readSecureSecret, writeSecureSecret } from "../api/
 import { loadAppDataBackupState, saveAppDataBackupState, type AppDataWebDAVSettings } from "../store/appDataBackup";
 import { loadConnections, updateConnection, type Connection } from "../store/connections";
 import { loadSnapshotWebDAVState, saveSnapshotWebDAVState, type SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
+import { translate } from "../locales";
 
 export type CredentialSecretNamespace = "connection" | "app-data-webdav" | "snapshot-webdav" | "app-data-backup";
 export type StoredSecretStatus = "stored" | "missing" | "unsupported";
@@ -127,7 +128,7 @@ export async function writeAndVerifySecret(input: WriteSecretInput, deps?: Crede
   };
   const result = await clientFromDeps(deps).write(ref, input.value);
   if (!result.verified) {
-    throw new Error("系统凭据库写入后未通过读回校验");
+    throw new Error(translate("credentials.writeVerifyFailed"));
   }
   return {
     ...ref,
@@ -139,12 +140,12 @@ export async function writeAndVerifySecret(input: WriteSecretInput, deps?: Crede
 
 export async function resolveSecret(pointer: StoredSecretPointer, deps?: CredentialSecretDeps): Promise<string> {
   if (pointer.status !== "stored") {
-    throw new Error(`凭据 ${pointer.ref} 当前状态为 ${pointer.status}，无法从系统凭据库读取`);
+    throw new Error(translate("credentials.statusUnresolvable", { ref: pointer.ref, status: pointer.status }));
   }
   try {
     return await clientFromDeps(deps).read(refFromPointer(pointer));
   } catch (e) {
-    throw new Error(`凭据已迁移到系统凭据库，但当前系统中找不到 ${pointer.ref}，请重新输入密码或从应用数据备份恢复：${String(e)}`);
+    throw new Error(translate("credentials.missingAfterMigration", { ref: pointer.ref, detail: String(e) }));
   }
 }
 
@@ -160,14 +161,14 @@ const APP_DATA_BACKUP_PASSWORD_REF: SecureSecretRef = {
 
 export async function saveAppDataBackupPassword(password: string, deps?: CredentialSecretDeps): Promise<StoredSecretPointer> {
   if (!password.trim()) {
-    throw new Error("备份密码不能为空");
+    throw new Error(translate("appDataBackup.passwordRequired"));
   }
   return writeAndVerifySecret({ ...APP_DATA_BACKUP_PASSWORD_REF, value: password }, deps);
 }
 
 export async function resolveAppDataBackupPassword(pointer: StoredSecretPointer, deps?: CredentialSecretDeps): Promise<string> {
   if (pointer.namespace !== APP_DATA_BACKUP_PASSWORD_REF.namespace || pointer.ownerId !== APP_DATA_BACKUP_PASSWORD_REF.ownerId || pointer.field !== APP_DATA_BACKUP_PASSWORD_REF.field) {
-    throw new Error("备份密码凭据引用无效，请重新设置密码");
+    throw new Error(translate("credentials.backupPasswordRefInvalid"));
   }
   return resolveSecret(pointer, deps);
 }

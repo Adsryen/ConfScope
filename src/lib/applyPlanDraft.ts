@@ -14,6 +14,7 @@ import {
 } from "./applyPlan";
 import { detectFormat, type Format } from "./format";
 import { normalizeConfig, type ConfigEntry } from "./normalize";
+import { translate } from "../locales";
 import { buildSnapshotConnection } from "./snapshotConnection";
 
 const DOCUMENT_KEY = "__document";
@@ -149,7 +150,11 @@ async function readValue(
   } catch (error) {
     if (isMissingConfigError(error)) return { exists: false };
     throw new Error(
-      `Failed to read ${role} config ${ref.connectionId}/${ref.namespace}/${ref.group}/${ref.dataId}/${ref.key}: ${errorText(error)}`
+      translate("apply.readConfigFailed", {
+        role: translate(role === "source" ? "apply.source" : "apply.target"),
+        ref: `${ref.connectionId}/${ref.namespace}/${ref.group}/${ref.dataId}/${ref.key}`,
+        detail: errorText(error),
+      })
     );
   }
 }

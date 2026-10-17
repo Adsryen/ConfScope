@@ -13,6 +13,7 @@ import {
   resolveSecret,
   type StoredSecretPointer,
 } from "./credentialSecrets";
+import { translate } from "../locales";
 
 export const APP_DATA_BACKUP_SCHEMA_VERSION = 1;
 
@@ -98,7 +99,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function arraySection(data: Record<string, unknown>, key: keyof AppDataBackupData): unknown[] {
   const value = data[key];
   if (!Array.isArray(value)) {
-    throw new Error(`应用数据备份缺少有效分区: ${String(key)}`);
+    throw new Error(translate("appDataBackup.missingSection", { section: String(key) }));
   }
   return value;
 }
@@ -106,7 +107,7 @@ function arraySection(data: Record<string, unknown>, key: keyof AppDataBackupDat
 function objectSection(data: Record<string, unknown>, key: keyof AppDataBackupData): unknown {
   const value = data[key];
   if (!isObject(value)) {
-    throw new Error(`应用数据备份缺少有效分区: ${String(key)}`);
+    throw new Error(translate("appDataBackup.missingSection", { section: String(key) }));
   }
   return value;
 }
@@ -114,14 +115,14 @@ function objectSection(data: Record<string, unknown>, key: keyof AppDataBackupDa
 function sectionLocale(data: Record<string, unknown>): string {
   const value = data.locale;
   if (typeof value !== "string") {
-    throw new Error("应用数据备份缺少有效分区: locale");
+    throw new Error(translate("appDataBackup.missingSection", { section: "locale" }));
   }
   return localeValue(value);
 }
 
 function snapshotFileSection(value: unknown): AppDataBackupSnapshotFile {
   if (!isObject(value) || typeof value.path !== "string" || typeof value.contentBase64 !== "string") {
-    throw new Error("应用数据备份缺少有效分区: snapshots");
+    throw new Error(translate("appDataBackup.missingSection", { section: "snapshots" }));
   }
   return {
     path: value.path,
@@ -161,7 +162,7 @@ async function resolvePortablePointer(pointer: StoredSecretPointer, deps?: Colle
   try {
     return deps?.resolveSecret ? await deps.resolveSecret(pointer) : await resolveSecret(pointer);
   } catch (e) {
-    throw new Error(`导出应用数据备份前无法解析 ${pointer.ref}: ${String(e)}`);
+    throw new Error(translate("appDataBackup.resolveSecretFailed", { ref: pointer.ref, detail: String(e) }));
   }
 }
 
@@ -245,16 +246,16 @@ export async function collectPortableAppDataBackupPayload(
 
 export function validateAppDataBackupPayload(value: unknown): AppDataBackupPayload {
   if (!isObject(value)) {
-    throw new Error("应用数据备份格式无效");
+    throw new Error(translate("appDataBackup.invalidPayload"));
   }
   if (value.schemaVersion !== APP_DATA_BACKUP_SCHEMA_VERSION) {
-    throw new Error("不支持的应用数据备份版本");
+    throw new Error(translate("appDataBackup.unsupportedSchemaVersion"));
   }
   if (typeof value.createdAt !== "string" || typeof value.appVersion !== "string" || typeof value.sourcePlatform !== "string") {
-    throw new Error("应用数据备份缺少元信息");
+    throw new Error(translate("appDataBackup.missingMetadata"));
   }
   if (!isObject(value.data)) {
-    throw new Error("应用数据备份缺少数据分区");
+    throw new Error(translate("appDataBackup.missingDataSection"));
   }
   const data = value.data;
   return {
