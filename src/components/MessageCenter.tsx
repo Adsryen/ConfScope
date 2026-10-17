@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
+import { toast } from "../lib/toast";
 import {
   AppErrorItem,
   clearErrors,
@@ -94,11 +95,14 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
   };
 
   const copyMessage = async (item: AppErrorItem) => {
+    // 失败要说一声：WebView 拦剪贴板时以前点了没反应（轮6 R51）
     if (await copyText(fullText(item))) {
       window.clearTimeout(copiedTimer.current);
       setCopiedId(item.id);
       copiedTimer.current = window.setTimeout(() => setCopiedId((id) => (id === item.id ? null : id)), 1200);
+      return;
     }
+    toast(t("common.copyFailed"), "error");
   };
 
   const removeMessage = (id: number) => {

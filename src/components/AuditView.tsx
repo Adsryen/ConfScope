@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, connectionEnvironmentName, connectionProjectName } from "../store/connections";
 import { getConfig, listAllConfigs } from "../api/nacos";
 import { detectFormat } from "../lib/format";
+import { environmentTone } from "../lib/envTone";
 import { normalizeConfig, type ConfigEntry, type ParseStatus } from "../lib/normalize";
 import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } from "../lib/audit";
 import { useTranslation } from "../i18n";
@@ -121,15 +122,6 @@ function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, s
       ))}
     </div>
   );
-}
-
-function environmentToneShort(name: string): string {
-  const value = name.trim().toLowerCase();
-  if (value.includes("prod") || value.includes("生产")) return "prod";
-  if (value.includes("staging") || value.includes("预发") || value.includes("uat")) return "staging";
-  if (value.includes("test") || value.includes("测试") || value.includes("qa")) return "test";
-  if (value.includes("dev") || value.includes("开发")) return "dev";
-  return "other";
 }
 
 export default function AuditView({ connections, onNavigateToDiff, onStartApply }: Props) {
@@ -578,7 +570,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             <div className="audit-env-card" key={`${env.conn.id}:${env.namespace}`}>
               <div className="audit-env-head">
                 <span
-                  className={`env-badge env-${environmentToneShort(connectionEnvironmentName(env.conn))}`}
+                  className={`env-badge env-${environmentTone(connectionEnvironmentName(env.conn))}`}
                   title={connectionEnvironmentName(env.conn)}
                 >
                   {connectionEnvironmentName(env.conn)}

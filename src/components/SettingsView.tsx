@@ -11,6 +11,7 @@ import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
+import { scrollBehavior } from "../lib/motion";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -118,7 +119,7 @@ export default function SettingsView() {
     const targetTop = target.getBoundingClientRect().top;
     container.scrollTo({
       top: container.scrollTop + targetTop - containerTop,
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
   };
 

@@ -12,6 +12,7 @@
     "success": "Success",
     "copy": "Copy",
     "copied": "✓ Copied",
+    "copyFailed": "Copy failed — select the text and copy manually",
     "copyToClipboard": "Copy to clipboard",
     "copyError": "Copy Error",
     "operationFailed": "Operation failed",
@@ -83,7 +84,6 @@
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
     "mainNav": "Main navigation",
-    "planned": "Planned",
     "auditPlanned": "Multi-environment consistency matrix, ignore rules, name normalization, and batch audits.",
     "historyPlanned": "Configuration change tracking, operation records, and history version viewing.",
     "backupPlanned": "Cloud exports, local snapshots, and cloud-vs-local comparison.",
@@ -103,7 +103,9 @@
     "dataFileImported": "Imported {count} connections into the local data file",
     "dataFileRestored": "Restored {count} connections from the local data file",
     "dataFileCorruptTitle": "Local data file is corrupted",
-    "dataFileCorruptMessage": "The data file could not be read. It was quarantined as {file} and browser cache data is being used. The file will be rebuilt on the next save."
+    "dataFileCorruptMessage": "The data file could not be read. It was quarantined as {file} and browser cache data is being used. The file will be rebuilt on the next save.",
+    "dataFileSource": "Local data",
+    "dataFileSaveErrorTitle": "Failed to save the local data file"
   },
   "apply": {
     "title": "Configuration change plan",
@@ -192,6 +194,7 @@
     "dryRunExecuting": "Dry-run checking...",
     "dryRunCompleted": "Dry-run passed. Planned writes: {count}",
     "executionSucceeded": "Change executed. Applied items: {count}",
+    "executionSucceededWithBlocked": "Change executed. Applied items: {count}; {blocked} blocked and skipped",
     "taskProgressLabel": "Change execution progress",
     "taskProgressTitle": "Execution progress",
     "taskProgressStats": "Processed {completed}/{total} items",

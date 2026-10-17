@@ -835,7 +835,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         setExecutionCompleted(!sandboxTarget);
         setExecutionSucceeded(true);
         if (skippedBlocked > 0) {
-          setExecuteNotice(`${t("apply.executionSucceeded", { count: selectedItemIds.length })}（另有 ${skippedBlocked} 项已阻断，未执行）`);
+          // 整句走 i18n：以前这里是「t() 结果 + 写死的中文尾巴」，英文界面会漏出「（另有 N 项已阻断，未执行）」（轮6 R54）
+          setExecuteNotice(t("apply.executionSucceededWithBlocked", { count: selectedItemIds.length, blocked: skippedBlocked }));
         } else {
           setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
         }

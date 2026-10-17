@@ -9,8 +9,8 @@ import {
   type UpdateCheckResult,
 } from "../api/app";
 import { useTranslation } from "../i18n";
-import { copyText } from "../lib/clipboard";
 import { reportError } from "../lib/errorCenter";
+import CopyButton from "./CopyButton";
 import { loadSettings, updateUpdateSettings } from "../store/settings";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 
@@ -299,9 +299,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               <button className="btn btn-primary btn-sm" onClick={runUpdateCheck}>
                 {t("common.retry")}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => copyText(errorMessage)}>
-                {t("common.copy")}
-              </button>
+              {/* 用共享 CopyButton：复制成功/失败都有反馈（轮6 R51，原来是 fire-and-forget） */}
+              <CopyButton text={errorMessage} />
             </div>
           </>
         );

@@ -12,6 +12,7 @@
     "success": "成功",
     "copy": "复制",
     "copied": "✓ 已复制",
+    "copyFailed": "复制失败，请手动选中文本复制",
     "copyToClipboard": "复制到剪贴板",
     "copyError": "复制错误",
     "operationFailed": "操作失败",
@@ -83,7 +84,6 @@
     "collapseSidebar": "收起侧边栏",
     "expandSidebar": "展开侧边栏",
     "mainNav": "主导航",
-    "planned": "规划中",
     "auditPlanned": "多环境一致性矩阵、忽略规则、名称归一化和批量差异审计。",
     "historyPlanned": "配置变更追溯、操作记录、历史版本查看。",
     "backupPlanned": "云端配置导出、本地快照浏览、本地与云端配置对比。",
@@ -103,7 +103,9 @@
     "dataFileImported": "已导入 {count} 条连接到本地数据文件",
     "dataFileRestored": "已从本地数据文件恢复 {count} 条连接",
     "dataFileCorruptTitle": "本地数据文件已损坏",
-    "dataFileCorruptMessage": "数据文件读取失败，已隔离为 {file} 并回退到浏览器缓存数据；下次数据保存时将自动重建数据文件。"
+    "dataFileCorruptMessage": "数据文件读取失败，已隔离为 {file} 并回退到浏览器缓存数据；下次数据保存时将自动重建数据文件。",
+    "dataFileSource": "本地数据",
+    "dataFileSaveErrorTitle": "本地数据文件保存失败"
   },
   "apply": {
     "title": "配置变更计划",
@@ -192,6 +194,7 @@
     "dryRunExecuting": "Dry-run 检查中...",
     "dryRunCompleted": "Dry-run 检查通过，计划写入 {count} 项",
     "executionSucceeded": "变更执行完成，已应用 {count} 项",
+    "executionSucceededWithBlocked": "变更执行完成，已应用 {count} 项（另有 {blocked} 项被阻断，未执行）",
     "taskProgressLabel": "变更执行进度",
     "taskProgressTitle": "执行进度",
     "taskProgressStats": "已处理 {completed}/{total} 项",

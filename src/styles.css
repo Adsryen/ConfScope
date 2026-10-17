@@ -199,17 +199,6 @@ textarea {
   color: var(--blue);
 }
 
-.nav-planned,
-.planned-badge {
-  color: var(--yellow);
-  border: 1px solid rgba(220, 220, 170, 0.35);
-  background: rgba(220, 220, 170, 0.1);
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
 .side-icon {
   width: 20px;
   height: 20px;
@@ -281,7 +270,11 @@ textarea {
   bottom: 14px;
   width: min(420px, calc(100vw - 220px));
   max-height: min(620px, calc(100vh - 28px));
-  z-index: 390;
+  /* 层级阶梯（轮6 R49）：菜单 60 < 消息面板 90 < 弹框遮罩 100 < 启动遮罩 120
+     < 报错弹框 420 < 轻提示 460 < 帮助气泡 9999。
+     以前这里是 390，压过了弹框遮罩：确认框打开时消息面板仍浮在暗幕上、还能点，
+     用户会在「等待确认」的状态下改动别处的状态。 */
+  z-index: 90;
   display: flex;
   flex-direction: column;
   background: var(--bg2);
@@ -472,8 +465,7 @@ textarea {
   padding: 0;
 }
 
-.sidebar.collapsed .side-label,
-.sidebar.collapsed .nav-planned {
+.sidebar.collapsed .side-label {
   display: none;
 }
 
@@ -1682,6 +1674,19 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* 系统开了「减少动态效果」就把全站动效压平：三条 keyframes（草稿加载脉冲 / 工作流闪烁 /
+     轻提示入场）和所有 transition 一起降速，scroll-behavior 也回退成直接跳位。
+     JS 里发起的 smooth 滚动由 lib/motion 同步判断（轮6 R50）。
+     这里不用 animation: none，保留 0.01ms 的时长是为了让依赖动画结束的代码照常收到事件。 */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
   .apply-draft-loading {
     animation: none;
   }

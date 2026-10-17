@@ -9,6 +9,7 @@
 // 仅在 loader 层通过水合/推送切换数据来源。
 
 import { reportError } from "./errorCenter";
+import { translate } from "../locales";
 
 export const APP_DATA_DOC_SCHEMA_VERSION = 2;
 export const APP_DATA_DOC_FILE_NAME = "confscope-data.json";
@@ -303,8 +304,9 @@ export async function pushAppDataDocument(options: { report?: boolean } = {}): P
 function reportDocSaveError(message: string): void {
   try {
     reportError({
-      title: "本地数据文件保存失败",
-      source: "本地数据",
+      // 走 i18n：这两句以前写死中文，英文界面下错误中心会漏出中文（轮6 R45）
+      title: translate("app.dataFileSaveErrorTitle"),
+      source: translate("app.dataFileSource"),
       message,
       detail: message,
     });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
+import { toast } from "../lib/toast";
 
 interface Props {
   text: string;
@@ -16,11 +17,14 @@ export default function CopyButton({ text, label }: Props) {
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   const onClick = async () => {
+    // 剪贴板在 WebView 里可能被权限拦掉，失败必须说一声——以前是点了没反应（轮6 R51）
     if (await copyText(text)) {
       setDone(true);
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setDone(false), 1200);
+      return;
     }
+    toast(t("common.copyFailed"), "error");
   };
 
   return (

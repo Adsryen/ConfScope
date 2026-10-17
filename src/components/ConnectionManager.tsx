@@ -19,6 +19,7 @@ import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
+import { environmentTone } from "../lib/envTone";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 
@@ -337,18 +338,6 @@ function connectionLabelMeta(conn: Pick<Connection, "name" | "sourceName">): str
   const sourceName = conn.sourceName?.trim();
   const label = conn.name?.trim();
   return label && label !== sourceName ? label : "";
-}
-
-function environmentTone(name: string): string {
-  const value = name.trim().toLowerCase();
-  if (!value) return "other";
-  if (value.includes("生产") || value.includes("prod")) return "prod";
-  if (value.includes("预发") || value.includes("staging") || value.includes("stage") || value.includes("uat")) return "staging";
-  if (value.includes("灰度") || value.includes("canary")) return "canary";
-  if (value.includes("测试") || value.includes("test") || value.includes("qa")) return "test";
-  if (value.includes("本地") || value.includes("local")) return "local";
-  if (value.includes("开发") || value.includes("dev")) return "dev";
-  return "other";
 }
 
 function copyLabel(value: string | undefined, fallback: string, suffix: string): string {

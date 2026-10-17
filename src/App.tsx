@@ -226,7 +226,7 @@ export default function App() {
       reportMessage({
         level: "error",
         title: t("app.dataFileCorruptTitle"),
-        source: "本地数据",
+        source: t("app.dataFileSource"),
         message: t("app.dataFileCorruptMessage", { file: notice.detail }),
       });
       return;
@@ -368,7 +368,7 @@ export default function App() {
     setTenant(activeConn.defaultNamespace || "");
   }, [activeConn, activeConnId, tenantFollowsDefault]);
 
-  const navGroups: { group: string; label: string; items: { mode: NavigableMode; label: string; unavailable?: boolean }[] }[] = [
+  const navGroups: { group: string; label: string; items: { mode: NavigableMode; label: string }[] }[] = [
     {
       group: "config",
       label: t("app.navGroupConfig"),
@@ -665,7 +665,6 @@ export default function App() {
                   >
                     <NavIcon mode={item.mode} />
                     <span className="side-label">{item.label}</span>
-                    {item.unavailable && <span className="nav-planned">{t("app.planned")}</span>}
                   </button>
                 ))}
               </div>

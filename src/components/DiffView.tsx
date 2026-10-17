@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfigItem, getConfig, listAllConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
+import { environmentTone, environmentSortWeight, type EnvironmentTone } from "../lib/envTone";
+import { scrollBehavior } from "../lib/motion";
 import { diffLines } from "../lib/diff";
 import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
 import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
@@ -243,33 +245,6 @@ function compareText(a: string, b: string): number {
 
 function uniqueValues(values: string[]): string[] {
   return Array.from(new Set(values.filter((item) => item.trim())));
-}
-
-type EnvironmentTone = "dev" | "test" | "staging" | "prod" | "canary" | "local" | "other";
-
-function environmentTone(name: string): EnvironmentTone {
-  const value = name.trim().toLowerCase();
-  if (!value) return "other";
-  if (value.includes("生产") || value.includes("prod")) return "prod";
-  if (value.includes("预发") || value.includes("staging") || value.includes("stage") || value.includes("uat")) return "staging";
-  if (value.includes("灰度") || value.includes("canary")) return "canary";
-  if (value.includes("测试") || value.includes("test") || value.includes("qa")) return "test";
-  if (value.includes("本地") || value.includes("local")) return "local";
-  if (value.includes("开发") || value.includes("dev")) return "dev";
-  return "other";
-}
-
-function environmentSortWeight(name: string): number {
-  const weights: Record<EnvironmentTone, number> = {
-    dev: 10,
-    test: 20,
-    staging: 30,
-    canary: 40,
-    prod: 50,
-    local: 60,
-    other: 90,
-  };
-  return weights[environmentTone(name)];
 }
 
 function sortEnvironments(values: string[]): string[] {
@@ -1631,7 +1606,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     const target = step === "choose" ? sourcesRef.current : resultsRef.current;
     if (step === "choose") setSourcesCollapsed(false);
     if (target && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
     }
     if (target) {
       if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);

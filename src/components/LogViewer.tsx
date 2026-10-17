@@ -19,6 +19,9 @@ function eventTime(event: AuditEventPayload): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+// 与 lib/auditSessionLog 的 AuditSession["kind"] 对应；新增档时记得同时补 locales 里的 logViewer.kind*
+const KNOWN_LOG_KINDS = new Set(["compare", "audit", "apply"]);
+
 interface PersistentSession {
   id: string;
   kind: string;
@@ -95,7 +98,13 @@ export default function LogViewer() {
   const kinds = useMemo(() => [...new Set(sessions.map((s) => s.kind))].sort(), [sessions]);
   const selectedJson = selected ? selected.events.map((e) => JSON.stringify(e)).join("\n") : "";
 
-  const kindLabel = (kind: string) => t(`logViewer.kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`) as string;
+  // scope 来自持久化 JSONL，历史日志里可能出现这里没见过的值；
+  // 以前直接拼 key，碰上缺条目就把 "logViewer.kindUnknown" 这种原始键名印到按钮上（轮6 R47）。
+  // 现在只认已知三档，其余原样显示 scope 本身——日志页里看到真值比看到猜测的译文有用。
+  const kindLabel = (kind: string) => {
+    if (!KNOWN_LOG_KINDS.has(kind)) return kind;
+    return t(`logViewer.kind${kind.charAt(0).toUpperCase()}${kind.slice(1)}`);
+  };
   const statusLabel = (s: string) => (s === "success" ? t("logViewer.statusSuccess") : s === "failure" ? t("logViewer.statusFailure") : t("logViewer.statusRunning"));
   const statusClass = (s: string) => (s === "failure" ? "danger" : s === "success" ? "success" : "running");
 
@@ -164,9 +173,15 @@ export default function LogViewer() {
               </div>
               <pre className="log-jsonl">{selected.events.map((e) => JSON.stringify(e)).join("\n")}</pre>
               <div className="log-detail-expanded">
-                {selected.events
-                  .filter((e) => showContent || !e.item || (e.item.sourceValue === undefined && e.item.targetValue === undefined && e.item.afterValue === undefined))
-                  .map((e, index) => (
+                {/* 先按原始下标建立 DOM 身份，再在渲染时决定显不显示：
+                    以前先 filter 再 key={index}，勾掉「显示内容」会让事件整体上移一位，
+                    用户展开的那些 <details> 就串到别的日志行上了（轮6 R46） */}
+                {selected.events.map((e, index) => {
+                  const carriesValue =
+                    Boolean(e.item) &&
+                    (e.item?.sourceValue !== undefined || e.item?.targetValue !== undefined || e.item?.afterValue !== undefined);
+                  if (!showContent && carriesValue) return null;
+                  return (
                     <details key={index} className="log-event">
                       <summary>
                         <span className={`log-event-kind ${e.result === "failure" ? "danger" : ""}`}>{e.kind}</span>
@@ -177,7 +192,8 @@ export default function LogViewer() {
                       </summary>
                       <pre className="log-event-payload">{JSON.stringify(e, null, 2)}</pre>
                     </details>
-                  ))}
+                  );
+                })}
               </div>
             </>
           )}
