@@ -14,6 +14,7 @@ import CopyButton from "./CopyButton";
 import { loadSettings, updateUpdateSettings } from "../store/settings";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
 
 interface AboutProps {
@@ -51,6 +52,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active: !embedded, containerRef: modalRef });
+  const overlayDismiss = useOverlayDismiss(onClose);
 
   useEffect(() => {
     let alive = true;
@@ -420,7 +422,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" {...overlayDismiss}>
       <div
         ref={modalRef}
         className="modal about-modal"

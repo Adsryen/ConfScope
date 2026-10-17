@@ -1,6 +1,7 @@
 import { useId, useRef } from "react";
 import { useTranslation } from "../i18n";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 
 interface Props {
@@ -30,9 +31,10 @@ export default function ConfirmModal({ title, message, confirmLabel, cancelLabel
   useEscape(active, onCancel, EscapePriority.confirm);
   // Enter 不再挂全局监听：由焦点所在按钮原生激活，语义与视觉焦点一致。
   useDialogFocus({ active, containerRef: modalRef });
+  const overlayDismiss = useOverlayDismiss(onCancel);
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal-overlay" {...overlayDismiss}>
       <div
         ref={modalRef}
         className="modal modal-sm"

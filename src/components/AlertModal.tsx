@@ -1,6 +1,7 @@
 import { useId, useRef } from "react";
 import { useTranslation } from "../i18n";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 
 /** 弹框里的一条内容：纯文本，或带行号的「可定位」条目（校验错误）。 */
@@ -36,9 +37,10 @@ export default function AlertModal({ title, messages, onClose, active = true, on
   // Esc 交给分层注册表；Enter 改由焦点所在的「知道了」按钮原生激活（弹框打开即拿到焦点）。
   useEscape(active, onClose, EscapePriority.confirm);
   useDialogFocus({ active, containerRef: modalRef });
+  const overlayDismiss = useOverlayDismiss(onClose);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" {...overlayDismiss}>
       <div
         ref={modalRef}
         className="modal modal-sm"

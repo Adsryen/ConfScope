@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
+import { clickOverlay, dragFromPanelOntoOverlay, fireEvent, render, screen } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { EscapePriority, useEscape } from "../lib/useEscape";
@@ -140,8 +140,26 @@ describe("ConfirmModal", () => {
     const onCancel = vi.fn();
     renderModal({ onCancel });
 
-    fireEvent.click(screen.getByText("确认操作").closest(".modal-overlay")!);
+    clickOverlay(screen.getByText("确认操作").closest(".modal-overlay")!);
 
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  // 轮14 波32 / R53：mousedown 落在弹层子树、mouseup 落在遮罩时，click 按规范派发到两者的
+  // 最近共同祖先（也就是遮罩），弹层本体上的 stopPropagation 挡不住它，过去整框连带刚填的东西一起没。
+  it("从弹层内按下拖到遮罩松手不关，同一起手改在遮罩按下才关", () => {
+    const onCancel = vi.fn();
+    renderModal({ onCancel });
+    const overlay = screen.getByText("确认操作").closest(".modal-overlay")!;
+    const panel = overlay.querySelector(".modal") as HTMLElement;
+
+    dragFromPanelOntoOverlay(panel, overlay);
+    expect(onCancel).not.toHaveBeenCalled();
+
+    dragFromPanelOntoOverlay(screen.getByText("是否继续?"), overlay);
+    expect(onCancel).not.toHaveBeenCalled();
+
+    clickOverlay(overlay);
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

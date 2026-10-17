@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { clickOverlay, fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
@@ -59,7 +59,7 @@ describe("DeleteConfirm", () => {
     const { onCancel } = renderDeleteConfirm();
 
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.click(screen.getByText("删除配置").closest(".modal-overlay")!);
+    clickOverlay(screen.getByText("删除配置").closest(".modal-overlay")!);
 
     expect(onCancel).toHaveBeenCalledTimes(2);
   });

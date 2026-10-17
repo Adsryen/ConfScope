@@ -21,6 +21,7 @@ import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import AlertModal, { type AlertItem } from "./AlertModal";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -658,6 +659,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   // 确认框（confirm 优先级）与弹层内下拉（dropdown 优先级）展开时，Esc 由它们先吃掉。
   useEscape(active && showReplace && !showTargetPicker && !pending, () => setShowReplace(false), EscapePriority.overlay);
   useEscape(active && showTargetPicker && !showReplace && !pending, () => setShowTargetPicker(false), EscapePriority.overlay);
+  // 遮罩关闭走统一判定：在替换表单里选中文本拖出弹层，不再把填好的条件一起丢掉（R53）。
+  const replaceOverlayDismiss = useOverlayDismiss(() => setShowReplace(false));
+  const targetOverlayDismiss = useOverlayDismiss(() => setShowTargetPicker(false));
 
   // 这两个内联弹层也要有焦点陷阱：条件与上面两条 Esc 完全对齐，
   // 两层同时 active 会互相抢焦点（谁后挂载谁赢，Tab 环被拽到看不见的那层）。
@@ -1305,7 +1309,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       )}
 
       {showReplace && (
-        <div className="modal-overlay" onClick={() => setShowReplace(false)}>
+        <div className="modal-overlay" {...replaceOverlayDismiss}>
           <div
             ref={replaceModalRef}
             className="modal modal-md browser-replace-modal"
@@ -1381,7 +1385,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       )}
 
       {showTargetPicker && (
-        <div className="modal-overlay" onClick={() => setShowTargetPicker(false)}>
+        <div className="modal-overlay" {...targetOverlayDismiss}>
           <div
             ref={targetModalRef}
             className="modal modal-md browser-target-modal"

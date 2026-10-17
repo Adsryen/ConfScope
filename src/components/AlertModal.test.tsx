@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
+import { clickOverlay, dragFromPanelOntoOverlay, fireEvent, render, screen } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import AlertModal from "./AlertModal";
@@ -80,8 +80,23 @@ describe("AlertModal", () => {
   it("点遮罩关闭", () => {
     const { onClose } = renderAlert();
 
-    fireEvent.click(screen.getByText("格式校验未通过").closest(".modal-overlay")!);
+    clickOverlay(screen.getByText("格式校验未通过").closest(".modal-overlay")!);
 
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("选中提示文本拖出弹层不关，点弹层本体也不关（R53）", () => {
+    const { onClose } = renderAlert();
+    const overlay = screen.getByText("格式校验未通过").closest(".modal-overlay")!;
+    const panel = overlay.querySelector(".modal") as HTMLElement;
+
+    dragFromPanelOntoOverlay(screen.getByText("第 2 行缺少冒号"), overlay);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(panel);
+    expect(onClose).not.toHaveBeenCalled();
+
+    clickOverlay(overlay);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

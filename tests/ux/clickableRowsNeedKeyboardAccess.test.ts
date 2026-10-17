@@ -42,15 +42,18 @@ const CONTAINER_TAGS = [
 ];
 
 /** 遮罩/弹层本体：给鼠标用户的便利出口，键盘走 Esc。按文件计配额。 */
+// 轮14 波32（R53）：遮罩的关闭判定收进 useOverlayDismiss 后展开成 `{...overlayDismiss}`，
+// 开标签里不再有字面 onClick，每份弹层只剩「弹层本体 stopPropagation」这一处豁免，配额随之减半。
+// 这不是放松：遮罩要再挂回裸 onClick，就得按本守卫的要求补键盘出口，或被 overlayDismiss 守卫拦下。
 const OVERLAY_QUOTA: Record<string, number> = {
-  "src/components/About.tsx": 2,
-  "src/components/AlertModal.tsx": 2,
-  "src/components/ConfigBrowser.tsx": 4,
-  "src/components/ConfigEditor.tsx": 2,
-  "src/components/ConfirmModal.tsx": 2,
-  "src/components/ConnectionManager.tsx": 2,
-  "src/components/DeleteConfirm.tsx": 2,
-  "src/components/ErrorDialog.tsx": 2,
+  "src/components/About.tsx": 1,
+  "src/components/AlertModal.tsx": 1,
+  "src/components/ConfigBrowser.tsx": 2,
+  "src/components/ConfigEditor.tsx": 1,
+  "src/components/ConfirmModal.tsx": 1,
+  "src/components/ConnectionManager.tsx": 1,
+  "src/components/DeleteConfirm.tsx": 1,
+  "src/components/ErrorDialog.tsx": 1,
 };
 
 // role="option" 的行由外层 listbox 统一接管按键（配置浏览就是这套），行上不再重复写 onKeyDown。

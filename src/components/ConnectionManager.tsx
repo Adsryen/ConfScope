@@ -24,6 +24,7 @@ import { environmentTone } from "../lib/envTone";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
 
 interface Props {
@@ -456,6 +457,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active: !embedded, containerRef: modalRef });
+  const overlayDismiss = useOverlayDismiss(onClose);
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -2125,7 +2127,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" {...overlayDismiss}>
       <div ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
         {content}
       </div>

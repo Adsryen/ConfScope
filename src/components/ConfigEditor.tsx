@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { validateConfigIssues } from "../lib/validate";
@@ -61,6 +62,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active, containerRef: modalRef });
+  const overlayDismiss = useOverlayDismiss(attemptClose);
 
   const save = () => {
     if (!dataId.trim()) {
@@ -108,14 +110,9 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   return (
     <div
       className="modal-overlay"
-      onClick={(e) => {
-        // 只认落在这层遮罩自身上的点击。
-        // 「放弃草稿」确认框和校验错误框都渲染在本层内部，它们自己的 .modal-overlay
-        // 铺满视口、点空白处就会关自己；这一点击若不挡掉还会继续冒泡到这里，
-        // 于是「关掉确认框」立刻又被 attemptClose 重新问一遍，看起来像点了没反应。
-        if (e.target !== e.currentTarget) return;
-        attemptClose();
-      }}
+      // useOverlayDismiss 已判「点击是否落在遮罩自身」：内层确认框/校验框的遮罩铺满视口，
+      // 关它们的那一下会冒泡到这层，若不挡掉就会立刻被 attemptClose 重新问一遍（R36 的坑，R53 收进同一实现）。
+      {...overlayDismiss}
     >
       <div
         ref={modalRef}

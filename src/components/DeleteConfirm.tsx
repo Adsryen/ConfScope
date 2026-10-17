@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { reportError } from "../lib/errorCenter";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 import { errorText } from "../lib/errorText";
@@ -30,6 +31,8 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active: true, containerRef: modalRef });
+  // 删除进行中（busy）时遮罩点不动，与「取消」按钮同时禁用一致（R53）。
+  const overlayDismiss = useOverlayDismiss(onCancel, !busy);
 
   const confirm = async () => {
     if (!match || busy) return;
@@ -53,7 +56,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
   };
 
   return (
-    <div className="modal-overlay" onClick={() => !busy && onCancel()}>
+    <div className="modal-overlay" {...overlayDismiss}>
       <div
         ref={modalRef}
         className="modal modal-sm"

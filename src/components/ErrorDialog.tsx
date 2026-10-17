@@ -3,6 +3,7 @@ import { useTranslation } from "../i18n";
 import { AppErrorItem, closeMessageDetail, subscribeActiveError } from "../lib/errorCenter";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
+import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import CopyButton from "./CopyButton";
 
@@ -28,6 +29,7 @@ export default function ErrorDialog() {
   // 详情块复用同一节点：从一个报错切到另一个报错时不归零，新堆栈会停在旧偏移处（轮13 波29 / R49）。
   const detailRef = useRef<HTMLPreElement>(null);
   useScrollResetOnContentChange(detailRef, [current?.id ?? 0, current?.detail ?? ""]);
+  const overlayDismiss = useOverlayDismiss(closeMessageDetail);
 
   if (!current) return null;
 
@@ -38,7 +40,7 @@ export default function ErrorDialog() {
   };
 
   return (
-    <div className="modal-overlay error-overlay" onClick={close}>
+    <div className="modal-overlay error-overlay" {...overlayDismiss}>
       <div
         ref={modalRef}
         className="modal modal-error"

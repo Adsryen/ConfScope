@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from "../test/react";
+import { clickOverlay, fireEvent, render, screen } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
@@ -191,7 +191,7 @@ describe("ConfigEditor", () => {
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
 
-    fireEvent.click(overlays()[0]);
+    clickOverlay(overlays()[0]);
 
     expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
     expect(screen.getByText(/配置 app\.yaml 尚未发布/)).toBeInTheDocument();
@@ -244,11 +244,11 @@ describe("ConfigEditor", () => {
   it("确认框自己的遮罩不冒泡：关掉它不会又被外层重新问一遍", () => {
     const { onClose } = renderEditor();
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(overlays()[0]);
+    clickOverlay(overlays()[0]);
     expect(screen.getByText("放弃未发布的内容？")).toBeInTheDocument();
 
     // 第二层遮罩铺满视口，点空白处本该只关确认框、留在编辑器里继续写。
-    fireEvent.click(overlays()[1]);
+    clickOverlay(overlays()[1]);
 
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByText("放弃未发布的内容？")).not.toBeInTheDocument();
@@ -279,7 +279,7 @@ describe("ConfigEditor", () => {
     const { onClose } = renderEditor({}, "en-US");
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
 
-    fireEvent.click(overlays()[0]);
+    clickOverlay(overlays()[0]);
 
     expect(screen.getByText("Discard the unpublished content?")).toBeInTheDocument();
     expect(screen.getByText(/unnamed draft/)).toBeInTheDocument();
