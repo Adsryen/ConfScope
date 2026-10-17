@@ -7085,7 +7085,8 @@ button.diff-workflow-step-btn:hover {
   border: 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  user-select: none;
+  /* R62：这行是「哪条配置、从哪到哪、成没成」的唯一读数，禁选等于让人手抄 */
+  user-select: text;
 }
 
 .apply-item-row:hover,
@@ -7822,4 +7823,67 @@ button.diff-workflow-step-btn:hover {
 .task-item.active .task-item-scope,
 .conn-env-title.active {
   color: var(--text-dim-raised);
+}
+
+/* ── 可复制正文（R62 / 波18）──────────────────────────────────────────────
+   `body` 关了全选是为了不让拖动列表时整屏刷蓝，代价是「看得见、抄不走」。
+   在配置工具里最高频的动作就是把 dataId / namespace / 路径 / 报错原文抄到别处，
+   而这些地方大多还带省略号截断——截断 + 禁选 = 既看不到全文也拿不到原文。
+   这里按视图族显式列出要能复制的正文，不搞 `* { user-select: text }` 那种大赦：
+   行号槽、minimap、diff 标记列必须继续禁选，否则复制出来的内容会夹一列空白。
+   新增带省略号的类时 tests/ux/truncatedTextNeedsSelectable.test.ts 会飘红，
+   照下面的分组补一行即可，别改守卫的基线。 */
+
+/* 弹层里的正文：校验失败清单、确认文案、错误详情、快照详情，全是要抄的 */
+.modal-body,
+.about-content,
+
+/* 配置浏览与连接树：条目摘要、目标范围、元数据值、三层节点名 */
+.browser-item-summary,
+.browser-target-scope,
+.config-meta-value,
+.conn-group-name,
+.conn-env-name,
+.ssh-profile-name,
+.ssh-profile-endpoint,
+
+/* 只读展示型控件的当前值（不是 input，抄不到就只能凭眼睛记） */
+.sel-value,
+.combo-val,
+
+/* 审计矩阵：格子与格子内的 dataId / 取值 */
+.audit-cell,
+.audit-dataid,
+.audit-value,
+
+/* 历史 / 备份 / 任务 / 日志：dataId、名称、范围、详情元信息 */
+.history-dataid,
+.backup-item-name,
+.backup-config-dataid,
+.task-item-name,
+.task-item-scope,
+.log-detail-meta,
+
+/* 对比视图：左右标签、来源说明、加载失败原因、批量对比的标题与错误 */
+.diff-head-cell,
+.diff-source-summary-text,
+.diff-loaderr,
+.source-note,
+.match-dataid,
+.batch-diff-nav-title,
+.batch-diff-main-title,
+.batch-diff-main-label,
+.batch-diff-failures-error,
+
+/* 变更计划：执行流水与每行的主体文案 */
+.apply-ledger,
+.apply-item-main,
+
+/* 设置页：数据目录路径（报错时第一个要被抄走的东西） */
+.settings-data-location-path,
+
+/* 消息中心正文 */
+.message-text {
+  -webkit-user-select: text;
+  user-select: text;
 }
