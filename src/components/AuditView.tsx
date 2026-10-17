@@ -577,7 +577,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
           {envSources.map((env, index) => (
             <div className="audit-env-card" key={`${env.conn.id}:${env.namespace}`}>
               <div className="audit-env-head">
-                <span className={`env-badge env-${environmentToneShort(connectionEnvironmentName(env.conn))}`}>
+                <span
+                  className={`env-badge env-${environmentToneShort(connectionEnvironmentName(env.conn))}`}
+                  title={connectionEnvironmentName(env.conn)}
+                >
                   {connectionEnvironmentName(env.conn)}
                 </span>
                 <span className="audit-env-name">{env.conn.name || env.conn.sourceName}</span>
@@ -873,7 +876,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                     {t(STATUS_LABELS[row.status])}
                   </span>
                   <div className="audit-key-path">
-                    <span className="audit-dataid">{row.dataId}</span>
+                    <span className="audit-dataid" title={row.dataId}>
+                      {row.dataId}
+                    </span>
                     <span className="audit-key">{row.key}</span>
                   </div>
                 </div>

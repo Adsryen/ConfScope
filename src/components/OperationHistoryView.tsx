@@ -398,7 +398,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                   <span className={`history-result ${record.result}`}>{t(RESULT_LABELS[record.result])}</span>
                   <span className="history-time">{formatTime(record.timestamp)}</span>
                 </div>
-                <div className="history-dataid">{record.dataId}</div>
+                <div className="history-dataid" title={record.dataId}>
+                  {record.dataId}
+                </div>
                 <div className="history-item-meta">
                   <span>{record.connectionName}</span>
                   <span>

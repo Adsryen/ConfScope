@@ -132,8 +132,13 @@ export default function LogViewer() {
                 <span className={`task-status ${statusClass(s.status)}`}>{statusLabel(s.status)}</span>
                 <span className="task-type">{kindLabel(s.kind)}</span>
               </div>
-              <div className="task-item-name">{s.id}</div>
-              <div className="task-item-scope">
+              <div className="task-item-name" title={s.id}>
+                {s.id}
+              </div>
+              <div
+                className="task-item-scope"
+                title={`${s.events.length} ${t("logViewer.eventCountUnit")} · ${new Date(s.events[0]?.ts ?? s.startedAt).toLocaleTimeString()}`}
+              >
                 {s.events.length} {t("logViewer.eventCountUnit")} · {new Date(s.events[0]?.ts ?? s.startedAt).toLocaleTimeString()}
               </div>
             </div>
@@ -148,8 +153,10 @@ export default function LogViewer() {
               <div className="log-detail-header">
                 <div className="log-detail-meta">
                   <span className="task-type">{kindLabel(selected.kind)}</span>
-                  <span className="task-item-name">{selected.id}</span>
-                  <span className="task-item-scope">
+                  <span className="task-item-name" title={selected.id}>
+                    {selected.id}
+                  </span>
+                  <span className="task-item-scope" title={new Date(selected.events[0]?.ts ?? selected.startedAt).toLocaleString()}>
                     {new Date(selected.events[0]?.ts ?? selected.startedAt).toLocaleString()}
                   </span>
                 </div>

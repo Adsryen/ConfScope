@@ -154,11 +154,11 @@ function PlanLedger({ plan }: { plan: ApplyPlan }) {
   return (
     <div className="apply-ledger" aria-label={t("apply.ledgerLabel")}>
       <span>{t("apply.ledger.source")}</span>
-      <strong>{plan.source.label}</strong>
+      <strong title={plan.source.label}>{plan.source.label}</strong>
       <span>{t("apply.ledger.dryRun")}</span>
-      <strong>{plan.id}</strong>
+      <strong title={plan.id}>{plan.id}</strong>
       <span>{t("apply.ledger.target")}</span>
-      <strong>{plan.target.label}</strong>
+      <strong title={plan.target.label}>{plan.target.label}</strong>
     </div>
   );
 }
@@ -211,8 +211,12 @@ function PlanItemList({
               onChange={() => onToggleSelected(item.id)}
             />
             <span className="apply-item-main">
-              <span className="mono">{item.ref.dataId}</span>
-              <span className="apply-item-key mono">{item.ref.key}</span>
+              <span className="mono" title={item.ref.dataId}>
+                {item.ref.dataId}
+              </span>
+              <span className="apply-item-key mono" title={item.ref.key}>
+                {item.ref.key}
+              </span>
             </span>
             <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
             {item.blocked && <span className="apply-blocked">{t("apply.blocked")}</span>}

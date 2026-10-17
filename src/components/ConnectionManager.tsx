@@ -1082,7 +1082,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     }}
                   />
                 ) : (
-                  <span className="conn-group-name">{project.project}</span>
+                  <span className="conn-group-name" title={project.project}>
+                    {project.project}
+                  </span>
                 )}
                 <div className="conn-tree-actions">
                   <button
@@ -1116,7 +1118,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     }`}
                     onClick={() => selectContext(project.project, env.environment)}
                   >
-                    <span className="conn-env-name">{env.environment}</span>
+                    <span className="conn-env-name" title={env.environment}>
+                      {env.environment}
+                    </span>
                     <div className="conn-tree-actions">
                       <button
                         className="conn-tree-btn"
@@ -1137,7 +1141,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         <div className="conn-item-name">
                           {connectionSourceName(c)}
                           {c.isDefaultSource && <span className="conn-ssh-badge">{t("connection.defaultSource")}</span>}
-                          <span className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}>
+                          <span
+                            className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}
+                            title={connectionEnvironmentName(c)}
+                          >
                             {connectionEnvironmentName(c)}
                           </span>
                           {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}

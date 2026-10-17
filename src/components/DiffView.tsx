@@ -1681,7 +1681,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               <div className="diff-source-summary-card">
                 <span className="diff-source-summary-title">{t("diff.sourceA")}</span>
                 {leftConn?.sourceType === "local-snapshot" ? (
-                  <span className="env-badge env-local">{t("connection.sourceTypeSnapshot")}</span>
+                  <span className="env-badge env-local" title={t("connection.sourceTypeSnapshot")}>
+                    {t("connection.sourceTypeSnapshot")}
+                  </span>
                 ) : leftConn ? (
                   <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />
                 ) : null}
@@ -1692,7 +1694,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               <div className="diff-source-summary-card">
                 <span className="diff-source-summary-title">{t("diff.sourceB")}</span>
                 {rightConn?.sourceType === "local-snapshot" ? (
-                  <span className="env-badge env-local">{t("connection.sourceTypeSnapshot")}</span>
+                  <span className="env-badge env-local" title={t("connection.sourceTypeSnapshot")}>
+                    {t("connection.sourceTypeSnapshot")}
+                  </span>
                 ) : rightConn ? (
                   <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />
                 ) : null}
@@ -1887,7 +1891,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 )}
                 {error && (
                   <div className="diff-loaderr">
-                    <span>{error}</span>
+                    <span title={error}>{error}</span>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -1934,7 +1938,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                       {matchResults.map((item) => (
                         <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
                           <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
-                          <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`}>
+                          <span className={`match-dataid${item.presence === "right-only" ? " missing" : ""}`} title={item.dataId}>
                             {item.presence === "right-only" ? t("diff.missingConfig") : item.dataId}
                           </span>
                           <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
@@ -1948,7 +1952,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                     <div className="match-side-scroll">
                       {matchResults.map((item) => (
                         <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
-                          <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`}>
+                          <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`} title={item.dataId}>
                             {item.presence === "left-only" ? t("diff.missingConfig") : item.dataId}
                           </span>
                           <span className={`match-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
@@ -1984,7 +1988,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                       {failedItems.map((f) => (
                         <div className="batch-diff-failures-item" key={f.dataId}>
                           <span className="batch-diff-failures-dataid">{f.dataId}</span>
-                          <span className="batch-diff-failures-error">{f.error}</span>
+                          <span className="batch-diff-failures-error" title={f.error}>
+                            {f.error}
+                          </span>
                           <CopyButton text={`${f.dataId}: ${f.error}`} label={t("diff.copyError")} />
                           <button
                             type="button"
@@ -2041,7 +2047,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                       <>
                         <div className="batch-diff-main-head">
                           <div className="batch-diff-main-title-wrap">
-                            <span className="batch-diff-main-title">{selectedBatchItem.dataId}</span>
+                            <span className="batch-diff-main-title" title={selectedBatchItem.dataId}>
+                              {selectedBatchItem.dataId}
+                            </span>
                             <span className={`batch-diff-presence ${selectedBatchItem.presence}`}>
                               {matchPresenceLabel(selectedBatchItem.presence)}
                             </span>

@@ -240,11 +240,17 @@ export default function SSHManagerView() {
             {profiles.length === 0 && <div className="settings-empty">{t('settings.noSSHProfiles')}</div>}
             {profiles.map((profile) => {
               const refs = listSSHProfileReferences(profile.id);
+              // 端点一行摆三个字段，窄列表里必然截断 → title 用同一段文本兜住全文
+              const endpoint = `${profile.config.username}@${profile.config.host}:${profile.config.port || 22}`;
               return (
                 <div className={`ssh-profile-item${draft.id === profile.id ? " active" : ""}`} key={profile.id}>
                   <button className="ssh-profile-main" onClick={() => edit(profile)}>
-                    <span className="ssh-profile-name">{profile.name}</span>
-                    <span className="ssh-profile-endpoint">{profile.config.username}@{profile.config.host}:{profile.config.port || 22}</span>
+                    <span className="ssh-profile-name" title={profile.name}>
+                      {profile.name}
+                    </span>
+                    <span className="ssh-profile-endpoint" title={endpoint}>
+                      {profile.config.username}@{profile.config.host}:{profile.config.port || 22}
+                    </span>
                     <span className="ssh-profile-tags">
                       <span>{profile.config.authType === "key" ? t('connection.keyAuth') : t('connection.passwordAuth')}</span>
                       <span>{t('ssh.referenceCount').replace("{count}", String(refs.length))}</span>

@@ -125,8 +125,14 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                   <span className={`task-status ${getStatusClass(task.status)}`}>{getStatusLabel(task.status)}</span>
                   <span className="task-type">{getTypeLabel(task.type)}</span>
                 </div>
-                <div className="task-item-name">{task.name}</div>
-                {task.scope && <div className="task-item-scope">{task.scope}</div>}
+                <div className="task-item-name" title={task.name}>
+                  {task.name}
+                </div>
+                {task.scope && (
+                  <div className="task-item-scope" title={task.scope}>
+                    {task.scope}
+                  </div>
+                )}
                 {task.status === "running" && (
                   <div className="task-item-progress">
                     <div className="progress-bar">

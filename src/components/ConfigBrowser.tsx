@@ -1044,6 +1044,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 className="btn btn-ghost btn-sm snapshot-action-btn"
                 onClick={createSnapshot}
                 disabled={snapshotSaving || listLoading}
+                title={snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
               >
                 {snapshotSaving ? t("config.creatingSnapshot") : t("config.createSnapshot")}
               </button>
@@ -1127,7 +1128,11 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         />
                         <span>{t("config.selectForReplace")}</span>
                       </label>
-                      <div className="browser-item-summary" dangerouslySetInnerHTML={{ __html: highlightSearchTerm(result.summary, contentTerm) }} />
+                      <div
+                        className="browser-item-summary"
+                        title={result.summary}
+                        dangerouslySetInnerHTML={{ __html: highlightSearchTerm(result.summary, contentTerm) }}
+                      />
                     </>
                   )}
                 </div>
@@ -1374,14 +1379,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               <div className="browser-target-flow">
                 <div className="browser-target-scope">
                   <span>{t("config.applySource")}</span>
-                  <strong>{sourceEndpoint.label}</strong>
+                  <strong title={sourceEndpoint.label}>{sourceEndpoint.label}</strong>
                 </div>
                 <span className="browser-target-arrow" aria-hidden="true">
                   →
                 </span>
                 <div className="browser-target-scope">
                   <span>{t("config.applyTarget")}</span>
-                  <strong>{targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}</strong>
+                  <strong title={targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}>
+                    {targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}
+                  </strong>
                 </div>
               </div>
               <div className="field">

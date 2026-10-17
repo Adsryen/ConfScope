@@ -224,7 +224,9 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
                   pick(o);
                 }}
               >
-                <span className="combo-val">{o.value}</span>
+                <span className="combo-val" title={o.value}>
+                  {o.value}
+                </span>
                 {o.sub && <span className="combo-sub">{o.sub}</span>}
               </div>
             ))}

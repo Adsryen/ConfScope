@@ -377,7 +377,9 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   onClick={() => setSelectedSnapshot(snap)}
                 >
                   <span className="data-item-accent backup" />
-                  <div className="backup-item-name">{formatSnapshotName(snap)}</div>
+                  <div className="backup-item-name" title={formatSnapshotName(snap)}>
+                    {formatSnapshotName(snap)}
+                  </div>
                   <div className="backup-item-meta">
                     <span className="backup-item-count">{t("backup.configCount", { count: stats.totalConfigs })}</span>
                     <span className="backup-item-time">{formatTime(snap.createdAt)}</span>
@@ -566,7 +568,9 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   {selectedSnapshot.configs.map((cfg) => (
                     <div key={`${cfg.group}/${cfg.dataId}`} className="backup-config-item">
                       <div className="backup-config-main">
-                        <span className="backup-config-dataid">{cfg.dataId}</span>
+                        <span className="backup-config-dataid" title={cfg.dataId}>
+                          {cfg.dataId}
+                        </span>
                         <span className="backup-config-group">{cfg.group}</span>
                         <span className="backup-config-type">{cfg.configType}</span>
                       </div>

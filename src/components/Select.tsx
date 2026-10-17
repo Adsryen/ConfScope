@@ -148,7 +148,7 @@ export default function Select({
   }, [open, updateMenuPosition]);
 
   return (
-    <div className={`sel${className ? " " + className : ""}`} ref={ref} title={title}>
+    <div className={`sel${className ? " " + className : ""}`} ref={ref} title={title ?? cur?.label ?? placeholder}>
       <button
         type="button"
         className="sel-trigger"
