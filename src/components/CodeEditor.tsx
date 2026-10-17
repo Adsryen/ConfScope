@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { Format } from "../lib/format";
+import { isImeComposing } from "../lib/useEscape";
 import { highlightCode } from "../lib/highlight";
 
 interface Props {
@@ -31,6 +32,8 @@ export default function CodeEditor({ value, onChange, format, placeholder }: Pro
 
   // Tab 键插入两个空格而不是切换焦点
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 组合态的 Tab 属于输入法（部分输入法用 Tab 做整句/候选页切换），不能拦成插空格
+    if (isImeComposing(e)) return;
     if (e.key === "Tab") {
       e.preventDefault();
       const ta = e.currentTarget;
