@@ -89,8 +89,8 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>{t('config.newConfigTitle')}</h3>
-          <button className="modal-x" onClick={onClose} title={t('common.close')}>
+          <h3>{t("config.newConfigTitle")}</h3>
+          <button className="modal-x" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>

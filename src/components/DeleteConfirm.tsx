@@ -48,8 +48,8 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
     <div className="modal-overlay" onClick={() => !busy && onCancel()}>
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>{t('config.deleteTitle')}</h3>
-          <button className="modal-x" onClick={onCancel} disabled={busy} title={t('common.close')}>
+          <h3>{t("config.deleteTitle")}</h3>
+          <button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>

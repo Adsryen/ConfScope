@@ -1047,7 +1047,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           {embedded && <div className="page-subtitle">{t("connection.pageSubtitle")}</div>}
         </div>
         {!embedded && (
-          <button className="modal-x" onClick={onClose} title={t("common.close")}>
+          <button className="modal-x" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         )}
@@ -1087,7 +1087,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 <div className="conn-tree-actions">
                   <button
                     className="conn-tree-btn"
-                    title={t("connection.addSource")}
+                    title={t("connection.addSourceToProject", { name: project.project })}
+                    aria-label={t("connection.addSourceToProject", { name: project.project })}
                     onClick={(e) => {
                       e.stopPropagation();
                       startNew(project.project, project.environments[0]?.environment ?? DEFAULT_ENVIRONMENT_NAME);
@@ -1119,7 +1120,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     <div className="conn-tree-actions">
                       <button
                         className="conn-tree-btn"
-                        title={t("connection.addSource")}
+                        title={t("connection.addSourceToEnv", { name: env.environment })}
+                        aria-label={t("connection.addSourceToEnv", { name: env.environment })}
                         onClick={(e) => {
                           e.stopPropagation();
                           startNew(project.project, env.environment);

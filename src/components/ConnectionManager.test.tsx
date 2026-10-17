@@ -220,11 +220,29 @@ describe("ConnectionManager", () => {
     });
 
     const envTitle = connectionList().querySelector(".conn-env-name")?.closest(".conn-env-title") as HTMLElement;
-    fireEvent.click(within(envTitle).getByTitle("新增来源"));
+    fireEvent.click(within(envTitle).getByTitle("为环境 生产 新增来源"));
 
     expect(controlByLabel("项目").value).toBe("订单系统");
     expect(controlByLabel("环境").value).toBe("生产");
     expect(fieldByLabel("来源名称").value).toBe("");
+  });
+
+  // R29：树里的 + 只写一个符号，补 aria-label 后又不能和侧栏主按钮同名，否则读屏里三处「新增来源」分不清彼此。
+  it("三处新增来源各自报出落点，不再撞成同一个可访问名", () => {
+    renderManager();
+
+    saveConnection({
+      name: "prod-public",
+      project: "订单系统",
+      environment: "生产",
+      source: "云上公网",
+    });
+
+    expect(screen.getAllByRole("button", { name: "为项目 订单系统 新增来源" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "为环境 生产 新增来源" })).toHaveLength(1);
+    // 主按钮保持短名「新增来源」，它没有上下文可报，落在空白表单上
+    expect(screen.getByRole("button", { name: "新增来源" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "新增来源" })).toHaveLength(1);
   });
 
   it("uses fixed environment options", () => {

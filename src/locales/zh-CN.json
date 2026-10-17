@@ -19,7 +19,9 @@
     "nextPage": "下一页",
     "configListTruncated": "命名空间条目超过扫描上限，仅取到前 {count} 条，结果可能不完整",
     "configListPartial": "配置列表第 {pages} 页加载失败，仅取到 {count} 条，结果不完整",
-    "comboMoreHidden": "还有 {count} 项未显示，请继续输入缩小范围"
+    "comboMoreHidden": "还有 {count} 项未显示，请继续输入缩小范围",
+    "pagerLabel": "分页导航",
+    "pagerInfo": "第 {page} 页，共 {pages} 页"
   },
   "errorDialog": {
     "fullError": "完整错误",
@@ -419,6 +421,8 @@
     "sourceNamePlaceholder": "例如 云上公网 / 云上内网 / 公司内网",
     "sourceNameHelp": "同一项目环境下可以有多个来源，例如云上公网、云上内网、公司内网、出差网络。SSH 只表示连接方式，不作为来源分类。",
     "addSource": "新增来源",
+    "addSourceToProject": "为项目 {name} 新增来源",
+    "addSourceToEnv": "为环境 {name} 新增来源",
     "renameProject": "重命名项目",
     "sectionBasic": "基础信息",
     "sectionNetwork": "网络",

@@ -19,7 +19,9 @@
     "nextPage": "Next Page",
     "configListTruncated": "Namespace exceeds the scan cap: only the first {count} entries were fetched, results may be incomplete",
     "configListPartial": "Config list page(s) {pages} failed to load: only {count} entries fetched, results are incomplete",
-    "comboMoreHidden": "{count} more options hidden — keep typing to narrow the list"
+    "comboMoreHidden": "{count} more options hidden — keep typing to narrow the list",
+    "pagerLabel": "Pagination",
+    "pagerInfo": "Page {page} of {pages}"
   },
   "errorDialog": {
     "fullError": "Full Error",
@@ -419,6 +421,8 @@
     "sourceNamePlaceholder": "e.g. Cloud Public / Cloud Intranet / Company Intranet",
     "sourceNameHelp": "One project environment can have multiple sources, such as cloud public, cloud intranet, company intranet, or travel network. SSH is an access mode, not a source category.",
     "addSource": "Add Source",
+    "addSourceToProject": "Add a source to project {name}",
+    "addSourceToEnv": "Add a source to environment {name}",
     "renameProject": "Rename Project",
     "sectionBasic": "Basic Info",
     "sectionNetwork": "Network",

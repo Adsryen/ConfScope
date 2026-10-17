@@ -392,6 +392,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                       setShowDeleteConfirm(snap.id);
                     }}
                     title={t("backup.delete")}
+                    aria-label={t("backup.delete")}
                   >
                     ×
                   </button>

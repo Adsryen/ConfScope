@@ -52,7 +52,9 @@ describe("ErrorDialog", () => {
     });
     expect(copyText).toHaveBeenCalledWith("Full message\nline 2");
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+    // R29 之后 × 有了 aria-label，和页脚主按钮同名「关闭」（本来就是同一个动作）。
+    // getByLabelText 只认标签关联，正好把标题栏的 × 单独取出来，顺带证明它真的有了可访问名。
+    fireEvent.click(within(dialog).getByLabelText("关闭"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -94,7 +96,9 @@ describe("ErrorDialog", () => {
     expect(within(dialog).getByText("Full Error")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Copy Full Error" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    // 两个「Close」是有意重名：标题栏的 × 和页脚主按钮都只关闭弹框，读屏念出来都听得懂。
+    expect(within(dialog).getAllByRole("button", { name: "Close" })).toHaveLength(2);
     expect(within(dialog).getByTitle("Close")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Close")).toHaveAccessibleName("Close");
   });
 });

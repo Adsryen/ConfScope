@@ -44,7 +44,7 @@ export default function ConfirmModal({ title, message, confirmLabel, cancelLabel
       >
         <div className="modal-header">
           <h3 id={titleId}>{title}</h3>
-          <button className="modal-x" onClick={onCancel} title={t("common.close")}>
+          <button className="modal-x" onClick={onCancel} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>

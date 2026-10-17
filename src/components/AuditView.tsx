@@ -582,7 +582,12 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 </span>
                 <span className="audit-env-name">{env.conn.name || env.conn.sourceName}</span>
                 {envSources.length > 2 && (
-                  <button className="btn btn-ghost btn-sm" onClick={() => removeSource(index)} title={t("common.delete")}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => removeSource(index)}
+                    title={t("common.delete")}
+                    aria-label={t("common.delete")}
+                  >
                     ×
                   </button>
                 )}

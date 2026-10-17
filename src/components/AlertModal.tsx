@@ -50,7 +50,7 @@ export default function AlertModal({ title, messages, onClose, active = true, on
       >
         <div className="modal-header">
           <h3 id={titleId}>{title}</h3>
-          <button className="modal-x" onClick={onClose} title={t("common.close")}>
+          <button className="modal-x" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>

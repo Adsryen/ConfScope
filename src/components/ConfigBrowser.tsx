@@ -1293,7 +1293,13 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           <div className="modal modal-md browser-replace-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{t("config.batchReplace")}</h3>
-              <button className="modal-x" type="button" title={t("common.close")} onClick={() => setShowReplace(false)}>
+              <button
+                className="modal-x"
+                type="button"
+                title={t("common.close")}
+                aria-label={t("common.close")}
+                onClick={() => setShowReplace(false)}
+              >
                 ×
               </button>
             </div>
@@ -1354,7 +1360,13 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           <div className="modal modal-md browser-target-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{t("config.applyToTarget")}</h3>
-              <button className="modal-x" type="button" title={t("common.close")} onClick={() => setShowTargetPicker(false)}>
+              <button
+                className="modal-x"
+                type="button"
+                title={t("common.close")}
+                aria-label={t("common.close")}
+                onClick={() => setShowTargetPicker(false)}
+              >
                 ×
               </button>
             </div>

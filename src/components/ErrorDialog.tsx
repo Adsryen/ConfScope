@@ -35,7 +35,7 @@ export default function ErrorDialog() {
             <h3>{current.title}</h3>
             {current.source && <div className="error-source">{current.source}</div>}
           </div>
-          <button className="modal-x" onClick={close} title={t("common.close")}>
+          <button className="modal-x" onClick={close} title={t("common.close")} aria-label={t("common.close")}>
             ×
           </button>
         </div>
