@@ -250,7 +250,14 @@ export default function SSHManagerView() {
                       <span>{t('ssh.referenceCount').replace("{count}", String(refs.length))}</span>
                     </span>
                   </button>
-                  <button className="conn-item-del" title={t('common.delete')} onClick={() => remove(profile)}>x</button>
+                  <button
+                    className="conn-item-del"
+                    title={t("common.delete")}
+                    aria-label={t("common.delete")}
+                    onClick={() => remove(profile)}
+                  >
+                    x
+                  </button>
                 </div>
               );
             })}

@@ -604,7 +604,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                         {!rule.dataId && !rule.key && <span className="ignore-rule-dataid">{t("audit.ignoreRuleAll")}</span>}
                         <span className="ignore-rule-reason"> — {rule.reason}</span>
                       </span>
-                      <button className="btn btn-ghost btn-sm" onClick={() => removeIgnoreRule(i)}>×</button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => removeIgnoreRule(i)}
+                        title={t("audit.removeRule")}
+                        aria-label={t("audit.removeRule")}
+                      >
+                        ×
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -654,7 +661,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                             : {rule.pattern} → {rule.replacement || t("audit.normalizeDeleteHint")}
                             {rule.caseSensitive ? ` [${t("audit.caseSensitive")}]` : ""}
                           </span>
-                          <button className="btn btn-ghost btn-sm" onClick={() => removeNormalizeRule(i)}>×</button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => removeNormalizeRule(i)}
+                            title={t("audit.removeRule")}
+                            aria-label={t("audit.removeRule")}
+                          >
+                            ×
+                          </button>
                         </div>
                       ))}
                     </div>

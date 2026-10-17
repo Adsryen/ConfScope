@@ -672,6 +672,8 @@ export default function App() {
             <button
               className="sidebar-toggle"
               title={sidebarCollapsed ? t("app.expandSidebar") : t("app.collapseSidebar")}
+              aria-label={sidebarCollapsed ? t("app.expandSidebar") : t("app.collapseSidebar")}
+              aria-expanded={!sidebarCollapsed}
               onClick={() => setSidebarCollapsed((value) => !value)}
             >
               {sidebarCollapsed ? ">" : "<"}
