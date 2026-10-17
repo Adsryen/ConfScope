@@ -1177,4 +1177,67 @@ describe("ConfigBrowser", () => {
     expect(document.activeElement?.closest(".modal")).not.toBeNull();
     expect(document.activeElement).not.toBe(textarea);
   });
+
+  it("搜索无命中时说清是「没搜到」而非「没有配置」，并可一键回到全量列表", async () => {
+    apiMocks.listConfigs.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) =>
+      configPage(dataId.includes("gateway") ? [] : [{ dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" }])
+    );
+
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    fireEvent.change(document.querySelector(".browser-search input")!, { target: { value: "gateway" } });
+    // 输入即搜：等 400ms 防抖落地（用真实时钟，避免假定时器饿死后面的 waitFor）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+
+    expect(await screen.findByText("没有匹配「gateway」的配置")).toBeInTheDocument();
+    expect(screen.queryByText("没有配置")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "清除搜索条件" }));
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "", "", 1, 50);
+    });
+    expect(await screen.findByText("app.json")).toBeInTheDocument();
+    expect(screen.queryByText("清除搜索条件")).not.toBeInTheDocument();
+  });
+
+  it("内容搜索 0 命中走独立文案，且扫描过程中不许提前断言「没有命中」", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    apiMocks.getConfigDocument.mockImplementation(async () => {
+      await gate;
+      return { content: '{"server":{"port":8080}}', format: "json", version: "v1", source: "nacos", updateTime: "" };
+    });
+
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    fireEvent.change(document.querySelector(".browser-search input")!, { target: { value: "nomatch" } });
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalled());
+
+    // 扫描还没跑完，空态不许抢话说「没有命中」
+    expect(screen.queryByText(/内容搜索没有命中/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      release();
+      await gate;
+    });
+    expect(await screen.findByText("内容搜索没有命中「nomatch」")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清除搜索条件" })).toBeInTheDocument();
+  });
+
+  it("分组确实为空时仍是「没有配置」，不塞多余的清除搜索按钮", async () => {
+    apiMocks.listConfigs.mockResolvedValue(configPage([]));
+
+    renderBrowser();
+
+    expect(await screen.findByText("没有配置")).toBeInTheDocument();
+    expect(screen.queryByText(/没有匹配|内容搜索没有命中/)).not.toBeInTheDocument();
+    expect(screen.queryByText("清除搜索条件")).not.toBeInTheDocument();
+  });
 });

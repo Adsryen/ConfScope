@@ -10,7 +10,11 @@
   --accent: #007acc;
   --accent-h: #1a8fe3;
   --text: #cccccc;
-  --text-dim: #7a7a7a;
+  /* 次要文本（R15）：#7a7a7a 在 --bg 上只有 3.88:1，正文都是 11–12px，达不到 WCAG AA 的 4.5:1。
+     #a0a0a0 在 bg/bg2/bg3/bg-hover 上为 6.38 / 5.86 / 5.25 / 4.52，层次仍在但可读。
+     --text-dim-raised 供「选中行底色 --bg-active」这类深于 4.5:1 的场合用（#a0a0a0 在其上只有 3.73:1）。 */
+  --text-dim: #a0a0a0;
+  --text-dim-raised: #c5c5c5;
   --text-hi: #ffffff;
   --border: #3e3e42;
   --red: #f44747;
@@ -1647,6 +1651,13 @@ textarea {
 .pad-msg.err,
 .test-msg.err {
   color: var(--red-h);
+}
+/* 列表空态：文案下面挂「清除搜索条件」按钮，纵向左对齐，避免按钮孤零零排在长文案后面换行错位。 */
+.browser-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 .pad-msg.big {
   flex: 1;
@@ -7773,4 +7784,22 @@ button.diff-workflow-step-btn:hover {
   font-size: 11px;
   color: #c8c8d2;
   word-break: break-all;
+}
+
+/* ── 选中行上的次要文本换用 raised 令牌（R15）──
+   列表行选中底色是 --bg-active(#094771)，#a0a0a0 在其上只有 3.73:1，
+   副标题（group / 时间 / 摘要）正好是字号最小的一档，糊得最明显。
+   这里按族显式列出，不用 :where 通配：漏一处的代价是「只有选中那行看不清」，很难被随手发现。 */
+.browser-item.active .browser-item-group,
+.browser-item.active .browser-item-summary,
+.browser-item.active .browser-result-check,
+.history-item.active .history-item-id,
+.history-item.active .history-item-meta,
+.backup-item.active .backup-item-meta,
+.backup-item.active .backup-item-time,
+.backup-item.active .backup-item-source,
+.task-item.active .task-item-meta,
+.task-item.active .task-item-scope,
+.conn-env-title.active {
+  color: var(--text-dim-raised);
 }

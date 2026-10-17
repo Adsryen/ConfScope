@@ -131,6 +131,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [contentResults, setContentResults] = useState<ContentSearchResult[]>([]);
   const [contentSearchProgress, setContentSearchProgress] = useState({ loaded: 0, total: 0, failed: 0 });
   const [contentSearchError, setContentSearchError] = useState<string | null>(null);
+  // 内容扫描进行中：此时结果为空是「还没扫完」，不能当成「没有命中」播报给用户。
+  const [contentSearching, setContentSearching] = useState(false);
   const [selectedContentKeys, setSelectedContentKeys] = useState<Set<string>>(new Set());
   const [showReplace, setShowReplace] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
@@ -246,6 +248,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
   const clearContentSearch = () => {
     contentSearchReqId.current += 1;
+    setContentSearching(false);
     setContentTerm("");
     setContentResults([]);
     setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
@@ -265,6 +268,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
     const my = ++contentSearchReqId.current;
     const group = groupFilter.trim();
+    setContentSearching(true);
     setContentTerm(query);
     setContentResults([]);
     setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
@@ -322,6 +326,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         actionLabel: t("common.retry"),
         onAction: () => searchAllContent(query, group),
       });
+    } finally {
+      if (my === contentSearchReqId.current) setContentSearching(false);
     }
   };
 
@@ -375,6 +381,15 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     window.clearTimeout(searchTimer.current);
     if (searchMode === "content") searchAllContent(search, selectedGroup);
     else fetchList(search, 1, selectedGroup);
+  };
+
+  // 空态里的「清除搜索条件」：搜索框、已生效词、内容搜索结果一起归零并回列表。
+  // 不顺手清掉防抖定时器的话，用户点完清除，400ms 后旧词又会把列表打回空态。
+  const clearSearchTerms = () => {
+    window.clearTimeout(searchTimer.current);
+    setSearch("");
+    if (searchMode === "content") searchAllContent("");
+    else fetchList("", 1, selectedGroup);
   };
   const switchSearchMode = (mode: SearchMode) => {
     if (mode === searchMode) return;
@@ -1002,8 +1017,22 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           {isContentSearchActive && contentSearchError && (
             <InlineError {...inlineErrorLabels} message={contentSearchError} onRetry={() => searchAllContent(contentTerm, selectedGroup)} />
           )}
-          {!listLoading && !listError && !contentSearchError && visibleItems.length === 0 && (
-            <div className="pad-msg">{t("config.empty")}</div>
+          {!listLoading && !listError && !contentSearchError && !contentSearching && visibleItems.length === 0 && (
+            <div className="pad-msg browser-empty">
+              {/* 搜不出来 ≠ 这个分组本来就空。两者共用一句「没有配置」，用户会去怀疑同步坏了。 */}
+              <span>
+                {isContentSearchActive
+                  ? t("config.contentSearchEmpty", { term: contentTerm })
+                  : appliedTerm
+                    ? t("config.searchEmpty", { term: appliedTerm })
+                    : t("config.empty")}
+              </span>
+              {(isContentSearchActive || appliedTerm) && (
+                <button className="btn btn-ghost btn-sm" type="button" onClick={clearSearchTerms}>
+                  {t("config.clearSearch")}
+                </button>
+              )}
+            </div>
           )}
           {visibleItems.map((it) => {
             const active = selected?.dataId === it.dataId && selected?.group === it.group;
