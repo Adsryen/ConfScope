@@ -578,7 +578,10 @@ describe("ApplyPlanView", () => {
       options.onTaskCreated?.(task.id);
       return { ok: true, taskId: task.id, historyId: "history-1" };
     });
-    const planEntry = { ...entryPayload, target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" } };
+    const planEntry = {
+      ...entryPayload,
+      target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" },
+    };
 
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
       ok: true,
@@ -614,7 +617,10 @@ describe("ApplyPlanView", () => {
       targetConnection: sandboxConn,
     });
 
-    const sandboxEntry = { ...entryPayload, target: { ...entryPayload.target, connectionId: sandboxConn.id, connectionName: sandboxConn.name, label: "Sandbox / public" } };
+    const sandboxEntry = {
+      ...entryPayload,
+      target: { ...entryPayload.target, connectionId: sandboxConn.id, connectionName: sandboxConn.name, label: "Sandbox / public" },
+    };
     renderView(sandboxEntry, [sourceConn, sandboxConn]);
     fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
     fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
@@ -750,11 +756,118 @@ describe("ApplyPlanView", () => {
     await waitFor(() => expect(storeMocks.saveApplyPlan.mock.calls.length).toBeGreaterThan(savesBeforeCommit));
     await waitFor(() =>
       expect(storeMocks.saveApplyPlan).toHaveBeenCalledWith(
-        expect.objectContaining({ items: expect.arrayContaining([expect.objectContaining({ afterValue: expect.objectContaining({ value: "server.port=7777" }) })]) }) as never
+        expect.objectContaining({
+          items: expect.arrayContaining([expect.objectContaining({ afterValue: expect.objectContaining({ value: "server.port=7777" }) })]),
+        }) as never
       )
     );
     // diff 预览右侧（after）应出现编辑后的端口值
     expect(await screen.findByText("7777")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+  it("explains which step is missing before the confirmation checkbox is ticked", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+
+    const missingReason = "Tick the confirmation checkbox first.";
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    const dryRunButton = screen.getByRole("button", { name: "Dry-run check" });
+
+    expect(executeButton).toBeDisabled();
+    // 原因既进读屏可达的行内清单，也挂在包裹按钮的守卫 title 上——disabled 按钮自身收不到 pointer 事件，tooltip 弹不出来
+    expect(screen.getByText(missingReason)).toBeInTheDocument();
+    expect(executeButton.closest(".btn-guard")).toHaveAttribute("title", missingReason);
+    // dry-run 不要求勾选确认，不能被这条原因误伤
+    expect(dryRunButton).toBeEnabled();
+    expect(dryRunButton.closest(".btn-guard")).not.toHaveAttribute("title");
+
+    fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    expect(screen.queryByText(missingReason)).not.toBeInTheDocument();
+    expect(executeButton.closest(".btn-guard")).not.toHaveAttribute("title");
+  });
+
+  it("asks for a selection on both buttons after the user clears the checkboxes", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(screen.getByRole("button", { name: "Select none" }));
+
+    const missingReason = "Select at least one item.";
+    expect(await screen.findByText(missingReason)).toBeInTheDocument();
+    // 没勾选连 dry-run 也做不了，所以两个按钮的守卫都要带上这条原因
+    const guards = Array.from(document.querySelectorAll<HTMLElement>(".apply-confirmation-actions .btn-guard"));
+    expect(guards).toHaveLength(2);
+    guards.forEach((guard) => {
+      expect(guard).toHaveAttribute("title", missingReason);
+      expect(guard.querySelector("button")).toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() => expect(guards[1].querySelector("button")).toBeEnabled());
+    expect(screen.queryByText(missingReason)).not.toBeInTheDocument();
+  });
+
+  it("stays quiet while a task runs and explains the lock after it succeeds", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    // 手动收尾的执行，用来把组件停在「任务进行中」这一帧
+    let finishExecution: ((result: { ok: true; taskId: string; historyId: string }) => void) | undefined;
+    executionMocks.executeApplyPlan.mockImplementationOnce(
+      () =>
+        new Promise<{ ok: true; taskId: string; historyId: string }>((resolve) => {
+          finishExecution = resolve;
+        })
+    );
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    const runningButton = await screen.findByRole("button", { name: "Executing..." });
+    expect(runningButton).toBeDisabled();
+    const runningReason = "A task is already running; wait for it to finish.";
+    // 悬停提示保留，但行内清单不播报——执行中进度面板自己会说话，避免两处重复
+    expect(runningButton.closest(".btn-guard")).toHaveAttribute("title", runningReason);
+    expect(screen.queryByText(runningReason)).not.toBeInTheDocument();
+    expect(document.querySelector(".apply-blocker-hint")).not.toBeInTheDocument();
+
+    finishExecution?.({ ok: true, taskId: "task-blocker-1", historyId: "history-blocker-1" });
+
+    const succeededReason = "This plan already ran successfully; generate a new plan to run again.";
+    expect(await screen.findByText(succeededReason)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dry-run check" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
+    expect(screen.getByRole("button", { name: "Execute change" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Connection, connectionDisplayLabel, connectionProjectName } from "../store/connections";
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
@@ -415,26 +415,83 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     });
   };
 
-  // 键盘上下键在列表中移动选中(从搜索框或列表触发)
-  const moveSelection = (delta: number) => {
-    if (!items.length) return;
-    const idx = items.findIndex((it) => selected && it.dataId === selected.dataId && it.group === selected.group);
-    const next = idx < 0 ? (delta > 0 ? 0 : items.length - 1) : idx + delta;
-    const it = items[Math.min(Math.max(next, 0), items.length - 1)];
-    if (it) guardNav(() => openConfig(it));
+  // ── 列表键盘导航（R18）──
+  // 列表项此前是裸 div：↑↓ 寄生在搜索框上，焦点一旦离开输入框就再也走不动，读屏也念不出条目。
+  // 现在走 roving tabindex——整列只有一个 tabIndex=0（焦点行 > 选中行 > 首行），方向键在 listbox 容器上
+  // 统一处理，Home/End 跳首末，Enter 兜住「焦点行不是选中行」那一种。
+  // 保留「移动即打开」的自动激活，不改成「移动 + Enter」：↑↓ 预览是用户已有的肌肉记忆，
+  // 换成手动激活等于悄悄改掉既有语义；代价是按一次拉一次正文，靠已有的请求序号收敛掉过期响应。
+  // 走动的是 visibleItems 而不是 items：内容搜索态下屏幕上就是命中项，箭头却曾经过滤前的旧列表——
+  // 那会打开一行根本没显示的配置。
+  const listItemKey = (it: ConfigItem) => `${it.group}/${it.dataId}`;
+  const selectedKey = selected ? listItemKey(selected) : null;
+  const [focusedItemKey, setFocusedItemKey] = useState<string | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  const bindItemRef = (key: string) => (el: HTMLDivElement | null) => {
+    if (el) itemRefs.current.set(key, el);
+    else itemRefs.current.delete(key);
+  };
+  const rovingItemKey =
+    [focusedItemKey, selectedKey, visibleItems.length ? listItemKey(visibleItems[0]) : null].find((key) =>
+      key ? visibleItems.some((it) => listItemKey(it) === key) : false
+    ) ?? null;
+
+  useEffect(() => {
+    if (!focusedItemKey) return;
+    const el = itemRefs.current.get(focusedItemKey);
+    // 只有键盘在列表内走动才挪 DOM 焦点；从搜索框预览时输入框必须留住，用户还要接着改查询词。
+    if (el && el !== document.activeElement) el.focus({ preventScroll: true });
+  }, [focusedItemKey]);
+
+  const navigateList = (index: number, moveFocus: boolean) => {
+    if (!visibleItems.length) return;
+    const it = visibleItems[Math.min(Math.max(index, 0), visibleItems.length - 1)];
+    if (moveFocus) setFocusedItemKey(listItemKey(it));
+    guardNav(() => openConfig(it));
+  };
+
+  // 搜索框触发 moveFocus=false（只预览），列表内触发 true（焦点随行走）。
+  const moveSelection = (delta: number, moveFocus = false) => {
+    const baseKey = moveFocus ? (focusedItemKey ?? selectedKey) : selectedKey;
+    const idx = baseKey ? visibleItems.findIndex((it) => listItemKey(it) === baseKey) : -1;
+    if (idx < 0) {
+      navigateList(delta > 0 ? 0 : visibleItems.length - 1, moveFocus);
+      return;
+    }
+    navigateList(idx + delta, moveFocus);
+  };
+
+  const onListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (isImeComposing(e)) return; // 组合态的方向键与回车归输入法
+    const key = focusedItemKey ?? selectedKey;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      moveSelection(1, true);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      moveSelection(-1, true);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      navigateList(0, true);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      navigateList(visibleItems.length - 1, true);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const it = key && key !== selectedKey ? visibleItems.find((item) => listItemKey(item) === key) : undefined;
+      if (it) guardNav(() => openConfig(it));
+    }
   };
   // 选中项滚入可视区。
   // 保活隐藏（display:none）期间 Chromium 会直接丢弃 scrollIntoView（真机实测），
   // 所以记下最后一次对齐过的选中项；切回前台时若选中项已在隐藏期间变掉，补一次对齐，
   // 没变过就什么都不做——列表滚动位置本身是保活的，不能把用户翻到的地方拽回去。
-  const activeRef = useRef<HTMLDivElement>(null);
   const alignedKeyRef = useRef<string | null>(null);
-  const selectedKey = selected ? `${selected.group}::${selected.dataId}` : null;
   useEffect(() => {
     if (!active) return;
     if (selectedKey === alignedKeyRef.current) return;
     alignedKeyRef.current = selectedKey;
-    activeRef.current?.scrollIntoView({ block: "nearest" });
+    if (selectedKey) itemRefs.current.get(selectedKey)?.scrollIntoView({ block: "nearest" });
   }, [active, selectedKey]);
 
   // 切换连接 / 命名空间时重置并重新拉列表
@@ -1034,40 +1091,49 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               )}
             </div>
           )}
-          {visibleItems.map((it) => {
-            const active = selected?.dataId === it.dataId && selected?.group === it.group;
-            const result = isContentSearchActive
-              ? contentResults.find((candidate) => configResultKey(candidate.item) === configResultKey(it))
-              : null;
-            return (
-              <div
-                key={`${it.group}/${it.dataId}`}
-                ref={active ? activeRef : undefined}
-                className={`browser-item${active ? " active" : ""}`}
-                onClick={() => guardNav(() => openConfig(it))}
-                title={`${it.dataId}\nGROUP: ${it.group}`}
-              >
-                <div className="browser-item-id">{it.dataId}</div>
-                <div className="browser-item-group">
-                  {it.group}
-                  {it.configType ? ` · ${it.configType}` : ""}
+          {/* listbox 只包列表项：加载/报错/空态这些提示留在外面，免得被读成「列表里少了这一项」。
+             容器本身 display:contents，不产生盒子，滚动与分隔线仍归 .browser-items。 */}
+          <div className="browser-items-list" role="listbox" aria-label={t("config.listAriaLabel")} onKeyDown={onListKeyDown}>
+            {visibleItems.map((it) => {
+              const key = listItemKey(it);
+              const active = selected?.dataId === it.dataId && selected?.group === it.group;
+              const result = isContentSearchActive
+                ? contentResults.find((candidate) => configResultKey(candidate.item) === configResultKey(it))
+                : null;
+              return (
+                <div
+                  key={key}
+                  ref={bindItemRef(key)}
+                  role="option"
+                  aria-selected={active}
+                  tabIndex={rovingItemKey === key ? 0 : -1}
+                  onFocus={() => setFocusedItemKey(key)}
+                  className={`browser-item${active ? " active" : ""}`}
+                  onClick={() => guardNav(() => openConfig(it))}
+                  title={`${it.dataId}\nGROUP: ${it.group}`}
+                >
+                  <div className="browser-item-id">{it.dataId}</div>
+                  <div className="browser-item-group">
+                    {it.group}
+                    {it.configType ? ` · ${it.configType}` : ""}
+                  </div>
+                  {result && (
+                    <>
+                      <label className="browser-result-check" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedContentKeys.has(configResultKey(it))}
+                          onChange={() => toggleContentResult(result)}
+                        />
+                        <span>{t("config.selectForReplace")}</span>
+                      </label>
+                      <div className="browser-item-summary" dangerouslySetInnerHTML={{ __html: highlightSearchTerm(result.summary, contentTerm) }} />
+                    </>
+                  )}
                 </div>
-                {result && (
-                  <>
-                    <label className="browser-result-check" onClick={(event) => event.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedContentKeys.has(configResultKey(it))}
-                        onChange={() => toggleContentResult(result)}
-                      />
-                      <span>{t("config.selectForReplace")}</span>
-                    </label>
-                    <div className="browser-item-summary" dangerouslySetInnerHTML={{ __html: highlightSearchTerm(result.summary, contentTerm) }} />
-                  </>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
         {!isContentSearchActive && (
           <Pager page={pageNo} pages={pages} loading={listLoading} onPage={(p) => fetchList(appliedTerm, p, selectedGroup)} />

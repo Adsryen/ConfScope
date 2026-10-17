@@ -1240,4 +1240,117 @@ describe("ConfigBrowser", () => {
     expect(screen.queryByText(/没有匹配|内容搜索没有命中/)).not.toBeInTheDocument();
     expect(screen.queryByText("清除搜索条件")).not.toBeInTheDocument();
   });
+
+  it("列表项能被 Tab 到达：整列只有一个 roving tabIndex=0", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ])
+    );
+
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    const list = document.querySelector('[role="listbox"]');
+    expect(list).toBeInTheDocument();
+    expect(list).toHaveAttribute("aria-label", "配置列表");
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.browser-item[role="option"]'));
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((row) => row.getAttribute("tabindex") === "0")).toHaveLength(1);
+    // 没人主动聚焦时，Tab 的落点是首行；读屏能念出「未选中」
+    expect(rows[0].getAttribute("tabindex")).toBe("0");
+    expect(rows[1].getAttribute("tabindex")).toBe("-1");
+    expect(rows[0]).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("焦点在列表项上：上下键换行、焦点随行、回车不再重复拉正文", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ])
+    );
+
+    renderBrowser();
+    const rows = await screen.findAllByRole("option");
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP"));
+
+    rows[0].focus();
+    fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "gateway.yaml", "DEFAULT_GROUP"));
+    expect(document.activeElement).toBe(rows[1]);
+    expect(rows[1]).toHaveAttribute("aria-selected", "true");
+    expect(rows[0]).toHaveAttribute("aria-selected", "false");
+
+    // 焦点行已是选中行：回车不该再发一次同样的请求
+    apiMocks.getConfigDocument.mockClear();
+    fireEvent.keyDown(rows[1], { key: "Enter" });
+    expect(apiMocks.getConfigDocument).not.toHaveBeenCalled();
+
+    // Home/End 跳首末（在列表里，不靠搜索框焦点）
+    fireEvent.keyDown(rows[1], { key: "Home" });
+    await waitFor(() => expect(document.activeElement).toBe(rows[0]));
+    fireEvent.keyDown(rows[0], { key: "End" });
+    await waitFor(() => expect(document.activeElement).toBe(rows[1]));
+  });
+
+  it("从搜索框按上下键只预览、不把焦点从输入框抢走", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ])
+    );
+
+    renderBrowser();
+    const rows = await screen.findAllByRole("option");
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP"));
+
+    const input = document.querySelector(".browser-search input") as HTMLInputElement;
+    input.focus();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "gateway.yaml", "DEFAULT_GROUP"));
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("内容搜索态下方向键走的是屏幕上的命中项，不是后台那份完整列表", async () => {
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "a.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "b.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "c.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+      ])
+    );
+    apiMocks.getConfigDocument.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => ({
+      content: dataId === "b.json" ? "unrelated" : "token: hit",
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    }));
+
+    renderBrowser();
+    await screen.findByText("a.json");
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    fireEvent.change(document.querySelector(".browser-search input")!, { target: { value: "token" } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+
+    const rows = await screen.findAllByRole("option");
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining("a.json"), expect.stringContaining("c.json")]);
+
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "a.json", "DEFAULT_GROUP"));
+    rows[0].focus();
+    fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+
+    // 旧实现按 items（含未显示的 b.json）移动：屏幕上不会有任何一行亮起来
+    await waitFor(() => expect(rows[1].getAttribute("aria-selected")).toBe("true"));
+    expect(document.querySelector(".browser-item.active .browser-item-id")?.textContent).toBe("c.json");
+  });
 });

@@ -377,6 +377,23 @@ function ConfirmationPanel({
   // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
   const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
   const executeDisabled = !ready || anyRunning || executionSucceeded || selectedCount === 0 || selectedHasBlocked;
+  // 灰按钮必须自己说清缺哪一步（R19）：五个原因并成一个 disabled，用户只能一个个开关去试。
+  // title 挂在包裹按钮的 .btn-guard 上而不是按钮本身——disabled 的元素收不到 pointer 事件，
+  // 浏览器根本不出 tooltip（与 ConnectionManager 的端口守卫同一写法）。
+  const blockers: Array<{ id: string; label: string; alsoDryRun: boolean }> = [];
+  if (anyRunning) blockers.push({ id: "running", label: t("apply.blockRunning"), alsoDryRun: true });
+  if (executionSucceeded) blockers.push({ id: "succeeded", label: t("apply.blockSucceeded"), alsoDryRun: true });
+  if (selectedCount === 0) blockers.push({ id: "noSelection", label: t("apply.blockNoSelection"), alsoDryRun: true });
+  if (selectedHasBlocked) blockers.push({ id: "hasBlocked", label: t("apply.blockHasBlocked"), alsoDryRun: false });
+  if (!ready) {
+    blockers.push({
+      id: "notReady",
+      label: protectedTarget ? t("apply.blockConfirmText") : t("apply.blockNotConfirmed"),
+      alsoDryRun: false,
+    });
+  }
+  const dryRunBlockers = blockers.filter((blocker) => blocker.alsoDryRun);
+  const blockerTitle = (list: typeof blockers) => (list.length ? list.map((blocker) => blocker.label).join("\n") : undefined);
   const executeLabel =
     executionMode === "apply"
       ? t("apply.executing")
@@ -418,13 +435,26 @@ function ConfirmationPanel({
         </label>
       )}
       <div className="apply-confirmation-actions">
-        <button className="btn btn-ghost" type="button" disabled={dryRunDisabled} onClick={onDryRun}>
-          {dryRunLabel}
-        </button>
-        <button className="btn btn-primary" type="button" disabled={executeDisabled} onClick={onExecute}>
-          {executeLabel}
-        </button>
+        <span className="btn-guard" title={blockerTitle(dryRunBlockers)}>
+          <button className="btn btn-ghost" type="button" disabled={dryRunDisabled} aria-disabled={dryRunDisabled} onClick={onDryRun}>
+            {dryRunLabel}
+          </button>
+        </span>
+        <span className="btn-guard" title={blockerTitle(blockers)}>
+          <button className="btn btn-primary" type="button" disabled={executeDisabled} aria-disabled={executeDisabled} onClick={onExecute}>
+            {executeLabel}
+          </button>
+        </span>
       </div>
+      {/* 任务在跑时进度面板自己会说话，这里不再重复播报「已有任务在执行」；
+          读屏拿的是这条行内清单，不依赖悬停 tooltip。 */}
+      {!anyRunning && blockers.length > 0 && (
+        <ul className="apply-blocker-hint" aria-label={t("apply.blockerHintLabel")}>
+          {blockers.map((blocker) => (
+            <li key={blocker.id}>{blocker.label}</li>
+          ))}
+        </ul>
+      )}
       {executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
       {executionTask && (
         <div className="apply-task-progress" aria-label={t("apply.taskProgressLabel")}>

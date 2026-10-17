@@ -1812,6 +1812,16 @@ textarea {
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
 }
+/* listbox 容器（R18）：只挂语义与键盘处理，不产生盒子，
+   滚动条、分隔线、空态提示的位置都保持原样。 */
+.browser-items-list {
+  display: contents;
+}
+/* 列表项现在能被 Tab 到达，得有可见焦点环；鼠标点击不画（:focus-visible）。 */
+.browser-item:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+}
 .browser-item:hover {
   background: var(--bg-hover);
 }
@@ -7338,6 +7348,21 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 主操作按钮灰掉时的原因清单（R19）。不复用 .apply-execution-notice：
+   那条是执行成功的绿色语义，拿它报「现在不能执行」正好反了。 */
+.apply-blocker-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 220, 170, 0.28);
+  border-radius: 4px;
+  background: rgba(220, 220, 170, 0.08);
+  color: var(--yellow);
+  font-size: 12px;
+  list-style: none;
 }
 
 .apply-execution-notice {
