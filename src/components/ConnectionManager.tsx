@@ -1057,6 +1057,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               >
                 {renamingProject?.oldName === project.project ? (
                   <input
+                    type="text"
                     className="conn-inline-input"
                     value={renamingProject.value}
                     autoFocus
@@ -1254,6 +1255,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 )}
                 {showProjectInput && (
                   <input
+                    type="text"
                     className="search-input wide"
                     value={draft.projectName ?? ""}
                     placeholder={t("connection.projectPlaceholder")}
@@ -1291,6 +1293,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.sourceName")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide"
                   value={draft.sourceName ?? ""}
                   placeholder={t("connection.sourceNamePlaceholder")}
@@ -1354,6 +1357,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 </FieldLabel>
                 <div className="path-field">
                   <input
+                    type="text"
                     className="search-input wide mono"
                     value={draft.localPath ?? ""}
                     placeholder={t("connection.localPathPlaceholder")}
@@ -1404,6 +1408,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 {t("connection.name")}
               </FieldLabel>
               <input
+                type="text"
                 className="search-input wide"
                 value={draft.name}
                 placeholder={t("connection.namePlaceholder")}
@@ -1450,6 +1455,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.address")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide mono"
                   value={draft.baseUrl}
                   placeholder="http://localhost:8848/nacos"
@@ -1484,6 +1490,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.address")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide mono"
                   value={draft.baseUrl}
                   placeholder="http://localhost:8070"
@@ -1523,6 +1530,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {t("connection.apolloEnv")}
                   </FieldLabel>
                   <input
+                    type="text"
                     className="search-input mono"
                     value={draft.apolloEnv ?? ""}
                     placeholder="DEV"
@@ -1537,6 +1545,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {t("connection.apolloCluster")}
                   </FieldLabel>
                   <input
+                    type="text"
                     className="search-input mono"
                     value={draft.apolloCluster ?? ""}
                     placeholder="default"
@@ -1552,6 +1561,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.apolloAppId")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide mono"
                   value={draft.apolloAppId ?? ""}
                   placeholder="order-service"
@@ -1566,6 +1576,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.apolloNamespaceName")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide mono"
                   value={draft.apolloNamespaceName ?? ""}
                   placeholder="application"
@@ -1586,6 +1597,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   {t("connection.address")}
                 </FieldLabel>
                 <input
+                  type="text"
                   className="search-input wide mono"
                   value={draft.baseUrl}
                   placeholder="http://localhost:8500"
@@ -1625,6 +1637,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {t("connection.consulDatacenter")}
                   </FieldLabel>
                   <input
+                    type="text"
                     className="search-input mono"
                     value={draft.consulDatacenter ?? ""}
                     placeholder="dc1"
@@ -1639,6 +1652,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {t("connection.consulKeyPrefix")}
                   </FieldLabel>
                   <input
+                    type="text"
                     className="search-input mono"
                     value={draft.consulKeyPrefix ?? ""}
                     placeholder="apps/order/"
@@ -1675,6 +1689,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       {t("connection.username")}
                     </FieldLabel>
                     <input
+                      type="text"
                       className="search-input mono"
                       value={draft.username}
                       placeholder={t("connection.usernamePlaceholder")}
@@ -1718,6 +1733,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         {t("connection.accessKeyId")}
                       </FieldLabel>
                       <input
+                        type="text"
                         className="search-input mono"
                         value={draft.accessKeyId ?? ""}
                         placeholder={t("connection.accessKeyIdPlaceholder")}
@@ -1757,6 +1773,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       {t("connection.securityToken")}
                     </FieldLabel>
                     <input
+                      type="text"
                       className="search-input wide mono"
                       value={draft.securityToken ?? ""}
                       placeholder={t("connection.securityTokenPlaceholder")}
@@ -1774,6 +1791,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 </FieldLabel>
                 <div className="namespace-field">
                   <input
+                    type="text"
                     className="search-input wide mono"
                     value={draft.defaultNamespace}
                     placeholder={t("connection.defaultNamespacePlaceholder")}
@@ -1834,6 +1852,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {t("connection.defaultGroup")}
                   </FieldLabel>
                   <input
+                    type="text"
                     className="search-input wide mono"
                     value={draft.defaultGroup ?? ""}
                     placeholder={t("connection.defaultGroupPlaceholder")}
@@ -1892,6 +1911,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           {t("connection.sshHost")}
                         </FieldLabel>
                         <input
+                          type="text"
                           className="search-input wide"
                           value={draft.sshConfig?.host || ""}
                           placeholder={t("connection.sshHostPlaceholder")}
@@ -1918,6 +1938,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                             {t("connection.sshUsername")}
                           </FieldLabel>
                           <input
+                            type="text"
                             className="search-input mono"
                             spellCheck={false}
                             value={draft.sshConfig?.username || ""}

@@ -967,6 +967,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           </div>
           <div className="browser-search-row">
             <input
+              type="text"
               className="search-input wide"
               placeholder={searchMode === "content" ? t("config.contentSearchPlaceholder") : t("config.searchPlaceholder")}
               value={search}
@@ -1318,6 +1319,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   {t("config.findText")}
                 </label>
                 <input
+                  type="text"
                   id="config-replace-find"
                   className="search-input wide mono"
                   value={replaceFindText}
@@ -1332,6 +1334,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   {t("config.replaceText")}
                 </label>
                 <input
+                  type="text"
                   id="config-replace-text"
                   className="search-input wide mono"
                   value={replaceText}
@@ -1414,6 +1417,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   {t("config.targetNamespace")}
                 </label>
                 <input
+                  type="text"
                   id="config-target-namespace"
                   className="search-input wide mono"
                   spellCheck={false}

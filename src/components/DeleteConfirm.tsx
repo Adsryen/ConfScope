@@ -63,6 +63,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             {t('config.deleteHint')} <b className="mono">{name}</b>
           </p>
           <input
+            type="text"
             className="search-input wide mono"
             value={input}
             placeholder={name}

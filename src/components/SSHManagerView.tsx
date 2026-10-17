@@ -293,6 +293,7 @@ export default function SSHManagerView() {
                   <label className="field">
                     <span>{t('settings.sshProfileName')}</span>
                     <input
+                      type="text"
                       className="search-input wide"
                       value={draft.name}
                       placeholder={t('settings.sshProfileNamePlaceholder')}
@@ -305,6 +306,7 @@ export default function SSHManagerView() {
                   <label className="field">
                     <span>{t('connection.sshHost')}</span>
                     <input
+                      type="text"
                       className="search-input wide"
                       value={draft.config.host}
                       placeholder={t('connection.sshHostPlaceholder')}
@@ -326,6 +328,7 @@ export default function SSHManagerView() {
                     <label className="field">
                       <span>{t('connection.sshUsername')}</span>
                       <input
+                        type="text"
                         className="search-input mono"
                         spellCheck={false}
                         value={draft.config.username}

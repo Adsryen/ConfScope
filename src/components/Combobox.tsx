@@ -154,6 +154,7 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
   return (
     <div className="combo" ref={ref}>
       <input
+        type="text"
         ref={inputRef}
         className="search-input wide mono"
         value={value}

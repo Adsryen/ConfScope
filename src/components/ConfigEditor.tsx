@@ -122,6 +122,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
             <label className="field">
               <span>{t('config.dataId')}</span>
               <input
+                type="text"
                 className="search-input wide mono"
                 value={dataId}
                 placeholder={t('config.dataIdPlaceholder')}
@@ -135,6 +136,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
             <label className="field">
               <span>{t('config.groupLabel')}</span>
               <input
+                type="text"
                 className="search-input mono"
                 value={group}
                 autoCapitalize="off"

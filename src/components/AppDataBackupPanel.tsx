@@ -615,11 +615,21 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
             <div className="app-data-backup-webdav-grid">
               <label className="field">
                 <span>{t("appDataBackup.webdavUrl")}</span>
-                <input className="search-input" value={webdavDraft.url} onChange={(e) => setWebdavDraft({ ...webdavDraft, url: e.target.value })} />
+                <input
+                  type="text"
+                  className="search-input"
+                  value={webdavDraft.url}
+                  onChange={(e) => setWebdavDraft({ ...webdavDraft, url: e.target.value })}
+                />
               </label>
               <label className="field">
                 <span>{t("appDataBackup.webdavUsername")}</span>
-                <input className="search-input" value={webdavDraft.username} onChange={(e) => setWebdavDraft({ ...webdavDraft, username: e.target.value })} />
+                <input
+                  type="text"
+                  className="search-input"
+                  value={webdavDraft.username}
+                  onChange={(e) => setWebdavDraft({ ...webdavDraft, username: e.target.value })}
+                />
               </label>
               <label className="field">
                 <span>{t("appDataBackup.webdavPassword")}</span>
@@ -627,7 +637,12 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
               </label>
               <label className="field">
                 <span>{t("appDataBackup.remoteFolder")}</span>
-                <input className="search-input" value={webdavDraft.rootPath} onChange={(e) => setWebdavDraft({ ...webdavDraft, rootPath: e.target.value })} />
+                <input
+                  type="text"
+                  className="search-input"
+                  value={webdavDraft.rootPath}
+                  onChange={(e) => setWebdavDraft({ ...webdavDraft, rootPath: e.target.value })}
+                />
               </label>
             </div>
             <div className="app-data-backup-actions">

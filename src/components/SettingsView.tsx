@@ -203,6 +203,7 @@ export default function SettingsView() {
               <label className="field">
                 <span>{t("settings.httpProxy")}</span>
                 <input
+                  type="text"
                   className="search-input"
                   value={settings.proxy.httpProxy}
                   placeholder="http://127.0.0.1:7890"
@@ -212,6 +213,7 @@ export default function SettingsView() {
               <label className="field">
                 <span>{t("settings.httpsProxy")}</span>
                 <input
+                  type="text"
                   className="search-input"
                   value={settings.proxy.httpsProxy}
                   placeholder="http://127.0.0.1:7890"
@@ -221,6 +223,7 @@ export default function SettingsView() {
               <label className="field">
                 <span>{t("settings.noProxy")}</span>
                 <input
+                  type="text"
                   className="search-input"
                   value={settings.proxy.noProxy}
                   placeholder="localhost,127.0.0.1"

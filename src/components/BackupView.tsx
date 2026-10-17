@@ -457,6 +457,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   <label className="field">
                     <span>{t("backup.webdavUrl")}</span>
                     <input
+                      type="text"
                       className="search-input"
                       value={snapshotWebDAV.url}
                       onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, url: e.target.value }))}
@@ -465,6 +466,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   <label className="field">
                     <span>{t("backup.webdavUsername")}</span>
                     <input
+                      type="text"
                       className="search-input"
                       value={snapshotWebDAV.username}
                       onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, username: e.target.value }))}
@@ -482,6 +484,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   <label className="field">
                     <span>{t("backup.remoteFolder")}</span>
                     <input
+                      type="text"
                       className="search-input"
                       value={snapshotWebDAV.rootPath}
                       onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, rootPath: e.target.value }))}

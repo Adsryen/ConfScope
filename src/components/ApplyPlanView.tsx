@@ -426,6 +426,7 @@ function ConfirmationPanel({
           <div className="field-hint">{t("apply.protectedInstruction")}</div>
           <code className="apply-confirmation-code">{requiredText}</code>
           <input
+            type="text"
             id="apply-confirmation-text"
             className="search-input wide mono"
             spellCheck={false}

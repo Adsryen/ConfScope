@@ -359,6 +359,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
           <option value="restore">{t("operationHistory.opRestore")}</option>
         </select>
         <input
+          type="text"
           className="history-filter-input"
           placeholder={t("operationHistory.dataIdPlaceholder")}
           value={filterDataId}

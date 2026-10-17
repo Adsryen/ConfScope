@@ -590,6 +590,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <label className="field">
                 <span>{t("app.namespace")}</span>
                 <input
+                  type="text"
                   className="search-input mono"
                   spellCheck={false}
                   value={env.namespace}
@@ -600,6 +601,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <label className="field">
                 <span>group</span>
                 <input
+                  type="text"
                   className="search-input mono"
                   spellCheck={false}
                   value={env.group}
@@ -610,6 +612,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <label className="field">
                 <span>dataId {t("audit.filter")}</span>
                 <input
+                  type="text"
                   className="search-input mono"
                   spellCheck={false}
                   value={env.dataIdFilter}
@@ -661,18 +664,21 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               )}
               <div className="field-row">
                 <input
+                  type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreDataIdPlaceholder")}
                   value={ignoreForm.dataId ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, dataId: e.target.value || undefined })}
                 />
                 <input
+                  type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreKeyPlaceholder")}
                   value={ignoreForm.key ?? ""}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, key: e.target.value || undefined })}
                 />
                 <input
+                  type="text"
                   className="search-input"
                   placeholder={t("audit.ignoreReasonPlaceholder")}
                   value={ignoreForm.reason}
@@ -727,6 +733,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                       <option value="replace">{t("audit.normalizeReplace")}</option>
                     </select>
                     <input
+                      type="text"
                       className="search-input mono"
                       spellCheck={false}
                       placeholder={t("audit.matchPattern")}
@@ -734,6 +741,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                       onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
                     />
                     <input
+                      type="text"
                       className="search-input mono"
                       spellCheck={false}
                       placeholder={t("audit.replaceTo")}
