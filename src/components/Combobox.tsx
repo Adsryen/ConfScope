@@ -162,6 +162,9 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
         autoCapitalize="off"
         autoCorrect="off"
         spellCheck={false}
+        /* 展开态必须挂在本体上：input 的隐式角色是 textbox，不认 aria-expanded/aria-controls，
+           读屏只会念出文本框而不会念「已展开」（R43，APG 的组合框模式要求控件本体是 combobox 角色） */
+        role="combobox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-autocomplete="list"

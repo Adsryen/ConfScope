@@ -440,6 +440,35 @@ describe("App", () => {
     expect(within(screen.getByRole("button", { name: /Config Compare/ })).queryByText("Planned")).not.toBeInTheDocument();
   });
 
+  it("侧栏导航有地标名、当前页自报 aria-current、每一项都带全文 title", async () => {
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    // 读屏进侧栏时先念得出这是「主导航」，而不是「一组按钮」
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    const pages = () => within(nav).getAllByRole("button");
+    const ariaCurrent = () => pages().filter((item) => item.getAttribute("aria-current") === "page");
+
+    // cs.ui 里存的是 backup，当前页必须且只能是它——多个 aria-current 等于没有
+    expect(ariaCurrent()).toHaveLength(1);
+    expect(ariaCurrent()[0]).toHaveAccessibleName("Backups");
+
+    fireEvent.click(within(nav).getByRole("button", { name: "Config Compare" }));
+
+    await waitFor(() => {
+      expect(ariaCurrent()).toHaveLength(1);
+      expect(ariaCurrent()[0]).toHaveAccessibleName("Config Compare");
+    });
+
+    // title 不再只在折叠态给：窄窗口把 .side-label 截断时，鼠标悬停也要能读到全文（R35 收尾）
+    pages().forEach((item) => {
+      expect(item, "导航项缺 title，截断后没有任何补救入口").toHaveAttribute("title", String(item.textContent).trim());
+    });
+  });
+
   it("opens the about page even when there are no connections", async () => {
     localStorage.clear();
     localStorage.setItem("locale", "en-US");

@@ -23,10 +23,34 @@ const openMenu = (input: HTMLElement) => {
 describe("Combobox", () => {
   afterEach(() => localStorage.clear());
 
+  it("本体自报组合框角色，展开态读屏才念得出（R43）", () => {
+    renderCombo({ value: "beta", options, onChange: vi.fn() });
+    const input = screen.getByRole("combobox");
+    // 收起态：角色 + aria-expanded=false 都在本体上，不再挂在隐式 textbox 上
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(input).toHaveAttribute("aria-autocomplete", "list");
+    expect(input).not.toHaveAttribute("aria-controls");
+
+    openMenu(input);
+
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    const listId = input.getAttribute("aria-controls");
+    expect(listId, "展开后必须用 aria-controls 指向候选列表").toBeTruthy();
+    const listbox = document.getElementById(listId as string);
+    expect(listbox).toHaveAttribute("role", "listbox");
+    // aria-activedescendant 指向的节点必须真的落在该 listbox 内，否则读屏念不到高亮项
+    const activeId = input.getAttribute("aria-activedescendant");
+    expect(activeId).toBeTruthy();
+    const active = document.getElementById(activeId as string);
+    expect(active).not.toBeNull();
+    expect(listbox?.contains(active as Node)).toBe(true);
+    expect(active).toHaveAttribute("role", "option");
+  });
+
   it("宿主页面被保活隐藏（模式切换）时收起候选弹层", () => {
     renderCombo({ value: "a", options, onChange: vi.fn() });
 
-    fireEvent.focus(screen.getByRole("textbox"));
+    fireEvent.focus(screen.getByRole("combobox"));
     expect(document.querySelector(".combo-menu-portal")).toBeInTheDocument();
 
     act(() => closeAllPopovers());
@@ -39,7 +63,7 @@ describe("Combobox", () => {
     const onPick = vi.fn();
     renderCombo({ value: "a", options, onChange, onPick });
 
-    fireEvent.focus(screen.getByRole("textbox"));
+    fireEvent.focus(screen.getByRole("combobox"));
 
     const menu = document.querySelector(".combo-menu-portal") as HTMLElement;
     expect(menu).toBeInTheDocument();
@@ -55,7 +79,7 @@ describe("Combobox", () => {
 
   it("opens on ArrowDown and highlights the current value", () => {
     renderCombo({ value: "beta", options, onChange: vi.fn() });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     fireEvent.keyDown(input, { key: "ArrowDown" }); // 收起态：先展开
 
@@ -68,7 +92,7 @@ describe("Combobox", () => {
 
   it("highlights the best match when the caret lands on a non-empty query", () => {
     const view = renderCombo({ value: "", options, onChange: vi.fn() });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     // 受控父组件把输入回灌成 value："a" 同时命中 alpha/beta
     view.rerender(
@@ -87,7 +111,7 @@ describe("Combobox", () => {
     const onChange = vi.fn();
     const onPick = vi.fn();
     renderCombo({ value: "a", options, onChange, onPick });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     openMenu(input); // 展开，高亮 alpha
     fireEvent.keyDown(input, { key: "ArrowDown" }); // beta
@@ -107,7 +131,7 @@ describe("Combobox", () => {
   it("jumps to first/last candidate with Home/End", () => {
     const onChange = vi.fn();
     renderCombo({ value: "a", options, onChange });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     openMenu(input);
     fireEvent.keyDown(input, { key: "End" });
@@ -119,7 +143,7 @@ describe("Combobox", () => {
 
   it("hands Home/End back to the caret when the menu is closed", () => {
     renderCombo({ value: "a", options, onChange: vi.fn() });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     const event = new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true });
     input.dispatchEvent(event);
@@ -130,7 +154,7 @@ describe("Combobox", () => {
   it("re-highlights the best match while typing so Enter picks it", () => {
     const onChange = vi.fn();
     const view = renderCombo({ value: "", options, onChange });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     openMenu(input);
     fireEvent.change(input, { target: { value: "bet" } });
@@ -149,7 +173,7 @@ describe("Combobox", () => {
 
   it("closes on Escape but keeps the caret in the input", () => {
     renderCombo({ value: "a", options, onChange: vi.fn() });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
 
     openMenu(input);
     expect(screen.getByRole("listbox")).toBeInTheDocument();
@@ -165,7 +189,7 @@ describe("Combobox", () => {
     const many = Array.from({ length: 60 }, (_, i) => ({ value: `zz${i}` }));
     const rerender = renderCombo({ value: "zz", options: many, onChange: vi.fn() });
 
-    openMenu(screen.getByRole("textbox"));
+    openMenu(screen.getByRole("combobox"));
 
     expect(optionNodes()).toHaveLength(50);
     expect(screen.getByText("还有 10 项未显示，请继续输入缩小范围")).toBeInTheDocument();
@@ -175,7 +199,7 @@ describe("Combobox", () => {
         <Combobox value="zz59" options={many} onChange={vi.fn()} />
       </I18nProvider>
     );
-    openMenu(screen.getByRole("textbox"));
+    openMenu(screen.getByRole("combobox"));
 
     expect(screen.queryByText(/未显示/)).not.toBeInTheDocument();
   });
@@ -183,7 +207,7 @@ describe("Combobox", () => {
     const onChange = vi.fn();
     const onPick = vi.fn();
     renderCombo({ value: "a", options, onChange, onPick });
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
     openMenu(input); // 展开并高亮 alpha
 
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });

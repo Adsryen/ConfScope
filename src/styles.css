@@ -6263,7 +6263,9 @@ button.diff-workflow-step-btn:hover {
   transition: opacity 0.15s;
 }
 
-.backup-item:hover .backup-item-delete {
+/* 键盘 Tab 也能显形：焦点进入这一行时删除按钮同样要露出来（R37） */
+.backup-item:hover .backup-item-delete,
+.backup-item:focus-within .backup-item-delete {
   opacity: 1;
 }
 
@@ -6605,7 +6607,8 @@ button.diff-workflow-step-btn:hover {
   transition: opacity 0.15s;
 }
 
-.task-item:hover .task-item-actions {
+.task-item:hover .task-item-actions,
+.task-item:focus-within .task-item-actions {
   opacity: 1;
 }
 

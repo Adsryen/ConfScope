@@ -82,6 +82,7 @@
     "settingsSubtitle": "管理应用级偏好、语言、代理、安全策略与后续高级选项。",
     "collapseSidebar": "收起侧边栏",
     "expandSidebar": "展开侧边栏",
+    "mainNav": "主导航",
     "planned": "规划中",
     "auditPlanned": "多环境一致性矩阵、忽略规则、名称归一化和批量差异审计。",
     "historyPlanned": "配置变更追溯、操作记录、历史版本查看。",

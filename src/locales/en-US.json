@@ -82,6 +82,7 @@
     "settingsSubtitle": "Manage app preferences, language, proxy, safety policy, and future advanced options.",
     "collapseSidebar": "Collapse sidebar",
     "expandSidebar": "Expand sidebar",
+    "mainNav": "Main navigation",
     "planned": "Planned",
     "auditPlanned": "Multi-environment consistency matrix, ignore rules, name normalization, and batch audits.",
     "historyPlanned": "Configuration change tracking, operation records, and history version viewing.",

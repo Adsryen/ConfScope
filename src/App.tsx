@@ -647,7 +647,8 @@ export default function App() {
     <div className="app-shell">
       <div className="app-main">
         <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
-          <nav className="side-nav">
+          {/* 侧栏是全站唯一的页面切换入口，读屏需要一个地标名（R41） */}
+          <nav className="side-nav" aria-label={t("app.mainNav")}>
             {navGroups.map((group, groupIndex) => (
               <div key={group.group} className="side-nav-group">
                 {groupIndex > 0 && <div className="side-nav-separator" />}
@@ -656,7 +657,10 @@ export default function App() {
                   <button
                     key={item.mode}
                     className={`side-nav-item${mode === item.mode ? " active" : ""}`}
-                    title={sidebarCollapsed ? item.label : undefined}
+                    /* 展开态也可能被截断（窄窗口/长译名），一律给全文；
+                       aria-current 让读屏在进侧栏时就念出「当前页」，而不是只靠视觉高亮认（R41） */
+                    title={item.label}
+                    aria-current={mode === item.mode ? "page" : undefined}
                     onClick={() => setMode(item.mode)}
                   >
                     <NavIcon mode={item.mode} />
