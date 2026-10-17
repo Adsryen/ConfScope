@@ -42,9 +42,62 @@
     "xmlTagMismatch": "标签不匹配:{name}",
     "parseFailed": "解析失败",
     "jsonParseFailed": "JSON 解析失败:{message}",
+    "yamlParseFailed": "YAML 解析失败:{message}",
     "atLineColumn": "（第 {line} 行第 {column} 列）",
     "atLine": "（第 {line} 行）",
     "duplicateKeyLines": "（首次 {first} 行，重复于 {lines} 行）"
+  },
+  "parseError": {
+    "orJoin": "或",
+    "expectedHere": "此处应为{expected}",
+    "expectedAfter": "{context}之后应为{expected}",
+    "atOffset": "（第 {offset} 个字符处）",
+    "unexpectedEnd": "JSON 内容不完整，还没读到值就结束了",
+    "unterminatedString": "字符串缺少结尾的引号",
+    "badControlCharacter": "字符串里出现了控制字符",
+    "badEscapeCharacter": "转义字符写法不正确",
+    "trailingContent": "JSON 内容之后还有多余的字符",
+    "unexpectedToken": "出现了不该出现的字符「{token}」",
+    "unexpectedTokenIn": "「{snippet}」不是合法的 JSON，出现了不该出现的字符「{token}」",
+    "unexpectedKind": "此处不该出现{kind}",
+    "term": {
+      "propertyName": "属性名",
+      "doubleQuotedPropertyName": "带双引号的属性名",
+      "value": "值",
+      "data": "数据",
+      "colon": "冒号「:」",
+      "comma": "逗号「,」",
+      "closeBrace": "右花括号「}」",
+      "closeBracket": "右方括号「]」"
+    },
+    "context": {
+      "propertyName": "属性名",
+      "propertyValue": "属性值",
+      "arrayElement": "数组元素"
+    },
+    "kind": {
+      "number": "数字",
+      "string": "字符串",
+      "boolean": "布尔值",
+      "null": "空值",
+      "object": "对象",
+      "array": "数组"
+    },
+    "yaml": {
+      "mapKeysUnique": "映射的键必须唯一",
+      "nestedMappingsInCompact": "紧凑写法里不允许嵌套映射",
+      "implicitKeysSingleLine": "隐式键必须写在同一行",
+      "implicitKeysNeedValue": "隐式键后面必须跟映射的值",
+      "mappingItemsSameColumn": "同一组映射项必须从同一列开始",
+      "flowSequenceUnclosedInBlock": "块级集合里的流式序列要缩进到位并以「]」结尾",
+      "flowSequenceUnclosed": "流式序列必须以「]」结尾",
+      "flowMapUnclosedInBlock": "块级集合里的流式映射要缩进到位并以「}」结尾",
+      "flowMapUnclosed": "流式映射必须以「}」结尾",
+      "missingClosingDoubleQuote": "字符串缺少结尾的双引号",
+      "missingClosingSingleQuote": "字符串缺少结尾的单引号",
+      "blockCollectionsInFlow": "流式集合里不允许出现块级集合",
+      "tabsAsIndentation": "不允许用 Tab 缩进"
+    }
   },
   "export": {
     "unsupportedFormat": "不支持的导出格式: {format}"

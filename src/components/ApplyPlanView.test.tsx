@@ -364,6 +364,31 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("bad properties")).toBeInTheDocument();
   });
 
+  // 轮26 F-5：引擎原文是数据（要随快照持久化、要能被内容搜索命中），
+  // 但红字块是给人看的——必须显示本地化框架 + 行列，而不是 `Expected ... in JSON at position 5`。
+  it("renders parse errors as localized copy, not the raw engine sentence", async () => {
+    const plan = makePlan([
+      item(
+        "broken.json",
+        { ...value('{\"a\" 1}'), parseStatus: "error", parseError: "JSON:Expected ':' after property name in JSON at position 5 (line 1 column 6)" },
+        value("old")
+      ),
+    ]);
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+    expect(await screen.findByText("Parse error 1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("broken.json"));
+    expect(screen.getByText("JSON parse failed:expected ':' after property name (line 1, column 6)")).toBeInTheDocument();
+    expect(screen.queryByText(/in JSON at position/)).not.toBeInTheDocument();
+  });
+
   it("shows a copyable generation error and does not expose execution controls", async () => {
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
       ok: false,

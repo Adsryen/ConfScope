@@ -12,6 +12,7 @@ import { withEditedAfterValue, type ApplyPlan, type ApplyPlanAction, type ApplyP
 import { busyProps } from "../lib/busyRegion";
 import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
+import { describeParseError } from "../lib/parseErrorCopy";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
@@ -351,12 +352,12 @@ function ItemDetail({
       </div>
       {parseErrors.map((error, index) => (
         <div className="apply-parse-error" key={`${item.id}-parse-error-${index}`}>
-          {error}
+          {describeParseError(error)}
         </div>
       ))}
       {parseWarnings.map((warning, index) => (
         <div className="apply-parse-warning" key={`${item.id}-parse-warning-${index}`}>
-          {"\u26A0"} {warning}
+          {"\u26A0"} {describeParseError(warning)}
         </div>
       ))}
     </div>

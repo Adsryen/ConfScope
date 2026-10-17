@@ -42,9 +42,62 @@
     "xmlTagMismatch": "Tag mismatch:{name}",
     "parseFailed": "Parse failed",
     "jsonParseFailed": "JSON parse failed:{message}",
+    "yamlParseFailed": "YAML parse failed:{message}",
     "atLineColumn": " (line {line}, column {column})",
     "atLine": " (line {line})",
     "duplicateKeyLines": " (first on line {first}, duplicated on lines {lines})"
+  },
+  "parseError": {
+    "orJoin": " or ",
+    "expectedHere": "expected {expected}",
+    "expectedAfter": "expected {expected} after {context}",
+    "atOffset": " (character {offset})",
+    "unexpectedEnd": "the JSON input ended before a value was complete",
+    "unterminatedString": "unterminated string",
+    "badControlCharacter": "bad control character in string literal",
+    "badEscapeCharacter": "bad escaped character",
+    "trailingContent": "unexpected non-whitespace character after JSON",
+    "unexpectedToken": "unexpected token \"{token}\"",
+    "unexpectedTokenIn": "\"{snippet}\" is not valid JSON, unexpected token \"{token}\"",
+    "unexpectedKind": "unexpected {kind}",
+    "term": {
+      "propertyName": "property name",
+      "doubleQuotedPropertyName": "double-quoted property name",
+      "value": "value",
+      "data": "data",
+      "colon": "':'",
+      "comma": "','",
+      "closeBrace": "'}'",
+      "closeBracket": "']'"
+    },
+    "context": {
+      "propertyName": "property name",
+      "propertyValue": "property value",
+      "arrayElement": "array element"
+    },
+    "kind": {
+      "number": "number",
+      "string": "string",
+      "boolean": "boolean",
+      "null": "null",
+      "object": "object",
+      "array": "array"
+    },
+    "yaml": {
+      "mapKeysUnique": "map keys must be unique",
+      "nestedMappingsInCompact": "nested mappings are not allowed in compact mappings",
+      "implicitKeysSingleLine": "implicit keys need to be on a single line",
+      "implicitKeysNeedValue": "implicit map keys need to be followed by map values",
+      "mappingItemsSameColumn": "all mapping items must start at the same column",
+      "flowSequenceUnclosedInBlock": "flow sequence in a block collection must be indented enough and end with ']'",
+      "flowSequenceUnclosed": "flow sequence must end with ']'",
+      "flowMapUnclosedInBlock": "flow map in a block collection must be indented enough and end with '}'",
+      "flowMapUnclosed": "flow map must end with '}'",
+      "missingClosingDoubleQuote": "missing closing double quote",
+      "missingClosingSingleQuote": "missing closing single quote",
+      "blockCollectionsInFlow": "block collections are not allowed within flow collections",
+      "tabsAsIndentation": "tabs are not allowed as indentation"
+    }
   },
   "export": {
     "unsupportedFormat": "Unsupported export format: {format}"
