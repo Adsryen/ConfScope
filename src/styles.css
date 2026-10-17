@@ -1136,8 +1136,12 @@ textarea {
   min-width: 0;
 }
 
-.app-data-backup-remote-tools .field,
-.app-data-backup-remote-password {
+.app-data-backup-remote-tools .field {
+  /* R79：原来这条还并列着 .app-data-backup-remote-password，那个裸类名与后面的
+     .field { min-width: 0 } 同为 (0,1,0)、写在前面，整条声明从没生效过；
+     而它在 flex column 默认 stretch 的父容器里，100% 的基准就是父宽，提特异度也没有视觉作用，
+     直接删——连 JSX 上那个类名一起摘掉，别留一个没有样式的死钩子（cssHooks 守卫盯这个）。
+     tools 行里这条是 (0,2,0)，确实在撑窄屏下的密码框，保留。 */
   min-width: min(260px, 100%);
 }
 
@@ -6241,12 +6245,6 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
 }
 
-.backup-content {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
 .backup-list {
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -6332,16 +6330,6 @@ button.diff-workflow-step-btn:hover {
 .backup-detail-actions {
   display: flex;
   gap: 8px;
-}
-
-.backup-detail-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .backup-detail-configs h4 {
@@ -6494,12 +6482,6 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
-}
-
-.task-center-content {
-  display: flex;
-  flex: 1;
   overflow: hidden;
 }
 
@@ -6672,16 +6654,6 @@ button.diff-workflow-step-btn:hover {
   gap: 8px;
 }
 
-.task-detail-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
 .task-detail-error {
   min-width: 0;
   margin-top: 12px;
@@ -6763,6 +6735,9 @@ button.diff-workflow-step-btn:hover {
   margin: 12px 14px 0;
 }
 
+/* R79：备份页与任务中心共用这一套 grid。两个变体类原先各自还写着 display:flex / flex:1 /
+   overflow:hidden，同特异度又写在前面，在这里被整条反超——纯死声明，已删；
+   变体之间真正生效的差异（列宽、margin-top）写在段尾那两条同名的规则里。 */
 .data-split {
   display: grid;
   grid-template-columns: minmax(260px, 34%) minmax(0, 1fr);
@@ -6884,6 +6859,10 @@ button.diff-workflow-step-btn:hover {
   word-break: break-word;
 }
 
+/* R79：.backup-detail-info / .task-detail-info 的 flex 版（display:flex、gap:8px、
+   flex-direction:column）同特异度写在前面，被这里整条反超；剩下的 padding / background /
+   border / border-radius 又与这里逐条同值。留着只会让「改 detail-info 的间距没反应」，已删，
+   变体只在段尾留一条真正生效的 margin-bottom 覆盖。 */
 .data-info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

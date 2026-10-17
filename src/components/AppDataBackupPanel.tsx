@@ -656,7 +656,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
               </button>
             </div>
 
-            <label className="field app-data-backup-remote-password">
+            <label className="field">
               <span>{t("appDataBackup.remoteRestorePassword")}</span>
               <input className="search-input" type="password" value={remoteRestorePassword} onChange={(e) => setRemoteRestorePassword(e.target.value)} />
             </label>
