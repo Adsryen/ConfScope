@@ -108,6 +108,7 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
       <button
         className={`message-center-btn${open ? " active" : ""}`}
         onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
         onFocus={openPanel}
         title={t("messageCenter.title")}
       >

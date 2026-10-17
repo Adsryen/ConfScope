@@ -366,6 +366,7 @@ export default function HistoryView({
                     <button
                       className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
                       onClick={() => setRawView((v) => !v)}
+                      aria-pressed={!rawView}
                     >
                       {rawView ? t('history.highlightChanges') : t('history.rawContent')}
                     </button>

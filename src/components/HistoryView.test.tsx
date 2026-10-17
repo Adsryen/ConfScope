@@ -313,4 +313,16 @@ describe("HistoryView", () => {
       actionLabel: "Retry Rollback",
     });
   });
+  it("原始内容切换按钮的按下态与视图一致（R69）", async () => {
+    renderHistory();
+    fireEvent.click(await screen.findByText("nid 2"));
+
+    // 默认是高亮视图，此时按钮视觉上就是 active，aria-pressed 必须跟着 active 类
+    const toggle = await screen.findByRole("button", { name: "原始内容" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(toggle);
+    const back = await screen.findByRole("button", { name: "高亮变更" });
+    expect(back).toHaveAttribute("aria-pressed", "false");
+  });
 });

@@ -103,4 +103,16 @@ describe("MessageCenter", () => {
     expect(within(panel).getAllByRole("button", { name: "Copy Full Message" }).length).toBeGreaterThan(0);
     expect(within(panel).getAllByRole("button", { name: "Delete Message" }).length).toBeGreaterThan(0);
   });
+  it("消息中心的开合状态由 aria-expanded 播报，不靠图标猜（R69）", () => {
+    renderMessageCenter();
+    const trigger = screen.getByTitle("消息中心");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(".message-panel")).toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
 });

@@ -638,4 +638,27 @@ describe("AuditView", () => {
 
     expect((second.container.querySelector(".audit-matrix-body") as HTMLElement).scrollTop).toBe(320);
   });
+  it("筛选片、排序与设置折叠把自己的状态播报出来（R69）", async () => {
+    oneRowMatrix();
+    render(<AuditView connections={twoEnvs()} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    const chip = screen.getByRole("button", { name: "Consistent" });
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+
+    const sort = screen.getByRole("button", { name: /^key/ });
+    expect(sort).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(sort);
+    expect(sort).toHaveAttribute("aria-pressed", "true");
+
+    const disclosure = document.querySelector(".audit-settings-toggle button") as HTMLElement;
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    // 折叠的那块内容真的出来了，aria-expanded 不是在骗人
+    expect(document.querySelector(".audit-settings")).toBeInTheDocument();
+  });
 });

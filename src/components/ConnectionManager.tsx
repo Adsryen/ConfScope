@@ -1549,6 +1549,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     type="button"
                     className="pwd-toggle"
                     title={showPwd ? t("connection.hide") : t("connection.show")}
+                    aria-label={t("connection.revealPassword")}
+                    aria-pressed={showPwd}
                     onClick={() => setShowPwd((v) => !v)}
                   >
                     {showPwd ? "🙈" : "👁"}
@@ -1656,6 +1658,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     type="button"
                     className="pwd-toggle"
                     title={showPwd ? t("connection.hide") : t("connection.show")}
+                    aria-label={t("connection.revealPassword")}
+                    aria-pressed={showPwd}
                     onClick={() => setShowPwd((v) => !v)}
                   >
                     {showPwd ? "🙈" : "👁"}
@@ -1748,6 +1752,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         type="button"
                         className="pwd-toggle"
                         title={showPwd ? t("connection.hide") : t("connection.show")}
+                        aria-label={t("connection.revealPassword")}
+                        aria-pressed={showPwd}
                         onClick={() => setShowPwd((v) => !v)}
                       >
                         {showPwd ? "🙈" : "👁"}
@@ -1792,6 +1798,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           type="button"
                           className="pwd-toggle"
                           title={showPwd ? t("connection.hide") : t("connection.show")}
+                          aria-label={t("connection.revealPassword")}
+                          aria-pressed={showPwd}
                           onClick={() => setShowPwd((v) => !v)}
                         >
                           {showPwd ? "🙈" : "👁"}
@@ -1901,7 +1909,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           {draft.provider === "nacos" && accessMode === "ssh" && (
             <section className="conn-form-section">
               <div className="conn-section-title">SSH</div>
-              <button type="button" className="ssh-toggle" onClick={() => setShowSSHConfig(!showSSHConfig)}>
+              <button type="button" className="ssh-toggle" onClick={() => setShowSSHConfig(!showSSHConfig)} aria-expanded={showSSHConfig}>
                 {showSSHConfig ? "▼" : "▶"} {t("connection.sshConfig")}
                 {(draft.sshConfig?.host || selectedSSHProfile) && <span className="ssh-badge">{t("connection.sshConfigured")}</span>}
               </button>
@@ -2010,6 +2018,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                               type="button"
                               className="pwd-toggle"
                               title={showSSHPwd ? t("connection.hide") : t("connection.show")}
+                              aria-label={t("connection.revealPassword")}
+                              aria-pressed={showSSHPwd}
                               onClick={() => setShowSSHPwd((v) => !v)}
                             >
                               {showSSHPwd ? "🙈" : "👁"}
@@ -2048,6 +2058,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                                 type="button"
                                 className="pwd-toggle"
                                 title={showSSHPassphrase ? t("connection.hide") : t("connection.show")}
+                                aria-label={t("connection.revealPassword")}
+                                aria-pressed={showSSHPassphrase}
                                 onClick={() => setShowSSHPassphrase((v) => !v)}
                               >
                                 {showSSHPassphrase ? "🙈" : "👁"}

@@ -639,7 +639,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         </div>
 
         <div className="audit-settings-toggle">
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowSettings(!showSettings)}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowSettings(!showSettings)} aria-expanded={showSettings}>
             {showSettings ? "▼" : "▶"} {t("audit.settingsToggle")}
           </button>
         </div>
@@ -836,6 +836,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               key={status}
               className={`btn btn-sm ${statusFilter.has(status) ? "btn-primary" : "btn-ghost"}`}
               onClick={() => toggleStatusFilter(status)}
+              aria-pressed={statusFilter.has(status)}
             >
               {t(STATUS_LABELS[status])}
             </button>
@@ -854,6 +855,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 key={key}
                 className={`btn btn-sm ${sortKey === key ? "btn-primary" : "btn-ghost"}`}
                 onClick={() => toggleSort(key)}
+                aria-pressed={sortKey === key}
               >
                 {key} {sortKey === key ? (sortDir === "asc" ? "↑" : "↓") : ""}
               </button>

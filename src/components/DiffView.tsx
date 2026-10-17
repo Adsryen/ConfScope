@@ -1732,6 +1732,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               onClick={() => setSourcesCollapsed((value) => !value)}
               aria-label={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
               title={sourcesCollapsed ? t("diff.expandSources") : t("diff.collapseSources")}
+              aria-expanded={!sourcesCollapsed}
             >
               <span aria-hidden="true">{sourcesCollapsed ? "\u2304" : "\u2303"}</span>
             </button>

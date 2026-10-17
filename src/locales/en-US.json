@@ -675,6 +675,7 @@
     "privateKeyHelp": "Private key used to log in to the jump host.",
     "privateKeyPasswordHelp": "Fill this only when the private key has a passphrase.",
     "removeSSH": "Remove SSH Config",
+    "revealPassword": "Show password",
     "hide": "Hide",
     "show": "Show"
   },
