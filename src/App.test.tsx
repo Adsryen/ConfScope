@@ -33,7 +33,10 @@ const viewMocks = vi.hoisted(() => ({
   browserProps: [] as Array<{
     conn: Connection;
     tenant: string;
+    active: boolean;
   }>,
+  // 每挂载一次自增一次：用来判断保活有没有真的把配置浏览页留在内存里
+  browserSeq: 0,
   makeApplyPayload: (mode: "audit" | "diff" | "backup"): ApplyEntryPayload => ({
     sourceType: mode,
     scope: mode === "audit" ? "key" : "config",
@@ -98,12 +101,17 @@ vi.mock("./lib/toast", () => ({
 }));
 
 vi.mock("./components/ConnectionManager", () => ({ default: () => <div data-testid="connection-manager" /> }));
-vi.mock("./components/ConfigBrowser", () => ({
-  default: ({ conn, tenant }: { conn: Connection; tenant: string }) => {
-    viewMocks.browserProps.push({ conn, tenant });
-    return <div data-testid="config-browser" />;
-  },
-}));
+vi.mock("./components/ConfigBrowser", async () => {
+  const react = await vi.importActual<typeof import("react")>("react");
+  return {
+    default: ({ conn, tenant, active = true }: { conn: Connection; tenant: string; active?: boolean }) => {
+      viewMocks.browserProps.push({ conn, tenant, active });
+      // 实例号只在挂载时分配：号没变 = 没被卸载重挂 = 保活生效，列表请求也不会重发
+      const [instance] = react.useState(() => `browser-${(viewMocks.browserSeq += 1)}`);
+      return <div data-testid="config-browser" data-instance={instance} data-active={String(active)} />;
+    },
+  };
+});
 vi.mock("./components/About", () => ({ default: () => <div data-testid="about" /> }));
 vi.mock("./components/SettingsView", () => ({ default: () => <div data-testid="settings" /> }));
 vi.mock("./components/SSHManagerView", () => ({ default: () => <div data-testid="ssh" /> }));
@@ -495,6 +503,91 @@ describe("App", () => {
       browseEnvironment: "Production",
       browseSourceId: "conn-billing-prod-private",
     });
+  });
+
+  it("keeps the browse page mounted across mode switches and hands back keyboard duties", async () => {
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    const browser = await screen.findByTestId("config-browser");
+    const instance = browser.getAttribute("data-instance");
+    expect(browser).toHaveAttribute("data-active", "true");
+    expect(browser.closest(".browse-cache")).not.toHaveAttribute("hidden");
+
+    // 切到配置矩阵：整页只是 hidden，不卸载
+    fireEvent.click(screen.getByRole("button", { name: /Config Matrix/ }));
+    await waitFor(() => expect(screen.getByTestId("audit")).toBeInTheDocument());
+    const cached = screen.getByTestId("config-browser");
+    expect(cached.getAttribute("data-instance")).toBe(instance);
+    // 用 hidden 属性隐藏，Tab 顺序不会穿过隐藏内容
+    expect(cached.closest(".browse-cache")).toHaveAttribute("hidden");
+    // 同时把全局键盘职责交还（Esc / Ctrl+F 归当前模式）
+    expect(cached).toHaveAttribute("data-active", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    await waitFor(() => expect(screen.getByTestId("settings")).toBeInTheDocument());
+    expect(screen.getByTestId("config-browser").getAttribute("data-instance")).toBe(instance);
+
+    fireEvent.click(screen.getByRole("button", { name: /Config Browser/ }));
+    await waitFor(() => expect(screen.getByTestId("config-browser")).toHaveAttribute("data-active", "true"));
+    expect(screen.getByTestId("config-browser").closest(".browse-cache")).not.toHaveAttribute("hidden");
+    // 仍是同一个实例：选中项、正文、搜索词、列表滚动、查找态都留在内存里
+    expect(screen.getByTestId("config-browser").getAttribute("data-instance")).toBe(instance);
+  });
+
+  it("remounts the kept-alive browse page when the namespace changes", async () => {
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "ns-gray", namespaceShowName: "", configCount: 1 }]);
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    const first = (await screen.findByTestId("config-browser")).getAttribute("data-instance");
+    const filterButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".browse-scope-field .sel-trigger"));
+
+    await waitFor(() => expect(filterButtons()[3]).not.toBeDisabled());
+    fireEvent.pointerDown(filterButtons()[3]);
+    const option = Array.from(document.querySelectorAll<HTMLElement>(".sel-option")).find((item) => item.textContent?.includes("ns-gray"));
+    if (!option) throw new Error("Namespace option not found: ns-gray");
+    fireEvent.mouseDown(option);
+
+    await waitFor(() => {
+      expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].tenant).toBe("ns-gray");
+    });
+    // 保活不能保住旧连接的数据：命名空间变化仍靠 key 重挂载重拉列表
+    const current = screen.getByTestId("config-browser");
+    expect(current.getAttribute("data-instance")).not.toBe(first);
+    expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].active).toBe(true);
+  });
+
+  it("closes an open portaled dropdown when the mode switches", async () => {
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: "conn-1" }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("config-browser");
+    const triggers = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".browse-scope-field .sel-trigger"));
+    await waitFor(() => expect(triggers().length).toBeGreaterThan(0));
+    fireEvent.pointerDown(triggers()[0]);
+    await waitFor(() => expect(document.querySelector(".sel-menu-portal")).toBeInTheDocument());
+
+    // 菜单 portal 在 document.body 上，不在被保活隐藏的 browse 子树里：
+    // 模式切换必须显式喊它收起，否则会浮到设置页上方并继续占着 Esc / window 监听
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    await waitFor(() => expect(screen.getByTestId("settings")).toBeInTheDocument());
+    expect(document.querySelector(".sel-menu-portal")).not.toBeInTheDocument();
   });
 
   it("updates and remembers browse filters when switching environment and source", async () => {

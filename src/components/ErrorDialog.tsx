@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
 import { AppErrorItem, closeMessageDetail, subscribeActiveError } from "../lib/errorCenter";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 import CopyButton from "./CopyButton";
 
 function displayText(item: AppErrorItem): string {
@@ -15,14 +16,8 @@ export default function ErrorDialog() {
 
   const fullText = useMemo(() => (current ? displayText(current) : ""), [current]);
 
-  useEffect(() => {
-    if (!current) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMessageDetail();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [current]);
+  // 错误详情盖在应用内所有弹层之上，Esc 优先关掉它自己。
+  useEscape(!!current, closeMessageDetail, EscapePriority.global);
 
   if (!current) return null;
 

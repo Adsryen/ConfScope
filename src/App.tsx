@@ -27,6 +27,7 @@ import StartupDialog from "./components/StartupDialog";
 import ApplyPlanView from "./components/ApplyPlanView";
 import type { WorkflowStepId } from "./components/DiffWorkflowCard";
 import { reportError, reportMessage } from "./lib/errorCenter";
+import { closeAllPopovers } from "./lib/popoverBus";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
@@ -270,6 +271,12 @@ export default function App() {
       })
     );
   }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed, diffInitialParams]);
+
+  // 模式切换即收起所有自绘下拉/候选弹层：它们的菜单 portal 到 document.body，
+  // 不在被保活隐藏的页面子树里，光给容器加 hidden 关不掉（见 lib/popoverBus）。
+  useEffect(() => {
+    closeAllPopovers();
+  }, [mode]);
 
   // 启动后低频后台检查更新（延迟 5 分钟，仅一次）
   useEffect(() => {
@@ -519,7 +526,7 @@ export default function App() {
 
   const browsePage = (
     <div className="page-surface browse-page">
-      <div className="page-header browse-header">
+      <div className="page-header">
         <div>
           <h3>{t("app.title")}</h3>
           <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t("app.selectConnection")}</div>
@@ -595,7 +602,14 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <ConfigBrowser key={`${activeConnId}:${tenant}`} conn={activeConn} tenant={tenant} connections={connections} onStartApply={startApply} />
+        <ConfigBrowser
+          key={`${activeConnId}:${tenant}`}
+          conn={activeConn}
+          tenant={tenant}
+          connections={connections}
+          onStartApply={startApply}
+          active={mode === "browse"}
+        />
       )}
     </div>
   );
@@ -666,6 +680,18 @@ export default function App() {
         </aside>
 
         <main className="workspace">
+          {/* 配置浏览保活（R8 / D3）：切到审计、历史、备份、设置等模式时，整页只是 hidden，不卸载。
+              选中项、正文、搜索词、分组、列表滚动、CodeView 查找态都留在内存里，回来不再重发列表请求。
+              连接 / 命名空间变化仍靠下面的 key 重挂载来重拉数据，行为与改造前一致。
+              用 hidden 属性 + display:none 的兜底规则，而不是临时 class：
+              子树内的弹层（modal-overlay 是 fixed 定位）跟着一起消失，且 Tab 不会穿过隐藏内容。
+              唯一例外是 portal 到 document.body 的下拉菜单，它们不随容器 hidden 消失，
+              由模式切换的 effect 统一收起（见 lib/popoverBus）。 */}
+          {connections.length > 0 && (
+            <div className="browse-cache" hidden={mode !== "browse"}>
+              {browsePage}
+            </div>
+          )}
           {mode === "connections" ? (
             <ConnectionManager
               embedded
@@ -706,8 +732,6 @@ export default function App() {
                 {t("app.addConnection")}
               </button>
             </div>
-          ) : mode === "browse" ? (
-            browsePage
           ) : null}
         </main>
       </div>

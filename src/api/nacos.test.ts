@@ -9,6 +9,7 @@ import {
   deleteConfig,
   deleteConfigFromApplyPlan,
   deleteConfigRefFromApplyPlan,
+  listAllConfigs,
   listConfigs,
   listHistory,
   listNamespaces,
@@ -17,6 +18,7 @@ import {
   publishConfigRefFromApplyPlan,
   testConnection,
 } from "./nacos";
+import { StaleRequestError } from "./nacos";
 import type { Connection } from "../store/connections";
 
 const goApp = {
@@ -1077,5 +1079,139 @@ describe("nacos api compatibility bridge", () => {
       })
     );
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:13380/nacos" }));
+  });
+
+  describe("listAllConfigs 聚合翻页", () => {
+    /** 造一条 configCenter 列表项（ref 形状与 Go DTO 对齐）。 */
+    const item = (conn: Connection, dataId: string, group = "DEFAULT_GROUP") => ({
+      ref: expectedRef(conn, "public", dataId, group),
+      content: `content-of-${dataId}`,
+      format: "text",
+      updateTime: "2026-10-17T00:00:00Z",
+    });
+
+    /** 让列表接口按 pageNo 返回不同页内容，并可指定某些页失败。 */
+    function mockPages(opts: {
+      pagesAvailable: number;
+      perPage?: number;
+      failPages?: number[];
+      totalCountOverride?: number;
+      extraGroupItem?: boolean;
+    }) {
+      const conn = currentConn;
+      const perPage = opts.perPage ?? 2;
+      goApp.ConfigCenterListConfigs.mockImplementation(async (_profile: unknown, query: { pageNo: number; pageSize: number }) => {
+        if (opts.failPages?.includes(query.pageNo)) throw new Error(`page ${query.pageNo} exploded`);
+        const items = Array.from({ length: perPage }, (_, i) => item(conn, `app-${query.pageNo}-${i}`));
+        if (opts.extraGroupItem) items.push(item(conn, `stray-${query.pageNo}`, "OTHER_GROUP"));
+        return {
+          totalCount: opts.totalCountOverride ?? perPage,
+          pageNumber: query.pageNo,
+          pagesAvailable: opts.pagesAvailable,
+          pageItems: items,
+        };
+      });
+    }
+
+    let currentConn: Connection = makeConnection("conn-all-placeholder");
+
+    beforeEach(() => {
+      currentConn = makeConnection(`conn-all-${Date.now()}-${Math.random()}`);
+    });
+
+    it("按 pagesAvailable 逐页取全并回报进度", async () => {
+      mockPages({ pagesAvailable: 3 });
+      const progress: number[] = [];
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", {
+        pageSize: 2,
+        onProgress: (loaded) => progress.push(loaded),
+      });
+
+      expect(result.items.map((entry) => entry.dataId)).toEqual(["app-1-0", "app-1-1", "app-2-0", "app-2-1", "app-3-0", "app-3-1"]);
+      expect(result).toMatchObject({ pagesAvailable: 3, loadedPages: 3, failedPages: [], truncated: false });
+      expect(progress).toEqual([2, 4, 6]);
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(3);
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenLastCalledWith(expectedProfile(currentConn), {
+        namespace: "public",
+        dataId: "",
+        group: "DEFAULT_GROUP",
+        pageNo: 3,
+        pageSize: 2,
+      });
+    });
+
+    it("判页数只信 pagesAvailable，不信被 group 过滤改写过的 totalCount", async () => {
+      // group 精确兜底过滤会把 totalCount 改写成过滤后长度，聚合仍必须继续翻到 pagesAvailable
+      mockPages({ pagesAvailable: 4, perPage: 1, totalCountOverride: 1, extraGroupItem: true });
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 1 });
+
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(4);
+      expect(result.items.map((entry) => entry.dataId)).toEqual(["app-1-0", "app-2-0", "app-3-0", "app-4-0"]);
+      expect(result.pagesAvailable).toBe(4);
+      expect(result.truncated).toBe(false);
+    });
+
+    it("超过安全上限时只拉到上限并置 truncated", async () => {
+      mockPages({ pagesAvailable: 10, perPage: 1 });
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 1, safeCap: 3 });
+
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(3);
+      expect(result.items).toHaveLength(3);
+      expect(result.truncated).toBe(true);
+      expect(result.pagesAvailable).toBe(10);
+    });
+
+    it("未超过安全上限时 truncated 为 false", async () => {
+      mockPages({ pagesAvailable: 3, perPage: 1 });
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 1, safeCap: 3 });
+
+      expect(result.truncated).toBe(false);
+      expect(result.loadedPages).toBe(3);
+    });
+
+    it("首页失败直接抛出，由调用方走既有错误展示", async () => {
+      mockPages({ pagesAvailable: 3, failPages: [1] });
+
+      await expect(listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 2 })).rejects.toThrow("page 1 exploded");
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(1);
+    });
+
+    it("后续页失败不抛错而是回报失败页并停止翻页", async () => {
+      mockPages({ pagesAvailable: 4, perPage: 1, failPages: [3] });
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 1 });
+
+      expect(result.items.map((entry) => entry.dataId)).toEqual(["app-1-0", "app-2-0"]);
+      expect(result.failedPages).toEqual([3]);
+      expect(result.loadedPages).toBe(2);
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(3);
+    });
+
+    it("请求作废时抛 StaleRequestError 并立即停止翻页", async () => {
+      mockPages({ pagesAvailable: 3, perPage: 1 });
+      let stale = false;
+
+      const pending = listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", {
+        pageSize: 1,
+        isStale: () => stale,
+      });
+      stale = true;
+
+      await expect(pending).rejects.toBeInstanceOf(StaleRequestError);
+      expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledTimes(1);
+    });
+
+    it("每页都保留 group 精确兜底过滤语义", async () => {
+      mockPages({ pagesAvailable: 2, perPage: 1, extraGroupItem: true });
+
+      const result = await listAllConfigs(currentConn, "public", "", "DEFAULT_GROUP", { pageSize: 1 });
+
+      expect(result.items.every((entry) => entry.group === "DEFAULT_GROUP")).toBe(true);
+      expect(result.items.map((entry) => entry.dataId)).toEqual(["app-1-0", "app-2-0"]);
+    });
   });
 });

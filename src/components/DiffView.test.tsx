@@ -6,10 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
 import DiffView from "./DiffView";
+import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
   listConfigs: vi.fn(),
+  listAllConfigs: vi.fn(),
   getConfig: vi.fn(),
 }));
 
@@ -19,6 +21,7 @@ vi.mock("../api/nacos", async () => {
     ...actual,
     listNamespaces: apiMocks.listNamespaces,
     listConfigs: apiMocks.listConfigs,
+    listAllConfigs: apiMocks.listAllConfigs,
     getConfig: apiMocks.getConfig,
   };
 });
@@ -106,7 +109,10 @@ describe("DiffView", () => {
     localStorage.clear();
     apiMocks.listNamespaces.mockReset();
     apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
     apiMocks.getConfig.mockReset();
+    // 组件已改用 listAllConfigs 聚合翻页：默认用单页 mock 桥接，保持既有分页夹具可用
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
     apiMocks.listNamespaces.mockResolvedValue([{ namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 }]);
     apiMocks.listConfigs.mockResolvedValue({
       totalCount: 1,
@@ -228,6 +234,81 @@ describe("DiffView", () => {
       </I18nProvider>
     );
     expect(onFocusStepConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("候选 dataId 按 pagesAvailable 聚合翻页取全，而不是只取首页", async () => {
+    apiMocks.listConfigs.mockImplementation(
+      async (_conn: Connection, _tenant: string, _dataId: string, _group: string, pageNo: number) => ({
+        totalCount: 1,
+        pageNumber: pageNo,
+        pagesAvailable: 3,
+        pageItems: [{ dataId: `app-${pageNo}.yaml`, group: "RETEST-PROD", content: "", configType: "yaml" }],
+      })
+    );
+
+    renderDiff([nacosConn]);
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(nacosConn, "dev-tenant", "", "", 3, 1000);
+    });
+    // 两侧来源面板都拿到了 3 页各 1 条（单页夹具只会得到 1 条）
+    expect(await screen.findAllByText(/^dataId \(3\)$/, { selector: "span" })).toHaveLength(2);
+  });
+
+  it("候选列表命中安全上限时显示截断提示并可复制", async () => {
+    apiMocks.listAllConfigs.mockImplementation(async () => ({
+      items: Array.from({ length: 5 }, (_, index) => ({
+        dataId: `app-${index}.yaml`,
+        group: "DEFAULT_GROUP",
+        content: "",
+        configType: "yaml",
+      })),
+      pagesAvailable: 40,
+      loadedPages: 5,
+      failedPages: [],
+      truncated: true,
+    }));
+
+    renderDiff([nacosConn]);
+
+    const warnings = await screen.findAllByText("命名空间条目超过扫描上限，仅取到前 5 条，结果可能不完整");
+    expect(warnings).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "复制错误" }).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("批量对比任一侧列表不完整时在结果区提示", async () => {
+    apiMocks.listAllConfigs.mockImplementation(async (conn: Connection) => ({
+      items: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "pay.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+      pagesAvailable: conn.id === "left-nacos" ? 20 : 12,
+      loadedPages: 10,
+      failedPages: conn.id === "left-nacos" ? [] : [7],
+      truncated: conn.id === "left-nacos",
+    }));
+    apiMocks.getConfig.mockImplementation(async () => "server.port=8080");
+    localStorage.setItem("locale", "zh-CN");
+
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            autoCompare: true,
+          }}
+        />
+      </I18nProvider>
+    );
+
+    const warnings = await screen.findAllByText(/结果可能不完整|结果不完整/);
+    expect(warnings.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("来源（左）: 命名空间条目超过扫描上限，仅取到前 2 条，结果可能不完整")).toBeInTheDocument();
+    expect(screen.getByText("目标（右）: 配置列表第 7 页加载失败，仅取到 2 条，结果不完整")).toBeInTheDocument();
   });
 
   it("restores the last compared sources and mode from localStorage", async () => {

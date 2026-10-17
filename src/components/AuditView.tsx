@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Connection, connectionEnvironmentName, connectionProjectName } from "../store/connections";
-import { getConfig, listConfigs } from "../api/nacos";
+import { getConfig, listAllConfigs } from "../api/nacos";
 import { detectFormat } from "../lib/format";
 import { normalizeConfig, type ConfigEntry, type ParseStatus } from "../lib/normalize";
 import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } from "../lib/audit";
 import { useTranslation } from "../i18n";
+import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
@@ -162,6 +163,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 聚合列表的不完整信号（命中安全上限 / 有页失败）与已扫描条数，两者都必须让用户看见
+  const [runGaps, setRunGaps] = useState<string[]>([]);
+  const [scanCount, setScanCount] = useState(0);
+  const auditReqId = useRef(0);
   const [selectedRow, setSelectedRow] = useState<AuditRow | null>(null);
   const [baseline, setBaseline] = useState<string>("");
   const [showSettings, setShowSettings] = useState(false);
@@ -358,6 +363,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     setError(null);
     setRows([]);
     setSelectedRow(null);
+    setRunGaps([]);
+    setScanCount(0);
+    // 请求序号守卫：重跑审计后旧聚合结果必须作废，不得覆盖新一轮结果
+    const myReq = ++auditReqId.current;
     const session = createAuditSession("audit");
     auditSessionEvent(session, {
       kind: "audit_run_start",
@@ -369,13 +378,21 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     try {
       const sources: AuditSource[] = [];
       const errors: string[] = [];
+      const gaps: string[] = [];
 
       for (const env of envSources) {
         try {
           const dataId = env.dataIdFilter.trim() ? `*${env.dataIdFilter.trim()}*` : "";
-          const page = await listConfigs(env.conn, env.namespace, dataId, env.group, 1, 500);
+          // 按 pagesAvailable 取全该环境的配置条目，超过安全上限或少页时显式提示
+          const listResult = await listAllConfigs(env.conn, env.namespace, dataId, env.group, {
+            pageSize: 500,
+            isStale: () => myReq !== auditReqId.current,
+            onProgress: (loaded) => {
+              if (myReq === auditReqId.current) setScanCount(loaded);
+            },
+          });
           const entriesList: { dataId: string; entries: ConfigEntry[]; format: string }[] = [];
-          for (const item of page.pageItems) {
+          for (const item of listResult.items) {
             try {
               const content = await getConfig(env.conn, env.namespace, item.dataId, item.group);
               const fmt = detectFormat(item.dataId, item.configType, content);
@@ -386,6 +403,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               entriesList.push({ dataId: item.dataId, entries: [{ key: "__parse__", value: t("audit.configLoadFailedValue"), valueType: "text" as const, sourcePath: "__parse__", parseStatus: "error" as ParseStatus }], format: "TEXT" });
             }
           }
+          gaps.push(...describeConfigListGaps(listResult, t).map((gap) => `${envShortLabel(env)}: ${gap}`));
           for (const item of entriesList) {
             sources.push({
               envId: envKey(env),
@@ -398,9 +416,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             });
           }
         } catch (e) {
+          // 作废信号继续上抛，由外层静默处理，不能污染本轮 errors
+          if (isStaleRequestError(e)) throw e;
           errors.push(`${envShortLabel(env)}: ${String(e)}`);
         }
       }
+
+      if (myReq !== auditReqId.current) return;
+      setRunGaps(gaps);
 
       if (sources.length === 0) {
         setError(t("audit.noData"));
@@ -433,6 +456,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         });
       }
     } catch (e) {
+      if (isStaleRequestError(e)) return;
       setError(String(e));
       auditSessionEvent(session, { kind: "audit_run_result", result: "failure", error: String(e) });
       endAuditSession(session, "failure", String(e));
@@ -675,7 +699,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
 
         <div className="audit-actions">
           <button className="btn btn-primary" onClick={runAudit} disabled={loading}>
-            {loading ? t("common.loading") : t("audit.runAudit")}
+            {loading ? (scanCount > 0 ? t("audit.scanning", { count: scanCount }) : t("common.loading")) : t("audit.runAudit")}
           </button>
           {rows.length > 0 && (
             <div className="audit-export">
@@ -704,6 +728,18 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             <div className="test-msg err">
               <span>{error}</span>
               <CopyButton text={error} label={t("common.copyError")} />
+            </div>
+          )}
+          {runGaps.length > 0 && (
+            <div className="diff-warnings" role="status">
+              {runGaps.map((gap) => (
+                <div className="diff-warning" key={gap}>
+                  {gap}
+                </div>
+              ))}
+              <div className="field-error-actions">
+                <CopyButton text={runGaps.join("\n")} label={t("common.copyError")} />
+              </div>
             </div>
           )}
         </div>

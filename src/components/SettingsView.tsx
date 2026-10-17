@@ -7,6 +7,7 @@ import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
 import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
+import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
@@ -35,6 +36,10 @@ export default function SettingsView() {
   const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
   const [openFolderBusy, setOpenFolderBusy] = useState(false);
   const [openFolderError, setOpenFolderError] = useState("");
+  // 危险操作二次确认：走应用内 ConfirmModal，不用原生 confirm()
+  // （WebView2 里原生对话框跟随系统浅色、破坏主题，且同步阻塞主线程）。
+  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; action: () => void } | null>(null);
+  const askConfirm = (title: string, message: string, action: () => void) => setPendingConfirm({ title, message, action });
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -334,11 +339,7 @@ export default function SettingsView() {
               <button
                 type="button"
                 className="btn btn-ghost btn-danger"
-                onClick={() => {
-                  if (confirm(t("operationHistory.confirmClear"))) {
-                    clearOperationHistory();
-                  }
-                }}
+                onClick={() => askConfirm(t("settings.clearLocalHistory"), t("operationHistory.confirmClear"), clearOperationHistory)}
               >
                 {t("settings.clearLocalHistory")}
               </button>
@@ -403,12 +404,7 @@ export default function SettingsView() {
                 type="button"
                 className="btn btn-ghost btn-danger"
                 disabled={cacheBusy}
-                onClick={() => {
-                  if (cacheBusy) return;
-                  if (confirm(t("settings.confirmClearCache"))) {
-                    void runClearCache();
-                  }
-                }}
+                onClick={() => askConfirm(t("settings.clearCache"), t("settings.confirmClearCache"), () => void runClearCache())}
               >
                 {cacheBusy ? "…" : t("settings.clearCache")}
               </button>
@@ -422,6 +418,20 @@ export default function SettingsView() {
           </section>
         </div>
       </div>
+
+      {pendingConfirm && (
+        <ConfirmModal
+          title={pendingConfirm.title}
+          message={pendingConfirm.message}
+          danger
+          onConfirm={() => {
+            const action = pendingConfirm.action;
+            setPendingConfirm(null);
+            action();
+          }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      )}
     </div>
   );
 }

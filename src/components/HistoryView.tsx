@@ -27,6 +27,8 @@ interface Props {
   format: Format;
   /** 回滚成功后通知父级刷新当前内容。 */
   onRolledBack: () => void;
+  /** 宿主页面被保活隐藏时传 false：本页的 CodeView 不再劫持全局 Ctrl+F。 */
+  active?: boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -45,6 +47,7 @@ export default function HistoryView({
   group,
   currentContent,
   format,
+  active = true,
 }: Props) {
   const { t } = useTranslation();
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -362,7 +365,12 @@ export default function HistoryView({
                 {!ready ? (
                   <div className="pad-msg">{t('common.loading')}</div>
                 ) : rawView ? (
-                  <CodeView code={contents[dv!] ?? ""} format={format} />
+                  <CodeView
+                    code={contents[dv!] ?? ""}
+                    format={format}
+                    active={active}
+                    contentKey={`${tenant}::${group}::${dataId}::${dv}`}
+                  />
                 ) : (
                   <UnifiedDiff
                     oldText={prev ? contents[prev.id] ?? "" : ""}

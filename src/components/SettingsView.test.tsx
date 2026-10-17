@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import SettingsView from "./SettingsView";
@@ -17,6 +17,30 @@ vi.mock("../lib/credentialSecrets", async () => {
     ...actual,
     countMigratableStoredCredentials: credentialMocks.countMigratableStoredCredentials,
     migrateStoredCredentials: credentialMocks.migrateStoredCredentials,
+  };
+});
+
+const cacheMocks = vi.hoisted(() => ({
+  clearAppCache: vi.fn(),
+}));
+
+vi.mock("../lib/cacheCleanup", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/cacheCleanup")>();
+  return {
+    ...actual,
+    clearAppCache: cacheMocks.clearAppCache,
+  };
+});
+
+const historyMocks = vi.hoisted(() => ({
+  clearOperationHistory: vi.fn(),
+}));
+
+vi.mock("../store/operationHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../store/operationHistory")>();
+  return {
+    ...actual,
+    clearOperationHistory: historyMocks.clearOperationHistory,
   };
 });
 
@@ -77,6 +101,63 @@ describe("SettingsView", () => {
     dataLocMocks.GetDataLocations.mockResolvedValue(testDataLocations);
     dataLocMocks.OpenDataFolder.mockReset();
     dataLocMocks.OpenDataFolder.mockResolvedValue(undefined);
+    historyMocks.clearOperationHistory.mockReset();
+    cacheMocks.clearAppCache.mockReset();
+    cacheMocks.clearAppCache.mockResolvedValue(0);
+  });
+
+  // ── 危险操作二次确认（2026-10-17 扫描 R3：不得用原生 confirm）──
+
+  function confirmModal() {
+    const overlay = document.querySelector(".modal-overlay") as HTMLElement;
+    expect(overlay).toBeInTheDocument();
+    return overlay;
+  }
+
+  it("asks in an app modal before clearing local operation history", async () => {
+    const nativeConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderSettings("zh-CN");
+
+    fireEvent.click(screen.getByRole("button", { name: "清空本地历史" }));
+
+    expect(await screen.findByText("确定清空所有本地操作记录？")).toBeInTheDocument();
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(historyMocks.clearOperationHistory).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirmModal()).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByText("确定清空所有本地操作记录？")).not.toBeInTheDocument());
+    expect(historyMocks.clearOperationHistory).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空本地历史" }));
+    fireEvent.click(await screen.findByText("确定清空所有本地操作记录？"));
+    fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+    await waitFor(() => expect(historyMocks.clearOperationHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("asks in an app modal before clearing the local cache", async () => {
+    const nativeConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderSettings("zh-CN");
+
+    fireEvent.click(screen.getByRole("button", { name: "清理缓存" }));
+
+    expect(await screen.findByText(/确定清理缓存吗/)).toBeInTheDocument();
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(cacheMocks.clearAppCache).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => expect(cacheMocks.clearAppCache).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("缓存已清理")).toBeInTheDocument();
+  });
+
+  it("keeps dismissing the cache confirmation without any cleanup", async () => {
+    renderSettings("zh-CN");
+
+    fireEvent.click(screen.getByRole("button", { name: "清理缓存" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByText(/确定清理缓存吗/)).not.toBeInTheDocument());
+    expect(cacheMocks.clearAppCache).not.toHaveBeenCalled();
   });
 
   it("renders a grouped settings workbench without empty standalone sections", () => {

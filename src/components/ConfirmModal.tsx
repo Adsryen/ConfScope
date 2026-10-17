@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "../i18n";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 
 interface Props {
   title: string;
@@ -23,14 +24,16 @@ export default function ConfirmModal({
 }: Props) {
   const { t } = useTranslation();
 
+  // Esc 交给分层注册表：确认框盖在别的弹层上时，一次 Esc 只关确认框这一层。
+  useEscape(true, onCancel, EscapePriority.confirm);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
       if (e.key === "Enter") onConfirm();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onConfirm, onCancel]);
+  }, [onConfirm]);
 
   return (
     <div className="modal-overlay" onClick={onCancel}>

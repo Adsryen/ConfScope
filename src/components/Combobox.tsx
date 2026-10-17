@@ -1,5 +1,11 @@
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { subscribeClosePopovers } from "../lib/popoverBus";
+import { EscapePriority, useEscape } from "../lib/useEscape";
+import { useTranslation } from "../i18n";
+
+// 候选渲染上限：超出部分不再静默丢弃，改为显式提示继续输入缩小范围
+const MAX_VISIBLE_OPTIONS = 50;
 
 export interface ComboOption {
   value: string;
@@ -37,12 +43,22 @@ function fuzzy(query: string, text: string, exactValue?: string): boolean {
 
 /** 输入框 + 候选下拉框（combobox）：支持模糊过滤，并防止被父容器裁剪。 */
 export default function Combobox({ value, onChange, onPick, options, placeholder, disabled }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  // 键盘/悬停高亮项索引（与"已选中"分开；输入变化时由 effect 重置到最佳匹配）
+  const [activeIndex, setActiveIndex] = useState(-1);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const optionId = (i: number) => `${listId}-opt-${i}`;
 
-  const filtered = options.filter((o) => fuzzy(value, o.value, value) || (o.sub ? fuzzy(value, o.sub) : false)).slice(0, 50);
+  const matchFor = (query: string) => options.filter((o) => fuzzy(query, o.value, query) || (o.sub ? fuzzy(query, o.sub) : false));
+
+  const matched = matchFor(value);
+  const filtered = matched.slice(0, MAX_VISIBLE_OPTIONS);
+  const hiddenCount = matched.length - filtered.length;
 
   const updateMenuPosition = useCallback(() => {
     const trigger = ref.current;
@@ -64,6 +80,53 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
       zIndex: 10000,
     });
   }, []);
+
+  // 候选弹层展开时 Esc 只收弹层（分层注册表按 dropdown 优先级胜出，不吃掉外层弹层）。
+  useEscape(open, () => setOpen(false), EscapePriority.dropdown);
+
+  // 宿主页面被保活隐藏（模式切换）时收起候选弹层：portal 在 document.body 上，不随容器 hidden 消失。
+  useEffect(() => subscribeClosePopovers(() => setOpen(false)), []);
+
+  const pick = (o: ComboOption) => {
+    onChange(o.value);
+    onPick?.(o);
+    setOpen(false);
+  };
+
+  // ↑↓ 移动高亮（到边界停住；尚未高亮时从首/尾开始）
+  const moveActive = (delta: number) => {
+    if (filtered.length === 0) return;
+    setActiveIndex((cur) => {
+      const base = cur < 0 ? (delta > 0 ? -1 : filtered.length) : cur;
+      return Math.min(filtered.length - 1, Math.max(0, base + delta));
+    });
+  };
+
+  // 展开/输入时把高亮落到"当前值"或首个候选，保证 Enter 语义稳定。
+  // 由动作显式调用，不放进依赖 filtered 的 effect —— 否则父组件每次重渲染都会重置键盘高亮。
+  const resetActive = (list: ComboOption[], query: string) => {
+    if (list.length === 0) {
+      setActiveIndex(-1);
+      return;
+    }
+    setActiveIndex(
+      Math.max(
+        0,
+        list.findIndex((o) => o.value === query)
+      )
+    );
+  };
+
+  // 收起后清掉高亮
+  useEffect(() => {
+    if (!open) setActiveIndex(-1);
+  }, [open]);
+
+  // 高亮项滚入弹层可视区（block:nearest 只动弹层，不让整页跳动）
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    menuRef.current?.querySelector(`[data-idx="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, open]);
 
   useLayoutEffect(() => {
     if (!open || filtered.length === 0) return;
@@ -91,6 +154,7 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
   return (
     <div className="combo" ref={ref}>
       <input
+        ref={inputRef}
         className="search-input wide mono"
         value={value}
         placeholder={placeholder}
@@ -98,33 +162,71 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
         autoCapitalize="off"
         autoCorrect="off"
         spellCheck={false}
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         onChange={(e) => {
-          onChange(e.target.value);
+          const next = e.target.value;
+          onChange(next);
+          resetActive(matchFor(next), next);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+        onFocus={() => {
+          resetActive(matched, value);
+          setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          // 焦点始终留在输入框（不抢焦点，保证输入法与继续输入不被打断）
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            if (!open) {
+              resetActive(matched, value);
+              setOpen(true);
+            } else {
+              moveActive(e.key === "ArrowDown" ? 1 : -1);
+            }
+            return;
+          }
+          if (e.key === "Home" || e.key === "End") {
+            if (!open || filtered.length === 0) return; // 收起态把光标键交还输入框
+            e.preventDefault();
+            setActiveIndex(e.key === "Home" ? 0 : filtered.length - 1);
+            return;
+          }
+          if (e.key === "Enter") {
+            const target = filtered[activeIndex];
+            if (!open || !target) return;
+            e.preventDefault(); // 阻止外层表单的默认提交
+            pick(target);
+          }
+          // Escape 由 useEscape 分层注册处理：只收弹层，焦点留在输入框
+        }}
       />
       {open &&
         filtered.length > 0 &&
         createPortal(
-          <div ref={menuRef} className="combo-menu combo-menu-portal" style={menuStyle}>
+          <div ref={menuRef} id={listId} role="listbox" className="combo-menu combo-menu-portal" style={menuStyle}>
             {filtered.map((o, i) => (
               <div
                 key={`${o.value}/${o.sub ?? ""}/${i}`}
-                className={`combo-option${o.value === value ? " active" : ""}`}
+                id={optionId(i)}
+                data-idx={i}
+                role="option"
+                aria-selected={o.value === value}
+                className={`combo-option${o.value === value ? " active" : ""}${i === activeIndex ? " highlighted" : ""}`}
+                onMouseEnter={() => setActiveIndex(i)}
                 onMouseDown={(e) => {
                   e.preventDefault(); // 防止 input 失焦抢先关闭下拉框
                   e.stopPropagation();
-                  onChange(o.value);
-                  onPick?.(o);
-                  setOpen(false);
+                  pick(o);
                 }}
               >
                 <span className="combo-val">{o.value}</span>
                 {o.sub && <span className="combo-sub">{o.sub}</span>}
               </div>
             ))}
+            {hiddenCount > 0 && <div className="combo-more">{t("common.comboMoreHidden", { count: hiddenCount })}</div>}
           </div>,
           document.body
         )}

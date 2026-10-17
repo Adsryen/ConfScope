@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConfigItem, getConfig, listConfigs, listNamespaces, Namespace } from "../api/nacos";
+import { ConfigItem, getConfig, listAllConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { diffLines } from "../lib/diff";
 import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
+import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
 import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
@@ -437,6 +438,9 @@ function SourcePicker({
   const [cfgLoading, setCfgLoading] = useState(false);
   const [cfgError, setCfgError] = useState<string | null>(null);
   const [cfgReload, setCfgReload] = useState(0);
+  // 聚合翻页期间的已取条数与「结果不完整」提示（命中安全上限 / 有页失败）
+  const [cfgLoaded, setCfgLoaded] = useState(0);
+  const [cfgGaps, setCfgGaps] = useState<string[]>([]);
   const onLoadErrorRef = useRef(onLoadError);
 
   const conn = connections.find((item) => item.id === source.connId);
@@ -494,20 +498,29 @@ function SourcePicker({
     setCfgLoading(true);
     setCfgError(null);
     setConfigs([]);
+    setCfgLoaded(0);
+    setCfgGaps([]);
 
-    listConfigs(conn, source.tenant, "", "", 1, 1000) // group 传空 → 返回该命名空间全部 group
-      .then((page) => {
+    // group 传空 → 该命名空间全部 group；按 pagesAvailable 取全，超过安全上限时显式提示
+    listAllConfigs(conn, source.tenant, "", "", {
+      pageSize: 1000,
+      isStale: () => !alive,
+      onProgress: (loaded) => setCfgLoaded(loaded),
+    })
+      .then((result) => {
         if (!alive) return;
         // 客户端精确过滤：Nacos v1 的 group=空 可能混入大小写不同的兄弟 group，
         // 只保留与当前选中 group 精确匹配（忽略大小写）的配置项。
         const expected = (source.group || "").trim().toLowerCase();
         const items = expected
-          ? page.pageItems.filter((item) => (item.group || "").trim().toLowerCase() === expected)
-          : page.pageItems;
+          ? result.items.filter((item) => (item.group || "").trim().toLowerCase() === expected)
+          : result.items;
         setConfigs(items);
+        setCfgGaps(describeConfigListGaps(result, t));
       })
       .catch((e) => {
-        if (!alive) return;
+        // 请求作废（切连接/命名空间/group）是内部取消信号，静默丢弃
+        if (!alive || isStaleRequestError(e)) return;
         const message = errorText(e);
         setConfigs([]);
         setCfgError(message);
@@ -632,7 +645,9 @@ function SourcePicker({
 
       <div className="field-row">
         <label className="field">
-          <span>dataId {cfgLoading ? `(${t("common.loading")})` : `(${configs.length})`}</span>
+          <span>
+            dataId {cfgLoading ? `(${t("common.loading")} ${t("diff.configListLoaded", { count: cfgLoaded })})` : `(${configs.length})`}
+          </span>
           <Combobox
             value={source.dataId}
             placeholder={t("diff.dataIdPlaceholder")}
@@ -655,6 +670,18 @@ function SourcePicker({
                   {t("diff.retryConfigs")}
                 </button>
                 <CopyButton text={`${t("diff.configListLoadFailed")}: ${cfgError}`} label={t("diff.copyError")} />
+              </div>
+            </div>
+          )}
+          {cfgGaps.length > 0 && (
+            <div className="diff-warnings">
+              {cfgGaps.map((gap) => (
+                <div className="diff-warning" key={gap}>
+                  {gap}
+                </div>
+              ))}
+              <div className="field-error-actions">
+                <CopyButton text={cfgGaps.join("\n")} label={t("diff.copyError")} />
               </div>
             </div>
           )}
@@ -708,6 +735,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [mode, setMode] = useState<DiffMode>(initialDiffStateRef.current.mode);
   const [matchResults, setMatchResults] = useState<MatchResult[] | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
+  // 批量对比取列表的进度与「结果不完整」提示（任一侧截断/少页都要显示）
+  const [matchScan, setMatchScan] = useState(0);
+  const [matchGaps, setMatchGaps] = useState<string[]>([]);
+  const matchReqId = useRef(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [selectedBatchDataId, setSelectedBatchDataId] = useState<string | null>(null);
@@ -927,6 +958,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     setError(null);
     setNotice(null);
     setMatchResults(null);
+    setMatchScan(0);
+    setMatchGaps([]);
+    // 请求序号守卫：重复点「匹配」或切换来源后，旧的聚合结果必须作废而不是覆盖新结果
+    const myReq = ++matchReqId.current;
     setBatchResults([]);
     setFailedItems([]);
     setMergeSelections({});
@@ -942,9 +977,22 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       const rightGroup = right.group.trim() || "DEFAULT_GROUP";
 
       const [leftResult, rightResult] = await Promise.allSettled([
-        listConfigs(leftConn, left.tenant, "", leftGroup, 1, 500),
-        listConfigs(rightConn, right.tenant, "", rightGroup, 1, 500),
+        listAllConfigs(leftConn, left.tenant, "", leftGroup, {
+          pageSize: 500,
+          isStale: () => myReq !== matchReqId.current,
+          onProgress: (loaded) => {
+            if (myReq === matchReqId.current) setMatchScan(loaded);
+          },
+        }),
+        listAllConfigs(rightConn, right.tenant, "", rightGroup, {
+          pageSize: 500,
+          isStale: () => myReq !== matchReqId.current,
+          onProgress: (loaded) => {
+            if (myReq === matchReqId.current) setMatchScan(loaded);
+          },
+        }),
       ]);
+      if (myReq !== matchReqId.current) return;
 
       const leftErr = leftResult.status === "rejected" ? errorText(leftResult.reason) : "";
       const rightErr = rightResult.status === "rejected" ? errorText(rightResult.reason) : "";
@@ -973,12 +1021,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       const leftPage = leftResult.status === "fulfilled" ? leftResult.value : null;
       const rightPage = rightResult.status === "fulfilled" ? rightResult.value : null;
 
-      const leftItems = leftPage?.pageItems ?? [];
-      const rightItems = rightPage?.pageItems ?? [];
+      const leftItems = leftPage?.items ?? [];
+      const rightItems = rightPage?.items ?? [];
       const leftMap = new Map(leftItems.map((item) => [item.dataId, item]));
       const rightMap = new Map(rightItems.map((item) => [item.dataId, item]));
       const leftIds = leftPage ? new Set(leftItems.map((item) => item.dataId)) : null;
       const rightIds = rightPage ? new Set(rightItems.map((item) => item.dataId)) : null;
+
+      // 任一侧列表被截断或少页，都可能让「缺失/一致」结论失真，必须显示并允许复制
+      const gaps = [
+        ...(leftPage ? describeConfigListGaps(leftPage, t).map((gap) => `${t("diff.sourceA")}: ${gap}`) : []),
+        ...(rightPage ? describeConfigListGaps(rightPage, t).map((gap) => `${t("diff.sourceB")}: ${gap}`) : []),
+      ];
+      if (gaps.length) setMatchGaps(gaps);
       const leftId = left.dataId.trim();
       const rightId = right.dataId.trim();
       let matches: MatchResult[];
@@ -1020,6 +1075,8 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
       setSelectedIds(new Set(matches.map((item) => item.dataId)));
       setSourcesCollapsed(true);
     } catch (e) {
+      // 请求作废：本次匹配已被新的匹配/来源切换取代，静默丢弃
+      if (isStaleRequestError(e)) return;
       const message = errorText(e);
       setSourcesCollapsed(false);
       setError(message);
@@ -1808,6 +1865,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                   <button className="btn btn-ghost" onClick={startSingleApply}>
                     {t("diff.startApply")}
                   </button>
+                )}
+                {matchLoading && matchScan > 0 && <div className="diff-loadok">{t("diff.matchScanning", { count: matchScan })}</div>}
+                {matchGaps.length > 0 && (
+                  <div className="diff-warnings" role="status">
+                    {matchGaps.map((gap) => (
+                      <div className="diff-warning" key={gap}>
+                        {gap}
+                      </div>
+                    ))}
+                    <div className="field-error-actions">
+                      <CopyButton text={matchGaps.join("\n")} label={t("diff.copyError")} />
+                    </div>
+                  </div>
                 )}
                 {notice && (
                   <div className={`diff-loadok${leftFailed || rightFailed ? " warn" : ""}`}>

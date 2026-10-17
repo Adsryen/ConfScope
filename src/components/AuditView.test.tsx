@@ -4,11 +4,13 @@
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AuditView from "./AuditView";
+import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 import type { Connection } from "../store/connections";
 
 // mock API 模块
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
+  listAllConfigs: vi.fn(),
   getConfig: vi.fn(),
 }));
 
@@ -20,7 +22,7 @@ const exportMocks = vi.hoisted(() => ({
 
 vi.mock("../api/nacos", async () => {
   const actual = await vi.importActual<typeof import("../api/nacos")>("../api/nacos");
-  return { ...actual, listConfigs: apiMocks.listConfigs, getConfig: apiMocks.getConfig };
+  return { ...actual, listConfigs: apiMocks.listConfigs, listAllConfigs: apiMocks.listAllConfigs, getConfig: apiMocks.getConfig };
 });
 
 vi.mock("../lib/export", async () => {
@@ -91,8 +93,13 @@ vi.mock("../i18n", () => ({
         "common.delete": "Delete",
         "common.loading": "Loading...",
         "common.copyError": "Copy Error",
+        "common.configListTruncated": "Scan cap reached: only the first {count} entries were fetched, results may be incomplete",
+        "common.configListPartial": "Config list page(s) {pages} failed to load: only {count} entries fetched, results are incomplete",
+        "audit.scanning": "Scanning... {count} loaded",
       };
-      return map[key] ?? key;
+      const text = map[key] ?? key;
+      if (!params) return text;
+      return Object.entries(params).reduce((acc, [name, value]) => acc.replace(new RegExp(`\\{${name}\\}`, "g"), String(value)), text);
     },
   }),
 }));
@@ -122,7 +129,10 @@ function makeConnection(overrides: Partial<Connection> = {}): Connection {
 describe("AuditView", () => {
   beforeEach(() => {
     apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
     apiMocks.getConfig.mockReset();
+    // 组件已改用 listAllConfigs 聚合翻页：默认用单页 mock 桥接，保持既有分页夹具可用
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
     exportMocks.exportAuditCSV.mockClear();
     exportMocks.exportAuditJSON.mockClear();
     exportMocks.downloadFile.mockClear();
@@ -454,6 +464,71 @@ describe("AuditView", () => {
 
     expect(await screen.findAllByText("Config Load Failed")).not.toHaveLength(0);
     expect(screen.queryByText("加载失败")).not.toBeInTheDocument();
+  });
+
+  it("审计按 pagesAvailable 取全多页条目，而不是只审第一页", async () => {
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+    apiMocks.listConfigs.mockImplementation(async (_conn: Connection, _ns: string, _dataId: string, _group: string, pageNo: number) => ({
+      pageItems: [{ dataId: `app-${pageNo}.yaml`, group: "DEFAULT_GROUP" }],
+      totalCount: 1,
+      pageNumber: pageNo,
+      pagesAvailable: 3,
+    }));
+    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    await waitFor(() => {
+      expect(apiMocks.listConfigs).toHaveBeenCalledWith(expect.anything(), "public", "", "", 3, 500);
+    });
+    // 第三页独有的条目也必须进入审计矩阵
+    expect(await screen.findByText("app-3.yaml")).toBeInTheDocument();
+  });
+
+  it("列表命中安全上限时在界面显示不完整提示", async () => {
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+    apiMocks.listAllConfigs.mockResolvedValue({
+      items: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }],
+      pagesAvailable: 60,
+      loadedPages: 10,
+      failedPages: [],
+      truncated: true,
+    });
+    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const warnings = await screen.findAllByText(/Scan cap reached: only the first 1 entries/);
+    expect(warnings.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole("button", { name: "Copy Error" }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("列表少页时提示结果不完整而不是静默少数据", async () => {
+    const conns = [
+      makeConnection({ id: "c1", name: "dev", environmentName: "Development" }),
+      makeConnection({ id: "c2", name: "prod", environmentName: "Production" }),
+    ];
+    apiMocks.listAllConfigs.mockResolvedValue({
+      items: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }],
+      pagesAvailable: 8,
+      loadedPages: 2,
+      failedPages: [3],
+      truncated: false,
+    });
+    apiMocks.getConfig.mockResolvedValue("server.port=8080");
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    expect((await screen.findAllByText(/Config list page\(s\) 3 failed to load: only 1 entries fetched/)).length).toBeGreaterThanOrEqual(2);
   });
 
   it("默认以脱敏模式导出审计矩阵", async () => {

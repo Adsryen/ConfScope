@@ -15,10 +15,12 @@ interface Props {
   namespace: string;
   onClose: () => void;
   onSaved: (dataId: string, group: string) => void;
+  /** 宿主页面被保活隐藏时传 false：不响应 Esc，避免其他模式的按键关掉隐藏的新建草稿。 */
+  active?: boolean;
 }
 
 /** 新建配置：填写 dataId / group / 格式 / 内容并发布到 Nacos。 */
-export default function ConfigEditor({ conn, namespace, onClose }: Props) {
+export default function ConfigEditor({ conn, namespace, onClose, active = true }: Props) {
   const { t } = useTranslation();
   const [dataId, setDataId] = useState("");
   // 默认 group 跟随连接配置（留空/DEFAULT_GROUP → DEFAULT_GROUP）
@@ -35,10 +37,11 @@ export default function ConfigEditor({ conn, namespace, onClose }: Props) {
   const namespaceLabel = namespace || "public";
 
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [active, onClose]);
 
   const save = () => {
     if (!dataId.trim()) {
@@ -161,6 +164,7 @@ export default function ConfigEditor({ conn, namespace, onClose }: Props) {
           title={t('config.validateFailed')}
           messages={validateErrs}
           onClose={() => setValidateErrs([])}
+          active={active}
         />
       )}
     </div>

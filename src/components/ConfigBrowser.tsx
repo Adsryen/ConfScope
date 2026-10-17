@@ -19,6 +19,7 @@ import { createSnapshotFromConfigs } from "../api/snapshot";
 import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../api/app";
 import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -35,6 +36,12 @@ interface Props {
   tenant: string;
   connections?: Connection[];
   onStartApply?: (payload: ApplyEntryPayload) => void;
+  /**
+   * 页面是否处于前台。App 为保活把整页 hidden 起来（切到其他模式）时传 false：
+   * 实例不卸载，但全局键盘职责要一并交还，避免隐藏的编辑态/弹层吃掉 Esc、
+   * 隐藏的 CodeView 劫持 Ctrl+F。默认 true，单测与其他调用方无需改动。
+   */
+  active?: boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -114,7 +121,7 @@ function BrowserToolIcon({ name }: { name: BrowserToolIconName }) {
 }
 
 /** 配置浏览：左侧配置列表（dataId 或内容搜索），右侧内容 / 历史标签页。 */
-export default function ConfigBrowser({ conn, tenant, connections = [], onStartApply }: Props) {
+export default function ConfigBrowser({ conn, tenant, connections = [], onStartApply, active = true }: Props) {
   const { t } = useTranslation();
   const taskManager = useTaskManager();
   const [search, setSearch] = useState("");
@@ -262,6 +269,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setContentSearchError(null);
     setSelectedContentKeys(new Set());
     try {
+      // 这里按 pagesAvailable 聚合翻页（判页数不能信被 group 过滤改写过的 totalCount）。
+      // 其它调用点「取全列表」请直接用 api 层的 listAllConfigs（见 R1）；
+      // 本处保留自有的逐页进度语义，PAGE_SIZE=50 的枚举成本归入 P2 backlog。
       const firstPage = await listConfigs(conn, tenant, "", group, 1, PAGE_SIZE);
       if (my !== contentSearchReqId.current) return;
       const allItems = [...firstPage.pageItems];
@@ -396,11 +406,19 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     const it = items[Math.min(Math.max(next, 0), items.length - 1)];
     if (it) guardNav(() => openConfig(it));
   };
-  // 选中项滚入可视区
+  // 选中项滚入可视区。
+  // 保活隐藏（display:none）期间 Chromium 会直接丢弃 scrollIntoView（真机实测），
+  // 所以记下最后一次对齐过的选中项；切回前台时若选中项已在隐藏期间变掉，补一次对齐，
+  // 没变过就什么都不做——列表滚动位置本身是保活的，不能把用户翻到的地方拽回去。
   const activeRef = useRef<HTMLDivElement>(null);
+  const alignedKeyRef = useRef<string | null>(null);
+  const selectedKey = selected ? `${selected.group}::${selected.dataId}` : null;
   useEffect(() => {
+    if (!active) return;
+    if (selectedKey === alignedKeyRef.current) return;
+    alignedKeyRef.current = selectedKey;
     activeRef.current?.scrollIntoView({ block: "nearest" });
-  }, [selected?.dataId, selected?.group]);
+  }, [active, selectedKey]);
 
   // 切换连接 / 命名空间时重置并重新拉列表
   useEffect(() => {
@@ -568,15 +586,39 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setSaving(false);
   };
 
-  // 编辑态按 Esc 取消编辑(无弹框时)
+  /**
+   * 退出编辑态：有未保存改动时先经 guardNav 弹确认，绝不静默丢弃草稿。
+   * Esc 与「取消」按钮共用这一条路径，保证两个入口行为一致。
+   */
+  const cancelEditing = () => {
+    setSaveError(null);
+    guardNav(() => setEditing(false));
+  };
+
+  // 编辑态按 Esc 取消编辑；更高一层的弹层（新建/删除/确认/替换/目标选择/校验提示）打开时不参与。
+  useEscape(
+    active && editing && !showNew && !showDelete && !pending && !showReplace && !showTargetPicker && validateErrs.length === 0,
+    cancelEditing,
+    EscapePriority.page
+  );
+
+  // 批量替换 / 应用目标两个内联弹层支持 Esc（此前只能点遮罩关闭）。
+  // 两步是互斥流程（进入目标选择时替换层已关闭），条件里的互斥判断是给未来嵌套留的余量；
+  // 确认框（confirm 优先级）与弹层内下拉（dropdown 优先级）展开时，Esc 由它们先吃掉。
+  useEscape(active && showReplace && !showTargetPicker && !pending, () => setShowReplace(false), EscapePriority.overlay);
+  useEscape(active && showTargetPicker && !showReplace && !pending, () => setShowTargetPicker(false), EscapePriority.overlay);
+
+  // 保活隐藏（切到其他模式）时收敛「一次性、且再出现会很危险」的 UI 态：
+  // 待确认的跳转闭包与删除确认框不能藏在后台——切回来突然弹确认、
+  // 或对着已经变掉的选中项执行删除，都是事故。
+  // 反过来，编辑草稿与批量替换这类「装了用户输入」的弹层要留着：
+  // 整棵子树是 display:none，不会残留在屏幕上，切回来还能接着改，
+  // 不像改造前那样切个 Tab 就把没保存的正文丢掉。
   useEffect(() => {
-    if (!editing || showNew || showDelete || pending) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setEditing(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editing, showNew, showDelete, pending]);
+    if (active) return;
+    setPending(null);
+    setShowDelete(false);
+  }, [active]);
 
   // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
   const doDelete = async () => {
@@ -893,7 +935,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           </div>
           <div className="browser-action-row">
             <div className="browse-scope-field" title={t("config.groupFilter")}>
-              <span className="browse-scope-label">{t("config.groupFilter")}</span>
+              <span>{t("config.groupFilter")}</span>
               <Select
                 className="browser-group-select"
                 value={selectedGroup}
@@ -1042,13 +1084,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       />
                       {saveError && <InlineError {...inlineErrorLabels} message={saveError} onRetry={saveEdit} />}
                       <span className="fmt-spacer" />
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          setEditing(false);
-                          setSaveError(null);
-                        }}
-                      >
+                      <button className="btn btn-ghost btn-sm" onClick={cancelEditing}>
                         {t("common.cancel")}
                       </button>
                       <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving}>
@@ -1103,7 +1139,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         ))}
                       </div>
                     )}
-                    <CodeView code={content} format={fmt} searchTerm={isContentSearchActive ? contentTerm : undefined} />
+                    <CodeView code={content} format={fmt} searchTerm={isContentSearchActive ? contentTerm : undefined} active={active} />
                   </>
                 )}
               </div>
@@ -1111,6 +1147,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               <HistoryView
                 conn={conn}
                 tenant={tenant}
+                active={active}
                 dataId={selected.dataId}
                 group={selected.group}
                 currentContent={content}
@@ -1126,6 +1163,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         <ConfigEditor
           conn={conn}
           namespace={tenant}
+          active={active}
           onClose={() => setShowNew(false)}
           onSaved={(dataId, group) => {
             const nextGroup = group.trim() || "DEFAULT_GROUP";
@@ -1290,7 +1328,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       )}
 
       {validateErrs.length > 0 && (
-        <AlertModal title={t("config.validateFailed")} messages={validateErrs} onClose={() => setValidateErrs([])} />
+        <AlertModal title={t("config.validateFailed")} messages={validateErrs} onClose={() => setValidateErrs([])} active={active} />
       )}
     </div>
   );

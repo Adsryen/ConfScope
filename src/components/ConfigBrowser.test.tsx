@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
@@ -8,6 +9,7 @@ import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCen
 import type { ConfigItem } from "../api/nacos";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 import ConfigBrowser from "./ConfigBrowser";
 import ErrorDialog from "./ErrorDialog";
 import MessageCenter from "./MessageCenter";
@@ -138,6 +140,15 @@ async function expectCodeContains(...parts: string[]) {
       expect(text).toContain(part);
     }
   });
+}
+
+/**
+ * 其他模式（应用计划/设置等）里一个低优先级的 Esc 响应者，
+ * 用来验证被保活隐藏的配置浏览不会替它吃掉按键。
+ */
+function OtherModeDropdown({ onClose }: { onClose: () => void }) {
+  useEscape(true, onClose, EscapePriority.dropdown);
+  return <div data-testid="other-mode-dropdown" />;
 }
 
 describe("ConfigBrowser", () => {
@@ -816,5 +827,292 @@ describe("ConfigBrowser", () => {
       rollbackable: false,
       rollbackReason: "operationHistory.rollbackSnapshotOnly",
     });
+  });
+
+  // ── 未保存改动守卫与弹层 Esc 分层（2026-10-17 扫描 R2 / R7）──
+
+  async function enterEditMode(editedValue = '{"server":{"port":9090}}') {
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await waitFor(() => expect(document.querySelector("textarea")).toBeInTheDocument());
+    if (editedValue) fireEvent.change(document.querySelector("textarea")!, { target: { value: editedValue } });
+  }
+
+  async function openReplaceFlow() {
+    const sandboxConn: Connection = {
+      ...conn,
+      id: "sandbox",
+      name: "sandbox",
+      projectName: "订单",
+      environmentName: "Sandbox",
+      sourceName: "云上",
+      baseUrl: "http://sandbox.example.com/nacos",
+    };
+    const sourceConn: Connection = { ...conn, projectName: "订单", environmentName: "Development", sourceName: "云上" };
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([{ dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }])
+    );
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: "gateway:\n  host: dev.internal\n",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    });
+    renderBrowser("zh-CN", sourceConn, "public", { connections: [sourceConn, sandboxConn], onStartApply: vi.fn() });
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "dev.internal" } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "批量替换" }));
+    await waitFor(() => expect(document.querySelector(".browser-replace-modal")).toBeInTheDocument());
+  }
+
+  it("asks before discarding unsaved edits when Escape is pressed", async () => {
+    await enterEditMode();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+
+    // 留在当前 → 仍是编辑态，草稿不丢
+    fireEvent.click(screen.getByRole("button", { name: "留在当前" }));
+    await waitFor(() => expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument());
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    // 放弃并切换 → 退出编辑态
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  });
+
+  it("asks before discarding unsaved edits when the cancel button is clicked", async () => {
+    await enterEditMode();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃并切换" }));
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
+  });
+
+  it("leaves editing on Escape without confirmation when nothing changed", async () => {
+    await enterEditMode("");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
+    expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  });
+
+  it("keeps the validation alert above the editing guard when Escape is pressed", async () => {
+    await enterEditMode('{"server":');
+    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
+
+    // 校验提示打开时 Esc 只关提示，不应连带退出编辑态
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("格式校验未通过")).not.toBeInTheDocument());
+    expect(document.querySelector("textarea")).toHaveValue('{"server":');
+
+    // 提示关闭后 Esc 才回到编辑守卫
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+  });
+
+  // ── 保活隐藏（R8 / D3）：整页只是 hidden，不卸载 ──
+
+  /** 受控外壳：rerender 切 active，模拟 App 把配置浏览整页隐藏 / 显示。 */
+  function renderBrowserShell(extra?: ReactNode) {
+    localStorage.setItem("locale", "zh-CN");
+    const tree = (active: boolean) => (
+      <I18nProvider>
+        <ConfigBrowser conn={conn} tenant="public" active={active} />
+        {extra}
+        <MessageCenter />
+        <ErrorDialog />
+      </I18nProvider>
+    );
+    const view = render(tree(true));
+    return {
+      setActive: (active: boolean) => view.rerender(tree(active)),
+      openEditorWithDraft: async (draft = '{"server":{"port":9090}}') => {
+        fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+        await waitFor(() => expect(document.querySelector("textarea")).toBeInTheDocument());
+        fireEvent.change(document.querySelector("textarea")!, { target: { value: draft } });
+      },
+    };
+  }
+
+  it("隐藏时不吃掉 Esc，编辑草稿留到切回来（改造前整页卸载会直接丢草稿）", async () => {
+    const shell = renderBrowserShell();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+    await shell.openEditorWithDraft();
+
+    shell.setActive(false);
+
+    // 已交还键盘职责：既不弹「放弃未保存的修改？」，也不退出编辑态
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    shell.setActive(true);
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+  });
+
+  it("隐藏时收起待确认的跳转，切回来不补执行也不重弹", async () => {
+    const shell = renderBrowserShell();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+    await shell.openEditorWithDraft();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+
+    shell.setActive(false);
+    await waitFor(() => expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument());
+
+    // pending 是一次性闭包：切回来编辑态与草稿还在，但那次「取消」不会被补执行
+    shell.setActive(true);
+    expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+  });
+
+  it("隐藏时收起删除确认框，切回来不复活", async () => {
+    const shell = renderBrowserShell();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    expect(await screen.findByText("删除配置")).toBeInTheDocument();
+
+    shell.setActive(false);
+    await waitFor(() => expect(screen.queryByText("删除配置")).not.toBeInTheDocument());
+
+    shell.setActive(true);
+    expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
+    expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
+  });
+
+  it("隐藏期间的选中变化不白跑对齐，切回前台补一次滚入可视区", async () => {
+    // 真机（Chromium）实测：容器 display:none 时 scrollIntoView 被直接丢弃，
+    // 而 scrollTop 本身是保活的。jsdom 没有布局，只能验「该调 / 不该调」的调用次数。
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "db.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+      ])
+    );
+    const shell = renderBrowserShell();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      fireEvent.click(await screen.findByText("app.json"));
+      await expectCodeContains('"server"');
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1)); // 前台选中时已对齐
+
+      shell.setActive(false);
+      fireEvent.click(screen.getByText("db.json"));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1); // 隐藏期间的变化不白跑
+
+      scrollIntoView.mockClear();
+      shell.setActive(true);
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1)); // 切回来补对齐
+      expect(document.querySelector(".browser-item.active")).toHaveTextContent("db.json");
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("隐藏时交出键盘职责：看不见的校验提示不替其他模式吃掉 Esc，也不响应 Enter", async () => {
+    const otherModeClose = vi.fn();
+    const shell = renderBrowserShell(<OtherModeDropdown onClose={otherModeClose} />);
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"server"', '"port"', "8080");
+    await shell.openEditorWithDraft('{"server":');
+
+    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
+
+    shell.setActive(false);
+
+    // 提示框连同草稿一起留在隐藏子树里，但高位注册已撤销：Esc 归其他模式的弹层
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(otherModeClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("格式校验未通过")).toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":');
+
+    // Enter 同样交还：不能出现「看不见的那层被一键关掉」
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(screen.getByText("格式校验未通过")).toBeInTheDocument();
+
+    shell.setActive(true);
+    expect(screen.getByText("格式校验未通过")).toBeInTheDocument();
+  });
+
+  it("隐藏时不吃掉 Esc，新建配置草稿留到切回来；切回前台才交还键盘", async () => {
+    const shell = renderBrowserShell();
+    fireEvent.click(screen.getByRole("button", { name: "新建配置" }));
+    const dataIdInput = screen.getByText("Data ID").closest("label")!.querySelector("input")!;
+    fireEvent.change(dataIdInput, { target: { value: "app.yaml" } });
+    fireEvent.change(document.querySelector(".modal textarea")!, { target: { value: "server:\n  port: 8080\n" } });
+
+    shell.setActive(false);
+
+    // 隐藏的新建弹层不该被其他模式的 Esc 关掉，草稿留着
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByText("Data ID")).toBeInTheDocument();
+    expect(dataIdInput).toHaveValue("app.yaml");
+
+    // 切回前台：Esc 重新由新建弹层负责
+    shell.setActive(true);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("Data ID")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "新建配置" })).toBeInTheDocument();
+  });
+
+  it("closes the batch replace modal on Escape", async () => {
+    await openReplaceFlow();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(document.querySelector(".browser-replace-modal")).not.toBeInTheDocument());
+  });
+
+  it("closes the target picker on Escape without reopening the replace step", async () => {
+    await openReplaceFlow();
+    // 替换与目标选择是互斥流程：进入第二步时替换层已关闭
+    fireEvent.click(screen.getByRole("button", { name: "选择应用目标" }));
+    await waitFor(() => expect(document.querySelector(".browser-target-modal")).toBeInTheDocument());
+    expect(document.querySelector(".browser-replace-modal")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".browser-target-modal")).not.toBeInTheDocument());
+    expect(document.querySelectorAll(".modal-overlay")).toHaveLength(0);
+  });
+
+  it("lets an open dropdown consume Escape before the overlay behind it", async () => {
+    await openReplaceFlow();
+    fireEvent.click(screen.getByRole("button", { name: "选择应用目标" }));
+    await waitFor(() => expect(document.querySelector(".browser-target-modal")).toBeInTheDocument());
+
+    const trigger = document.querySelector(".browser-target-modal .sel-trigger") as HTMLButtonElement;
+    expect(trigger).toBeInTheDocument();
+    fireEvent.pointerDown(trigger);
+    await waitFor(() => expect(document.querySelector(".sel-menu-portal")).toBeInTheDocument());
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".sel-menu-portal")).not.toBeInTheDocument());
+    expect(document.querySelector(".browser-target-modal")).toBeInTheDocument();
   });
 });

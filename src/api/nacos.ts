@@ -559,6 +559,95 @@ export async function listConfigs(
   });
 }
 
+/**
+ * 列表聚合结果。
+ *
+ * `failedPages` 非空或 `truncated` 为 true 都表示结果不完整，调用方必须显式提示用户，
+ * 否则「缺失配置」「全部一致」这类结论就是错的（见 .trellis/tasks/10-17-uiux-scan-remediation R1）。
+ */
+export interface ConfigListAllResult {
+  items: ConfigItem[];
+  /** 服务端给出的页数口径（唯一可信来源）。 */
+  pagesAvailable: number;
+  /** 实际成功拉取的页数。 */
+  loadedPages: number;
+  /** 拉取失败的页码（fail fast，失败页之后的页不再尝试）。 */
+  failedPages: number[];
+  /** 是否因安全上限（safeCap）被截断。 */
+  truncated: boolean;
+}
+
+/** 请求已失效（用户切走了数据源/命名空间），用于中断在途聚合并让调用方丢弃结果。 */
+export class StaleRequestError extends Error {
+  constructor(message = "config list request is stale") {
+    super(message);
+    this.name = "StaleRequestError";
+  }
+}
+
+/** 聚合翻页的默认单页大小与安全上限。 */
+export const CONFIG_LIST_ALL_PAGE_SIZE = 500;
+export const CONFIG_LIST_ALL_SAFE_CAP = 5000;
+
+/**
+ * 把「取全某个命名空间/分组下的配置列表」收敛成一个助手，替代各处单页 `listConfigs(..., 1, 500)`。
+ *
+ * 语义要点（与 `ConfigBrowser.tsx` 既有聚合范式一致）：
+ *
+ * 1. 页数只认 `pagesAvailable`：`listConfigs` 内部会按 group 再做一次精确兜底过滤，
+ *    并把 `totalCount` 改写为过滤后的长度，所以 `totalCount` 不能用来判页数。
+ * 2. 第 1 页失败直接抛（调用方走既有错误展示）；第 2 页及以后失败记入 `failedPages`
+ *    并停止翻页，返回已取到的部分。
+ * 3. 超过 `safeCap` 的部分不拉，置 `truncated`，由调用方提示「仅扫描前 N 条」。
+ * 4. 串行翻页，不并发打爆服务端。
+ */
+export async function listAllConfigs(
+  conn: Connection,
+  namespace: string,
+  dataId: string,
+  group: string,
+  opts: {
+    pageSize?: number;
+    safeCap?: number;
+    /** 请求序号守卫回调：返回 true 表示本次聚合已作废。 */
+    isStale?: () => boolean;
+    /** 每成功聚合一页回调已加载条数，供界面显示进度。 */
+    onProgress?: (loaded: number) => void;
+  } = {}
+): Promise<ConfigListAllResult> {
+  const pageSize = Math.max(1, Math.floor(opts.pageSize ?? CONFIG_LIST_ALL_PAGE_SIZE));
+  const safeCap = Math.max(pageSize, Math.floor(opts.safeCap ?? CONFIG_LIST_ALL_SAFE_CAP));
+  const throwIfStale = () => {
+    if (opts.isStale?.()) throw new StaleRequestError();
+  };
+
+  const first = await listConfigs(conn, namespace, dataId, group, 1, pageSize);
+  throwIfStale();
+  const items = [...first.pageItems];
+  const pagesAvailable = Math.max(first.pagesAvailable || 1, 1);
+  const capPages = Math.ceil(safeCap / pageSize);
+  const truncated = pagesAvailable > capPages;
+  const targetPages = Math.min(pagesAvailable, capPages);
+  const failedPages: number[] = [];
+  opts.onProgress?.(items.length);
+
+  for (let page = 2; page <= targetPages; page += 1) {
+    try {
+      const next = await listConfigs(conn, namespace, dataId, group, page, pageSize);
+      throwIfStale();
+      items.push(...next.pageItems);
+      opts.onProgress?.(items.length);
+    } catch (error) {
+      if (error instanceof StaleRequestError) throw error;
+      failedPages.push(page);
+      break;
+    }
+  }
+
+  const loadedPages = failedPages.length ? failedPages[0] - 1 : targetPages;
+  return { items, pagesAvailable, loadedPages, failedPages, truncated };
+}
+
 export async function getConfig(conn: Connection, namespace: string, dataId: string, group: string): Promise<string> {
   const document = await getConfigDocument(conn, namespace, dataId, group);
   return document.content;
