@@ -6267,8 +6267,19 @@ button.diff-workflow-step-btn:hover {
   border-color: rgba(244, 67, 54, 0.35);
 }
 
-.btn-danger:hover {
+/* R85（轮26）：hover 必须也变红，而且要**同时**写满两条选择器，理由两条各自独立——
+   1) `.btn-ghost:hover:not(:disabled)` 特异度 (0,3,0)，裸 `.btn-danger:hover` 只有 (0,2,0)：
+      `btn btn-ghost btn-danger`（SettingsView 的「清空本地历史」「清理缓存」）悬停时底色是
+      中性 --bg-hover，和普通 ghost 按钮一模一样，「这是危险操作」的信号在最需要它的时刻消失。
+      复合形式 `.btn-ghost.btn-danger:hover:not(:disabled)` 是 (0,4,0)，靠特异度稳赢，
+      不赌文档顺序——轮25 正是因为守卫看不见伪类才没敢动这块，本轮补了
+      hoverToneRulesResolveBySpecificity 这条守卫（伪类进特异度）才落地。
+   2) `:not(:disabled)` 与 ghost/primary 同口径：danger 原来没写，于是 DeleteConfirm 的确认按钮
+      在 busy 期间（disabled + opacity .45）照样画红色 hover 底色，给出「能点但其实不能点」的假可点性。 */
+.btn-danger:hover:not(:disabled),
+.btn-ghost.btn-danger:hover:not(:disabled) {
   background: rgba(244, 67, 54, 0.15);
+  border-color: rgba(244, 67, 54, 0.6);
 }
 
 /* ── BackupView 备份管理 ── */
