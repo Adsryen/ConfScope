@@ -27,6 +27,7 @@ import {
 } from "../lib/appDataBackup";
 import { getTaskManager } from "../lib/taskmanager";
 import { toast } from "../lib/toast";
+import InlineError from "./InlineError";
 import {
   loadAppDataBackupState,
   recordAppDataBackupActivity,
@@ -36,7 +37,6 @@ import {
   type AppDataWebDAVSettings,
 } from "../store/appDataBackup";
 import { deleteStoredSecret, resolveAppDataBackupPassword, saveAppDataBackupPassword } from "../lib/credentialSecrets";
-import CopyButton from "./CopyButton";
 import { errorText } from "../lib/errorText";
 
 interface Props {
@@ -87,23 +87,6 @@ function activityLabel(type: AppDataBackupActivity["type"], t: (key: string) => 
     case "recovery_point":
       return t("appDataBackup.activityRecoveryPoint");
   }
-}
-
-function InlineError({ title, message }: { title: string; message: string }) {
-  const { t } = useTranslation();
-  return (
-    <div className="inline-error app-data-backup-error" role="alert">
-      <div className="inline-error-head">
-        <span className="inline-error-title">{title}</span>
-        <div className="inline-error-actions">
-          <CopyButton text={message} label={t("common.copyError")} />
-        </div>
-      </div>
-      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-        {message}
-      </pre>
-    </div>
-  );
 }
 
 function SummaryPreview({ preview }: { preview: PreviewState }) {
@@ -512,7 +495,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
           <span className="test-msg-text">{status.text}</span>
         </div>
       )}
-      {error && <InlineError title={t("appDataBackup.operationFailed")} message={error} />}
+      {error && <InlineError title={t("appDataBackup.operationFailed")} message={error} extraClassName="app-data-backup-error" />}
 
       <section className="app-data-backup-password-settings" aria-labelledby="app-data-backup-password-title">
         <div className="app-data-backup-area-head">

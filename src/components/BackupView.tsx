@@ -19,6 +19,7 @@ import { loadSnapshotWebDAVState, recordSnapshotWebDAVActivity, updateSnapshotWe
 import { applyEntryRiskSummary, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
+import InlineError from "./InlineError";
 import { errorText } from "../lib/errorText";
 
 export interface BackupDiffJumpParams {
@@ -347,17 +348,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
         </div>
       </div>
 
-      {error && (
-        <div className="inline-error" role="alert">
-          <div className="inline-error-head">
-            <span className="inline-error-title">{t("backup.loadFailed")}</span>
-            <CopyButton text={error} label={t("common.copyError")} />
-          </div>
-          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-            {error}
-          </pre>
-        </div>
-      )}
+      {error && <InlineError title={t("backup.loadFailed")} message={error} />}
 
       {loading && (
         <div className="pad-msg" role="status" aria-live="polite">
@@ -453,15 +444,11 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                 </div>
 
                 {snapshotWebDAVError && (
-                  <div className="inline-error backup-webdav-error" role="alert">
-                    <div className="inline-error-head">
-                      <span className="inline-error-title">{t("backup.webdavOperationFailed")}</span>
-                      <CopyButton text={snapshotWebDAVError} label={t("common.copyError")} />
-                    </div>
-                    <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-                      {snapshotWebDAVError}
-                    </pre>
-                  </div>
+                  <InlineError
+                    title={t("backup.webdavOperationFailed")}
+                    message={snapshotWebDAVError}
+                    extraClassName="backup-webdav-error"
+                  />
                 )}
 
                 <div className="backup-webdav-grid">

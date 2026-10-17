@@ -10,6 +10,7 @@ import { loadSettings, saveSettings, type AppSettings } from "../store/settings"
 import AppDataBackupPanel from "./AppDataBackupPanel";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
+import InlineError from "./InlineError";
 import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
 import { scrollBehavior } from "../lib/motion";
@@ -282,19 +283,7 @@ export default function SettingsView() {
                 </span>
               </div>
             )}
-            {credentialError && (
-              <div className="inline-error" role="alert">
-                <div className="inline-error-head">
-                  <span className="inline-error-title">{t("settings.credentialMigrationFailed")}</span>
-                  <div className="inline-error-actions">
-                    <CopyButton text={credentialError} label={t("common.copyError")} />
-                  </div>
-                </div>
-                <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-                  {credentialError}
-                </pre>
-              </div>
-            )}
+            {credentialError && <InlineError title={t("settings.credentialMigrationFailed")} message={credentialError} />}
           </section>
 
           <section id="settings-backup" className="settings-panel settings-backup-panel">

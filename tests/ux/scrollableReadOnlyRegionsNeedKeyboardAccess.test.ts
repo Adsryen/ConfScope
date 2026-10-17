@@ -173,7 +173,10 @@ describe("只读滚动区必须能被键盘到达", () => {
     const sites = scanAll().preSites;
     const bad = sites.filter((site) => !site.accessible).map((site) => site.id);
     expect(bad, `这些只读正文键盘滚不到。补 tabIndex={0} + role="region" + aria-label/aria-labelledby：\n${bad.join("\n")}`).toEqual([]);
-    expect(sites.length, "命中量低于预期，扫描逻辑可能失效了").toBeGreaterThanOrEqual(17);
+    // 轮13 波28 把 9 份手抄的 .inline-error 收进 src/components/InlineError.tsx 后，源码里的
+    // 字面站点从 17 降到 9：运行时弹出的错误块数量没变，只是不再各写一份 <pre>。
+    // 这份结构自带的 tabIndex/role 由 inlineErrorSingleSource.test.ts 钉住，这里只守住下限。
+    expect(sites.length, "命中量低于预期，扫描逻辑可能失效了").toBeGreaterThanOrEqual(9);
   });
 
   it("假正文叠层豁免只减不增，且必须 aria-hidden", () => {

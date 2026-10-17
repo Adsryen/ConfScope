@@ -21,6 +21,7 @@ import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
+import InlineError from "./InlineError";
 import DiffPanel from "./DiffPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 import { errorText } from "../lib/errorText";
@@ -512,19 +513,7 @@ function ConfirmationPanel({
           {executionTask.error && <pre className="apply-task-progress-error">{executionTask.error}</pre>}
         </div>
       )}
-      {executeError && (
-        <div className="inline-error" role="alert">
-          <div className="inline-error-head">
-            <span className="inline-error-title">{t("apply.executionFailed")}</span>
-            <div className="inline-error-actions">
-              <CopyButton text={executeError} label={t("apply.copyError")} />
-            </div>
-          </div>
-          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-            {executeError}
-          </pre>
-        </div>
-      )}
+      {executeError && <InlineError title={t("apply.executionFailed")} message={executeError} copyLabel={t("apply.copyError")} />}
     </div>
   );
 }
@@ -984,17 +973,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       {entry && draftState.status === "loading" && <div className="pad-msg big apply-draft-loading" role="status">{t("apply.generating")}</div>}
 
       {entry && draftState.status === "error" && (
-        <div className="inline-error" role="alert">
-          <div className="inline-error-head">
-            <span className="inline-error-title">{t("apply.generationFailed")}</span>
-            <div className="inline-error-actions">
-              <CopyButton text={draftState.detail} label={t("apply.copyError")} />
-            </div>
-          </div>
-          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-            {draftState.detail}
-          </pre>
-        </div>
+        <InlineError title={t("apply.generationFailed")} message={draftState.detail} copyLabel={t("apply.copyError")} />
       )}
 
       {plan && (

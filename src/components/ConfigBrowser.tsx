@@ -27,6 +27,7 @@ import ConfirmModal from "./ConfirmModal";
 import CodeView from "./CodeView";
 import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
+import InlineError from "./InlineError";
 import DeleteConfirm from "./DeleteConfirm";
 import HistoryView from "./HistoryView";
 import Pager from "./Pager";
@@ -51,35 +52,6 @@ const CONTENT_SEARCH_CONCURRENCY = 6;
 type Tab = "content" | "history";
 type SearchMode = "dataId" | "content";
 type ConfigMetadata = Pick<ConfigDocument, "version" | "source" | "updateTime">;
-type InlineErrorProps = {
-  title: string;
-  message: string;
-  retryLabel: string;
-  copyLabel: string;
-  onRetry?: () => void;
-};
-
-function InlineError({ title, message, retryLabel, copyLabel, onRetry }: InlineErrorProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="inline-error" role="alert">
-      <div className="inline-error-head">
-        <span className="inline-error-title">{title}</span>
-        <div className="inline-error-actions">
-          {onRetry && (
-            <button className="btn btn-ghost btn-sm" onClick={onRetry}>
-              {retryLabel}
-            </button>
-          )}
-          <CopyButton text={message} label={copyLabel} />
-        </div>
-      </div>
-      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-        {message}
-      </pre>
-    </div>
-  );
-}
 
 function configResultKey(item: Pick<ConfigItem, "dataId" | "group">): string {
   return `${item.group}\u0000${item.dataId}`;

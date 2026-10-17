@@ -25,6 +25,7 @@ import { getConfigDocument, listHistory } from "../api/nacos";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
+import InlineError from "./InlineError";
 import { errorText } from "../lib/errorText";
 
 interface Props {
@@ -368,17 +369,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
         />
       </div>
 
-      {error && (
-        <div className="inline-error" role="alert">
-          <div className="inline-error-head">
-            <span className="inline-error-title">{t("operationHistory.loadFailed")}</span>
-            <CopyButton text={error} label={t("common.copyError")} />
-          </div>
-          <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-            {error}
-          </pre>
-        </div>
-      )}
+      {error && <InlineError title={t("operationHistory.loadFailed")} message={error} />}
       {loading && (
         <div className="history-loading" role="status" aria-live="polite">
           {t("common.loading")}
@@ -563,17 +554,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                     <div className="field-hint">{t("operationHistory.promoteRequiresVerification")}</div>
                   )}
                   {visibleFollowupError && (
-                    <div className="inline-error" role="alert">
-                      <div className="inline-error-head">
-                        <span className="inline-error-title">{t("operationHistory.followupFailed")}</span>
-                        <div className="inline-error-actions">
-                          <CopyButton text={visibleFollowupError} label={t("common.copyError")} />
-                        </div>
-                      </div>
-                      <pre className="inline-error-body" tabIndex={0} role="region" aria-label={t("common.errorDetail")}>
-                        {visibleFollowupError}
-                      </pre>
-                    </div>
+                    <InlineError title={t("operationHistory.followupFailed")} message={visibleFollowupError} />
                   )}
                 </div>
               )}
