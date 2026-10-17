@@ -312,6 +312,7 @@ textarea {
 
 .message-list {
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -569,6 +570,7 @@ textarea {
   min-width: 100%;
   max-height: 280px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -615,6 +617,7 @@ textarea {
   right: 0;
   max-height: 260px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -822,6 +825,7 @@ textarea {
   min-height: 0;
   max-height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   align-self: start;
   display: flex;
   flex-direction: column;
@@ -854,6 +858,7 @@ textarea {
 .settings-panels {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scroll-padding-top: 2px;
   display: flex;
   flex-direction: column;
@@ -1323,6 +1328,7 @@ textarea {
 
 .ssh-manager-page {
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .ssh-overview {
@@ -1401,6 +1407,7 @@ textarea {
 .ssh-profile-list {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1764,6 +1771,7 @@ textarea {
 .browser-items {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .browser-content-search-status {
@@ -2106,6 +2114,7 @@ textarea {
 .inline-error-body {
   max-height: 180px;
   overflow: auto;
+  overscroll-behavior: contain;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--red-h);
@@ -2130,6 +2139,7 @@ textarea {
 .udiff {
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   font-size: 12.5px;
   line-height: 1.5;
 }
@@ -2183,6 +2193,7 @@ textarea {
   inset: 0;
   z-index: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0;
   /* 顶部留白 = PAD_TOP，左 = 行号槽 + 间距，右 = 缩略图槽（由 JS 下发 --code-pad-right） */
   padding: var(--code-pad-top) var(--code-pad-right, 76px) 14px calc(var(--code-gutter-w) + 8px);
@@ -2465,6 +2476,7 @@ textarea {
 .history-items {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .history-list-head {
   padding: 10px 12px;
@@ -2735,6 +2747,7 @@ button.diff-workflow-step-btn:hover {
   .diff-workspace {
     grid-template-columns: 1fr;
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .diff-main-column {
@@ -3324,6 +3337,7 @@ button.diff-workflow-step-btn:hover {
 .field-error-box .field-error {
   max-height: 52px;
   overflow: auto;
+  overscroll-behavior: contain;
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -3502,6 +3516,7 @@ button.diff-workflow-step-btn:hover {
 .diff-body {
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   font-size: 12.5px;
   line-height: 1.5;
 }
@@ -3844,6 +3859,7 @@ button.diff-workflow-step-btn:hover {
   flex-shrink: 0;
   max-height: 170px;
   overflow: auto;
+  overscroll-behavior: contain;
   border-bottom: 1px solid var(--border);
   background: rgba(239, 68, 68, 0.045);
 }
@@ -4100,6 +4116,7 @@ button.diff-workflow-step-btn:hover {
 .modal-body {
   padding: 16px 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-lg {
@@ -4150,6 +4167,7 @@ button.diff-workflow-step-btn:hover {
   margin: 0;
   padding: 12px;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -4245,6 +4263,7 @@ button.diff-workflow-step-btn:hover {
   tab-size: 2;
   white-space: pre;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .code-editor-pre {
   pointer-events: none;
@@ -4768,11 +4787,13 @@ button.diff-workflow-step-btn:hover {
 .conn-mgr-page .conn-list {
   width: 340px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: 4px;
 }
 
 .conn-mgr-page .conn-form {
   overflow-y: auto;
+  overscroll-behavior: contain;
   max-width: 840px;
   padding-right: 4px;
 }
@@ -5064,10 +5085,12 @@ button.diff-workflow-step-btn:hover {
   max-width: 90vw;
   max-height: 85vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .about-page {
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 28px 24px;
 }
 
@@ -5329,6 +5352,7 @@ button.diff-workflow-step-btn:hover {
   white-space: pre-wrap;
   max-height: 80px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .update-downloading {
@@ -5435,6 +5459,7 @@ button.diff-workflow-step-btn:hover {
   flex-direction: column;
   gap: 16px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* 工具栏 */
@@ -5661,6 +5686,7 @@ button.diff-workflow-step-btn:hover {
 
 .audit-matrix-body {
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex: 1;
   min-height: 0;
 }
@@ -5903,6 +5929,7 @@ button.diff-workflow-step-btn:hover {
   font-family: monospace;
   color: var(--text);
   overflow: auto;
+  overscroll-behavior: contain;
   max-height: 200px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -6137,6 +6164,7 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   font-family: monospace;
   overflow: auto;
+  overscroll-behavior: contain;
   max-height: 150px;
   white-space: pre-wrap;
 }
@@ -6195,6 +6223,7 @@ button.diff-workflow-step-btn:hover {
 .backup-list {
   width: 300px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--border);
 }
 
@@ -6267,6 +6296,7 @@ button.diff-workflow-step-btn:hover {
 .backup-detail {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
 }
 
@@ -6462,6 +6492,7 @@ button.diff-workflow-step-btn:hover {
 .task-list {
   width: 320px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--border);
 }
 
@@ -6610,6 +6641,7 @@ button.diff-workflow-step-btn:hover {
 .task-detail {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
 }
 
@@ -6737,6 +6769,7 @@ button.diff-workflow-step-btn:hover {
 .data-list {
   min-width: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--border);
   background: var(--bg);
 }
@@ -6816,6 +6849,7 @@ button.diff-workflow-step-btn:hover {
 .data-detail {
   min-width: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 180px), var(--bg);
 }
@@ -6950,6 +6984,7 @@ button.diff-workflow-step-btn:hover {
   .apply-workspace {
     grid-template-columns: 1fr;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 0 12px 12px;
   }
 
@@ -7019,6 +7054,7 @@ button.diff-workflow-step-btn:hover {
 .apply-item-list {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.015);
 }
@@ -7124,6 +7160,7 @@ button.diff-workflow-step-btn:hover {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
 }
 
@@ -7557,6 +7594,7 @@ button.diff-workflow-step-btn:hover {
   .task-center-content {
     grid-template-columns: 1fr;
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .data-list {
@@ -7703,6 +7741,7 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   line-height: 1.55;
   overflow: auto;
+  overscroll-behavior: contain;
   max-height: 220px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -7713,6 +7752,7 @@ button.diff-workflow-step-btn:hover {
   flex-direction: column;
   gap: 6px;
   overflow: auto;
+  overscroll-behavior: contain;
   flex: 1;
 }
 .log-viewer .log-event {
@@ -7748,6 +7788,7 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   line-height: 1.5;
   overflow: auto;
+  overscroll-behavior: contain;
   max-height: 300px;
   white-space: pre-wrap;
   word-break: break-all;
