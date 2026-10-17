@@ -248,7 +248,7 @@ textarea {
   border-radius: 999px;
   background: var(--red);
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -558,7 +558,7 @@ textarea {
 }
 .sel-arrow {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 .sel-menu {
@@ -2488,7 +2488,7 @@ textarea {
 }
 .history-hint {
   display: block;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -2534,7 +2534,7 @@ textarea {
 }
 
 .op {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
 }
@@ -2692,7 +2692,7 @@ button.diff-workflow-step-btn:hover {
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 50%;
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -3401,7 +3401,7 @@ button.diff-workflow-step-btn:hover {
   border-radius: 50%;
   color: var(--text-dim);
   background: var(--bg3);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   cursor: help;
 }
@@ -4002,7 +4002,7 @@ button.diff-workflow-step-btn:hover {
   gap: 4px;
 }
 .batch-diff-nav-stats .stat {
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.25;
   white-space: nowrap;
 }
@@ -4459,7 +4459,7 @@ button.diff-workflow-step-btn:hover {
   gap: 6px;
 }
 .conn-ssh-badge {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--green);
   background: rgba(78, 201, 176, 0.12);
   padding: 1px 5px;
@@ -4467,7 +4467,7 @@ button.diff-workflow-step-btn:hover {
   white-space: nowrap;
 }
 .conn-provider-badge {
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: 3px;
   white-space: nowrap;
@@ -4830,7 +4830,7 @@ button.diff-workflow-step-btn:hover {
 .ssh-badge {
   background: var(--accent);
   color: white;
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
   margin-left: 6px;
@@ -6522,7 +6522,7 @@ button.diff-workflow-step-btn:hover {
 .task-status {
   display: inline-block;
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 3px;
   text-transform: uppercase;
