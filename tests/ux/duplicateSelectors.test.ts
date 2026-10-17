@@ -20,21 +20,15 @@ const CSS_PATH = join(PROJECT_ROOT, "src/styles.css");
  * 历史遗留的重复定义。key 是选择器，value 是在多份规则里被重复声明的属性。
  * 清掉一处就同时删掉这一行——下面「基线不得留着已经消失的重复」那条用例会盯着这点。
  * 波8 R31 已清掉 `.btn-sm` / `.field-error` / `.history-item:hover` / `.env-badge` / `.env-*` 六组。
+ * 波45 R31 又把剩下 12 组清零，方向统一为「删掉被后面那份盖掉的较早声明」：
+ * 同选择器同特异度，后一份对同一批元素恒赢，所以删前一份不改任何生效值，可静态证明。
+ * 反过来把生效声明往上搬则不安全——两份之间同特异度、能命中同一元素的第三方声明会反超。
  */
 const BASELINE: Record<string, string[]> = {
-  ".about-page .about-content": ["border-left", "border-right"],
-  ".backup-item-delete": ["top"],
-  ".history-dataid": ["flex"],
-  ".history-detail-actions": ["justify-content", "margin"],
-  ".history-detail-content, .history-detail-error": ["max-height"],
-  ".history-filters": ["border-radius", "display", "gap"],
-  ".history-item": ["border-radius", "padding"],
-  ".history-item-head": ["gap"],
-  ".history-item-meta": ["display", "gap", "margin-top"],
-  ".history-list": ["display", "flex-direction", "gap"],
-  ".history-page": ["gap"],
-  ".history-time": ["margin-left"],
-  ".task-item-actions": ["opacity"],
+  // 波45 R31 已清掉 12 组：about 边框、history 页/筛选栏/列表/行/行头/行元信息/时间/dataId/
+  // 详情操作区/详情正文、备份删除按钮。方向只有一个——删掉被后面那份静默盖掉的**较早声明**，
+  // 生效值原地不动，所以 computed style 逐属性对拍为零差异（脚本 /tmp 侧对拍见任务 PRD）。
+  ".task-item-actions": ["opacity"], // 波46 R74 收尾：这条不是噪音，是被抬成常显的真 bug
 };
 
 /** R31 合并过的选择器：这些一旦再出现第二份，就是「改了不生效」的坑，直接拦死。 */

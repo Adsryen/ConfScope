@@ -2469,8 +2469,6 @@ textarea {
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg2);
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
 }
 .history-items {
@@ -2497,7 +2495,6 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
 }
 .history-item.active {
@@ -2523,10 +2520,7 @@ textarea {
   color: var(--text-hi);
 }
 .history-item-meta {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 3px;
 }
 .history-item-id {
   font-size: 11px;
@@ -5109,8 +5103,6 @@ button.diff-workflow-step-btn:hover {
 }
 
 .about-page .about-content {
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
   background: var(--bg2);
 }
 
@@ -5940,18 +5932,14 @@ button.diff-workflow-step-btn:hover {
 .history-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
 /* 筛选栏（一行内） */
 .history-filters {
-  display: flex;
-  gap: 8px;
   align-items: center;
   padding: 8px 12px;
   background: var(--bg2);
   border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .history-filter-select {
@@ -6000,14 +5988,11 @@ button.diff-workflow-step-btn:hover {
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .history-item {
-  padding: 12px 16px;
   background: var(--bg2);
   border: 1px solid var(--border);
-  border-radius: 6px;
   cursor: pointer;
   transition: background 0.1s;
 }
@@ -6024,7 +6009,6 @@ button.diff-workflow-step-btn:hover {
 .history-item-head {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -6084,7 +6068,6 @@ button.diff-workflow-step-btn:hover {
   /* 不用 nowrap：超长 dataId 截断后 innerText 会丢失内容，换行保留完整文本 */
   white-space: normal;
   word-break: break-all;
-  flex: 1;
   min-width: 0;
 }
 
@@ -6092,13 +6075,11 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   color: var(--text-dim);
   white-space: nowrap;
-  margin-left: auto;
 }
 
 .history-item-meta {
   display: flex;
   gap: 12px;
-  margin-top: 6px;
   font-size: 12px;
   color: var(--text-dim);
 }
@@ -6125,9 +6106,7 @@ button.diff-workflow-step-btn:hover {
 
 .history-detail-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
-  margin: 12px 0;
 }
 
 .history-followup-panel {
@@ -6165,7 +6144,6 @@ button.diff-workflow-step-btn:hover {
   font-family: monospace;
   overflow: auto;
   overscroll-behavior: contain;
-  max-height: 150px;
   white-space: pre-wrap;
 }
 
@@ -6279,7 +6257,6 @@ button.diff-workflow-step-btn:hover {
 
 .backup-item-delete {
   position: absolute;
-  top: 8px;
   right: 8px;
   padding: 2px 6px;
   font-size: 14px;
@@ -7435,6 +7412,10 @@ button.diff-workflow-step-btn:hover {
   background: rgba(220, 220, 170, 0.08);
 }
 
+/* ── 布局收口段（R31 单一事实源）───────────────────────────────────────────────
+   这一段是各页面间距/圆角/列宽的最终生效值。波45 已把上方同名规则里被这里静默盖掉的
+   重复声明删干净：要改这些属性只认这里，别在原规则里再写一份（改了不生效，
+   tests/ux/duplicateSelectors.test.ts 也会直接拦下新的重复声明）。 */
 .history-page {
   gap: 0;
 }
