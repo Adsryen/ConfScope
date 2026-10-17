@@ -4,6 +4,7 @@ import { useTaskManager, useTaskList, type Task, type TaskStatus } from "../lib/
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
+import { formatClock, formatDateTime } from "../lib/formatDateTime";
 
 interface Props {
   onNavigateToTask?: (taskId: string) => void;
@@ -147,7 +148,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                   <span className="task-time">
                     {task.endTime
                       ? t("tasks.elapsed", { time: formatDuration(task.elapsedTime) })
-                      : t("tasks.startedAt", { time: new Date(task.startTime).toLocaleTimeString() })}
+                      : t("tasks.startedAt", { time: formatClock(task.startTime) })}
                   </span>
                   {task.failed > 0 && <span className="task-failed">{t("tasks.failedItems", { count: task.failed })}</span>}
                 </div>
@@ -224,12 +225,12 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
               </div>
               <div className="info-row">
                 <span className="info-label">{t("tasks.startTime")}:</span>
-                <span className="info-value">{new Date(selectedTask.startTime).toLocaleString()}</span>
+                <span className="info-value">{formatDateTime(selectedTask.startTime)}</span>
               </div>
               {selectedTask.endTime && (
                 <div className="info-row">
                   <span className="info-label">{t("tasks.endTime")}:</span>
-                  <span className="info-value">{new Date(selectedTask.endTime).toLocaleString()}</span>
+                  <span className="info-value">{formatDateTime(selectedTask.endTime)}</span>
                 </div>
               )}
               {selectedTask.elapsedTime > 0 && (

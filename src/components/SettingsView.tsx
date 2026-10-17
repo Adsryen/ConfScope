@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearAppCache } from "../lib/cacheCleanup";
+import { formatDateTime } from "../lib/formatDateTime";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
 import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
@@ -15,12 +16,6 @@ import { scrollBehavior } from "../lib/motion";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function formatDocTime(iso: string): string {
-  const time = new Date(iso).getTime();
-  if (!Number.isFinite(time)) return iso;
-  return new Date(time).toLocaleString();
 }
 
 export default function SettingsView() {
@@ -322,14 +317,14 @@ export default function SettingsView() {
                   </div>
                   {docInfo.savedAt && (
                     <div>
-                      {t("settings.dataFileLastSaved")}: {formatDocTime(docInfo.savedAt)}
+                      {t("settings.dataFileLastSaved")}: {formatDateTime(docInfo.savedAt)}
                     </div>
                   )}
                   {(() => {
                     const lastBackupAt = loadAppDataBackupState().activities.find((item) => item.status === "success")?.createdAt ?? "";
                     return lastBackupAt ? (
                       <div>
-                        {t("settings.dataFileLastBackup")}: {formatDocTime(lastBackupAt)}
+                        {t("settings.dataFileLastBackup")}: {formatDateTime(lastBackupAt)}
                       </div>
                     ) : null;
                   })()}

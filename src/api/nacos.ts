@@ -7,6 +7,7 @@ import {
   GetSSHTunnelLocalPort,
   StopSSHTunnel,
 } from "../../wailsjs/go/app/App";
+import { formatDateTime } from "../lib/formatDateTime";
 import {
   getConfig as configCenterGetConfig,
   getHistoryDetail as configCenterGetHistoryDetail,
@@ -784,16 +785,8 @@ export async function getHistoryDetail(
   });
 }
 
-/** 统一格式化 Nacos 时间：v3 是 epoch 毫秒，v1 是字符串，纯数字按时间戳格式化。 */
+/** 统一格式化 Nacos 时间：v3 是 epoch 毫秒、v1 是字符串，纯数字串按时间戳认；显示口径在 lib/formatDateTime（轮11 R41）。 */
 export function formatTime(raw: string): string {
   if (!raw) return "—";
-  if (/^\d{10,}$/.test(raw)) {
-    const ms = raw.length <= 10 ? Number(raw) * 1000 : Number(raw);
-    const d = new Date(ms);
-    if (!isNaN(d.getTime())) {
-      const p = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-    }
-  }
-  return raw;
+  return formatDateTime(raw);
 }

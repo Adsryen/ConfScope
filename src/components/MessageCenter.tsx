@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
+import { formatClock } from "../lib/formatDateTime";
 import { toast } from "../lib/toast";
 import {
   AppErrorItem,
@@ -20,14 +21,6 @@ function levelLabel(level: AppErrorItem["level"], t: (key: string) => string) {
 
 function fullText(item: AppErrorItem) {
   return item.detail || item.message;
-}
-
-function formatTime(value: string, locale: string) {
-  try {
-    return new Date(value).toLocaleTimeString(locale, { hour12: false });
-  } catch {
-    return "";
-  }
 }
 
 function TrashIcon() {
@@ -63,7 +56,7 @@ function DetailIcon() {
 }
 
 export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
-  const { locale, t } = useTranslation();
+  const { t } = useTranslation();
   const [items, setItems] = useState<AppErrorItem[]>([]);
   const [open, setOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -156,7 +149,7 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
                 <div key={item.id} className={`message-item message-${item.level}${item.read ? "" : " unread"}`}>
                   <div className="message-item-top">
                     <span className="message-level">{levelLabel(item.level, t)}</span>
-                    <span className="message-time">{formatTime(item.createdAt, locale)}</span>
+                    <span className="message-time">{formatClock(item.createdAt)}</span>
                     {item.count > 1 && <span className="message-count">x{item.count}</span>}
                   </div>
                   <div className="message-title">{item.title}</div>

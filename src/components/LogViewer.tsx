@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
 import { ReadAuditLogLines } from "../../wailsjs/go/app/App";
 import { clickableRowProps } from "../lib/clickableRow";
+import { formatClock, formatDateTime } from "../lib/formatDateTime";
 import {
   listAuditSessions,
   onAuditSessionUpdate,
@@ -152,9 +153,9 @@ export default function LogViewer() {
               </div>
               <div
                 className="task-item-scope"
-                title={`${s.events.length} ${t("logViewer.eventCountUnit")} · ${new Date(s.events[0]?.ts ?? s.startedAt).toLocaleTimeString()}`}
+                title={`${s.events.length} ${t("logViewer.eventCountUnit")} · ${formatClock(s.events[0]?.ts ?? s.startedAt)}`}
               >
-                {s.events.length} {t("logViewer.eventCountUnit")} · {new Date(s.events[0]?.ts ?? s.startedAt).toLocaleTimeString()}
+                {s.events.length} {t("logViewer.eventCountUnit")} · {formatClock(s.events[0]?.ts ?? s.startedAt)}
               </div>
             </div>
           ))}
@@ -171,8 +172,8 @@ export default function LogViewer() {
                   <span className="task-item-name" title={selected.id}>
                     {selected.id}
                   </span>
-                  <span className="task-item-scope" title={new Date(selected.events[0]?.ts ?? selected.startedAt).toLocaleString()}>
-                    {new Date(selected.events[0]?.ts ?? selected.startedAt).toLocaleString()}
+                  <span className="task-item-scope" title={formatDateTime(selected.events[0]?.ts ?? selected.startedAt)}>
+                    {formatDateTime(selected.events[0]?.ts ?? selected.startedAt)}
                   </span>
                 </div>
                 <CopyButton text={selectedJson} label={t("common.copy")} />
@@ -193,7 +194,7 @@ export default function LogViewer() {
                     <details key={index} className="log-event">
                       <summary>
                         <span className={`log-event-kind ${e.result === "failure" ? "danger" : ""}`}>{e.kind}</span>
-                        <span className="log-event-ts">{new Date(e.ts).toLocaleTimeString()}</span>
+                        <span className="log-event-ts">{formatClock(e.ts)}</span>
                         {e.dataId ? <span className="log-event-loc">{e.group ? `${e.group}/` : ""}{e.dataId}</span> : null}
                         {e.direction ? <span className="log-event-dir">{e.direction}</span> : null}
                         {e.error ? <span className="danger">{e.error}</span> : null}

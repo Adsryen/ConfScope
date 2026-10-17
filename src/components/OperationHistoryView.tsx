@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { Connection } from "../store/connections";
 import { reportError } from "../lib/errorCenter";
+import { formatDateTime } from "../lib/formatDateTime";
 import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildPromotionEntryFromVerification, buildRollbackEntryFromApplyRecord, fingerprintsForCurrentPlanTargets } from "../lib/applyFollowup";
@@ -278,14 +279,6 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     }
   };
 
-  const formatTime = (timestamp: string) => {
-    try {
-      return new Date(timestamp).toLocaleString();
-    } catch {
-      return timestamp;
-    }
-  };
-
   const formatPlanSummary = (record: OperationRecord) => {
     const summary = record.planSummary;
     if (!summary) return "";
@@ -406,7 +399,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                 <div className="history-item-head">
                   <span className={`history-type ${record.type}`}>{t(OPERATION_LABELS[record.type])}</span>
                   <span className={`history-result ${record.result}`}>{t(RESULT_LABELS[record.result])}</span>
-                  <span className="history-time">{formatTime(record.timestamp)}</span>
+                  <span className="history-time">{formatDateTime(record.timestamp)}</span>
                 </div>
                 <div className="history-dataid" title={record.dataId}>
                   {record.dataId}
@@ -461,7 +454,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                 </div>
                 <div className="info-row">
                   <span className="info-label">{t("operationHistory.time")}:</span>
-                  <span className="info-value">{formatTime(selectedVisibleRecord.timestamp)}</span>
+                  <span className="info-value">{formatDateTime(selectedVisibleRecord.timestamp)}</span>
                 </div>
                 {selectedVisibleRecord.planId && (
                   <div className="info-row">

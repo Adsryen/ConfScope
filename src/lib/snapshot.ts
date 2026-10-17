@@ -1,5 +1,6 @@
 // 快照工具库
 import type { Snapshot, ConfigSnapshot } from "../api/snapshot";
+import { formatDateTime } from "./formatDateTime";
 
 /** 快照统计信息 */
 export interface SnapshotStats {
@@ -38,11 +39,9 @@ export function formatSnapshotName(snapshot: Snapshot): string {
   return snapshot.name || snapshot.id;
 }
 
-/** 格式化时间 */
+/** 格式化时间：列表只要分钟精度，显示口径统一收在 lib/formatDateTime（轮11 R41） */
 export function formatTime(time: string | Date): string {
-  const d = typeof time === "string" ? new Date(time) : time;
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return formatDateTime(time, { seconds: false });
 }
 
 /** 比较两个快照的差异 */
