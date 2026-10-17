@@ -26,9 +26,17 @@ function toneSource(): string {
   return readFileSync(join(PROJECT_ROOT, TONE_SOURCE_FILE), "utf8");
 }
 
-/** styles.css 里真正定义过的色调类，例如 `.env-prod {` → "prod"。 */
+/**
+ * styles.css 里真正定义过的色调类，例如 `.env-prod {` → "prod"。
+ * R83 起这些色调写成复合形式 `.env-badge.env-prod {`（裸类名和 `.env-badge` 的 border 简写同特异度，
+ * 谁生效只靠文档顺序决胜）：旧正则要求 `.env-` 前面是行首/逗号/空白，撞上复合选择器就整族看不见，
+ * 当场误报「7 种色调全缺」。两种写法都收，将来谁退回裸类名这条守卫照样认。
+ */
 function definedTones(): string[] {
-  return Array.from(cssBody().matchAll(/(^|[},\s])\.env-([a-z]+)\s*\{/gm), (match) => match[2]);
+  const body = cssBody();
+  const compound = Array.from(body.matchAll(/\.env-badge\.env-([a-z]+)\s*\{/g), (match) => match[1]);
+  const bare = Array.from(body.matchAll(/(^|[},\s])\.env-([a-z]+)\s*\{/gm), (match) => match[2]);
+  return Array.from(new Set([...compound, ...bare]));
 }
 
 /** 色调函数体里 `return "xxx"` 的全部可能值。 */

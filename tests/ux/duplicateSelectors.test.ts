@@ -43,13 +43,15 @@ const SINGLE_SOURCE_SELECTORS = [
   ".field-error",
   ".history-item:hover",
   ".env-badge",
-  ".env-dev",
-  ".env-test",
-  ".env-staging",
-  ".env-prod",
-  ".env-canary",
-  ".env-local",
-  ".env-other",
+  // R83：tone 一律提成复合形式（.env-badge 写 border 简写，tone 改 border-color 长写，
+  // 裸类名是同特异度赌顺序），守卫跟着改名
+  ".env-badge.env-dev",
+  ".env-badge.env-test",
+  ".env-badge.env-staging",
+  ".env-badge.env-prod",
+  ".env-badge.env-canary",
+  ".env-badge.env-local",
+  ".env-badge.env-other",
 ];
 
 interface Rule {

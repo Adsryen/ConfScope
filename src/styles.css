@@ -679,13 +679,20 @@ textarea {
 .btn {
   padding: 6px 14px;
   border-radius: 4px;
-  border: 1px solid transparent;
+  /* R83：这里只留 width/style。border-color 交给 tone（btn-primary / btn-ghost / btn-danger）——
+     写在 .btn 里的话它和 tone 的 border-color 长写是同一样东西、同特异度，谁生效只看谁写在后面。
+     全站 0 处 `btn` 不带 tone，兜底放在下面那条 :where(.btn)（特异度 0，压不过任何 class 规则）。 */
+  border-width: 1px;
+  border-style: solid;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
   transition:
     background 0.1s,
     color 0.1s;
+}
+:where(.btn) {
+  border-color: transparent;
 }
 .btn:disabled {
   opacity: 0.45;
@@ -699,15 +706,6 @@ textarea {
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-h);
   border-color: var(--accent-h);
-}
-.btn-secondary {
-  background: rgba(79, 195, 247, 0.12);
-  color: #9ad7ff;
-  border-color: rgba(79, 195, 247, 0.36);
-}
-.btn-secondary:hover:not(:disabled) {
-  background: rgba(79, 195, 247, 0.2);
-  border-color: rgba(79, 195, 247, 0.52);
 }
 .btn-ghost {
   background: transparent;
@@ -2818,18 +2816,9 @@ button.diff-workflow-step-btn:hover {
   }
 
 
-  .diff-sources {
-    grid-template-columns: 1fr;
-  }
-
-  .diff-source-direction {
-    flex-direction: row;
-    min-height: 30px;
-  }
-
-  .diff-source-direction-arrow {
-    transform: rotate(90deg);
-  }
+  /* R83：这三条以前待在这里，但 .diff-sources / .diff-source-direction 的基础规则写在
+     本块之后（同一个提交 45abe25b），同特异度靠文档顺序反超——窄屏堆叠从出生起就没生效过。
+     响应式覆盖必须排在被覆盖者之后，已挪到下面那个「窄屏堆叠」@media 里。 */
 
   .diff-workflow-step-btn {
     padding: 3px 5px;
@@ -3008,6 +2997,23 @@ button.diff-workflow-step-btn:hover {
   width: 40px;
   height: 32px;
 }
+/* R83：窄屏把「源 A → 源 B」的三列网格堆成单列、方向按钮转成横排。
+   必须待在上面那两条基础规则之后——同特异度只认文档顺序，写在前面就是废声明（原来正是这么写的）。
+   本文件有另一块 (max-width: 980px) 在前面，两处都改时别只改一处。 */
+@media (max-width: 980px) {
+  .diff-sources {
+    grid-template-columns: 1fr;
+  }
+
+  .diff-source-direction {
+    flex-direction: row;
+    min-height: 30px;
+  }
+
+  .diff-source-direction-arrow {
+    transform: rotate(90deg);
+  }
+}
 .diff-source-toggle-edge {
   position: absolute;
   left: 50%;
@@ -3120,40 +3126,43 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.5;
   letter-spacing: 0.3px;
 }
-/* 每个环境一条：color / background 用后一份（当前生效），border-color 只有前一份设过，照旧留下。 */
-.env-dev {
+/* 每个环境一条：color / background 用后一份（当前生效），border-color 只有前一份设过，照旧留下。
+   R83：tone 一律提成 .env-badge.env-*——.env-badge 写了 border 简写，tone 改的是 border-color 长写，
+   裸类名并列时是同一样东西的同特异度赌顺序。7 个 tone 全部由 `env-badge env-${environmentTone(…)}` 或
+   `env-badge env-local` 写出，永远与 .env-badge 同元素，提复合不改值（environmentTone 只返回这 7 个值）。 */
+.env-badge.env-dev {
   color: #81c784;
   background: rgba(76, 175, 80, 0.15);
   border-color: rgba(123, 215, 199, 0.38);
 }
-.env-test {
+.env-badge.env-test {
   color: #64b5f6;
   background: rgba(33, 150, 243, 0.15);
   border-color: rgba(130, 199, 255, 0.36);
 }
-.env-staging {
+.env-badge.env-staging {
   color: #ffb74d;
   background: rgba(255, 152, 0, 0.15);
   border-color: rgba(244, 192, 106, 0.4);
 }
-.env-prod {
+.env-badge.env-prod {
   color: #e57373;
   background: rgba(244, 67, 54, 0.15);
   border-color: rgba(190, 80, 90, 0.45);
 }
 /* canary / local 从头到尾只有一份定义，颜色保持原样，别顺手改成 Material 色系。 */
-.env-canary {
+.env-badge.env-canary {
   color: #d8b4fe;
   background: rgba(168, 85, 247, 0.11);
   border-color: rgba(216, 180, 254, 0.36);
 }
-.env-local {
+.env-badge.env-local {
   color: #b8c0cc;
   background: rgba(184, 192, 204, 0.08);
   border-color: rgba(184, 192, 204, 0.32);
 }
 /* other 的文字走 --text-dim（波6 的 AA 口径），不再硬编码 #9e9e9e。 */
-.env-other {
+.env-badge.env-other {
   color: var(--text-dim);
   background: rgba(158, 158, 158, 0.15);
   border-color: var(--border);
@@ -3261,15 +3270,6 @@ button.diff-workflow-step-btn:hover {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-.result-action-merge-plan {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
-}
-.result-action-merge-plan.btn-primary {
-  border-color: rgba(34, 197, 94, 0.62);
-  box-shadow:
-    0 0 0 1px rgba(34, 197, 94, 0.14),
-    0 8px 18px rgba(34, 197, 94, 0.14);
 }
 
 .merge-workbench-summary {
@@ -5396,7 +5396,9 @@ button.diff-workflow-step-btn:hover {
   color: var(--yellow);
 }
 
-.about-links {
+/* R83：.about-section 写了 padding 与 border 简写，这里只撤上边——长写与简写是同一样东西，
+   唯一用法是 About.tsx 的 `about-section about-full about-links`，提成复合形式靠特异度决胜。 */
+.about-section.about-links {
   display: flex;
   gap: 10px;
   justify-content: center;
@@ -6211,18 +6213,26 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
 }
 
+/* R83：原来共用规则里写 border: 1px solid var(--border)，和下面 .history-detail-error 的
+   border-color 是同特异度竞争，红色只是侥幸写在后面才生效。边框颜色改成两个变体各自声明，
+   宽度/线型继续共用（两个类在 JSX 里从不共现在同一个元素上）。 */
 .history-detail-content,
 .history-detail-error {
   margin: 0;
   padding: 8px;
   background: var(--bg3);
-  border: 1px solid var(--border);
+  border-width: 1px;
+  border-style: solid;
   border-radius: 4px;
   font-size: 12px;
   font-family: monospace;
   overflow: auto;
   overscroll-behavior: contain;
   white-space: pre-wrap;
+}
+
+.history-detail-content {
+  border-color: var(--border);
 }
 
 .history-detail-error {
@@ -7633,7 +7643,12 @@ button.diff-workflow-step-btn:hover {
     overscroll-behavior: contain;
   }
 
-  .data-list {
+  /* R83：.backup-list / .task-list 的基础规则也各写了一遍 border-right（同特异度），
+     裸 .data-list 想归零只是「恰好写在文件末尾」——顺序一动窄屏就漏出竖分割线。
+     复合形式一起列进来靠特异度赢；值不变，三个列表仍是一起归零。 */
+  .data-list,
+  .data-list.backup-list,
+  .data-list.task-list {
     max-height: 42vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
