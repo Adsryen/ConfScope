@@ -96,7 +96,9 @@ describe("复制失败的反馈守卫（R51）", () => {
       .filter((file) => file !== "src/lib/clipboard.ts" && file !== "src/components/CopyButton.tsx")
       .filter((file) => {
         const source = readScannedSource(file);
-        return !/if\s*\(\s*await\s+copyText\(/.test(source) || !source.includes('t("common.copyFailed")');
+        // 失败分支必须复用共享文案：组件用 t()、lib 用 translate()（波41 的 externalLink 就是后者），
+        // 所以这里认 key 本身，而不是认某一种调用写法——换成自建文案同样算没处理。
+        return !/if\s*\(\s*await\s+copyText\(/.test(source) || !/["']common\.copyFailed["']/.test(source);
       });
     expect(unhandled).toEqual([]);
   });

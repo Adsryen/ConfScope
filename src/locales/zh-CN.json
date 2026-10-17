@@ -23,7 +23,9 @@
     "configListPartial": "配置列表第 {pages} 页加载失败，仅取到 {count} 条，结果不完整",
     "comboMoreHidden": "还有 {count} 项未显示，请继续输入缩小范围",
     "pagerLabel": "分页导航",
-    "pagerInfo": "第 {page} 页，共 {pages} 页"
+    "pagerInfo": "第 {page} 页，共 {pages} 页",
+    "linkUnsafe": "该链接不被允许打开",
+    "openLinkCopied": "无法打开链接，已复制到剪贴板"
   },
   "errorDialog": {
     "fullError": "完整错误",

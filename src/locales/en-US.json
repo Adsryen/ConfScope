@@ -23,7 +23,9 @@
     "configListPartial": "Config list page(s) {pages} failed to load: only {count} entries fetched, results are incomplete",
     "comboMoreHidden": "{count} more options hidden — keep typing to narrow the list",
     "pagerLabel": "Pagination",
-    "pagerInfo": "Page {page} of {pages}"
+    "pagerInfo": "Page {page} of {pages}",
+    "linkUnsafe": "This link can't be opened",
+    "openLinkCopied": "Couldn't open the link, copied to clipboard instead"
   },
   "errorDialog": {
     "fullError": "Full Error",

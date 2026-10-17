@@ -17,6 +17,8 @@ import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+import { openExternalLink } from "../lib/externalLink";
+import ExternalLink from "./ExternalLink";
 
 interface AboutProps {
   onClose?: () => void;
@@ -210,10 +212,12 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     }
   }, [updateResult, t]);
 
+  // 桌面 webview 里 window.open 开不出窗口（R66），统一交给外链出口：
+  // 有 Wails 运行时就走系统浏览器，都不行时复制链接并提示，不再「点了没反应」。
   const openDownloadPage = useCallback(() => {
     const url = updateResult?.downloadUrl || updateResult?.sourceUrl;
     if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+    void openExternalLink(url);
   }, [updateResult]);
 
   const renderUpdateSection = () => {
@@ -393,21 +397,18 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         </div>
 
         <div className="about-section about-full about-links">
-          <a href="https://github.com/Adsryen/ConfScope" target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
+          <ExternalLink href="https://github.com/Adsryen/ConfScope" className="btn btn-ghost btn-sm">
             ⭐ GitHub
-          </a>
-          <a href="https://github.com/Adsryen/ConfScope/issues" target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
+          </ExternalLink>
+          <ExternalLink href="https://github.com/Adsryen/ConfScope/issues" className="btn btn-ghost btn-sm">
             {t("about.feedback")}
-          </a>
+          </ExternalLink>
         </div>
       </div>
 
       <div className="about-footer">
         <p>
-          Made with ❤️ by{" "}
-          <a href="https://github.com/Adsryen" target="_blank" rel="noopener noreferrer">
-            Adsryen
-          </a>
+          Made with ❤️ by <ExternalLink href="https://github.com/Adsryen">Adsryen</ExternalLink>
         </p>
         {!embedded && (
           <button className="btn btn-primary" onClick={onClose}>
