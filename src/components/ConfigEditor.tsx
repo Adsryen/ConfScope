@@ -6,6 +6,7 @@ import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { validateConfigIssues } from "../lib/validate";
+import { statusMessageProps } from "../lib/statusSemantics";
 import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
 import AlertModal, { type AlertItem } from "./AlertModal";
@@ -183,7 +184,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
             </div>
           </label>
           {error && (
-            <div className="test-msg err">
+            <div className="test-msg err" {...statusMessageProps("error")}>
               <span>{error}</span>
               <CopyButton text={error} label={t("common.copyError")} />
             </div>

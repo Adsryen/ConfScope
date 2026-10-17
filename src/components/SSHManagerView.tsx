@@ -13,6 +13,7 @@ import {
 import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 type Draft = {
   id?: string;
@@ -409,7 +410,11 @@ export default function SSHManagerView() {
                 </div>
               </section>
 
-              {message && <div className={`test-msg ${message.ok ? "ok" : "err"}`}>{message.text}</div>}
+              {message && (
+                <div className={`test-msg ${message.ok ? "ok" : "err"}`} {...statusMessageProps(message.ok ? "success" : "error")}>
+                  {message.text}
+                </div>
+              )}
               <div className="conn-form-actions">
                 <div className="spacer" />
                 <button className="btn btn-ghost" onClick={testSSHProfile} disabled={testingCurrent}>

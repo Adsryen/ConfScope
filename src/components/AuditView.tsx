@@ -17,6 +17,7 @@ import { readViewState, useRememberedState, useScrollMemory, writeViewState } fr
 import Select from "./Select";
 import { errorText } from "../lib/errorText";
 import { useScrollResetRef } from "../lib/useScrollResetOnContentChange";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 export interface DiffJumpSideParams {
   tenant?: string;
@@ -806,7 +807,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             </div>
           )}
           {error && (
-            <div className="test-msg err">
+            <div className="test-msg err" {...statusMessageProps("error")}>
               <span>{error}</span>
               <CopyButton text={error} label={t("common.copyError")} />
             </div>

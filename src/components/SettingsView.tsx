@@ -15,6 +15,7 @@ import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wail
 import LanguageSwitch from "./LanguageSwitch";
 import { scrollBehavior } from "../lib/motion";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 export default function SettingsView() {
   const { t } = useTranslation();
@@ -163,7 +164,11 @@ export default function SettingsView() {
           <h3>{t("app.settings")}</h3>
           <div className="page-subtitle">{t("app.settingsSubtitle")}</div>
         </div>
-        {saved && <div className="test-msg ok">{t("settings.settingsSaved")}</div>}
+        {saved && (
+          <div className="test-msg ok" {...statusMessageProps("success")}>
+            {t("settings.settingsSaved")}
+          </div>
+        )}
       </div>
       <div className="settings-workbench">
         <aside className="settings-rail" aria-label={t("app.settings")}>
@@ -273,7 +278,7 @@ export default function SettingsView() {
               </button>
             </div>
             {credentialSummary && (
-              <div className="test-msg ok">
+              <div className="test-msg ok" {...statusMessageProps("success")}>
                 <span className="test-msg-text">
                   {t("settings.credentialMigrationSummary", {
                     migrated: credentialSummary.migrated,
@@ -396,7 +401,11 @@ export default function SettingsView() {
                 {cacheBusy ? "…" : t("settings.clearCache")}
               </button>
             </div>
-            {cacheResult === "ok" && <div className="test-msg ok">{t("settings.clearCacheSuccess")}</div>}
+            {cacheResult === "ok" && (
+              <div className="test-msg ok" {...statusMessageProps("success")}>
+                {t("settings.clearCacheSuccess")}
+              </div>
+            )}
             {cacheResult === "fail" && (
               <div className="inline-error" role="alert">
                 {t("settings.clearCacheFailed")}

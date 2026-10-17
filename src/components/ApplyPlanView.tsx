@@ -25,6 +25,7 @@ import InlineError from "./InlineError";
 import DiffPanel from "./DiffPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   entry: ApplyEntryPayload | null;
@@ -320,7 +321,7 @@ function ItemDetail({
             </div>
           </div>
           {edit.errors.length > 0 && (
-            <div className="apply-edit-errors">
+            <div className="apply-edit-errors" {...statusMessageProps("error")}>
               {edit.errors.map((err, i) => (
                 <div key={i}>{err}</div>
               ))}

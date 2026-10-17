@@ -38,6 +38,7 @@ import {
 } from "../store/appDataBackup";
 import { deleteStoredSecret, resolveAppDataBackupPassword, saveAppDataBackupPassword } from "../lib/credentialSecrets";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   onRestored?: () => void;
@@ -491,7 +492,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
       </div>
 
       {status && (
-        <div className={`test-msg ${status.ok ? "ok" : "err"}`}>
+        <div className={`test-msg ${status.ok ? "ok" : "err"}`} {...statusMessageProps(status.ok ? "success" : "error")}>
           <span className="test-msg-text">{status.text}</span>
         </div>
       )}

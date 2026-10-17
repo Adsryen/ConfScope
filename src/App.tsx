@@ -41,6 +41,7 @@ import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } fro
 import { recordOperation } from "./store/operationHistory";
 import type { ApplyEntryPayload } from "./lib/applyEntry";
 import { errorText } from "./lib/errorText";
+import { statusMessageProps } from "./lib/statusSemantics";
 
 type NavigableMode = "browse" | "diff" | "connections" | "ssh" | "audit" | "history" | "backup" | "tasks" | "logviewer" | "settings" | "about";
 type Mode = NavigableMode | "apply";
@@ -593,7 +594,7 @@ export default function App() {
       {!activeConn ? (
         <div className="pad-msg big">{t("app.selectConnection")}</div>
       ) : nsError ? (
-        <div className="pad-msg big err">
+        <div className="pad-msg big err" {...statusMessageProps("error")}>
           {t("app.cannotConnect", { name: activeConn.name })}
           <div className="diff-hint">{nsError}</div>
           <div className="err-actions">

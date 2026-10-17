@@ -6,6 +6,7 @@ import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   /** 需要输入以确认的名称（dataId）。 */
@@ -99,7 +100,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             }}
           />
           {error && (
-            <div className="test-msg err">
+            <div className="test-msg err" {...statusMessageProps("error")}>
               <span>{error}</span>
               <CopyButton text={error} label={t("common.copyError")} />
             </div>

@@ -17,6 +17,7 @@ import DiffPanel from "./DiffPanel";
 import Pager from "./Pager";
 import UnifiedDiff from "./UnifiedDiff";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   conn: Connection;
@@ -273,7 +274,7 @@ export default function HistoryView({
           </div>
         )}
         {error && (
-          <div className="pad-msg err">
+          <div className="pad-msg err" {...statusMessageProps("error")}>
             <span>{error}</span>
             <CopyButton text={error} label={t("common.copyError")} />
           </div>

@@ -16,6 +16,7 @@ import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface AboutProps {
   onClose?: () => void;
@@ -234,7 +235,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       case "upToDate":
         return (
           <>
-            <div className="test-msg ok">
+            <div className="test-msg ok" {...statusMessageProps("success")}>
               <span className="test-msg-text">{t("about.noUpdate")}</span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={runUpdateCheck}>
@@ -246,7 +247,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       case "updateAvailable":
         return (
           <>
-            <div className="test-msg ok">
+            <div className="test-msg ok" {...statusMessageProps("success")}>
               <div className="test-msg-text">
                 <div>{t("about.updateAvailable", { version: updateResult!.latestVersion })}</div>
                 {updateResult!.sourceName && <div>{t("about.updateSourceHit", { source: updateResult!.sourceName })}</div>}
@@ -298,7 +299,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       case "downloaded":
         return (
           <>
-            <div className="test-msg ok">
+            <div className="test-msg ok" {...statusMessageProps("success")}>
               <span className="test-msg-text">{t("about.downloadComplete")}</span>
             </div>
             {(updateResult?.downloadUrl || updateResult?.sourceUrl) && (
@@ -312,7 +313,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       case "error":
         return (
           <>
-            <div className="test-msg err">
+            <div className="test-msg err" {...statusMessageProps("error")}>
               <span className="test-msg-text">{errorMessage}</span>
             </div>
             <div className="update-actions">

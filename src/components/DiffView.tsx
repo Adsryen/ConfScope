@@ -35,6 +35,7 @@ import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 type DiffMode = "text" | "key" | "lines";
 
@@ -604,7 +605,7 @@ function SourcePicker({
           )}
         </div>
         {nsError && (
-          <div className="field-error-box">
+          <div className="field-error-box" {...statusMessageProps("error")}>
             <span className="field-error">
               {t("diff.namespaceLoadFailed")}: {nsError}
             </span>
@@ -634,7 +635,7 @@ function SourcePicker({
             onPick={(option) => onChange({ ...source, dataId: option.value, group: option.sub || source.group })}
           />
           {cfgError && (
-            <div className="field-error-box">
+            <div className="field-error-box" {...statusMessageProps("error")}>
               <span className="field-error">
                 {t("diff.configListLoadFailed")}: {cfgError}
               </span>
@@ -652,7 +653,7 @@ function SourcePicker({
             </div>
           )}
           {cfgGaps.length > 0 && (
-            <div className="diff-warnings">
+            <div className="diff-warnings" {...statusMessageProps("info")}>
               {cfgGaps.map((gap) => (
                 <div className="diff-warning" key={gap}>
                   {gap}

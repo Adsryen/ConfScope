@@ -26,6 +26,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   onClose: () => void;
@@ -1413,7 +1414,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   />
                   <span>{t("connection.forceLocalSnapshot")}</span>
                 </label>
-                {draft.forceLocalSnapshot && <div className="field-warning">{t("connection.forceLocalSnapshotHelp")}</div>}
+                {draft.forceLocalSnapshot && (
+                  <div className="field-warning" {...statusMessageProps("info")}>
+                    {t("connection.forceLocalSnapshotHelp")}
+                  </div>
+                )}
                 {localValidation && (
                   <div className={`local-validation ${localValidation.valid ? "ok" : "err"}`}>
                     {localValidation.valid
@@ -1844,7 +1849,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       </select>
                     )}
                     {visibleNamespaceError && (
-                      <div className="field-error-box">
+                      <div className="field-error-box" {...statusMessageProps("error")}>
                         <span className="field-error">
                           {t("connection.loadNamespacesFailed")}: {visibleNamespaceError}
                         </span>
@@ -2094,7 +2099,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             <TestTraceView trace={visibleTestTrace} />
           ) : (
             visibleTestMsg && (
-              <div className={`test-msg ${visibleTestMsg.ok ? "ok" : "err"}`}>
+              <div
+                className={`test-msg ${visibleTestMsg.ok ? "ok" : "err"}`}
+                {...statusMessageProps(visibleTestMsg.ok ? "success" : "error")}
+              >
                 <span className="test-msg-text" title={visibleTestMsg.text}>
                   {displayTestMessage(visibleTestMsg.text)}
                 </span>
