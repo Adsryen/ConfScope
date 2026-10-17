@@ -1,7 +1,7 @@
 import { type CSSProperties, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { subscribeClosePopovers } from "../lib/popoverBus";
-import { EscapePriority, useEscape } from "../lib/useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useTranslation } from "../i18n";
 
 // 候选渲染上限：超出部分不再静默丢弃，改为显式提示继续输入缩小范围
@@ -178,6 +178,8 @@ export default function Combobox({ value, onChange, onPick, options, placeholder
         }}
         onKeyDown={(e) => {
           // 焦点始终留在输入框（不抢焦点，保证输入法与继续输入不被打断）
+          // 组合态的 Enter / 方向键交给 IME：否则候选词上屏的同时会把该项写进表单
+          if (isImeComposing(e)) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             if (!open) {

@@ -3,6 +3,7 @@ import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import { activeLineOf, activeOffsetOf, buildMinimapRows, findCodeHits, hitLines, markHighlightedHtml, splitLines } from "../lib/codeLines";
 import { useTranslation } from "../i18n";
+import { isImeComposing } from "../lib/useEscape";
 
 interface Props {
   code: string;
@@ -206,6 +207,8 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
       return !active || active === document.body || active === document.documentElement;
     };
     const handler = (e: KeyboardEvent) => {
+      // 组合态期间不劫持 Ctrl+F / F3：此刻按键属于输入法候选，不该被查找栏抢走
+      if (isImeComposing(e)) return;
       const target = e.target as EventTarget | null;
       const key = e.key;
       const isFindKey = (e.ctrlKey || e.metaKey) && (key === "f" || key === "F");
@@ -233,6 +236,8 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   }, [findOpen, effectiveTerm]);
 
   const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 组合态回车是「上屏候选词」，不是「跳到下一个命中」；Esc 也交回 IME 取消候选
+    if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       navigate(e.shiftKey ? -1 : 1);

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { reportError } from "../lib/errorCenter";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 
@@ -19,13 +20,8 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
   const [error, setError] = useState<string | null>(null);
   const match = input === name;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel, busy]);
+  // Esc 走分层注册表：确认框盖在别的弹层上时一次只关这一层，删除进行中（busy）不放行。
+  useEscape(!busy, onCancel, EscapePriority.confirm);
 
   const confirm = async () => {
     if (!match || busy) return;
@@ -75,7 +71,11 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             autoCorrect="off"
             spellCheck={false}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && confirm()}
+            onKeyDown={(e) => {
+              // 组合态回车是把候选词上屏到输入框，不是提交删除
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") confirm();
+            }}
           />
           {error && (
             <div className="test-msg err">

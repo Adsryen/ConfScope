@@ -179,4 +179,22 @@ describe("Combobox", () => {
 
     expect(screen.queryByText(/未显示/)).not.toBeInTheDocument();
   });
+  it("输入法组合态的 Enter 只把候选词上屏，不写入选中值", () => {
+    const onChange = vi.fn();
+    const onPick = vi.fn();
+    renderCombo({ value: "a", options, onChange, onPick });
+    const input = screen.getByRole("textbox");
+    openMenu(input); // 展开并高亮 alpha
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(input, { key: "ArrowDown", isComposing: true });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    // 非组合态照常选中，作为守卫的负控
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("alpha");
+  });
 });

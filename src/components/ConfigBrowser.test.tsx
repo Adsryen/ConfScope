@@ -1052,7 +1052,7 @@ describe("ConfigBrowser", () => {
     expect(screen.getByText("格式校验未通过")).toBeInTheDocument();
     expect(document.querySelector("textarea")).toHaveValue('{"server":');
 
-    // Enter 同样交还：不能出现「看不见的那层被一键关掉」
+    // Enter 也交还：弹框不再挂全局 Enter，隐藏时焦点陷阱同样撤销，看不见的那层不会被一键关掉
     fireEvent.keyDown(window, { key: "Enter" });
     expect(screen.getByText("格式校验未通过")).toBeInTheDocument();
 
@@ -1114,5 +1114,48 @@ describe("ConfigBrowser", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(document.querySelector(".sel-menu-portal")).not.toBeInTheDocument());
     expect(document.querySelector(".browser-target-modal")).toBeInTheDocument();
+  });
+  it("输入法组合态回车不提交搜索，候选词上屏后的回车照常提交", async () => {
+    renderBrowser();
+    await screen.findByText("app.json");
+    vi.useFakeTimers();
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+
+    fireEvent.change(searchInput, { target: { value: "gate" } });
+    const callsBefore = apiMocks.listConfigs.mock.calls.length;
+
+    // 组合态里 Enter/Esc/方向键都属于输入法：回车是上屏候选词，不是「提交搜索」
+    fireEvent.keyDown(searchInput, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(searchInput, { key: "ArrowDown", isComposing: true });
+    fireEvent.keyDown(searchInput, { key: "ArrowUp", isComposing: true });
+    expect(apiMocks.listConfigs.mock.calls.length).toBe(callsBefore);
+
+    // 负控：上屏之后的那一次回车才真的搜索（不走 debounce）
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+    expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "*gate*", "", 1, 50);
+  });
+  it("放弃未保存修改：确认框存续时编辑器里按回车不会误确认，草稿仍在", async () => {
+    await enterEditMode();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+
+    // 危险动作的默认焦点落在「留在当前」，不在执行侧
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "留在当前" }));
+
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    // 弹框不再挂 window 级 Enter：回车归聚焦的那个元素，确认框与草稿都原样留着
+    expect(screen.getByText("放弃未保存的修改？")).toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    // 焦点回到弹框后 Tab 成环，不会跑到被遮住的编辑器上
+    const confirm = screen.getByRole("button", { name: "放弃并切换" });
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(document.activeElement?.closest(".modal")).not.toBeNull();
+    expect(document.activeElement).not.toBe(textarea);
   });
 });

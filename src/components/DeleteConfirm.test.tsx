@@ -15,13 +15,7 @@ function renderDeleteConfirm(props: Partial<Parameters<typeof DeleteConfirm>[0]>
     onConfirm,
     ...render(
       <I18nProvider>
-        <DeleteConfirm
-          name="app.json"
-          group="DEFAULT_GROUP"
-          onCancel={onCancel}
-          onConfirm={onConfirm}
-          {...props}
-        />
+        <DeleteConfirm name="app.json" group="DEFAULT_GROUP" onCancel={onCancel} onConfirm={onConfirm} {...props} />
       </I18nProvider>
     ),
   };
@@ -96,5 +90,32 @@ describe("DeleteConfirm", () => {
       message: "delete denied",
       actionLabel: "Retry Delete",
     });
+  });
+  it("输入法组合态的 Enter 不提交删除，Esc 不取消", () => {
+    const { onConfirm, onCancel } = renderDeleteConfirm();
+    const input = screen.getByPlaceholderText("app.json");
+    fireEvent.change(input, { target: { value: "app.json" } });
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true });
+    expect(onCancel).not.toHaveBeenCalled();
+
+    // 负控：上屏之后的那一下真回车仍然提交
+    fireEvent.keyDown(input, { key: "Enter" });
+    return waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
+  });
+
+  it("删除进行中（busy）时 Esc 不放行", async () => {
+    const onConfirm = vi.fn(() => new Promise<void>(() => {})); // 永不 resolve：模拟删除挂起
+    const { onCancel } = renderDeleteConfirm({ onConfirm });
+    fireEvent.change(screen.getByPlaceholderText("app.json"), { target: { value: "app.json" } });
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Connection, connectionDisplayLabel } from "../store/connections";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 import { Format, FORMATS, nacosType } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { validateConfig } from "../lib/validate";
@@ -36,12 +37,9 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = namespace || "public";
 
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [active, onClose]);
+  // 编辑器自身的 Esc：交给分层注册表。内部的校验提示（confirm）与自绘下拉（dropdown）
+  // 优先级更高，打开时先吃掉 Esc，不会再出现「一次 Esc 同时关下拉和编辑器」。
+  useEscape(active, onClose, EscapePriority.overlay);
 
   const save = () => {
     if (!dataId.trim()) {

@@ -921,4 +921,99 @@ describe("ConnectionManager", () => {
     expect(screen.getAllByText("目录有效，找到 3 个配置文件").length).toBeGreaterThan(0);
     expect(screen.getByText("C:\\backup\\picked-prod")).toBeInTheDocument();
   });
+
+  describe("容器级 Enter 与输入法组合态（R11/R20）", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      apiMocks.listNamespaces.mockReset();
+      apiMocks.listNamespaces.mockResolvedValue([]);
+    });
+
+    /** 按「包含某个选项」定位原生下拉，避免依赖字段标签的文案顺序。 */
+    function selectByOptionText(root: ParentNode, optionText: string): HTMLSelectElement {
+      const found = [...root.querySelectorAll<HTMLSelectElement>("select")].find((el) =>
+        [...el.options].some((o) => o.text === optionText)
+      );
+      if (!found) throw new Error(`未找到包含选项「${optionText}」的下拉，用例前置条件失效`);
+      return found;
+    }
+
+    /** 切到 SSH 连接方式 → 展开配置 → 认证方式改「密钥认证」，让私钥 textarea 出现在表单里。 */
+    function openPrivateKeyField(): HTMLTextAreaElement {
+      const form = document.querySelector(".conn-form") as HTMLElement;
+      fireEvent.change(selectByOptionText(form, "通过 SSH 隧道"), { target: { value: "ssh" } });
+      // 切到 SSH 时配置区已自动展开，只有收起状态才需要点一次标题
+      if (!document.querySelector(".ssh-config")) {
+        fireEvent.click(screen.getByRole("button", { name: /SSH 隧道配置/ }));
+      }
+      const section = document.querySelector(".ssh-config") as HTMLElement | null;
+      if (!section) throw new Error("SSH 配置区未展开，用例前置条件失效");
+      fireEvent.change(selectByOptionText(section, "密钥认证"), { target: { value: "key" } });
+      const area = document.querySelector<HTMLTextAreaElement>("textarea.ssh-key");
+      if (!area) throw new Error("私钥输入框未出现，用例前置条件失效");
+      return area;
+    }
+
+    it("私钥 textarea 里回车保留换行，不会误触发保存", () => {
+      renderManager();
+      const area = openPrivateKeyField();
+      area.focus();
+
+      // fireEvent 返回 false 表示 defaultPrevented：回车必须留给浏览器换行
+      expect(fireEvent.keyDown(area, { key: "Enter" })).toBe(true);
+      expect(screen.queryByText("来源名称和目标地址不能为空")).not.toBeInTheDocument();
+    });
+
+    it("下拉与复选框上的回车也归元素自己，容器不再抢先提交", () => {
+      renderManager();
+
+      const providerSelect = document.querySelector<HTMLSelectElement>(".conn-form select")!;
+      fireEvent.keyDown(providerSelect, { key: "Enter" });
+      expect(screen.queryByText("来源名称和目标地址不能为空")).not.toBeInTheDocument();
+
+      const checkbox = document.querySelector<HTMLInputElement>('.conn-form input[type="checkbox"]')!;
+      fireEvent.keyDown(checkbox, { key: "Enter" });
+      expect(screen.queryByText("来源名称和目标地址不能为空")).not.toBeInTheDocument();
+    });
+
+    it("单行输入框回车仍然等价于点保存（保留原便利行为）", () => {
+      renderManager();
+
+      fireEvent.keyDown(fieldByLabel("来源名称"), { key: "Enter" });
+
+      expect(screen.getByText("来源名称和目标地址不能为空")).toBeInTheDocument();
+    });
+
+    it("输入法组合态在单行输入框回车只上屏候选词，不提交表单", () => {
+      renderManager();
+      const input = fieldByLabel("来源名称");
+
+      fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+      fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+
+      expect(screen.queryByText("来源名称和目标地址不能为空")).not.toBeInTheDocument();
+    });
+
+    it("输入法组合态不提交项目重命名，也不退出重命名", () => {
+      const onChange = vi.fn();
+      renderManager(onChange);
+      saveConnection({ name: "prod-public", project: "订单系统", source: "云上公网" });
+
+      const title = within(connectionList()).getByText("订单系统").closest(".conn-group-title") as HTMLElement;
+      fireEvent.click(within(title).getByTitle("重命名项目"));
+      const input = within(title).getByDisplayValue("订单系统") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "交易平台" } });
+      fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+      // 仍在重命名态、也没有提交
+      expect(within(title).getByDisplayValue("交易平台")).toBeInTheDocument();
+      expect(onChange).not.toHaveBeenCalledWith([expect.objectContaining({ projectName: "交易平台" })]);
+
+      fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+      expect(within(title).getByDisplayValue("交易平台")).toBeInTheDocument();
+
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(within(connectionList()).getByText("交易平台")).toBeInTheDocument();
+    });
+  });
 });

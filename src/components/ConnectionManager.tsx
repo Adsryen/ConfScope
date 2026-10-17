@@ -18,6 +18,7 @@ import { selectLocalSnapshotDirectory, validateLocalSnapshotDirectory, type Loca
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 
 interface Props {
   onClose: () => void;
@@ -26,6 +27,18 @@ interface Props {
 }
 
 type Draft = Omit<Connection, "id"> & { id?: string };
+
+/**
+ * 是否为「单行文本类输入框」——只有它值得把 Enter 当成提交表单。
+ * 排除 checkbox / radio / file / button / submit 这些自带激活语义的类型；
+ * textarea 天然不等于 input，因此私钥多行粘贴不受影响。
+ */
+function isSingleLineTextField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLInputElement)) return false;
+  if (target.disabled || target.readOnly) return false;
+  const type = (target.type || "text").toLowerCase();
+  return !["checkbox", "radio", "file", "button", "submit", "reset"].includes(type);
+}
 
 const emptyDraft = (environmentName = DEFAULT_ENVIRONMENT_NAME): Draft => ({
   name: "",
@@ -441,15 +454,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     currentNamespaceKeyRef.current = currentNamespaceKey;
   }, [currentNamespaceKey]);
 
-  // Esc 关闭弹框
-  useEffect(() => {
-    if (embedded) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [embedded, onClose]);
+  // Esc 关闭弹框改用分层注册表：表单内的自绘下拉/候选弹层（dropdown 优先级）展开时先吃掉 Esc，
+  // 不会再出现「一次 Esc 同时收起下拉并关掉整个连接弹框」；内嵌在设置页时不参与。
+  useEscape(!embedded, onClose, EscapePriority.overlay);
 
   const set = (patch: Partial<Draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -1036,6 +1043,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     onChange={(e) => setRenamingProject({ ...renamingProject, value: e.target.value })}
                     onBlur={commitProjectRename}
                     onKeyDown={(e) => {
+                      // 组合态的 Enter/Esc 属于输入法（上屏/取消候选），不提交重命名也不退出编辑
+                      if (isImeComposing(e)) return;
                       if (e.key === "Enter") commitProjectRename();
                       if (e.key === "Escape") setRenamingProject(null);
                     }}
@@ -1166,10 +1175,15 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         <div
           className="conn-form"
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              save();
-            }
+            if (e.key !== "Enter") return;
+            // 组合态回车是把候选词上屏到当前字段，不是提交整个表单
+            if (isImeComposing(e)) return;
+            // 只有单行文本框回车才等价于「保存」。
+            // 私钥输入框是 <textarea>（PEM 要整段粘贴、必须能换行），
+            // 按钮 / 链接 / 下拉 / 复选框自带 Enter 语义，容器都不该替它们吃掉这次按键。
+            if (!isSingleLineTextField(e.target)) return;
+            e.preventDefault();
+            save();
           }}
         >
           <div className="conn-form-title">{draft.id ? t("connection.edit") : t("connection.new")}</div>

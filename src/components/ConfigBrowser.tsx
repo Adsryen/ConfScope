@@ -19,7 +19,7 @@ import { createSnapshotFromConfigs } from "../api/snapshot";
 import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../api/app";
 import { useTaskManager } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
-import { EscapePriority, useEscape } from "../lib/useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import AlertModal from "./AlertModal";
 import CodeEditor from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -901,6 +901,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               spellCheck={false}
               onChange={(e) => onSearchChange(e.target.value)}
               onKeyDown={(e) => {
+                // 输入法组合态：回车/方向键都属于候选词操作，不能当成「提交搜索 / 移动选中行」
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter") searchNow();
                 else if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -1324,6 +1326,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             act();
           }}
           onCancel={() => setPending(null)}
+          active={active}
         />
       )}
 

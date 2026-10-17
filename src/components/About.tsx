@@ -12,6 +12,7 @@ import { useTranslation } from "../i18n";
 import { copyText } from "../lib/clipboard";
 import { reportError } from "../lib/errorCenter";
 import { loadSettings, updateUpdateSettings } from "../store/settings";
+import { EscapePriority, useEscape } from "../lib/useEscape";
 
 interface AboutProps {
   onClose?: () => void;
@@ -40,14 +41,9 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
-  useEffect(() => {
-    if (embedded) return;
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [embedded, onClose]);
+  // Esc 关闭弹框改用分层注册表：散装监听会在冒泡阶段抢 Esc，
+  // 连带关掉它下面的弹层（下拉/确认框），一次 Esc 只该关最内层。
+  useEscape(!embedded, onClose, EscapePriority.overlay);
 
   useEffect(() => {
     let alive = true;

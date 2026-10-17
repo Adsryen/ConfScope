@@ -1,7 +1,7 @@
 ﻿import { type CSSProperties, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { subscribeClosePopovers } from "../lib/popoverBus";
-import { EscapePriority, useEscape } from "../lib/useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 
 export interface Option {
   value: string;
@@ -160,6 +160,9 @@ export default function Select({
         onKeyDown={(e) => {
           // 菜单展开后焦点仍留在触发器（弹层不可聚焦），键盘事件在此统一处理
           if (disabled) return;
+          // 组合态：Enter / Space / 方向键都属于 IME 候选操作，一律让路给输入法，
+          // 否则「打字选候选」会被当成「选中当前项」或「首字母检索」
+          if (isImeComposing(e)) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             if (!open) openMenu();

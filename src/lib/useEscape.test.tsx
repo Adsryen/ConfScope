@@ -3,7 +3,7 @@
  */
 import { fireEvent, renderHook } from "../test/react";
 import { describe, expect, it, vi } from "vitest";
-import { EscapePriority, useEscape } from "./useEscape";
+import { EscapePriority, isImeComposing, useEscape } from "./useEscape";
 
 describe("useEscape", () => {
   it("只让最内层（优先级最高）的注册者响应", () => {
@@ -89,5 +89,41 @@ describe("useEscape", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(next).toHaveBeenCalledTimes(1);
+  });
+  it("输入法组合态的 Esc 交还给 IME：不分派、也不拦截冒泡", () => {
+    const close = vi.fn();
+    const legacy = vi.fn();
+    renderHook(() => useEscape(true, close, EscapePriority.confirm));
+    window.addEventListener("keydown", legacy);
+
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(window, { key: "Escape", keyCode: 229 });
+
+    expect(close).not.toHaveBeenCalled();
+    // 没有 stopPropagation：候选列表自己收得到这两次 Esc
+    expect(legacy).toHaveBeenCalledTimes(2);
+    window.removeEventListener("keydown", legacy);
+  });
+
+  it("Enter 不进注册表：避免「焦点在取消、回车却确认」，弹框 Enter 由聚焦按钮原生激活", () => {
+    const close = vi.fn();
+    const legacy = vi.fn();
+    renderHook(() => useEscape(true, close, EscapePriority.confirm));
+    window.addEventListener("keydown", legacy);
+
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(close).not.toHaveBeenCalled();
+    expect(legacy).toHaveBeenCalledTimes(1);
+    window.removeEventListener("keydown", legacy);
+  });
+});
+
+describe("isImeComposing", () => {
+  it("识别 isComposing 与 keyCode 229 两种组合态信号", () => {
+    expect(isImeComposing({ isComposing: true })).toBe(true);
+    expect(isImeComposing({ keyCode: 229 })).toBe(true);
+    expect(isImeComposing({ isComposing: false, keyCode: 13 })).toBe(false);
+    expect(isImeComposing({})).toBe(false);
   });
 });

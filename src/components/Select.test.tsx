@@ -200,4 +200,21 @@ describe("Select", () => {
     expect(menu.parentElement).toBe(document.body);
     expect(menu).toHaveStyle({ position: "fixed" });
   });
+  it("输入法组合态的 Enter / Space / 方向键不选中也不移动高亮", () => {
+    const onChange = vi.fn();
+    render(<Select value="k0" options={manyOptions} onChange={onChange} />);
+    const trigger = screen.getByRole("button");
+
+    fireEvent.keyDown(trigger, { key: "ArrowDown" }); // 正常展开并高亮 k0
+    const highlighted = document.querySelector(".sel-option.highlighted");
+    fireEvent.keyDown(trigger, { key: "ArrowDown", isComposing: true });
+    expect(document.querySelector(".sel-option.highlighted")).toBe(highlighted);
+
+    fireEvent.keyDown(trigger, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(trigger, { key: " ", isComposing: true });
+    fireEvent.keyDown(trigger, { key: "Enter", keyCode: 229 });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
 });

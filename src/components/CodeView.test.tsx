@@ -235,3 +235,31 @@ describe("CodeView 换内容滚动重置（R9）", () => {
     expect(offsets.top).toBe(120);
   });
 });
+
+describe("CodeView 输入法组合态（R11）", () => {
+  it("查找栏的组合态 Enter 不跳命中、Esc 不关栏，上屏后的回车照常跳转", async () => {
+    const { container } = renderView(MULTI, "Properties", { searchTerm: "port" });
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    const currentBefore = container.querySelector(".code-area mark.search-hit-current");
+    expect(currentBefore).not.toBeNull();
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(container.querySelector(".code-area mark.search-hit-current")).toBe(currentBefore);
+
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(container.querySelector(".code-find-input")).not.toBeNull();
+
+    // 负控：非组合态回车仍然跳到下一个命中
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(container.querySelector(".code-area mark.search-hit-current")).not.toBe(currentBefore);
+  });
+
+  it("组合态期间 Ctrl+F 不被代码视图接管", () => {
+    const { container } = renderView(MULTI);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true, isComposing: true });
+
+    expect(container.querySelector(".code-find-input")).toBeNull();
+  });
+});
