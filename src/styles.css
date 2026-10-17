@@ -2384,6 +2384,15 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  /* 定宽（轮26 F-4）：这条栏右锚定（position:absolute + right），宽度交给内容时
+     "内容变宽"就是整条往左长——输入框、光标、按钮一起滑。真浏览器实测（同一份状态表，
+     10 种文案 × 宽/窄两种容器）改动前的抖动：
+     - 宽栏（容器 1100）：barX 从 712.9（第 1/1 处）滑到 582.6（空态提示），跨度 140.95px；
+       其中光计数逐位变长（第 1/1 处 → 第 123/12345 处）就吃掉 28.8px。
+     - 窄栏（容器 430）：提示挤到第二行时，连"固定在右侧"的 ↑↓✕ 都会跳，closeX 385 → 255.3。
+     定宽 + 下面的计数槽吸收富余宽度之后，上述所有状态下 barX / inputX / closeX 跨度实测 0.00。
+     520 = 最长的英文提示 195 + 其余各槽实测 317，向上取整到 10 的倍数；再窄由 max-width 兜住。 */
+  width: 520px;
   /* 多两个匹配开关后条子更宽：窄容器里换行而不是把输入框压瘪或被左边缘裁掉 */
   max-width: calc(100% - 24px);
   padding: 4px 6px;
@@ -2407,11 +2416,22 @@ textarea {
   border-color: var(--accent);
 }
 .code-find-count {
+  /* 计数 / 空态提示占一个"吃掉富余宽度"的槽（配合上面 .code-find 定宽才有实测零抖动）：
+     文案长短只改变槽内看不见的空隙，不再推动别的元素。
+     flex-shrink 必须为 0：这句是 nowrap，允许压缩的话长提示会溢出栏外被裁掉；
+     shrink 0 + 栏的 flex-wrap 让窄容器里提示整段换到第二行（实测 barH 60），
+     而 ↑↓✕ 靠这个槽的 grow 继续顶在最右，不再跟着左右跳。
+     text-align 从 center 改 right：槽变宽后居中的话，数字会在槽里横跳，右对齐才锚在按钮那一侧。 */
+  flex: 1 0 auto;
   min-width: 54px;
-  text-align: center;
+  text-align: right;
   font-size: 11.5px;
   color: var(--text-dim);
   white-space: nowrap;
+  /* 兜底，不是主修法：本机（DejaVu Sans）实测加与不加每一行数字宽度完全一样，
+     它管不了中文里「第/处」这类 CJK 与数字混排；留着是因为 Windows 的 Segoe UI
+     默认比例数字下 "1" 明显比 "9" 窄，等宽能让「第 1/9 处 → 第 9/9 处」少跳半个字。 */
+  font-variant-numeric: tabular-nums;
 }
 .code-find-btn {
   width: 22px;

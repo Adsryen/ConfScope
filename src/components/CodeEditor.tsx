@@ -16,6 +16,7 @@ import {
 } from "../lib/codeLines";
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
+import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -203,10 +204,20 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     [scrollColumnIntoView, scrollLineIntoView]
   );
 
+  /**
+   * 打开查找栏，初值口径与浏览态 CodeView 完全一致：
+   * **选区 > 栏内旧词 > 外部搜索词**（轮26 F-3，见 ../lib/findSelection）。
+   *
+   * 编辑态的选中内容不走 window.getSelection()，必须读 textarea 的 selectionStart/End；
+   * 同样要在 setState 前同步读，输入框聚焦后 textarea 的选区就没了。
+   * 注意 Enter/F3 导航会经 revealHit 把选区落在当前命中上，所以「栏已开时再按 Ctrl+F」
+   * 读到的是上一处命中——旧词本就与它相同，行为天然延续，不需要额外区分。
+   */
   const openFind = useCallback(() => {
+    const selectionRaw = textareaSelectionText(taRef.current);
     setPinnedLine(null);
     setFindOpen(true);
-    setFindTerm((prev) => prev || searchTerm);
+    setFindTerm((prev) => pickFindTermOnOpen({ previous: prev, selectionRaw, external: searchTerm }));
     const focusInput = () => {
       const input = findInputRef.current;
       if (input) {

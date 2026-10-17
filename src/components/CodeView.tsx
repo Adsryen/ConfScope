@@ -6,6 +6,7 @@ import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import { useRememberedState } from "../lib/viewState";
+import { pickFindTermOnOpen, selectionTextWithin } from "../lib/findSelection";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -150,9 +151,19 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return true;
   }, [findOpen, hits, scrollLineIntoView]);
 
+  /**
+   * 打开查找栏，并按 **选区 > 栏内旧词 > 外部搜索词** 决定初值（轮26 F-3，VSCode 口径）。
+   *
+   * 为什么要在这个函数里读选区、而且是 setState 之前同步读：查找输入框一拿到焦点，
+   * 文档级选区就被清掉了，等渲染完再读只剩空串。用户「选中一段配置名再按 Ctrl+F」
+   * 要的就是搜它，旧词压在上面等于把这次按键变成"什么也没发生"。
+   * 选区必须落在本视图 .code-area 内才算（见 ../lib/findSelection），
+   * 否则用户在左侧列表搜索框里选几个字，也会把这里的查找词劫持走。
+   */
   const openFind = useCallback(() => {
+    const selectionRaw = selectionTextWithin(areaRef.current);
     setFindOpen(true);
-    setFindTerm((prev) => prev || (searchTerm ?? ""));
+    setFindTerm((prev) => pickFindTermOnOpen({ previous: prev, selectionRaw, external: searchTerm ?? "" }));
     const focusInput = () => {
       const input = findInputRef.current;
       if (input) {
