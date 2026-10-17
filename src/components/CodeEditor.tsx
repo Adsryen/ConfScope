@@ -15,6 +15,8 @@ import {
   type CodeHit,
 } from "../lib/codeLines";
 import { useTranslation } from "../i18n";
+import { useRememberedState } from "../lib/viewState";
+import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
   value: string;
@@ -57,6 +59,12 @@ const PAD_LEFT_EXTRA = 14;
 const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
 const PROBE_CHARS = 20; // 隐形探针里放多少个等宽字符用来量字宽
 
+/**
+ * 查找栏选项的模块级常量：与 CodeView 同一口径。
+ * 复用同一个引用，非查找态时 hits 的 useMemo 才不会每渲染重算一次。
+ */
+const NEUTRAL_MATCH_OPTIONS: MatchOptions = {};
+
 function clamp(value: number, min: number, max: number): number {
   if (max < min) return min;
   return Math.min(max, Math.max(min, value));
@@ -86,6 +94,11 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const [findOpen, setFindOpen] = useState(false);
   const [findTerm, setFindTerm] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  // 查找栏的两个匹配开关：与浏览态（CodeView）共用同一对记忆键，
+  // 浏览态勾了「区分大小写」再进编辑态不必重勾一遍。
+  const [caseSensitive, setCaseSensitive] = useRememberedState<boolean>("codeFind.caseSensitive", false);
+  const [wholeWord, setWholeWord] = useRememberedState<boolean>("codeFind.wholeWord", false);
+
   const [metrics, setMetrics] = useState({ scrollTop: 0, clientHeight: 0 });
   // 「跳到第 N 行」落点：不在查找态时也要能高亮那一行
   const [pinnedLine, setPinnedLine] = useState<number | null>(null);
@@ -98,7 +111,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（只标红，不区分当前命中）。
   const effectiveTerm = findOpen ? findTerm : searchTerm;
-  const hits = useMemo(() => findCodeHits(doc, effectiveTerm.trim()), [doc, effectiveTerm]);
+  // 开关只作用于查找栏自己输入的词。栏一关就退回中性口径：外部内容搜索词必须继续
+  // 「大小写不敏感子串」，否则编辑态的标红会和左侧列表的命中数分叉。
+  const matchOptions = useMemo<MatchOptions>(
+    () => (findOpen ? { caseSensitive, wholeWord } : NEUTRAL_MATCH_OPTIONS),
+    [findOpen, caseSensitive, wholeWord]
+  );
+  const hits = useMemo(() => findCodeHits(doc, effectiveTerm.trim(), matchOptions), [doc, effectiveTerm, matchOptions]);
   const hitSet = useMemo(() => hitLines(hits), [hits]);
 
   const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
@@ -244,17 +263,19 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   useImperativeHandle(ref, () => ({ openFind, revealLine }), [openFind, revealLine]);
 
-  // 搜索词 / 内容变化：重置当前命中序号，避免越界或指向改动前的位置。
+  // 搜索词 / 匹配口径 / 内容变化：重置当前命中序号，避免越界或指向改动前的位置。
+  // 口径必须进依赖：勾上「全词」后命中会变少，旧的 activeIdx 可能已经越过新的末尾，
+  // 计数「第 N/M 处」会显示成不存在的位置。
   useEffect(() => {
     setActiveIdx(0);
-  }, [effectiveTerm, doc]);
+  }, [effectiveTerm, matchOptions, doc]);
 
   // 打开 / 改变查找词后，把选区与滚动落到当前命中（前后导航在 navigate 里即时做）。
   useEffect(() => {
     if (!findOpen || !hits.length) return;
     revealHit(hits[clamp(activeIdx, 0, hits.length - 1)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, effectiveTerm]);
+  }, [findOpen, effectiveTerm, matchOptions]);
 
   // 内容整体换掉（切文件/切草稿）时收起查找栏，防止旧关键词污染新内容。
   useEffect(() => {
@@ -462,6 +483,31 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             }}
             onKeyDown={onFindKeyDown}
           />
+          {/* 匹配口径开关。onMouseDown preventDefault：按钮默认会夺走焦点，
+              点一下开关就得再点一次输入框才能继续改词；编辑态里更糟——
+              焦点离开 textarea 会让当前选区一起消失。 */}
+          <button
+            type="button"
+            className={`code-find-toggle${caseSensitive ? " is-on" : ""}`}
+            aria-pressed={caseSensitive}
+            aria-label={t("config.findCaseSensitive")}
+            title={t("config.findCaseSensitive")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setCaseSensitive((v) => !v)}
+          >
+            Aa
+          </button>
+          <button
+            type="button"
+            className={`code-find-toggle${wholeWord ? " is-on" : ""}`}
+            aria-pressed={wholeWord}
+            aria-label={t("config.findWholeWord")}
+            title={t("config.findWholeWord")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setWholeWord((v) => !v)}
+          >
+            ab|
+          </button>
           <span className="code-find-count" aria-live="polite">
             {hits.length
               ? t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })

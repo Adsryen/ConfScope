@@ -3,11 +3,12 @@
  */
 import { fireEvent, render, screen, waitFor } from "../test/react";
 import { useRef, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
 import { normalizeLineEndings } from "../lib/codeLines";
+import { clearViewState, writeViewState } from "../lib/viewState";
 
 const INITIAL = "server.port=8080";
 
@@ -408,5 +409,120 @@ describe("CodeEditor 保存快捷键（R47）", () => {
 
     expect(onSave).not.toHaveBeenCalled();
     expect(ta.value).toBe("  " + MULTI);
+  });
+});
+
+describe("CodeEditor 查找匹配选项（R75）", () => {
+  const EDITOR_CASE = "PORT = 1\nport = 2\nexport const port = 3\nports = 4\n";
+
+  function openFind(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = findInput(container);
+    expect(input, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input as HTMLInputElement, { target: { value: term } });
+    return input as HTMLInputElement;
+  }
+
+  function toggles(container: HTMLElement): HTMLButtonElement[] {
+    return [...container.querySelectorAll<HTMLButtonElement>(".code-editor .code-find-toggle")];
+  }
+
+  function countText(container: HTMLElement): string {
+    return (container.querySelector(".code-find-count") as HTMLElement).textContent ?? "";
+  }
+
+  function hitLineNumbers(container: HTMLElement): number[] {
+    return [...container.querySelectorAll<HTMLElement>(".code-ln")]
+      .filter((el) => el.classList.contains("is-hit") || el.classList.contains("is-current"))
+      .map((el) => Number(el.textContent));
+  }
+
+  beforeEach(() => {
+    // 开关与浏览态共用同一对记忆键，不清掉会互相污染
+    clearViewState("codeFind.");
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  it("编辑态查找栏同样有两个开关，并把状态播报给辅助技术", () => {
+    const { container } = renderEditor(<MultiHarness />);
+    openFind(container, "server.port");
+
+    const [caseBtn, wordBtn] = toggles(container);
+    expect(caseBtn).toBeTruthy();
+    expect(wordBtn).toBeTruthy();
+    expect(caseBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(caseBtn);
+    expect(caseBtn.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(wordBtn);
+    expect(wordBtn.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("勾选口径后命中收窄、选区跟着换到新的首处命中，正文逐字不变", () => {
+    const doc = EDITOR_CASE;
+    const { container: c2 } = renderEditor(<CodeEditor value={doc} onChange={() => {}} format="TEXT" />);
+    const ta2 = textarea(c2);
+    openFind(c2, "port");
+
+    expect(countText(c2)).toContain("/5");
+    expect(hitLineNumbers(c2)).toEqual([1, 2, 3, 4]);
+    expect(ta2.selectionStart).toBe(0); // 不区分大小写时首处是大写那行的 PORT
+    expect(ta2.value).toBe(doc);
+
+    fireEvent.click(toggles(c2)[0]); // 区分大小写
+    expect(countText(c2)).toContain("/4");
+    expect(ta2.selectionStart).toBe(doc.indexOf("port")); // 选区落到新首处命中
+    expect(ta2.selectionEnd).toBe(doc.indexOf("port") + "port".length);
+
+    fireEvent.click(toggles(c2)[1]); // 全词
+    expect(countText(c2)).toContain("/2");
+    expect(hitLineNumbers(c2)).toEqual([2, 3]);
+    expect(ta2.value).toBe(doc); // 开关只改标记与选区，绝不改内容
+  });
+
+  it("关掉查找栏后外部内容搜索词回到中性口径", () => {
+    const { container } = renderEditor(<CodeEditor value={EDITOR_CASE} onChange={() => {}} format="TEXT" searchTerm="port" />);
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+
+    openFind(container, "port");
+    fireEvent.click(toggles(container)[0]);
+    expect(hitLineNumbers(container)).toEqual([2, 3, 4]);
+
+    fireEvent.keyDown(findInput(container) as HTMLElement, { key: "Escape" });
+    expect(findInput(container)).toBeNull();
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("点开关不抢走输入框焦点，选区也不丢", () => {
+    const { container } = renderEditor(<CodeEditor value={EDITOR_CASE} onChange={() => {}} format="TEXT" />);
+    const input = openFind(container, "port");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const [caseBtn] = toggles(container);
+    // fireEvent 返回 false 表示处理器调用了 preventDefault：浏览器据此不移动焦点
+    expect(fireEvent.mouseDown(caseBtn), "开关按下时没挡默认行为：点一下就得重新点输入框").toBe(false);
+
+    fireEvent.click(caseBtn);
+    expect(findInput(container)).toBe(input);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("口径与浏览态共用同一对记忆键：编辑态沿用上次选的口径", () => {
+    writeViewState("codeFind.caseSensitive", true);
+    const { container } = renderEditor(<CodeEditor value={"port = 1\n"} onChange={() => {}} format="TEXT" />);
+    openFind(container, "PORT");
+
+    expect(toggles(container)[0].getAttribute("aria-pressed")).toBe("true");
+    expect(countText(container)).toContain("无匹配");
+  });
+
+  it("栏没打开时记住的口径不许污染外部搜索词", () => {
+    writeViewState("codeFind.caseSensitive", true);
+    writeViewState("codeFind.wholeWord", true);
+    const { container } = renderEditor(<CodeEditor value={EDITOR_CASE} onChange={() => {}} format="TEXT" searchTerm="port" />);
+    expect(findInput(container)).toBeNull();
+    expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
   });
 });
