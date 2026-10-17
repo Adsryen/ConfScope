@@ -2530,6 +2530,11 @@ textarea {
   flex: 1;
   min-width: 0;
 }
+/* R61：行主体是真正可点的那块（左边是勾选框），焦点环画在它身上。 */
+.history-item-main:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+}
 .history-item-time {
   font-size: 12.5px;
   color: var(--text-hi);
@@ -4436,6 +4441,7 @@ button.diff-workflow-step-btn:hover {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-left: 18px;
+  cursor: pointer;
 }
 .conn-item:hover {
   border-color: var(--accent);
@@ -4443,6 +4449,13 @@ button.diff-workflow-step-btn:hover {
 .conn-item.active {
   border-color: var(--accent);
   background: rgba(0, 122, 204, 0.12);
+}
+/* R61：项目/环境/连接三行现在键盘也能到达，得有可见焦点环；鼠标点击不画（:focus-visible）。 */
+.conn-group-title:focus-visible,
+.conn-env-title:focus-visible,
+.conn-item:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
 }
 .conn-item-main {
   flex: 1;
@@ -5709,6 +5722,12 @@ button.diff-workflow-step-btn:hover {
 
 .audit-matrix-body .audit-matrix-row:hover {
   background: var(--bg-hover);
+}
+
+/* R61：矩阵行键盘可达后补焦点环；表头行同样用 .audit-matrix-row，只给 body 里的行画。 */
+.audit-matrix-body .audit-matrix-row:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .audit-matrix-body .audit-matrix-row.selected {

@@ -12,6 +12,7 @@ import {
 import { getSnapshotStats, formatSnapshotName, formatTime } from "../lib/snapshot";
 import { snapshotConnectionId, snapshotNamespaceForDiff } from "../lib/snapshotConnection";
 import { reportError } from "../lib/errorCenter";
+import { clickableRowProps } from "../lib/clickableRow";
 import { toast } from "../lib/toast";
 import { recordOperation } from "../store/operationHistory";
 import { loadSnapshotWebDAVState, recordSnapshotWebDAVActivity, updateSnapshotWebDAVSettings } from "../store/snapshotWebDAV";
@@ -375,6 +376,7 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                   key={snap.id}
                   className={`data-list-item backup-item${isActive ? " active" : ""}`}
                   onClick={() => setSelectedSnapshot(snap)}
+                  {...clickableRowProps(() => setSelectedSnapshot(snap), { role: "group", selected: isActive })}
                 >
                   <span className="data-item-accent backup" />
                   <div className="backup-item-name" title={formatSnapshotName(snap)}>

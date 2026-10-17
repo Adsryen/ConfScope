@@ -148,6 +148,25 @@ describe("HistoryView", () => {
     );
   });
 
+  it("版本行键盘可达：Enter 与空格都等价于点这一行（R61）", async () => {
+    const { container } = renderHistory();
+    const row = await screen.findByText("nid 2");
+    const main = row.closest(".history-item-main") as HTMLElement;
+
+    expect(main).toHaveAttribute("role", "button");
+    expect(main).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(main, { key: "Enter" });
+
+    expect(await screen.findByText(/相对上一版 nid 1 的变更/)).toBeInTheDocument();
+    expect(main).toHaveAttribute("aria-current", "true");
+
+    const other = Array.from(container.querySelectorAll(".history-item-main")).find((el) => el !== main) as HTMLElement;
+    fireEvent.keyDown(other, { key: " " });
+    expect(other).toHaveAttribute("aria-current", "true");
+    expect(main).not.toHaveAttribute("aria-current");
+  });
+
   it("localizes history operation type labels", async () => {
     apiMocks.listHistory.mockResolvedValueOnce(
       historyPage([

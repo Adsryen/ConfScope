@@ -3,6 +3,7 @@ import { useTranslation } from "../i18n";
 import { useTaskManager, useTaskList, type Task, type TaskStatus } from "../lib/taskmanager";
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
+import { clickableRowProps } from "../lib/clickableRow";
 
 interface Props {
   onNavigateToTask?: (taskId: string) => void;
@@ -119,6 +120,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 key={task.id}
                 className={`data-list-item task-item${selectedTask?.id === task.id ? " active" : ""}`}
                 onClick={() => setSelectedTask(task)}
+                {...clickableRowProps(() => setSelectedTask(task), { role: "group", selected: selectedTask?.id === task.id })}
               >
                 <span className={`data-item-accent ${task.status === "failed" ? "danger" : task.status}`} />
                 <div className="task-item-header">

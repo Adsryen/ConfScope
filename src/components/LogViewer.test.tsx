@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, type Mock, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "../test/react";
 import { I18nProvider } from "../i18n";
 import LogViewer from "./LogViewer";
 
@@ -104,5 +104,28 @@ describe("LogViewer", () => {
       expect(Array.from(items).map((el) => el.textContent?.trim()).sort()).toEqual([aId, cId].sort());
     });
     expect(container).toBeTruthy();
+  });
+
+  it("快照行键盘可达：三件套齐了，Enter 与空格能换选中项（R61）", async () => {
+    const aId = createAuditSession("compare");
+    const cId = createAuditSession("audit");
+    endAuditSession(aId, "success");
+    endAuditSession(cId, "success");
+
+    const { container } = renderViewer();
+    await waitFor(() => {
+      expect(container.querySelectorAll(".data-list-item").length).toBe(2);
+    });
+    const rows = Array.from(container.querySelectorAll(".data-list-item"));
+
+    expect(rows[0]).toHaveAttribute("role", "button");
+    expect(rows[0]).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(rows[0], { key: "Enter" });
+    expect(rows[0]).toHaveAttribute("aria-current", "true");
+
+    fireEvent.keyDown(rows[1], { key: " " });
+    expect(rows[1]).toHaveAttribute("aria-current", "true");
+    expect(rows[0]).not.toHaveAttribute("aria-current");
   });
 });

@@ -12,6 +12,7 @@ import { useTranslation } from "../i18n";
 import { recordOperation } from "../store/operationHistory";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
+import { clickableRowProps } from "../lib/clickableRow";
 import DiffPanel from "./DiffPanel";
 import Pager from "./Pager";
 import UnifiedDiff from "./UnifiedDiff";
@@ -286,7 +287,11 @@ export default function HistoryView({
               onChange={() => togglePick(h.id)}
               title={t('history.pickForCompare')}
             />
-            <div className="history-item-main" onClick={() => view(h.id)}>
+            <div
+              className="history-item-main"
+              onClick={() => view(h.id)}
+              {...clickableRowProps(() => view(h.id), { selected: viewing === h.id })}
+            >
               <div className="history-item-time">{formatTime(h.lastModifiedTime)}</div>
               <div className="history-item-meta">
                 <span className={`op op-${h.opType || "x"}`}>{opLabel(h.opType, t)}</span>

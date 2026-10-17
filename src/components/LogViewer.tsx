@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../i18n";
 import { ReadAuditLogLines } from "../../wailsjs/go/app/App";
+import { clickableRowProps } from "../lib/clickableRow";
 import {
   listAuditSessions,
   onAuditSessionUpdate,
@@ -135,7 +136,12 @@ export default function LogViewer() {
         <div className="data-list">
           {sessions.length === 0 && <div className="data-empty-state"><div>{t("logViewer.empty")}</div><span>{t("logViewer.emptyHint")}</span></div>}
           {sessions.map((s) => (
-            <div key={s.id} className={`data-list-item${selected?.id === s.id ? " active" : ""}`} onClick={() => setSelectedId(s.id)}>
+            <div
+              key={s.id}
+              className={`data-list-item${selected?.id === s.id ? " active" : ""}`}
+              onClick={() => setSelectedId(s.id)}
+              {...clickableRowProps(() => setSelectedId(s.id), { selected: selected?.id === s.id })}
+            >
               <span className={`data-item-accent ${statusClass(s.status)}`} />
               <div className="task-item-header">
                 <span className={`task-status ${statusClass(s.status)}`}>{statusLabel(s.status)}</span>

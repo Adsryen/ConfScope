@@ -11,6 +11,7 @@ import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
+import { clickableRowProps } from "../lib/clickableRow";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { readViewState, useRememberedState, useScrollMemory, writeViewState } from "../lib/viewState";
 import Select from "./Select";
@@ -875,6 +876,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 key={row.id}
                 className={`audit-matrix-row ${selectedRow?.id === row.id ? "selected" : ""}`}
                 onClick={() => setSelectedRow(row)}
+                {...clickableRowProps(() => setSelectedRow(row), { selected: selectedRow?.id === row.id })}
               >
                 <div className="audit-cell key">
                   <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>

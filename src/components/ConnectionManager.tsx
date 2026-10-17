@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { clickableRowProps } from "../lib/clickableRow";
 import {
   Connection,
   DEFAULT_ENVIRONMENT_NAME,
@@ -1054,6 +1055,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               <div
                 className={`conn-group-title${activeProject === project.project ? " active" : ""}`}
                 onClick={() => selectContext(project.project)}
+                {...clickableRowProps(() => selectContext(project.project), { role: "group", selected: activeProject === project.project })}
               >
                 {renamingProject?.oldName === project.project ? (
                   <input
@@ -1107,6 +1109,10 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       activeProject === project.project && activeEnvironment === env.environment ? " active" : ""
                     }`}
                     onClick={() => selectContext(project.project, env.environment)}
+                    {...clickableRowProps(() => selectContext(project.project, env.environment), {
+                      role: "group",
+                      selected: activeProject === project.project && activeEnvironment === env.environment,
+                    })}
                   >
                     <span className="conn-env-name" title={env.environment}>
                       {env.environment}
@@ -1126,7 +1132,12 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     </div>
                   </div>
                   {env.connections.map((c) => (
-                    <div key={c.id} className={`conn-item${draft.id === c.id ? " active" : ""}`} onClick={() => edit(c)}>
+                    <div
+                      key={c.id}
+                      className={`conn-item${draft.id === c.id ? " active" : ""}`}
+                      onClick={() => edit(c)}
+                      {...clickableRowProps(() => edit(c), { role: "group", selected: draft.id === c.id })}
+                    >
                       <div className="conn-item-main">
                         <div className="conn-item-name">
                           {connectionSourceName(c)}

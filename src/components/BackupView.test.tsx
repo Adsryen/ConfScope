@@ -122,6 +122,25 @@ describe("BackupView", () => {
     expect(screen.getByText("app.yaml")).toBeDefined();
   });
 
+  it("快照行键盘可达：Tab 停得住，Enter 等价于点这一行（R61）", async () => {
+    const { container } = renderWithI18n(<BackupView />);
+    await waitFor(() => {
+      expect(screen.queryByText("加载中…")).toBeNull();
+    });
+
+    const row = container.querySelector(".backup-item") as HTMLElement;
+    // 行内还嵌着删除按钮，所以是 group 而不是 button（button 的子树会被无障碍树当装饰隐藏）
+    expect(row).toHaveAttribute("role", "group");
+    expect(row).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText("配置列表")).toBeDefined();
+    });
+    expect(row).toHaveAttribute("aria-current", "true");
+  });
+
   it("falls back source namespace display to namespaceId and then public", async () => {
     const { listSnapshots } = await import("../api/snapshot");
     vi.mocked(listSnapshots).mockResolvedValue([
