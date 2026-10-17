@@ -105,6 +105,30 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     el.scrollTop = clamp(y - el.clientHeight / 2, 0, Math.max(0, el.scrollHeight - el.clientHeight));
   }, []);
 
+  /**
+   * 外部内容搜索词（查找栏没开）时的定位：把首个命中拉进视口中间。
+   *
+   * 缺陷长什么样（R74）：内容搜索点开结果后，命中词整篇标红、命中行有底色，但视图永远停在
+   * 文件开头——红字得用户自己滚过去找。原先唯一的「滚动到命中」出口被 `findOpen` 门掉了，
+   * 而外部 searchTerm 从不打开查找栏，于是这条路径上没人定位。
+   *
+   * 三重门控各有原因，少一个就会误伤别的口径：
+   * - `findOpen` 为真时不插手：查找栏有自己的当前命中语义（Enter / F3 导航），不许被拽回第一处；
+   * - 没有命中不插手：用户就该看到文件开头；
+   * - `clientHeight <= 0` 不插手：视图被保活隐藏（active=false 那类宿主页面）或首帧还没布局时
+   *   量不到高度，此时 clamp 的结果恒等于 0，"跳一次"等于没跳，还会把波29
+   *   「同一内容重复渲染不许误触滚动重置」的口径冒充成"定位成功"。
+   */
+  const locateFirstExternalHit = useCallback(() => {
+    if (findOpen) return false;
+    const el = areaRef.current;
+    if (!el || el.clientHeight <= 0) return false;
+    const first = hits[0];
+    if (!first) return false;
+    scrollLineIntoView(first.line);
+    return true;
+  }, [findOpen, hits, scrollLineIntoView]);
+
   const openFind = useCallback(() => {
     setFindOpen(true);
     setFindTerm((prev) => prev || (searchTerm ?? ""));
@@ -154,9 +178,19 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
 
   // 换内容时把滚动位置拉回起点（R9）：正文变了要归零；正文逐字相同但版本（contentKey）
   // 变了也要归零，否则相邻无差异版本之间会保留上一版的偏移，看起来像"莫名停在中间"。
-  // 口径与实现见 ../lib/useScrollResetOnContentChange。这里仍要传 syncScroll：
-  // 行号与缩略图靠 transform 跟手，归零后不同步一次，侧栏会停在旧偏移。
-  useScrollResetOnContentChange(areaRef, [code, contentKey], syncScroll);
+  // 口径与实现见 ../lib/useScrollResetOnContentChange。
+  //
+  // 这里的 onReset 干两件事，顺序不能反（R74）：先把内容搜索的首个命中拉进视口，
+  // 再 syncScroll 一次——行号层 / 命中行层 / 缩略图视口全靠 transform 跟手，
+  // 不同步就会侧栏停在开头、正文停在命中行，整屏错位。
+  // 定位必须待在这个回调里（即 hook 的 useLayoutEffect，绘制前）：挪到绘制后的 useEffect
+  // 会先闪一帧文件开头，用户读到的仍是"点了结果没反应"。
+  const handleContentReset = useCallback(() => {
+    locateFirstExternalHit();
+    syncScroll();
+  }, [locateFirstExternalHit, syncScroll]);
+
+  useScrollResetOnContentChange(areaRef, [code, contentKey], handleContentReset);
 
   // 切换文件时收起查找栏，防止旧关键词污染新内容。
   // 这里**不许**改成调用 closeFind：换文件是用户在左侧列表里点出来的，焦点该留在他点的位置；
@@ -239,6 +273,15 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     scrollLineIntoView(hits[clamp(activeIdx, 0, hits.length - 1)].line);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, effectiveTerm]);
+
+  // 同一份正文里改外部搜索词（没开查找栏）：也跟着定位新词的首个命中。
+  // 依赖数组**只许写 searchTerm**：closeFind 只动 findOpen / findTerm，用户主动关栏后
+  // 刚看的那处命中该留在屏幕上，不许被这条拽回第一处（CodeView.test.tsx R74 钉住）。
+  // 换正文那条路径由 handleContentReset 在绘制前处理，这里重复执行也只是跳到同一行。
+  useEffect(() => {
+    if (locateFirstExternalHit()) syncScroll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // 组合态回车是「上屏候选词」，不是「跳到下一个命中」

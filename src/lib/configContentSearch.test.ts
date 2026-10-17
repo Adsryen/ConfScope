@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { findCodeHits } from "./codeLines";
 import type { ConfigDocument, ConfigItem } from "../api/nacos";
 import type { ApplyEntryEndpoint } from "./applyEntry";
 import {
@@ -37,6 +38,34 @@ const target: ApplyEntryEndpoint = {
   namespace: "public",
   label: "订单 / 沙箱 / 云上 / public",
 };
+
+describe("列表摘要与浏览态跳转同源（波49 R74）", () => {
+  /**
+   * 结果行的摘要取自正文**第一处**命中（contentSummary 的 indexOf），
+   * CodeView 打开文件时定位的也是 findCodeHits 的第一处命中（波49）。
+   * 两者一旦分叉，用户看到的就是「列表里那句话和点开后停住的那行不是一回事」，
+   * 比不跳转更糟。这里用两个互斥的 marker 把锚点钉死：只有第一处命中在窗口内。
+   */
+  const filler = "z".repeat(120);
+  const content = `${filler}\nnote = max-size\n${filler}\nOMEGA-other = max-size\n`;
+  const term = "max-size";
+
+  const hit = () => searchConfigContent([{ item: item("app.properties"), document: document(content, "properties") }], term)[0];
+
+  it("摘要窗口锚在第一处命中，而不是别处同名命中", () => {
+    const summary = hit().summary;
+    expect(summary).toContain(term);
+    expect(summary, "摘要锚到了后面的命中，跳转就会和列表说的话不一致").not.toContain("OMEGA");
+  });
+
+  it("CodeView 的第一处命中就落在摘要那句话所在的行", () => {
+    const hits = findCodeHits(content, term);
+    expect(hits[0].line).toBe(1);
+    const targetLine = content.split("\n")[hits[0].line].trim();
+    expect(targetLine).toBe("note = max-size");
+    expect(hit().summary, "摘要里没有跳转目标行那句话").toContain(targetLine);
+  });
+});
 
 describe("highlightSearchTerm", () => {
   it("wraps case-insensitive hits in mark.search-hit and escapes html", () => {

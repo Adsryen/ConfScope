@@ -264,6 +264,110 @@ describe("CodeView 输入法组合态（R11）", () => {
   });
 });
 
+describe("CodeView 内容搜索定位（R74）", () => {
+  /** 24 行正文，needle 分别落在第 12 行与第 21 行（0 基 11 / 20）——刻意离文件开头足够远。 */
+  const DEEP_LINES = Array.from({ length: 24 }, (_, i) => (i === 11 ? "timeout = 3000" : i === 20 ? "timeout = 5000" : `key${i} = ${i}`));
+  const DEEP = `${DEEP_LINES.join("\n")}\n`;
+  const VIEWPORT_H = 100;
+  const CONTENT_H = 600;
+
+  function view(props: { code: string; searchTerm?: string; contentKey?: string }) {
+    localStorage.setItem("locale", "zh-CN");
+    return (
+      <I18nProvider>
+        <CodeView format="TEXT" {...props} />
+      </I18nProvider>
+    );
+  }
+
+  /** jsdom 无布局：scrollTop 可读写之外还要把 clientHeight / scrollHeight 撑出来，否则 clamp 后恒等于 0。 */
+  function stubGeometry(pre: HTMLElement) {
+    const offsets = { top: 0, left: 0 };
+    Object.defineProperty(pre, "scrollTop", {
+      configurable: true,
+      get: () => offsets.top,
+      set: (value: number) => {
+        offsets.top = value;
+      },
+    });
+    Object.defineProperty(pre, "scrollLeft", {
+      configurable: true,
+      get: () => offsets.left,
+      set: (value: number) => {
+        offsets.left = value;
+      },
+    });
+    Object.defineProperty(pre, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
+    Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    return offsets;
+  }
+
+  /** 行号槽里第 N 行的 top 就是「行 i 的 top = PAD_TOP + i * ROW_H」这条公式的另一个出口，
+   *  拿它当期望值就不用把 CodeView 的几何常量抄第二份（抄第二份等于埋一条会随波次腐烂的假断言）。 */
+  function expectedTopFor(container: HTMLElement, lineOneBased: number) {
+    const row = [...container.querySelectorAll<HTMLElement>(".code-ln")].find((el) => el.textContent === String(lineOneBased));
+    expect(row, `行号槽里没有第 ${lineOneBased} 行，视口范围算错了`).toBeTruthy();
+    return parseFloat(row!.style.top) - VIEWPORT_H / 2;
+  }
+
+  it("内容搜索点开文件：首个命中落在视口中间，不再停在文件开头", () => {
+    const { container, rerender } = render(view({ code: MULTI }));
+    const offsets = stubGeometry(container.querySelector(".code-area") as HTMLElement);
+    offsets.top = 300; // 上一份文件里用户自己滚到的位置
+
+    rerender(view({ code: DEEP, searchTerm: "timeout", contentKey: "public::DEFAULT_GROUP::app.properties::v1" }));
+
+    // 先钉用户视角的事实：被标红的那一行有没有进渲染窗口。停在开头时窗口只有前几行，压根画不到它。
+    expect(
+      [...container.querySelectorAll(".code-ln")].some((el) => el.textContent === "12"),
+      "首个命中行根本没渲染出来：视图还停在文件开头"
+    ).toBe(true);
+    expect(offsets.top).toBe(expectedTopFor(container, 12));
+    // 定位的那一行确实是被标红的那一行（行号槽的 is-hit 与命中行底色同一来源）
+    const hitRow = [...container.querySelectorAll<HTMLElement>(".code-ln")].find((el) => el.textContent === "12");
+    expect(hitRow!.className).toContain("is-hit");
+  });
+
+  it("同一份正文里改外部搜索词：跟着定位新词的首个命中", () => {
+    const { container, rerender } = render(view({ code: DEEP, searchTerm: "timeout", contentKey: "k1" }));
+    const offsets = stubGeometry(container.querySelector(".code-area") as HTMLElement);
+    offsets.top = expectedTopFor(container, 12);
+
+    rerender(view({ code: DEEP, searchTerm: "key19", contentKey: "k1" }));
+
+    expect(offsets.top).toBe(expectedTopFor(container, 20));
+  });
+
+  it("关掉查找栏不许把位置拽回第一处命中", async () => {
+    const { container } = render(view({ code: DEEP, searchTerm: "timeout", contentKey: "k1" }));
+    const offsets = stubGeometry(container.querySelector(".code-area") as HTMLElement);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+    expect(offsets.top).toBe(expectedTopFor(container, 12));
+
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Enter" }); // 下一处
+    expect(offsets.top).toBe(expectedTopFor(container, 21));
+
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).toBeNull());
+    expect(offsets.top).toBe(expectedTopFor(container, 21));
+  });
+
+  it("视口量不到高度时不定位，退回纯归零（宿主被保活隐藏 / 首帧未布局）", () => {
+    // 故意只撑出 scrollHeight：clientHeight 仍为 0，真跳一次会得到 clamp(226 - 0, 0, 600) = 226，
+    // 于是「归零后再也没跳过」和「跳歪了」在这条用例里能被区分开。
+    const { container, rerender } = render(view({ code: MULTI }));
+    const pre = container.querySelector(".code-area") as HTMLElement;
+    const offsets = stubGeometry(pre);
+    Object.defineProperty(pre, "clientHeight", { configurable: true, get: () => 0 });
+    offsets.top = 300;
+
+    rerender(view({ code: DEEP, searchTerm: "timeout", contentKey: "k2" }));
+
+    expect(offsets.top).toBe(0);
+  });
+});
+
 describe("CodeView 键盘可达（R39）", () => {
   it("正文能 Tab 停住，读屏念得出区域名", () => {
     const { container } = renderView(MULTI, "Properties");
