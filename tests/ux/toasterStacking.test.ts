@@ -31,7 +31,7 @@ function cssNumber(selector: string, property: string): number {
 
 describe("轻提示的层叠顺序", () => {
   it(".toaster 压在报错弹框之上，否则报错时看不见「已复制 / 已保存」", () => {
-    expect(cssNumber(".toaster", "z-index")).toBeGreaterThan(cssNumber(".error-overlay", "z-index"));
+    expect(cssNumber(".toaster", "z-index")).toBeGreaterThan(cssNumber(".modal-overlay.error-overlay", "z-index"));
     expect(cssNumber(".toaster", "z-index")).toBeGreaterThan(cssNumber(".message-panel", "z-index"));
     // 也要留在帮助气泡之下：气泡是就地解释，不该被飘过的提示盖住
     expect(cssNumber(".toaster", "z-index")).toBeLessThan(cssNumber(".help-popover", "z-index"));

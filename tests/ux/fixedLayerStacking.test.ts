@@ -50,7 +50,6 @@ function zIndexOf(selector: string): number {
   return Number.parseInt(found![1], 10);
 }
 
-/** `.error-overlay` 这类附加类：自己只写 z-index，定位来自它所叠加的基础类。 */
 /** portal 到 body 的下拉菜单：类名 + 提供内联 zIndex 的组件文件。 */
 const PORTAL_MENU_CLASS = [".sel-menu", ".combo-menu"];
 const PORTAL_MENU_FILES = [
@@ -62,13 +61,15 @@ const FIXED_LAYERS: { selector: string; fixedBy: string }[] = [
   { selector: ".message-panel", fixedBy: ".message-panel" },
   { selector: ".modal-overlay", fixedBy: ".modal-overlay" },
   { selector: ".startup-overlay", fixedBy: ".startup-overlay" },
-  { selector: ".error-overlay", fixedBy: ".modal-overlay" },
+  // 报错弹框是 .modal-overlay 的变体：定位来自基础类，自己只写 z-index。
+  // 波53 把它写成 .modal-overlay.error-overlay（复合形式），z-index 才不靠文档顺序赢过基础类的 100。
+  { selector: ".modal-overlay.error-overlay", fixedBy: ".modal-overlay" },
   { selector: ".toaster", fixedBy: ".toaster" },
   { selector: ".help-popover", fixedBy: ".help-popover" },
 ];
 
 /** 允许浮在弹框遮罩之上的层：都是「必须比弹框更醒目」或「弹框自己的变体」。 */
-const ABOVE_MODAL_ALLOWLIST = [".modal-overlay", ".startup-overlay", ".error-overlay", ".toaster", ".help-popover"];
+const ABOVE_MODAL_ALLOWLIST = [".modal-overlay", ".startup-overlay", ".modal-overlay.error-overlay", ".toaster", ".help-popover"];
 
 describe("浮层层叠阶梯", () => {
   it("每一层都是 fixed 定位（有 position 才有 z-index 可谈）", () => {
@@ -78,7 +79,7 @@ describe("浮层层叠阶梯", () => {
   });
 
   it("阶梯单调递增：消息面板 < 弹框 < 启动遮罩 < 报错弹框 < 轻提示 < 帮助气泡", () => {
-    const order = [".message-panel", ".modal-overlay", ".startup-overlay", ".error-overlay", ".toaster", ".help-popover"];
+    const order = [".message-panel", ".modal-overlay", ".startup-overlay", ".modal-overlay.error-overlay", ".toaster", ".help-popover"];
     const values = order.map((selector) => ({ selector, z: zIndexOf(selector) }));
     for (let i = 1; i < values.length; i += 1) {
       expect(values[i].z, `${values[i].selector}(${values[i].z}) 必须高于 ${values[i - 1].selector}(${values[i - 1].z})`).toBeGreaterThan(

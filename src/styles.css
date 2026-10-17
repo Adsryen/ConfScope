@@ -604,8 +604,11 @@ textarea {
   box-shadow: inset 2px 0 0 var(--blue);
 }
 
-.sel-menu-portal,
-.combo-menu-portal {
+/* R78：portal 弹层由 JS 定位，right / min-width 必须赢过基础类
+   （fixed 元素上 min-width:100% 的基准是视口，一旦被反超，下拉框直接铺满一屏宽）。
+   写成 .基础类.修饰类 而不是裸类名：这两族先后顺序在历史里换过位置，靠顺序赢迟早再被搬没一次。 */
+.sel-menu.sel-menu-portal,
+.combo-menu.combo-menu-portal {
   right: auto;
   min-width: 0;
 }
@@ -1856,7 +1859,7 @@ textarea {
   margin-left: auto;
 }
 
-.modal-md {
+.modal.modal-md {
   width: min(560px, calc(100vw - 32px));
 }
 
@@ -4168,17 +4171,20 @@ button.diff-workflow-step-btn:hover {
   overscroll-behavior: contain;
 }
 
-.modal-lg {
+/* R78：尺寸修饰类与 .modal 同为 (0,1,0) 时只能靠先后分胜负。
+   .modal-md 就因为写在 .modal 之前而整条失效（两个批量替换弹层被撑成 720px），
+   其余几个也只是侥幸写在后面。统一提特异度，胜负不再依赖文档顺序。 */
+.modal.modal-lg {
   width: 860px;
 }
-.modal-sm {
+.modal.modal-sm {
   width: 460px;
 }
-.modal-error {
+.modal.modal-error {
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
 }
-.error-overlay {
+.modal-overlay.error-overlay {
   z-index: 420;
 }
 .error-header {
@@ -5132,8 +5138,8 @@ button.diff-workflow-step-btn:hover {
   background: transparent;
 }
 
-/* About 模态框 */
-.about-modal {
+/* About 模态框（R78：同样提特异度，不再靠写在 .modal 之后活着） */
+.modal.about-modal {
   width: 560px;
   max-width: 90vw;
   max-height: 85vh;
