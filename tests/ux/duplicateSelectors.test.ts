@@ -7,6 +7,11 @@
  * 所以把「同选择器 + 同属性」写死成基线：只许减，不许加。
  *
  * 只扫顶层规则：`@media` 里的覆盖本来就该晚于基础规则，属正常写法，混进来只会让基线噪音盖过真问题。
+ *
+ * 键必须是「逗号拆开后的单个选择器」，不能是整串原文（波48 R75 补的盲区）。早期版本按 `.backup-list,
+ * .task-list` 这种整串建键，于是它和独立的 `.backup-list { width: 300px }` 永远归不到一组，
+ * 波45 那次「基线归零」其实只覆盖了写法完全一致的重复；改成单选择器建键后当场多报 19 组。
+ * 浏览器认的是拆开的每一项，守卫也该认每一项。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,6 +30,9 @@ const CSS_PATH = join(PROJECT_ROOT, "src/styles.css");
  * 后面那份盖掉的较早声明」：
  * 同选择器同特异度，后一份对同一批元素恒赢，所以删前一份不改任何生效值，可静态证明。
  * 反过来把生效声明往上搬则不安全——两份之间同特异度、能命中同一元素的第三方声明会反超。
+ * 波48 R75 又把键改成单选择器后清掉的 19 组（`.backup-*` / `.task-*` 一族被「布局收口段」盖掉、
+ * `.app-data-backup-*`、`.message-text`、`.batch-diff-main`、`.conn-item-del`、`.apply-task-progress-id`）
+ * 同样按这条口径删较早那份。
  */
 const BASELINE: Record<string, string[]> = {};
 
@@ -44,9 +52,20 @@ const SINGLE_SOURCE_SELECTORS = [
 ];
 
 interface Rule {
+  /** 选择器原文（含逗号），`.backup-list, .task-list` 一整串 */
   selector: string;
+  /** 逗号拆开的每一项，去重后的键就建在这一层 */
+  sels: string[];
   line: number;
   decls: Array<[string, string]>;
+}
+
+/** 选择器列表按逗号拆项：嵌套的括号/函数里不会出现裸逗号，直接 split 足够。 */
+function splitSelectors(selector: string): string[] {
+  return selector
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 /** 注释里也写着属性和颜色值，算之前一律换成等长空白，行号才对得上原文件。 */
@@ -79,7 +98,11 @@ function topLevelRules(css: string): Rule[] {
   while (cursor < text.length) {
     const open = text.indexOf("{", cursor);
     if (open === -1) break;
-    const selector = text.slice(cursor, open).replace(/\s+/g, " ").trim();
+    const head = text.slice(cursor, open);
+    const selector = head.replace(/\s+/g, " ").trim();
+    // 行号要从选择器真正起算那一行数：上一份规则的闭括号行和这份的选择器行经常差着一两个空行，
+    // 直接拿 cursor 算会把报错指到上一条规则尾巴上。
+    const leading = head.length - head.replace(/^\s+/, "").length;
     let depth = 1;
     let end = open + 1;
     while (end < text.length && depth > 0) {
@@ -88,7 +111,12 @@ function topLevelRules(css: string): Rule[] {
       end += 1;
     }
     if (!selector.startsWith("@") && !selector.includes("{")) {
-      rules.push({ selector, line: text.slice(0, cursor).split("\n").length, decls: parseDecls(text.slice(open + 1, end - 1)) });
+      rules.push({
+        selector,
+        sels: splitSelectors(selector),
+        line: text.slice(0, cursor + leading).split("\n").length,
+        decls: parseDecls(text.slice(open + 1, end - 1)),
+      });
     }
     cursor = end;
   }
@@ -105,9 +133,11 @@ interface Repeat {
 function repeatedDeclarations(rules: Rule[]): Repeat[] {
   const bySelector = new Map<string, Rule[]>();
   rules.forEach((rule) => {
-    const bucket = bySelector.get(rule.selector);
-    if (bucket) bucket.push(rule);
-    else bySelector.set(rule.selector, [rule]);
+    rule.sels.forEach((sel) => {
+      const bucket = bySelector.get(sel);
+      if (bucket) bucket.push(rule);
+      else bySelector.set(sel, [rule]);
+    });
   });
   const repeats: Repeat[] = [];
   bySelector.forEach((bucket, selector) => {
@@ -156,12 +186,29 @@ describe("顶层重复选择器不得继续变多", () => {
 
   it("R31 合并过的选择器各自只剩一份", () => {
     const counts = new Map<string, number>();
-    RULES.forEach((rule) => counts.set(rule.selector, (counts.get(rule.selector) ?? 0) + 1));
+    RULES.forEach((rule) =>
+      rule.sels.forEach((sel) => {
+        counts.set(sel, (counts.get(sel) ?? 0) + 1);
+      })
+    );
     const duplicated = SINGLE_SOURCE_SELECTORS.filter((selector) => (counts.get(selector) ?? 0) > 1);
     expect(duplicated, "这些选择器又出现第二份定义了").toEqual([]);
     SINGLE_SOURCE_SELECTORS.forEach((selector) => {
       expect(counts.get(selector), `styles.css 里找不到 ${selector}，改名或删除要连这条守卫一起改`).toBe(1);
     });
+  });
+
+  it("选择器列表里的每一项都要单独建键（波48 补的盲区，拿假数据自检探测器）", () => {
+    const probe = topLevelRules(".backup-list {\n  width: 300px;\n}\n\n.backup-list,\n.task-list {\n  width: auto;\n}\n");
+    const shape = repeatedDeclarations(probe).map((repeat) => [
+      repeat.selector,
+      repeat.prop,
+      repeat.sites.map((site) => `L${site.line}:${site.value}`),
+    ]);
+    // 整串建键时这两条会被当成不相干的选择器，一个都不报——波45 的「基线归零」就是这么假绿出来的
+    expect(shape, "逗号列表里的 .backup-list 必须和独立那条归到一组，.task-list 只出现一次不该报").toEqual([
+      [".backup-list", "width", ["L1:300px", "L5:auto"]],
+    ]);
   });
 
   it("环境徽章的截断保护还得真的生效", () => {
