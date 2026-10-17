@@ -938,7 +938,8 @@
     "sanitizeToggle": "脱敏导出（替换 password/token/secretKey/accessKey）",
     "hideIgnored": "隐藏已忽略",
     "logRecorded": "审计运行已记录：{id}（可在「审计日志」查看）",
-    "scanning": "正在扫描配置列表…已取 {count} 条"
+    "scanning": "正在扫描配置列表…已取 {count} 条",
+    "removeRule": "删除该规则"
   },
   "operationHistory": {
     "opPublish": "发布",
@@ -1174,5 +1175,8 @@
     "statusFailure": "失败",
     "statusRunning": "进行中",
     "webModeNote": "当前为 Web 手动桥模式，日志仅保留在内存中；原生应用会将事件持久化到 audit-trail.jsonl。"
+  },
+  "toast": {
+    "stackLabel": "操作提示"
   }
 }

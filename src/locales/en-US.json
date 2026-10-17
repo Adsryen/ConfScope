@@ -938,7 +938,8 @@
     "sanitizeToggle": "Sanitize export (replace password/token/secretKey/accessKey)",
     "hideIgnored": "Hide Ignored",
     "logRecorded": "Audit run recorded: {id} (viewable in Audit Log)",
-    "scanning": "Scanning config list… {count} loaded"
+    "scanning": "Scanning config list… {count} loaded",
+    "removeRule": "Remove rule"
   },
   "operationHistory": {
     "opPublish": "Publish",
@@ -1174,5 +1175,8 @@
     "statusFailure": "Failure",
     "statusRunning": "Running",
     "webModeNote": "Web manual-bridge mode: events are kept in memory only; the native app persists them to audit-trail.jsonl."
+  },
+  "toast": {
+    "stackLabel": "Notifications"
   }
 }
