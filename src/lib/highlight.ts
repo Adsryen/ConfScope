@@ -34,11 +34,9 @@ function langOf(fmt: Format): string | null {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+/** 转义 HTML 文本节点中的 & < >（与 highlight.js 的转义口径一致）。 */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** 把代码高亮成 HTML（带 hljs-* class）。未知/纯文本返回转义后的原文。 */

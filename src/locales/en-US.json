@@ -16,7 +16,10 @@
     "copyError": "Copy Error",
     "operationFailed": "Operation failed",
     "previousPage": "Previous Page",
-    "nextPage": "Next Page"
+    "nextPage": "Next Page",
+    "configListTruncated": "Namespace exceeds the scan cap: only the first {count} entries were fetched, results may be incomplete",
+    "configListPartial": "Config list page(s) {pages} failed to load: only {count} entries fetched, results are incomplete",
+    "comboMoreHidden": "{count} more options hidden — keep typing to narrow the list"
   },
   "errorDialog": {
     "fullError": "Full Error",
@@ -700,7 +703,16 @@
     "allGroups": "All groups",
     "exportSourceFilesToDirectory": "Export source files to folder",
     "exportSourceFilesTaskName": "Export source folder: {name} / {namespace}",
-    "exportedSourceFiles": "Source files exported to: {path}"
+    "exportedSourceFiles": "Source files exported to: {path}",
+    "openFind": "Find in this file (Ctrl+F)",
+    "findPlaceholder": "Find in current file…",
+    "findHint": "Type to find",
+    "findPrev": "Previous match",
+    "findNext": "Next match",
+    "findClose": "Close find",
+    "findCount": "{current} of {total}",
+    "findNone": "No matches",
+    "minimap": "Minimap"
   },
   "diff": {
     "title": "Smart Config Compare",
@@ -833,7 +845,9 @@
     "duplicateKeyWarning": "{side} {dataId} has duplicate keys under the same parent at different positions: {parts}. YAML loading keeps the last occurrence; review whether to remove one.",
     "duplicateSideLeft": "left side",
     "duplicateSideRight": "right side",
-    "duplicateLine": "line"
+    "duplicateLine": "line",
+    "configListLoaded": "{count} loaded",
+    "matchScanning": "Scanning config list… {count} loaded"
   },
   "history": {
     "title": "History",
@@ -915,7 +929,8 @@
     "exportJSON": "Export JSON",
     "sanitizeToggle": "Sanitize export (replace password/token/secretKey/accessKey)",
     "hideIgnored": "Hide Ignored",
-    "logRecorded": "Audit run recorded: {id} (viewable in Audit Log)"
+    "logRecorded": "Audit run recorded: {id} (viewable in Audit Log)",
+    "scanning": "Scanning config list… {count} loaded"
   },
   "operationHistory": {
     "opPublish": "Publish",

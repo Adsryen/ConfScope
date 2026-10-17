@@ -16,7 +16,10 @@
     "copyError": "复制错误",
     "operationFailed": "操作失败",
     "previousPage": "上一页",
-    "nextPage": "下一页"
+    "nextPage": "下一页",
+    "configListTruncated": "命名空间条目超过扫描上限，仅取到前 {count} 条，结果可能不完整",
+    "configListPartial": "配置列表第 {pages} 页加载失败，仅取到 {count} 条，结果不完整",
+    "comboMoreHidden": "还有 {count} 项未显示，请继续输入缩小范围"
   },
   "errorDialog": {
     "fullError": "完整错误",
@@ -700,7 +703,16 @@
     "allGroups": "全部分组",
     "exportSourceFilesToDirectory": "导出源文件到目录",
     "exportSourceFilesTaskName": "导出源文件目录：{name} / {namespace}",
-    "exportedSourceFiles": "源文件已导出到：{path}"
+    "exportedSourceFiles": "源文件已导出到：{path}",
+    "openFind": "在此文件查找（Ctrl+F）",
+    "findPlaceholder": "在当前文件查找…",
+    "findHint": "输入查找内容",
+    "findPrev": "上一处",
+    "findNext": "下一处",
+    "findClose": "关闭查找",
+    "findCount": "第 {current}/{total} 处",
+    "findNone": "无匹配",
+    "minimap": "缩略图"
   },
   "diff": {
     "title": "智能配置对比",
@@ -833,7 +845,9 @@
     "duplicateKeyWarning": "{side} {dataId} 存在同一层级下位置不同的重复 key：{parts}。YAML 加载时按后值覆盖前值，请人工确认是否删除其中一处。",
     "duplicateSideLeft": "左侧",
     "duplicateSideRight": "右侧",
-    "duplicateLine": "行"
+    "duplicateLine": "行",
+    "configListLoaded": "已取 {count} 条",
+    "matchScanning": "正在扫描配置列表…已取 {count} 条"
   },
   "history": {
     "title": "历史版本",
@@ -915,7 +929,8 @@
     "exportJSON": "导出 JSON",
     "sanitizeToggle": "脱敏导出（替换 password/token/secretKey/accessKey）",
     "hideIgnored": "隐藏已忽略",
-    "logRecorded": "审计运行已记录：{id}（可在「审计日志」查看）"
+    "logRecorded": "审计运行已记录：{id}（可在「审计日志」查看）",
+    "scanning": "正在扫描配置列表…已取 {count} 条"
   },
   "operationHistory": {
     "opPublish": "发布",

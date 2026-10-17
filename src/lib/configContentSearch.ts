@@ -5,6 +5,8 @@ import { applyEntryRiskSummary } from "./applyEntry";
 import { detectFormat } from "./format";
 import { normalizeConfig } from "./normalize";
 import { validateConfig } from "./validate";
+import { escapeRegex } from "./textMatch";
+import { escapeHtml } from "./highlight";
 
 const DOCUMENT_KEY = "__document";
 const SUMMARY_LIMIT = 96;
@@ -31,17 +33,6 @@ export interface ContentReplaceEntryInput {
 
 function normalizedText(value: string): string {
   return value.toLocaleLowerCase();
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** 把文本中的搜索词包裹为 <mark class="search-hit">，返回已转义的 HTML 片段。

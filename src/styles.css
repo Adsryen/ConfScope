@@ -1,4 +1,7 @@
 :root {
+  /* 显式声明深色配色方案：原生 select 展开弹层、滚动条、表单控件
+     不再跟随系统浅色反转（R4 / D2） */
+  color-scheme: dark;
   --bg: #1e1e1e;
   --bg2: #252526;
   --bg3: #2d2d30;
@@ -17,6 +20,9 @@
   --green: #4ec9b0;
   --yellow: #dcdcaa;
   --blue: #4fc3f7;
+  /* 键盘焦点环（R5 / D4）：全站统一色与宽度，供 outline / box-shadow 复用 */
+  --focus-outline: rgba(79, 195, 247, 0.7);
+  --focus-ring-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent);
   /* diff 配色 */
   --diff-add-bg: rgba(78, 201, 176, 0.16);
   --diff-del-bg: rgba(244, 71, 71, 0.16);
@@ -56,6 +62,12 @@ select,
 button,
 .tab-btn {
   cursor: pointer;
+}
+/* 原生复选/单选/范围等控件统一用主题强调色，避免深底上的白底蓝勾（R4 / D2） */
+input,
+select,
+textarea {
+  accent-color: var(--accent);
 }
 
 .mono {
@@ -491,6 +503,17 @@ button,
 .search-input::placeholder {
   color: var(--text-dim);
 }
+/* 键盘焦点环（R5）：以下控件都写了 outline:none，仅靠 1px 边框变色提示焦点，
+   深底上几乎不可辨；Tab 到达时统一补投影环，鼠标点击不触发（:focus-visible）。 */
+.search-input:focus-visible,
+.code-find-input:focus-visible,
+.conn-inline-input:focus-visible,
+.lang-switch:focus-visible,
+.history-filter-select:focus-visible,
+.history-filter-input:focus-visible,
+.code-editor-ta:focus-visible {
+  box-shadow: var(--focus-ring-shadow);
+}
 
 /* ── 自绘下拉框 ── */
 .sel {
@@ -515,6 +538,11 @@ button,
   font-size: 13px;
   outline: none;
   transition: border-color 0.15s;
+}
+.sel-trigger:focus-visible {
+  /* 自绘下拉的键盘焦点环：基础样式里 outline:none 后没有任何替代指示（R5） */
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring-shadow);
 }
 .sel-trigger:hover:not(:disabled) {
   border-color: #555;
@@ -566,6 +594,12 @@ button,
   background: var(--bg-active);
   color: var(--text-hi);
 }
+.sel-option.highlighted {
+  /* 键盘/悬停高亮：与"已选中"区分，排在 .active 之后保证导航可见（R5） */
+  background: var(--bg-hover);
+  color: var(--text-hi);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
 
 .sel-menu-portal,
 .combo-menu-portal {
@@ -608,6 +642,20 @@ button,
 .combo-option.active {
   background: var(--bg-active);
   color: var(--text-hi);
+}
+.combo-option.highlighted {
+  background: var(--bg-hover);
+  color: var(--text-hi);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+.combo-more {
+  /* 候选超出渲染上限时的提示行（R5：不再静默截断） */
+  margin-top: 4px;
+  padding: 6px 10px 2px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 .combo-val {
   font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -683,6 +731,29 @@ button,
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* 页面根钩子（R6 / D7）：与 .data-page 同构。page-surface 是 .app-main（flex 行）的子项，
+   不显式允许收缩时，长 dataId / 长路径会把页面顶宽并挤压侧栏。 */
+.browse-page,
+.settings-page,
+.connection-page {
+  min-width: 0;
+}
+
+/* 配置浏览保活层（R8 / D3）：与 .diff-apply-cache 同构，切到其他模式时整页只是隐藏，不卸载，
+   选中项 / 正文 / 搜索态 / 列表滚动 / 查找栏留在内存里。
+   [hidden] 兜底不能省：上面的 display:flex 特异性与 UA 样式同源，不写 !important 就盖不回来。 */
+.browse-cache {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.browse-cache[hidden] {
+  display: none !important;
 }
 
 .page-header {
@@ -805,7 +876,10 @@ button,
   color: var(--text-hi);
   border-color: var(--border);
   background: var(--bg2);
-  outline: none;
+}
+.settings-rail-item:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .settings-panels {
@@ -878,6 +952,18 @@ button,
   margin-bottom: 3px;
   color: var(--text-hi);
   font-size: 13px;
+}
+
+/* 设置页·数据位置：分组容器与行内对齐（R6 / D7，堆叠结果与块布局等价，
+   额外保证在 flex/grid 祖先下可收缩，并把多行路径行改为顶对齐） */
+.settings-data-locations {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-data-file-row {
+  align-items: flex-start;
 }
 
 /* 设置页·数据位置：路径展示与操作按钮 */
@@ -971,12 +1057,16 @@ button,
   border-left-color: rgba(87, 211, 146, 0.58);
 }
 
+.app-data-backup-local .app-data-backup-area-head {
+  border-left-color: rgba(79, 195, 247, 0.58);
+}
+
 .app-data-backup-password-settings .app-data-backup-area-head {
   border-left-color: rgba(166, 141, 255, 0.64);
 }
 
 .app-data-backup-password-settings .app-data-backup-area-head strong {
-  color: var(--success);
+  color: var(--green);
   font-size: 12px;
 }
 
@@ -1569,6 +1659,28 @@ button,
   text-align: center;
 }
 
+/* 应用计划草稿生成中（R6 / D7）：原先只有静止文案，看起来像渲染已结束；
+   低幅度透明度脉冲表示"仍在进行"，并在减弱动效偏好下关闭 */
+.apply-draft-loading {
+  animation: draft-loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes draft-loading-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apply-draft-loading {
+    animation: none;
+  }
+}
+
 /* ── Browser (list + detail) ── */
 .browser {
   flex: 1;
@@ -1724,7 +1836,7 @@ button,
   margin-top: 5px;
   font-size: 11px;
   line-height: 1.45;
-  color: var(--text-mid);
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1744,7 +1856,7 @@ button,
   gap: 12px;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  color: var(--text-mid);
+  color: var(--text-dim);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1793,6 +1905,28 @@ button,
 
 .browser-target-notice {
   margin-top: 2px;
+}
+
+/* 配置浏览内联弹层（R6 / D7）：modal-body 是块容器，纵向堆叠的 .field 之间原本零间距，
+   这里统一 12px；同时把子元素自带的上下 margin 归零，避免与 gap 叠加。
+   这两个类也是 ConfigBrowser.test 的查询锚点，不能只删不加。 */
+.browser-replace-modal .modal-body,
+.browser-target-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.browser-replace-modal .modal-body .field,
+.browser-target-modal .modal-body .field {
+  flex: 0 0 auto;
+}
+
+.browser-replace-modal .browser-replace-summary,
+.browser-target-modal .browser-target-flow,
+.browser-target-modal .browser-target-notice {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .browser-detail {
@@ -2053,15 +2187,222 @@ button,
   color: #d99;
 }
 .code-area {
-  flex: 1;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   overflow: auto;
   margin: 0;
-  padding: 14px 16px;
+  /* 顶部留白 = PAD_TOP，左 = 行号槽 + 间距，右 = 缩略图槽（由 JS 下发 --code-pad-right） */
+  padding: var(--code-pad-top) var(--code-pad-right, 76px) 14px calc(var(--code-gutter-w) + 8px);
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: var(--code-row-h); /* 必须与 JS ROW_H 严格一致 */
   color: var(--text);
+  background: transparent; /* 让命中行底色（z-index 更低的 .code-lines）透出 */
   white-space: pre;
   tab-size: 2;
+  outline: none;
+  -webkit-overflow-scrolling: touch;
+}
+/* 视图根：占据 .content-box 的剩余高度；绝对子层依赖它有界尺寸 */
+.code-view {
+  --code-row-h: 20px;
+  --code-gutter-w: 52px;
+  --code-pad-top: 6px;
+  --code-minimap-w: 66px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg);
+  outline: none;
+}
+.code-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 命中行底色层：与文本共享同一 ROW_H 网格，位于文本之下 */
+.code-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.code-lines-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  will-change: transform;
+}
+.code-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--code-row-h);
+}
+.code-line.is-hit {
+  background: rgba(244, 71, 71, 0.12);
+}
+.code-line.is-current {
+  background: rgba(244, 71, 71, 0.22);
+  box-shadow: inset 2px 0 0 var(--red-h);
+}
+/* 行号槽：绝对定位在文本左缘之外，滚动手感由 JS 同步 transform */
+.code-gutter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--code-gutter-w);
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.code-gutter-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  will-change: transform;
+}
+.code-ln {
+  position: absolute;
+  left: 0;
+  right: 6px;
+  height: var(--code-row-h);
+  line-height: var(--code-row-h);
+  text-align: right;
+  font-size: 11.5px;
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color: var(--text-dim);
+}
+.code-ln.is-hit {
+  color: var(--red-h);
+}
+.code-ln.is-current {
+  color: var(--text-hi);
+  background: rgba(244, 71, 71, 0.22);
+}
+/* 缩略图（VSCode minimap）：canvas 画行条，视口框标注当前可见范围 */
+.code-minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--code-minimap-w);
+  z-index: 2;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.code-minimap-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+.code-minimap-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 1px;
+  pointer-events: none;
+}
+/* 视图内查找：悬停显示入口，打开后为浮动查找条 */
+.code-find-open {
+  position: absolute;
+  top: 8px;
+  right: var(--code-find-right, 16px);
+  z-index: 4;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.code-body:hover .code-find-open,
+.code-find-open:focus-visible {
+  opacity: 1;
+}
+.code-find-open:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.code-find {
+  position: absolute;
+  top: 8px;
+  right: var(--code-find-right, 16px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.code-find-input {
+  width: 160px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.code-find-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.code-find-count {
+  min-width: 54px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.code-find-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.code-find-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.code-find-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .code-area code {
   font: inherit;
@@ -2899,7 +3240,9 @@ button.diff-workflow-step-btn:hover {
 .merge-scope-btn:focus-visible {
   color: var(--text-hi);
   border-color: rgba(79, 195, 247, 0.35);
-  outline: none;
+}
+.merge-scope-btn:focus-visible {
+  box-shadow: var(--focus-ring-shadow);
 }
 .merge-scope-btn.active {
   color: #9ad7ff;
@@ -2997,15 +3340,34 @@ button.diff-workflow-step-btn:hover {
   min-width: 0;
   color: var(--text-dim);
 }
-/* 内容搜索命中高亮（列表摘要与代码视图共用） */
+/* 字段下的辅助说明文字（R6 / D7）：曾被 4 个组件引用但全站未定义，
+   灰阶与 .settings-panel-description 同层级，字号对齐 .field > span */
+.field-hint {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+/* 内容搜索命中高亮（列表摘要与代码视图共用）——命中词标红 */
 .search-hit {
-  background: color-mix(in srgb, var(--yellow, #e5c07b) 45%, transparent);
-  color: inherit;
+  background: rgba(244, 71, 71, 0.35);
+  color: var(--red-h);
   border-radius: 2px;
   padding: 0 1px;
+  box-shadow: inset 0 0 0 1px rgba(244, 71, 71, 0.5);
 }
 .code-area .search-hit {
-  background: color-mix(in srgb, var(--yellow, #e5c07b) 60%, transparent);
+  background: rgba(244, 71, 71, 0.45);
+}
+/* 当前命中：更亮的实心红底白字；用 .search-hit.search-hit-current 复合选择器提升特异性，压过 .code-area .search-hit */
+.search-hit.search-hit-current {
+  background: var(--red);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px var(--red-h);
+}
+.code-area .search-hit.search-hit-current {
+  background: var(--red);
+  color: #fff;
 }
 
 .required-mark {
@@ -3033,7 +3395,9 @@ button.diff-workflow-step-btn:hover {
 .help-tip:focus-visible {
   color: var(--text-hi);
   border-color: var(--accent);
-  outline: none;
+}
+.help-tip:focus-visible {
+  box-shadow: var(--focus-ring-shadow);
 }
 .help-popover {
   position: fixed;
@@ -3075,7 +3439,6 @@ button.diff-workflow-step-btn:hover {
   width: 15px;
   height: 15px;
   cursor: pointer;
-  accent-color: var(--accent);
 }
 
 /* ── Diff panel ── */
@@ -3285,12 +3648,14 @@ button.diff-workflow-step-btn:hover {
 .diff-merge-btn:focus-visible:not(:disabled) {
   color: var(--text-hi);
   border-color: var(--accent);
-  outline: none;
+}
+.diff-merge-btn:focus-visible:not(:disabled) {
+  box-shadow: var(--focus-ring-shadow);
 }
 .diff-merge-btn:disabled {
   opacity: 0.28;
   cursor: not-allowed;
-  color: var(--text-muted);
+  color: var(--text-dim);
   border-color: rgba(255, 255, 255, 0.04);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -3495,6 +3860,11 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   font-weight: 650;
 }
+
+.batch-diff-failures-count {
+  flex: 1;
+  min-width: 0;
+}
 .batch-diff-failures-list {
   border-top: 1px solid rgba(239, 68, 68, 0.12);
 }
@@ -3573,7 +3943,10 @@ button.diff-workflow-step-btn:hover {
 .batch-diff-nav-item:hover,
 .batch-diff-nav-item:focus-visible {
   background: var(--bg-hover);
-  outline: none;
+}
+.batch-diff-nav-item:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
 }
 .batch-diff-nav-item.active {
   background: linear-gradient(90deg, rgba(79, 195, 247, 0.16), rgba(79, 195, 247, 0.045));
@@ -3993,7 +4366,7 @@ button.diff-workflow-step-btn:hover {
   min-width: 0;
   height: 24px;
   padding: 2px 6px;
-  background: var(--bg1);
+  background: var(--bg3);
   border: 1px solid var(--accent);
   border-radius: 4px;
   color: var(--text-hi);
@@ -4050,6 +4423,17 @@ button.diff-workflow-step-btn:hover {
 .conn-provider-badge.local {
   color: #c4b5fd;
   background: rgba(167, 139, 250, 0.12);
+}
+
+/* Apollo / Consul 徽标此前无定义，渲染成无边距的裸文字，与 Nacos/本地快照不一致（R6） */
+.conn-provider-badge.apollo {
+  color: #e5c07b;
+  background: rgba(229, 192, 123, 0.12);
+}
+
+.conn-provider-badge.consul {
+  color: #dcdcaa;
+  background: rgba(220, 220, 170, 0.14);
 }
 .conn-item-url {
   display: flex;
@@ -4134,7 +4518,7 @@ button.diff-workflow-step-btn:hover {
   background: var(--diff-del-bg);
 }
 .local-validation-path {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
 }
@@ -5736,6 +6120,12 @@ button.diff-workflow-step-btn:hover {
   color: var(--accent);
 }
 
+.backup-item-time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .backup-item-source {
   margin-top: 4px;
   font-size: 11px;
@@ -6028,6 +6418,15 @@ button.diff-workflow-step-btn:hover {
   text-overflow: ellipsis;
 }
 
+.task-item-scope {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .task-item-progress {
   display: flex;
   align-items: center;
@@ -6123,6 +6522,11 @@ button.diff-workflow-step-btn:hover {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 16px;
+}
+
+.task-detail-error {
+  min-width: 0;
+  margin-top: 12px;
 }
 
 .task-detail-progress {
@@ -6547,7 +6951,6 @@ button.diff-workflow-step-btn:hover {
 
 .apply-item-check {
   margin: 0;
-  accent-color: var(--accent);
 }
 
 .apply-item-row.blocked {
@@ -7086,7 +7489,7 @@ button.diff-workflow-step-btn:hover {
 
 .startup-dialog-kicker {
   margin-bottom: 8px;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -7111,7 +7514,7 @@ button.diff-workflow-step-btn:hover {
 .startup-dialog-list li {
   position: relative;
   padding-left: 18px;
-  color: var(--text-secondary);
+  color: var(--text);
   line-height: 1.55;
 }
 
