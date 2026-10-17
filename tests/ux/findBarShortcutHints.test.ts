@@ -15,8 +15,8 @@ import { loadLocale, readScannedSource, sourceFiles } from "./scanUtils";
 const VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
 /** 键名走 title（悬停可见）+ aria-keyshortcuts（辅助技术可读），label 走不带键名的旧 key。 */
 const HINTED: { labelKey: string; titleKey: string; keyShortcuts: string }[] = [
-  { labelKey: "findPrev", titleKey: "findPrevKey", keyShortcuts: '"Shift+Enter"' },
-  { labelKey: "findNext", titleKey: "findNextKey", keyShortcuts: '"Enter"' },
+  { labelKey: "findPrev", titleKey: "findPrevKey", keyShortcuts: '"Shift+Enter Shift+F3"' },
+  { labelKey: "findNext", titleKey: "findNextKey", keyShortcuts: '"Enter F3"' },
   { labelKey: "findClose", titleKey: "findCloseKey", keyShortcuts: '"Escape"' },
 ];
 /** 键名到文案的最低要求：中文英文都必须出现这些字面 token。 */

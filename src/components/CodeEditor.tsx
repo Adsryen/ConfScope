@@ -476,7 +476,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             disabled={!hits.length}
             title={t("config.findPrevKey")}
             aria-label={t("config.findPrev")}
-            aria-keyshortcuts="Shift+Enter"
+            aria-keyshortcuts="Shift+Enter Shift+F3"
           >
             ↑
           </button>
@@ -487,7 +487,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             disabled={!hits.length}
             title={t("config.findNextKey")}
             aria-label={t("config.findNext")}
-            aria-keyshortcuts="Enter"
+            aria-keyshortcuts="Enter F3"
           >
             ↓
           </button>

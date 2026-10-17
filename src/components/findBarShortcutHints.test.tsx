@@ -15,6 +15,19 @@ import CodeView from "./CodeView";
  * 键名另外通过 aria-keyshortcuts 告诉辅助技术。
  */
 
+/** title 里的键名（人眼看的）与 aria-keyshortcuts（辅助技术读的）互为同一份事实源。
+ *  先匹配长的组合，免得 "Shift+F3" 被拆成 "F3" 后误判成漏声明。 */
+const KEY_TOKEN = /Shift\+F3|Shift\+Enter|Ctrl\+F|Enter|F3|Esc/g;
+const KEY_ALIAS: Record<string, string> = { Esc: "Escape", "Ctrl+F": "Control+F" };
+
+function keysInTitle(title: string): string[] {
+  return [...new Set((title.match(KEY_TOKEN) ?? []).map((token) => KEY_ALIAS[token] ?? token))].sort();
+}
+
+function declaredKeys(value: string): string[] {
+  return [...new Set(value.split(/\s+/).filter(Boolean))].sort();
+}
+
 const MULTI = 'server.port=8080\nname = "a<b&c>"\nqps: 10000\nport = 8081\n';
 
 interface View {
@@ -90,9 +103,23 @@ describe.each(views)("$name 的查找栏交代快捷键", (view) => {
       expect(label).not.toMatch(/Enter|Esc|F3|\+/);
       expect(btn.getAttribute("aria-keyshortcuts")).toBeTruthy();
     }
-    expect(prev.getAttribute("aria-keyshortcuts")).toBe("Shift+Enter");
-    expect(next.getAttribute("aria-keyshortcuts")).toBe("Enter");
+    expect(prev.getAttribute("aria-keyshortcuts")).toBe("Shift+Enter Shift+F3");
+    expect(next.getAttribute("aria-keyshortcuts")).toBe("Enter F3");
     expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
+  });
+
+  // 波50：F3 / Shift+F3 在键盘监听里真能导航，title 文案也写了，可 aria-keyshortcuts 只声明了
+  // Enter / Shift+Enter——读屏用户永远听不出还有 F3 这条路径。这里把两边钉成同一份事实源：
+  // title 里出现的键名一个不许漏，aria 里也不许多出没做过的键（将来只改文案不改实现会当场红）。
+  it("title 里的键名与 aria-keyshortcuts 逐键同源（两种界面语言都验）", () => {
+    for (const locale of ["zh-CN", "en-US"]) {
+      const { container, before } = openBar(view, locale);
+      expect(declaredKeys(before.keyshortcuts), locale).toEqual(keysInTitle(before.title));
+      for (const btn of buttons(container)) {
+        const label = btn.getAttribute("aria-label") ?? "";
+        expect(declaredKeys(btn.getAttribute("aria-keyshortcuts") ?? ""), `${locale} 的「${label}」`).toEqual(keysInTitle(btn.title));
+      }
+    }
   });
 
   it("还没输入时，栏内直接写着 Enter / Esc 怎么用（不用悬停也能看见）", () => {
