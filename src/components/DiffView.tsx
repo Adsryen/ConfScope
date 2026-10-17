@@ -1681,7 +1681,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               <div className="diff-source-summary-card">
                 <span className="diff-source-summary-title">{t("diff.sourceA")}</span>
                 {leftConn?.sourceType === "local-snapshot" ? (
-                  <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+                  <span className="env-badge env-local">{t("connection.sourceTypeSnapshot")}</span>
                 ) : leftConn ? (
                   <EnvironmentBadge name={connectionEnvironmentName(leftConn)} />
                 ) : null}
@@ -1692,7 +1692,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               <div className="diff-source-summary-card">
                 <span className="diff-source-summary-title">{t("diff.sourceB")}</span>
                 {rightConn?.sourceType === "local-snapshot" ? (
-                  <span className="env-badge local">{t("connection.sourceTypeSnapshot")}</span>
+                  <span className="env-badge env-local">{t("connection.sourceTypeSnapshot")}</span>
                 ) : rightConn ? (
                   <EnvironmentBadge name={connectionEnvironmentName(rightConn)} />
                 ) : null}

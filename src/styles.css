@@ -714,11 +714,6 @@ textarea {
 .btn-ghost:hover:not(:disabled) {
   background: var(--bg-hover);
 }
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
 /* ── Workspace ── */
 .workspace {
   flex: 1;
@@ -2517,9 +2512,6 @@ textarea {
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
 }
-.history-item:hover {
-  background: var(--bg-hover);
-}
 .history-item.active {
   background: var(--bg-active);
 }
@@ -3050,55 +3042,65 @@ button.diff-workflow-step-btn:hover {
   color: var(--green);
   background: rgba(78, 201, 176, 0.1);
 }
+/* 环境徽章：全站只留这一份（R31）。
+   5493 行附近原本还有一份同名 .env-badge，把圆角和内距静默换成方形小标签，
+   而 max-width / overflow / border 只有前一份在设——颜色来自 A、形状来自 B，
+   谁都不知道自己最终长成什么样。合并口径：**保持现在屏幕上的样子**，
+   配色与形状一律取后一份（当前生效），只把被吃掉的截断与描边补回来。
+   display 从 inline-flex 改成 inline-block：text-overflow 在 flex 容器上不生效，
+   长环境名以前是被硬裁半个字，现在才真的出省略号。 */
 .env-badge {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
   min-width: 0;
   max-width: 110px;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   line-height: 1.5;
+  letter-spacing: 0.3px;
 }
+/* 每个环境一条：color / background 用后一份（当前生效），border-color 只有前一份设过，照旧留下。 */
 .env-dev {
-  color: #7bd7c7;
+  color: #81c784;
+  background: rgba(76, 175, 80, 0.15);
   border-color: rgba(123, 215, 199, 0.38);
-  background: rgba(78, 201, 176, 0.1);
 }
 .env-test {
-  color: #82c7ff;
+  color: #64b5f6;
+  background: rgba(33, 150, 243, 0.15);
   border-color: rgba(130, 199, 255, 0.36);
-  background: rgba(79, 195, 247, 0.1);
 }
 .env-staging {
-  color: #f4c06a;
+  color: #ffb74d;
+  background: rgba(255, 152, 0, 0.15);
   border-color: rgba(244, 192, 106, 0.4);
-  background: rgba(244, 192, 106, 0.1);
 }
 .env-prod {
-  color: #ef9a9a;
+  color: #e57373;
+  background: rgba(244, 67, 54, 0.15);
   border-color: rgba(190, 80, 90, 0.45);
-  background: rgba(126, 42, 52, 0.22);
 }
+/* canary / local 从头到尾只有一份定义，颜色保持原样，别顺手改成 Material 色系。 */
 .env-canary {
   color: #d8b4fe;
-  border-color: rgba(216, 180, 254, 0.36);
   background: rgba(168, 85, 247, 0.11);
+  border-color: rgba(216, 180, 254, 0.36);
 }
 .env-local {
   color: #b8c0cc;
-  border-color: rgba(184, 192, 204, 0.32);
   background: rgba(184, 192, 204, 0.08);
+  border-color: rgba(184, 192, 204, 0.32);
 }
+/* other 的文字走 --text-dim（波6 的 AA 口径），不再硬编码 #9e9e9e。 */
 .env-other {
   color: var(--text-dim);
+  background: rgba(158, 158, 158, 0.15);
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.04);
 }
 .source-note {
   display: flex;
@@ -3328,11 +3330,6 @@ button.diff-workflow-step-btn:hover {
 }
 .namespace-pick-row .btn {
   flex: 0 0 auto;
-}
-.field-error {
-  color: var(--red-h);
-  font-size: 11px;
-  line-height: 1.4;
 }
 .field-error-box {
   display: flex;
@@ -4934,6 +4931,8 @@ button.diff-workflow-step-btn:hover {
   display: inline-flex;
 }
 
+/* 全站唯一的小按钮尺寸。以前这里有两份 .btn-sm，前一份（padding 4px 10px / font-size 12px）
+   整条被这一份吃掉，写了却永远不生效（R31）。*/
 .btn-sm {
   padding: 4px 8px;
   font-size: 11px;
@@ -5488,37 +5487,6 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.env-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-}
-
-.env-dev {
-  background: rgba(76, 175, 80, 0.15);
-  color: #81c784;
-}
-.env-test {
-  background: rgba(33, 150, 243, 0.15);
-  color: #64b5f6;
-}
-.env-staging {
-  background: rgba(255, 152, 0, 0.15);
-  color: #ffb74d;
-}
-.env-prod {
-  background: rgba(244, 67, 54, 0.15);
-  color: #e57373;
-}
-.env-other {
-  background: rgba(158, 158, 158, 0.15);
-  color: #9e9e9e;
 }
 
 .audit-env-name {
