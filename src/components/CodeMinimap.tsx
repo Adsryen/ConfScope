@@ -94,6 +94,23 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
    */
   const canScrollContent = metrics.scrollHeight <= 0 || metrics.scrollHeight > metrics.clientHeight + 1;
 
+  /**
+   * 画条、视口框、点击映射共用的那**一把**尺：正文滚动内容的总高（轮31 F-27）。
+   *
+   * 原先画条按「行序号比例」（`startLine / lines.length`）画，而视口框与点击映射早就按正文像素算
+   * （`scrollTop / scrollHeight`、`ratio * scrollHeight - clientHeight/2`）。两者差一个 `padTop`：
+   * 正文第 L 行实际在 `padTop + L*rowHeight` 像素处，`scrollHeight = padTop + 行总高 + 底部留白`。
+   * 实测 40 行 / ROW_H=20 / padTop=72：第 20 行画在 50.0% 应在 53.4%，第 5 行画在 12.5% 应在 19.5%，
+   * 第 39 行反过来偏 1.3%。用户看到的是两条症状——点缩略图上某一行命中，正文落点差 1~2 行（文件越短
+   * 越明显）；以及**整条都在视口里的一行，它的红条画在视口框外面**（框按像素、条按行号）。
+   * 分母只许在 `scrollHeight` 上取一份，量不到（首帧 / jsdom）才退回估算，且这个估算同时给画条与
+   * 视口框用——再写第二个 `padTop*2 + totalLines*rowHeight` 就是第三把尺。
+   */
+  const contentHeight = useMemo(
+    () => (metrics.scrollHeight > 0 ? metrics.scrollHeight : padTop * 2 + lines.length * rowHeight),
+    [metrics.scrollHeight, padTop, lines.length, rowHeight]
+  );
+
   const rowLimit = Math.max(MM_MIN_ROWS, Math.floor(minimapSize.height / MM_ROW_H));
   /**
    * 分两阶段算（轮28 F-12），顺序不许合回去：
@@ -118,12 +135,12 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     canvas.style.height = `${height}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    const n = Math.max(1, lines.length);
     const barArea = Math.max(0, width - MM_INSET_X * 2);
     for (const row of minimapRows) {
       if (row.kind === "blank") continue;
-      const y = (row.startLine / n) * height;
-      const h = Math.max(1, ((row.endLine - row.startLine) / n) * height - MM_BAR_ROW_GAP);
+      // 与正文同一把像素尺：桶顶 = padTop + startLine*rowHeight，桶高 = 覆盖行数 * rowHeight
+      const y = ((padTop + row.startLine * rowHeight) / contentHeight) * height;
+      const h = Math.max(1, (((row.endLine - row.startLine) * rowHeight) / contentHeight) * height - MM_BAR_ROW_GAP);
       const barWidth = Math.max(MM_MIN_BAR_W, row.widthRatio * barArea);
       ctx.fillStyle = row.kind === "comment" ? COLOR_COMMENT_LINE : COLOR_CODE_LINE;
       ctx.fillRect(MM_INSET_X, y, barWidth, h);
@@ -133,7 +150,8 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
       }
     }
     // lines.length 而不是 lines：桶表变了才要重画，正文数组的引用变化由 buckets 那条 memo 收敛。
-  }, [minimapRows, minimapSize, lines.length]);
+    // padTop / rowHeight / contentHeight 也在这张表里：查找栏一开合，整张图的 y 都要跟着重画。
+  }, [minimapRows, minimapSize, lines.length, contentHeight, padTop, rowHeight]);
 
   /**
    * 点 / 拖缩略图落到某个偏移。
@@ -160,13 +178,12 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
 
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;
-    const totalLines = lines.length;
-    if (scrollHeight <= 0 || clientHeight <= 0 || totalLines <= 0) return null;
-    const contentH = padTop * 2 + totalLines * rowHeight;
+    if (scrollHeight <= 0 || clientHeight <= 0 || lines.length <= 0) return null;
     const topPct = clamp((scrollTop / scrollHeight) * 100, 0, 100);
-    const heightPct = clamp((clientHeight / scrollHeight) * 100, (rowHeight / contentH) * 100, 100 - topPct);
+    // 下限是「至少一行高」，分母同样取 contentHeight：这里再估一次就是第三把尺
+    const heightPct = clamp((clientHeight / scrollHeight) * 100, (rowHeight / contentHeight) * 100, 100 - topPct);
     return { topPct, heightPct };
-  }, [metrics, lines.length, padTop, rowHeight]);
+  }, [metrics, lines.length, rowHeight, contentHeight]);
 
   useEffect(() => {
     const mm = surfaceRef.current;
