@@ -29,6 +29,19 @@ const LOCALE_TOKENS: Record<string, string[]> = {
 };
 const KEY_SHORTCUT_ATTR = /aria-keyshortcuts=/g;
 
+/** 空态提示的落点：`.code-find-count` 那个 live region 的开标签 + children 表达式。 */
+const COUNT_CLASS = 'className="code-find-count"';
+
+function countRegion(source: string): { tag: string; children: string } {
+  const start = source.indexOf(COUNT_CLASS);
+  expect(start, `缺少 ${COUNT_CLASS} 容器`).toBeGreaterThanOrEqual(0);
+  const tagEnd = source.indexOf(">", start);
+  expect(tagEnd, `${COUNT_CLASS} 的开标签没闭合`).toBeGreaterThan(start);
+  const childrenEnd = source.indexOf("</span>", tagEnd);
+  expect(childrenEnd, `${COUNT_CLASS} 的 children 收不到尾`).toBeGreaterThan(tagEnd);
+  return { tag: source.slice(start, tagEnd + 1), children: source.slice(tagEnd + 1, childrenEnd) };
+}
+
 function count(re: RegExp, source: string): number {
   return Array.from(source.matchAll(re)).length;
 }
@@ -50,8 +63,25 @@ describe("查找栏快捷键提示两态成对（波42 R65）", () => {
     for (const file of VIEWS) {
       const source = readScannedSource(file);
       expect(source, `${file} 的空态提示出口被删了`).toContain('t("config.findHint")');
-      expect(source, `${file} 的提示不该搬出 .code-find-count`).toMatch(/className="code-find-count"[\s\S]{0,400}config\.findHint/);
+      // 按 span 边界量，不按「距离 className 多少个字符」量：开标签里再加几个属性
+      // （aria-live / 截断态的 title）就会把距离口径撑爆，而那根本不是回归。
+      const { tag, children } = countRegion(source);
+      expect(children, `${file} 的提示不该搬出 .code-find-count 的文本`).toContain('t("config.findHint")');
+      expect(tag, `${file} 的提示被塞进了属性——读屏念不到`).not.toContain("config.findHint");
+      expect(tag, `${file} 的 .code-find-count 不再是 live region`).toContain('aria-live="polite"');
     }
+  });
+
+  // ---- 自检：口径退回「按字符距离量」会被属性撑爆，按边界量则能抓到真回归 ----
+  it("自检：把提示从 children 搬进 title 必须判红", () => {
+    const source = readScannedSource(VIEWS[0]);
+    const moved = source
+      .replace(COUNT_CLASS, 'className="code-find-count" title={t("config.findHint")}')
+      .replace(': t("config.findHint")}', ': ""}');
+    expect(moved, "变异没落到 span 里，这条自检是空转").not.toBe(source);
+    const { tag, children } = countRegion(moved);
+    expect(tag, "变异后提示还是没进属性，这条自检是空转").toContain("config.findHint");
+    expect(children, "提示搬进属性必须判红").not.toContain("config.findHint");
   });
 
   it("zh / en 两份文案带同样的键名 token", () => {
