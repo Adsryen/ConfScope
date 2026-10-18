@@ -5588,6 +5588,12 @@ button.diff-workflow-step-btn:hover {
   gap: 16px;
   overflow: auto;
   overscroll-behavior: contain;
+  /* 轮34 F-35：.audit-detail 是 sticky;bottom:0 的浮条（那条上投影就是浮层的意思），
+     短窗口下它会盖住列表最后一段。键盘走查（F-29/F-61）把行滚进视野时必须给它让出这段高度，
+     否则选中的行落在条底下，看起来像「按了方向键没动」。取详情条最坏高度（表头 51 + 值框 200 + 内边距）。 */
+  scroll-padding-bottom: 280px;
+  /* 滚到底时详情条回到流内，留一段与 gap 同宽的呼吸，别让圆角贴着页面下边缘。 */
+  padding-bottom: 16px;
 }
 
 /* 工具栏 */
@@ -5807,7 +5813,10 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;
+  /* 轮34 F-35：这里原本是 min-height:0，整页只有它允许收缩，于是默认窗口 1280x820 点开详情后
+     实测塌成 0px / 可见 0 行、行也被 .audit-detail-head 拦住点不动。行高实测 48px，
+     58(表头) + 4*48 + 余量 = 280 ⇒ 再矮也看得见 4 行，挤不掉的部分交给 .audit-page 自己滚。 */
+  min-height: 280px;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -5991,6 +6000,9 @@ button.diff-workflow-step-btn:hover {
 .audit-detail {
   position: sticky;
   bottom: 0;
+  /* 轮34 F-35：flex 项默认 shrink:1，视口一矮它先被压到 2px（实测），
+     既读不到内容也留不住 sticky;bottom:0 的行程。收住自己的高度，挤压交给页面滚动。 */
+  flex-shrink: 0;
   z-index: 20;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.35);
   background: var(--bg2);
