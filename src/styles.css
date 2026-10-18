@@ -24,6 +24,9 @@
   --green: #4ec9b0;
   --yellow: #dcdcaa;
   --blue: #4fc3f7;
+  /* 原生滚动条占宽（轮31 F-28）：必须与文件末尾 ::-webkit-scrollbar 的 width/height 逐值相等，
+     由 tests/ux/minimapStagesMustSplit.test.ts 钉住。缩略图靠它让位，正文右留白按它算分量。 */
+  --code-scrollbar-w: 10px;
   /* 键盘焦点环（R5 / D4）：全站统一色与宽度，供 outline / box-shadow 复用 */
   --focus-outline: rgba(79, 195, 247, 0.7);
   --focus-ring-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent);
@@ -2217,7 +2220,7 @@ textarea {
   overscroll-behavior: contain;
   margin: 0;
   /* 顶部留白 = PAD_TOP，左 = 行号槽 + 间距，右 = 缩略图槽（由 JS 下发 --code-pad-right） */
-  padding: var(--code-pad-top) var(--code-pad-right, 76px) 14px calc(var(--code-gutter-w) + 8px);
+  padding: var(--code-pad-top) var(--code-pad-right, 86px) 14px calc(var(--code-gutter-w) + 8px);
   font-size: 12.5px;
   line-height: var(--code-row-h); /* 必须与 JS ROW_H 严格一致 */
   color: var(--text);
@@ -2316,12 +2319,14 @@ textarea {
   color: var(--text-hi);
   background: rgba(244, 71, 71, 0.22);
 }
-/* 缩略图（VSCode minimap）：canvas 画行条，视口框标注当前可见范围 */
+/* 缩略图（VSCode minimap）：canvas 画行条，视口框标注当前可见范围。
+   右与下各让开一个原生滚动条位（轮31 F-28）：滚动容器与它都 inset:0 铺满，
+   不让位的话那条 10px 的纵向滚动档整条被不透明的图盖住，横向滚动条右端 66px 也被抢走。 */
 .code-minimap {
   position: absolute;
   top: 0;
-  right: 0;
-  bottom: 0;
+  right: var(--code-scrollbar-w);
+  bottom: var(--code-scrollbar-w);
   width: var(--code-minimap-w);
   z-index: 2;
   background: var(--bg);
@@ -4356,7 +4361,7 @@ button.diff-workflow-step-btn:hover {
   --code-gutter-w: 52px;
   --code-pad-top: 12px;
   --code-pad-left: calc(var(--code-gutter-w) + 14px);
-  /* 右侧两条留白：基础值给正文与查找条，编辑态开着缩略图时由组件按 76px 覆盖（轮30 F-24）。
+  /* 右侧两条留白：基础值给正文与查找条，编辑态开着缩略图时由组件按 86px 覆盖（轮30 F-24 / 轮31 F-28）。
      --code-minimap-w 与 .code-view 同值，宽度只在 CodeMinimap 的 MINIMAP_W 有一份解释。 */
   --code-pad-right: 14px;
   --code-find-right: 16px;

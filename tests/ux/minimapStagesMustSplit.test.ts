@@ -206,6 +206,88 @@ describe("缩略图只许有一份实现（轮30 F-24）", () => {
   });
 });
 
+describe("缩略图让开原生滚动条（轮31 F-28）", () => {
+  /** 取某条选择器块里的某个声明值（值内空白压平）；找不到声明返回 null。判据只看传进来的那份 CSS。 */
+  function declIn(css: string, selector: string, prop: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+    const rule = new RegExp(`${escaped} \\{([^}]*)\\}`, "m").exec(css);
+    expect(rule, `styles.css 里找不到 ${selector} 规则块`).not.toBeNull();
+    const found = new RegExp(`${prop.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}:\\s*([^;]+);`).exec(rule![1]);
+    return found ? found[1].replace(/\s+/g, " ").trim() : null;
+  }
+  const decl = (selector: string, prop: string) => declIn(CSS, selector, prop);
+
+  /** 从 CodeMinimap.tsx 里取一个数值常量（`export const NAME = 12;` 或 `const NAME = 12;`）。 */
+  function numericConst(name: string): number {
+    const found = new RegExp(`(?:export )?const ${name} = (\\d+);`).exec(readScannedSource(MM));
+    expect(found, `CodeMinimap.tsx 里读不到常量 ${name}`).not.toBeNull();
+    return Number(found![1]);
+  }
+
+  it("CSS 侧：滚动条占宽只有一个数，缩略图按它让位", () => {
+    const scrollbarW = decl("::-webkit-scrollbar", "width");
+    expect(scrollbarW, "全站滚动条宽度读不到，这条守卫就成了空转").not.toBeNull();
+    expect(scrollbarW, "横向滚动条高度与纵向宽度不同值？那要拆成两个变量分别让位").toBe(decl("::-webkit-scrollbar", "height"));
+
+    expect(decl(":root", "--code-scrollbar-w"), `:root 里缺少 --code-scrollbar-w（必须与 ::-webkit-scrollbar 的 ${scrollbarW} 同源）`).toBe(
+      scrollbarW
+    );
+    expect(decl(".code-minimap", "right"), "缩略图还贴着 right:0：整条纵向滚动条被不透明的它盖住").toBe("var(--code-scrollbar-w)");
+    expect(decl(".code-minimap", "bottom"), "缩略图还贴着 bottom:0：横向滚动条右端那 66px 抓到的全是图").toBe("var(--code-scrollbar-w)");
+  });
+
+  it("TS 侧：留白按三个分量算，缺一项就是把滚动条盖回去", () => {
+    const w = numericConst("MINIMAP_W");
+    const gap = numericConst("MINIMAP_SIDE_GAP");
+    const bar = numericConst("MINIMAP_SCROLLBAR_W");
+    expect(bar, "MINIMAP_SCROLLBAR_W 必须与 CSS 那份同值").toBe(Number(decl("::-webkit-scrollbar", "width")!.replace("px", "")));
+
+    const reserved = /export const MINIMAP_RESERVED_RIGHT = ([^;]+);/.exec(readScannedSource(MM));
+    expect(reserved, "读不到 MINIMAP_RESERVED_RIGHT 的定义").not.toBeNull();
+    expect(reserved![1].replace(/\s+/g, " ").trim(), "留白少了滚动条那一格：必须是三个分量之和").toBe(
+      "MINIMAP_W + MINIMAP_SIDE_GAP + MINIMAP_SCROLLBAR_W"
+    );
+    expect(w + gap + bar, "三个分量加起来要正好等于留白（正文右缘与查找条都按它对齐）").toBe(86);
+
+    // .code-area 的兜底留白（JS 没下发时的值）不许停在旧的两分量数字上
+    const fallback = /--code-pad-right,\s*(\d+)px/.exec(CSS);
+    expect(fallback, "读不到 .code-area 的右侧留白兜底值").not.toBeNull();
+    expect(Number(fallback![1]), "兜底留白与 MINIMAP_RESERVED_RIGHT 分叉：JS 下发失败时就又盖住滚动条").toBe(w + gap + bar);
+  });
+
+  it("两个视图的 CSS 块各自都要看得到占宽（让位变量在 :root，靠继承下发）", () => {
+    for (const selector of [".code-view", ".code-editor"]) {
+      expect(decl(selector, "--code-minimap-w"), `${selector} 的 --code-minimap-w 必须与 MINIMAP_W 同值`).toBe(
+        `${numericConst("MINIMAP_W")}px`
+      );
+    }
+  });
+
+  it("自检六：把 right/bottom 退回 0 必须判红", () => {
+    const regressed = CSS.replace(".code-minimap {", ".code-minimap {").replace(
+      "  right: var(--code-scrollbar-w);\n  bottom: var(--code-scrollbar-w);",
+      "  right: 0;\n  bottom: 0;"
+    );
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(CSS);
+    expect(declIn(regressed, ".code-minimap", "right"), "退回 0 之后判据必须看得见差别").toBe("0");
+    expect(declIn(regressed, ".code-minimap", "bottom"), "退回 0 之后判据必须看得见差别").toBe("0");
+    expect(decl(".code-minimap", "right"), "真源码必须是让位写法，否则上面那两条对比是空转").not.toBe("0");
+  });
+
+  it("自检七：留白退回两个分量必须判红", () => {
+    const mm = readScannedSource(MM);
+    const regressed = mm.replace(
+      "export const MINIMAP_RESERVED_RIGHT = MINIMAP_W + MINIMAP_SIDE_GAP + MINIMAP_SCROLLBAR_W;",
+      "export const MINIMAP_RESERVED_RIGHT = MINIMAP_W + MINIMAP_SIDE_GAP;"
+    );
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    const reserved = /export const MINIMAP_RESERVED_RIGHT = ([^;]+);/.exec(regressed);
+    expect(reserved![1].replace(/\s+/g, " ").trim(), "少一个分量就必须判红：正文右缘会压住滚动条那 10px").not.toBe(
+      "MINIMAP_W + MINIMAP_SIDE_GAP + MINIMAP_SCROLLBAR_W"
+    );
+  });
+});
+
 describe("自检：几种退回都必须判红", () => {
   it("自检一：把 currentLine 圈回 buckets 依赖必须判红", () => {
     const mm = readScannedSource(MM);

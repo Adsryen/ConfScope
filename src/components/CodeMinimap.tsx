@@ -30,10 +30,19 @@ const MM_MIN_BAR_W = 3;
 const MM_BAR_ROW_GAP = 0.5;
 /** 缩略图占宽（px），与 styles.css 的 `--code-minimap-w` 同源（守卫盯着）。 */
 export const MINIMAP_W = 66;
-/** 正文右缘与缩略图之间的空隙：留白 = 图宽 + 这个数，两个视图同一个值。 */
+/** 正文右缘与缩略图之间的空隙：两个视图同一个值。 */
 export const MINIMAP_SIDE_GAP = 10;
-/** 设置里开着缩略图时，正文与查找条该往左让多少。 */
-export const MINIMAP_RESERVED_RIGHT = MINIMAP_W + MINIMAP_SIDE_GAP;
+/**
+ * 原生滚动条占宽，与 styles.css 的 `::-webkit-scrollbar` / `--code-scrollbar-w` 同源（轮31 F-28）。
+ *
+ * 缺陷长什么样：滚动容器（`.code-area` / `textarea`）与缩略图都 `inset:0` 铺满，滚动条就画在容器
+ * 最右 / 最下那 10px，而 `.code-minimap` 是 `right:0; bottom:0; background: var(--bg)` 且 z-index
+ * 在正文之上 ⇒ **整条纵向滚动条被不透明的图盖住**，横向滚动条右端那 66px 同理（拖到右下角抓到的是
+ * 缩略图，跳行而不是横滚）。CSS 侧已按 `var(--code-scrollbar-w)` 让位，这里必须跟着同一分量。
+ */
+export const MINIMAP_SCROLLBAR_W = 10;
+/** 设置里开着缩略图时，正文与查找条该往左让多少：图宽 + 缝隙 + 给滚动条留的那一格。 */
+export const MINIMAP_RESERVED_RIGHT = MINIMAP_W + MINIMAP_SIDE_GAP + MINIMAP_SCROLLBAR_W;
 
 // 画布上的四个语义色。全站只有一个深色主题（styles.css 里就一个 :root，无 prefers-color-scheme），
 // 所以这里写死不是「待接主题」，是画布层与 CSS 层的分工（轮30 PRD 记的口径）。
