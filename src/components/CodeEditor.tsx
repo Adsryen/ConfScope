@@ -34,6 +34,7 @@ import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
 import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
+import { useWheelScrollsContainer } from "../lib/useWheelScrollsContainer";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -115,6 +116,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const linesInnerRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const findBarRef = useRef<HTMLDivElement | null>(null);
+  /** 关栏状态下的 ⌕ 入口浮标：和查找条同一块死区（轮32 F-33），也要接滚轮。 */
+  const findOpenBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const [findOpen, setFindOpen] = useState(false);
   // 查找栏打开期间实测的条高（px）：与浏览态同一口径，量不到退到兜底常量。
@@ -406,6 +409,17 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return () => ro.disconnect();
   }, [findOpen]);
 
+  /**
+   * 滚轮落在查找条 / ⌕ 浮标上 ⇒ 滚正文（轮32 F-33，与浏览态同一份出口）。
+   *
+   * 取证 research/wheelbar_probe.txt + wheelopen_probe.txt：浮层完全压在正文之上，滚一格
+   * 正文停在原值、外层也始终 0 —— 纯死区。编辑态里更贵：正文是 textarea，指针从条子上挪回来
+   * 继续滚却不动，用户只会觉得「编辑器卡住了」。
+   * reattachKey 递 findOpen：两个元素互斥渲染且每次都是新节点，不重挂就等于静默失活。
+   */
+  useWheelScrollsContainer(findBarRef, { containerRef: taRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+  useWheelScrollsContainer(findOpenBtnRef, { containerRef: taRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+
   // 净空变化不触发 scroll 事件，补一次同步让高亮层与行号网格跟上新 padding。
   useLayoutEffect(() => {
     syncScroll();
@@ -618,6 +632,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         <button
           type="button"
           className="code-find-open"
+          ref={findOpenBtnRef}
           onClick={openFind}
           title={t("config.openFind")}
           aria-label={t("config.openFind")}

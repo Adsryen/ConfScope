@@ -1065,3 +1065,120 @@ describe("CodeView 查找栏按钮的焦点（轮32 F-29）", () => {
     expect(count.textContent, "点 ↑ 没跳回第 1 处").toContain("1/2");
   });
 });
+
+describe("CodeView 滚轮落在查找控件上（轮32 F-33）", () => {
+  /**
+   * 取证 research/wheelbar_probe.txt：查找条 532×38（窄容器换行 418×38），完全压在正文之上，
+   * 正文起始偏移 120 时滚一格应到 240 ⇒ 计数上 / 条内空隙 / 空隙偏左三个落点全部停在 120，
+   * 外层面板也始终 0（不是双滚，是纯死区）。
+   * research/wheelopen_probe.txt 同一形状：关着查找栏那颗 ⌕ 浮标（26×26）也是 120 不动。
+   *
+   * 换算档位、夹界、放手条件由 src/lib/useWheelScrollsContainer.test.tsx 钉；
+   * 这里钉的是接线：视图递进去的容器与 syncScroll 必须真的把三层一起当帧带走。
+   */
+  function wheelOn(target: EventTarget, init: WheelEventInit): WheelEvent {
+    // jsdom 的 fireEvent.wheel 造出来的事件读不到 deltaY，直接构造 WheelEvent（与缩略图同一手法）
+    const event = new WheelEvent("wheel", { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  function openFindBar(container: HTMLElement): HTMLElement {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const bar = container.querySelector(".code-find") as HTMLElement;
+    expect(bar, "Ctrl+F 没能打开查找栏").toBeTruthy();
+    return bar;
+  }
+
+  function closeFindBar(container: HTMLElement) {
+    const buttons = [...container.querySelectorAll<HTMLElement>(".code-find-btn")];
+    fireEvent.click(buttons[buttons.length - 1]);
+    expect(container.querySelector(".code-find"), "✕ 没关掉查找栏").toBeNull();
+  }
+
+  function mount() {
+    const view = renderView(MULTI);
+    const area = view.container.querySelector(".code-area") as HTMLElement;
+    const offsets = stubGeometry(area);
+    fireEvent.scroll(area);
+    return { ...view, area, offsets };
+  }
+
+  const transforms = (container: HTMLElement) =>
+    [".code-gutter-layer", ".code-lines-layer"].map((sel) => (container.querySelector(sel) as HTMLElement).style.transform);
+
+  it("滚轮打在查找条上：正文与行号层、命中行层当帧一起走", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+
+    const event = wheelOn(bar, { deltaY: 40, deltaMode: 0 });
+    expect(offsets.top, "滚轮打在查找条上，正文一动不动（实测停在 120 的那块死区）").toBe(40);
+    expect(transforms(container), "行号层与命中行层慢一帧").toEqual(["translateY(-40px)", "translateY(-40px)"]);
+    expect(event.defaultPrevented, "不取消默认动作：外层面板会跟着一起滚").toBe(true);
+  });
+
+  it("条内的输入框、计数文字与空隙都算：事件冒泡到条子上就接管", () => {
+    const { container, offsets } = mount();
+    openFindBar(container);
+    const targets = [".code-find-input", ".code-find-count"];
+    targets.forEach((sel) => {
+      const node = container.querySelector(sel) as HTMLElement;
+      expect(node, `读不到 ${sel}`).toBeTruthy();
+      offsets.top = 0;
+      expect(wheelOn(node, { deltaY: 40 }).defaultPrevented, `${sel} 上这一格被吃掉了`).toBe(true);
+      expect(offsets.top, `${sel} 上正文没跟着走`).toBe(40);
+    });
+    // 条子自己那 4px padding 的空隙（落点在 flex 容器本体上）
+    offsets.top = 0;
+    wheelOn(container.querySelector(".code-find") as HTMLElement, { deltaY: 40 });
+    expect(offsets.top, "条内空隙仍是死区").toBe(40);
+  });
+
+  it("关着查找栏时，⌕ 浮标上滚一格也要滚正文（同一块死区）", () => {
+    const { container, offsets } = mount();
+    const pill = container.querySelector(".code-find-open") as HTMLElement;
+    expect(pill, "悬停入口没渲染出来").toBeTruthy();
+
+    const event = wheelOn(pill, { deltaY: 40, deltaMode: 0 });
+    expect(offsets.top, "⌕ 浮标上正文停在原地").toBe(40);
+    expect(transforms(container), "行号层与命中行层慢一帧").toEqual(["translateY(-40px)", "translateY(-40px)"]);
+    expect(event.defaultPrevented, "不取消默认动作：外层面板会跟着一起滚").toBe(true);
+  });
+
+  it("关掉再打开：浮标与查找条都是新节点，照样接得住（重挂依据变了必须重订阅）", () => {
+    const { container, offsets } = mount();
+    const pill = container.querySelector(".code-find-open") as HTMLElement;
+    wheelOn(pill, { deltaY: 20 });
+    expect(offsets.top).toBe(20);
+
+    openFindBar(container);
+    offsets.top = 0;
+    wheelOn((container.querySelector(".code-find-open") as HTMLElement) ?? pill, { deltaY: 5 });
+    expect(offsets.top, "查找栏开着时那颗浮标早没了，不该再把这一格算进正文").toBe(0);
+
+    const bar = container.querySelector(".code-find") as HTMLElement;
+    wheelOn(bar, { deltaY: 40 });
+    expect(offsets.top, "开栏后新挂上的查找条接不住滚轮").toBe(40);
+
+    closeFindBar(container);
+    const nextPill = container.querySelector(".code-find-open") as HTMLElement;
+    expect(nextPill, "关栏后浮标没回来").toBeTruthy();
+    expect(nextPill, "关栏后浮标还是旧节点？").not.toBe(pill);
+    offsets.top = 0;
+    wheelOn(nextPill, { deltaY: 40 });
+    expect(offsets.top, "节点被重建后监听还挂在旧节点上：这条出口静默失活").toBe(40);
+  });
+
+  it("纯横向与捏合缩放放手：条子里要能自己横滚 / 浏览器要能缩放", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+    const horizontal = wheelOn(bar, { deltaY: 0, deltaX: 120 });
+    expect(horizontal.defaultPrevented, "shift+滚 / 触控板横划要留给原生").toBe(false);
+    expect(offsets.top).toBe(0);
+    const pinch = wheelOn(bar, { deltaY: 100, ctrlKey: true });
+    expect(pinch.defaultPrevented, "ctrl+wheel 是浏览器缩放").toBe(false);
+    expect(offsets.top).toBe(0);
+  });
+});

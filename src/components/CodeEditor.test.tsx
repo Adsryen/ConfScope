@@ -1190,3 +1190,98 @@ describe("CodeEditor 查找栏按钮的焦点（轮32 F-29）", () => {
     expect(count.textContent, "点 ↑ 没跳回第 1 处").toContain("1/2");
   });
 });
+
+describe("CodeEditor 滚轮落在查找控件上（轮32 F-33，与浏览态同一份出口）", () => {
+  const VIEWPORT_H = 100;
+  const CONTENT_H = 400;
+  const FIND_DOC = "server.port=8080\nname = a\nport = 8081\n";
+
+  /** jsdom 没布局：滚动容器的偏移与两个高度都得自己装（与缩略图那组同一手法）。 */
+  function stubSurface(el: HTMLElement) {
+    const offsets = { top: 0 };
+    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => offsets.top, set: (v: number) => (offsets.top = v) });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    return offsets;
+  }
+
+  function wheelOn(target: EventTarget, init: WheelEventInit): WheelEvent {
+    const event = new WheelEvent("wheel", { cancelable: true, bubbles: true, ...init });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  function mount() {
+    const view = renderEditor(<CodeEditor value={FIND_DOC} onChange={() => {}} format="Properties" />);
+    const ta = textarea(view.container);
+    const offsets = stubSurface(ta);
+    fireEvent.scroll(ta);
+    return { ...view, ta, offsets };
+  }
+
+  function openFindBar(container: HTMLElement): HTMLElement {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const bar = container.querySelector(".code-editor .code-find") as HTMLElement;
+    expect(bar, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    return bar;
+  }
+
+  const transforms = (container: HTMLElement) =>
+    [".code-gutter-layer", ".code-lines-layer"].map((sel) => (container.querySelector(sel) as HTMLElement).style.transform);
+
+  it("滚轮打在查找条上：textarea 与行号层、命中行层当帧一起走", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+
+    const event = wheelOn(bar, { deltaY: 40, deltaMode: 0 });
+    expect(offsets.top, "编辑态滚轮打在查找条上，正文一动不动").toBe(40);
+    expect(transforms(container), "行号层与命中行层慢一帧").toEqual(["translateY(-40px)", "translateY(-40px)"]);
+    expect(event.defaultPrevented, "不取消默认动作：外层面板会跟着一起滚").toBe(true);
+  });
+
+  it("deltaMode=1 按行换算（Linux 上 WebKitGTK 常见这一档，当像素就只滚 3px）", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+    wheelOn(bar, { deltaY: 3, deltaMode: 1 });
+    expect(offsets.top, "行档位被当像素用：一格只滚 3px，等于没滚").toBe(60);
+  });
+
+  it("关着查找栏时，⌕ 浮标上滚一格也要滚正文", () => {
+    const { container, offsets } = mount();
+    const pill = container.querySelector(".code-editor .code-find-open") as HTMLElement;
+    expect(pill, "编辑态悬停入口没渲染出来").toBeTruthy();
+
+    const event = wheelOn(pill, { deltaY: 40, deltaMode: 0 });
+    expect(offsets.top, "⌕ 浮标上正文停在原地").toBe(40);
+    expect(transforms(container), "行号层与命中行层慢一帧").toEqual(["translateY(-40px)", "translateY(-40px)"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("关掉再打开：新节点照样接得住", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+    wheelOn(bar, { deltaY: 20 });
+    expect(offsets.top, "开栏后新挂上的查找条接不住滚轮").toBe(20);
+
+    const buttons = [...container.querySelectorAll<HTMLElement>(".code-editor .code-find-btn")];
+    fireEvent.click(buttons[buttons.length - 1]);
+    expect(container.querySelector(".code-editor .code-find"), "✕ 没关掉编辑态查找栏").toBeNull();
+
+    const nextBar = openFindBar(container);
+    expect(nextBar, "重开后还是旧节点？").not.toBe(bar);
+    offsets.top = 0;
+    wheelOn(nextBar, { deltaY: 40 });
+    expect(offsets.top, "节点被重建后监听还挂在旧节点上：这条出口静默失活").toBe(40);
+  });
+
+  it("纯横向与捏合缩放放手", () => {
+    const { container, offsets } = mount();
+    const bar = openFindBar(container);
+    expect(wheelOn(bar, { deltaY: 0, deltaX: 120 }).defaultPrevented, "横划要留给原生").toBe(false);
+    expect(offsets.top).toBe(0);
+    expect(wheelOn(bar, { deltaY: 100, ctrlKey: true }).defaultPrevented, "ctrl+wheel 是浏览器缩放").toBe(false);
+    expect(offsets.top).toBe(0);
+  });
+});

@@ -14,6 +14,7 @@ import {
   splitLines,
 } from "../lib/codeLines";
 import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
+import { useWheelScrollsContainer } from "../lib/useWheelScrollsContainer";
 import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
@@ -80,6 +81,8 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const linesInnerRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const findBarRef = useRef<HTMLDivElement | null>(null);
+  /** 关栏状态下的 ⌕ 入口浮标：和查找条同一块死区（轮32 F-33），也要接滚轮。 */
+  const findOpenBtnRef = useRef<HTMLButtonElement | null>(null);
   /** 带着「当前命中」类的那批 <mark>：html 不变时 React 不重建它们，类只能由这里显式收回。 */
   const currentHitMarksRef = useRef<HTMLElement[]>([]);
 
@@ -425,6 +428,20 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return () => ro.disconnect();
   }, [findOpen]);
 
+  /**
+   * 滚轮落在查找条 / ⌕ 浮标上 ⇒ 滚正文（轮32 F-33）。
+   *
+   * 取证 research/wheelbar_probe.txt + wheelopen_probe.txt：条子 532×38（窄容器换行 418×38）、
+   * 浮标 26×26，都完全压在正文之上；正文偏移 120 时滚一格，计数上 / 条内空隙 / 空隙偏左 / 浮标上
+   * 四个落点全部停在 120，外层面板也始终 0 —— 不是双滚，是纯死区。换算与放手条件在
+   * src/lib/useWheelScrollsContainer.ts，与缩略图共用同一份（轮31 F-25 那条）。
+   *
+   * reattachKey 都递 findOpen：两个元素互斥渲染且每次都是新节点，
+   * 关栏再开栏时不重挂监听就等于这条出口静默失活。
+   */
+  useWheelScrollsContainer(findBarRef, { containerRef: areaRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+  useWheelScrollsContainer(findOpenBtnRef, { containerRef: areaRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+
   // 净空变了但没有滚动事件（padding 变化不触发 scroll）：补一次同步，
   // 否则缩略图的视口比例还按旧 scrollHeight 算，点缩略图会跳偏。
   useLayoutEffect(() => {
@@ -538,6 +555,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
           <button
             type="button"
             className="code-find-open"
+            ref={findOpenBtnRef}
             onClick={openFind}
             title={t("config.openFind")}
             aria-label={t("config.openFind")}

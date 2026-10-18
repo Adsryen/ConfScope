@@ -28,6 +28,7 @@ const LIB = "src/lib/codeLines.ts";
 const MM = "src/components/CodeMinimap.tsx";
 const VIEW = "src/components/CodeView.tsx";
 const EDITOR = "src/components/CodeEditor.tsx";
+const HOOK = "src/lib/useWheelScrollsContainer.ts";
 const CSS_FILE = "src/styles.css";
 
 const CSS = readFileSync(join(PROJECT_ROOT, CSS_FILE), "utf8");
@@ -312,19 +313,55 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
   }
 
   it("每一处写 scrollTop 都在同一个函数里补了同步", () => {
-    const mm = readScannedSource(MM);
-    const writes = mm.split("\n").filter((line) => /\.scrollTop\s*=[^=]/.test(line));
-    expect(writes.length, "缩略图连一处写偏移都没有？那这条守卫是空转").toBeGreaterThan(0);
-    expect(unsyncedScrollWrites(mm), "这些行写了正文偏移却没当帧同步行号层与命中行层").toEqual([]);
+    // 轮32 F-33 起滚轮那一份住在共享出口里，缩略图自己只剩点击/拖动这一处：两份都要扫
+    for (const file of [MM, HOOK] as const) {
+      const src = readScannedSource(file);
+      const writes = src.split("\n").filter((line) => /\.scrollTop\s*=[^=]/.test(line));
+      expect(writes.length, `${file} 连一处写偏移都没有？那这条守卫是空转`).toBeGreaterThan(0);
+      expect(unsyncedScrollWrites(src), `${file}：这些行写了正文偏移却没当帧同步行号层与命中行层`).toEqual([]);
+    }
   });
 
-  it("wheel 必须是元素上的原生 non-passive 监听，JSX 里不许出现 onWheel", () => {
-    const mm = readScannedSource(MM);
-    expect(mm, "React 18 的 onWheel 挂在根容器且是 passive，preventDefault 实测无效（双滚拦不住）").not.toMatch(/onWheel=\{/);
-    const listener = /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(mm);
+  it("wheel 必须是元素上的原生 non-passive 监听，三个消费方都不许出现 onWheel", () => {
+    const hook = readScannedSource(HOOK);
+    const listener = /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(hook);
     expect(listener, "wheel 没走原生监听，或第三个参数没显式写选项").not.toBeNull();
     expect(listener![1].replace(/\s+/g, " "), "passive 必须是 false，否则浏览器直接忽略 preventDefault").toMatch(/passive: false/);
-    expect(mm, "卸载时不摘监听：换文件重挂会攒出一串 handler，同一格滚轮滚好几遍").toMatch(/removeEventListener\("wheel"/);
+    expect(hook, "卸载时不摘监听：浮层重建会攒出一串 handler，同一格滚轮滚好几遍").toMatch(/removeEventListener\("wheel"/);
+    for (const file of [MM, VIEW, EDITOR] as const) {
+      const src = readScannedSource(file);
+      expect(src, `${file}：React 18 的 onWheel 挂在根容器且是 passive，preventDefault 实测无效（双滚拦不住）`).not.toMatch(/onWheel=\{/);
+      expect(src, `${file}：换算只许住在 ${HOOK} 里，抄第二份就是下一轮 bug 的出处`).not.toMatch(/addEventListener\("wheel"/);
+    }
+  });
+
+  it("滚轮出口只许有一份实现，三块浮层各自都要接上（轮32 F-33）", () => {
+    const hook = readScannedSource(HOOK);
+    expect(hook, "deltaMode 三档换算没收在共享出口里：Linux 上 WebKitGTK 按行给，当像素等于没滚").toMatch(
+      /event\.deltaMode === 1 \? rowHeight : event\.deltaMode === 2/
+    );
+    expect(hook, "写完偏移不许夹界：负偏移会让行号层与正文错开").toMatch(
+      /el\.scrollTop = clamp\(el\.scrollTop \+ delta, 0, Math\.max\(0, el\.scrollHeight - el\.clientHeight\)\);/
+    );
+    // 缩略图一块浮层，查找条与 ⌕ 浮标互斥渲染 ⇒ 两个视图各两块
+    const expectations = [
+      [MM, 1, "reattachKey: canScrollContent"],
+      [VIEW, 2, "reattachKey: findOpen"],
+      [EDITOR, 2, "reattachKey: findOpen"],
+    ] as const;
+    for (const [file, calls, reattach] of expectations) {
+      const src = readScannedSource(file);
+      expect((src.match(/useWheelScrollsContainer\(/g) || []).length, `${file} 的滚轮出口接了几块浮层？`).toBe(calls);
+      expect((src.match(/reattachKey:/g) || []).length, `${file} 每一处接线都要递重挂依据`).toBe(calls);
+      expect(src, `${file} 的 reattachKey 要跟着浮层的存在性走，写死或漏掉都等于静默失活`).toContain(reattach);
+    }
+    const view = readScannedSource(VIEW);
+    expect(view, "查找条没接上：实测 research/wheelbar_probe.txt 那块 532×38 的纯死区").toMatch(/useWheelScrollsContainer\(findBarRef,/);
+    expect(view, "⌕ 浮标没接上：实测 research/wheelopen_probe.txt 那颗 26×26 也是同一块死区").toMatch(
+      /useWheelScrollsContainer\(findOpenBtnRef,/
+    );
+    expect(readScannedSource(EDITOR).match(/useWheelScrollsContainer\(findBarRef,/), "编辑态查找条没接上").not.toBeNull();
+    expect(readScannedSource(EDITOR).match(/useWheelScrollsContainer\(findOpenBtnRef,/), "编辑态 ⌕ 浮标没接上").not.toBeNull();
   });
 
   it("pointerdown 必须取消默认动作（mousedown 才是抢焦点那一步）", () => {
@@ -367,7 +404,7 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
   });
 
   it("自检八：新出口只写偏移不补同步必须判红", () => {
-    const mm = readScannedSource(MM);
+    const mm = readScannedSource(HOOK);
     const regressed = mm.replace(
       "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));\n      syncScroll();",
       "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));"
@@ -378,14 +415,27 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
     ]);
   });
 
-  it("自检九：wheel 退回 React 的 onWheel 必须判红", () => {
+  it("自检九：wheel 退回 passive 档位、丢掉原生监听、或改用 JSX 的 onWheel 都必须判红", () => {
+    const hook = readScannedSource(HOOK);
+    const registration = 'surface.addEventListener("wheel", onWheel, { passive: false });';
+    expect(hook, "锚点不在共享出口里，这条自检是空转").toContain(registration);
+
+    const passive = hook.replace(registration, 'surface.addEventListener("wheel", onWheel, { passive: true });');
+    expect(passive, "变异没落到源码里，这条自检是空转").not.toBe(hook);
+    expect(
+      /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(passive)![1].replace(/\s+/g, " "),
+      "passive 档位改了，判据必须看见差别"
+    ).toMatch(/passive: true/);
+    expect(/passive: false/.test(passive), "passive: true 还留着一份 false，判据就成了空转").toBe(false);
+
+    const dropped = hook.replace(registration, "const onWheelJsx = onWheel;");
+    expect(dropped, "变异没落到源码里，这条自检是空转").not.toBe(hook);
+    expect(/addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(dropped), "原生监听没了也必须判红").toBeNull();
+
     const mm = readScannedSource(MM);
-    const regressed = mm
-      .replace('mm.addEventListener("wheel", onWheel, { passive: false });', "const onWheelJsx = onWheel;")
-      .replace('className="code-minimap"', 'className="code-minimap" onWheel={(e) => onWheel(e.nativeEvent)}');
-    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
-    expect(regressed, "出现 onWheel= 就必须判红（passive 监听里 preventDefault 无效）").toMatch(/onWheel=\{/);
-    expect(/addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(regressed), "原生监听没了也必须判红").toBeNull();
+    const jsx = mm.replace('className="code-minimap"', 'className="code-minimap" onWheel={(e) => onWheel(e.nativeEvent)}');
+    expect(jsx, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    expect(jsx, "出现 onWheel= 就必须判红（passive 监听里 preventDefault 无效）").toMatch(/onWheel=\{/);
   });
 
   it("自检十：pointerdown 不再 preventDefault 必须判红", () => {
