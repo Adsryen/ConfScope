@@ -9,6 +9,8 @@ import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
 import { normalizeLineEndings } from "../lib/codeLines";
 import { clearViewState, writeViewState } from "../lib/viewState";
+import { HIT_REVEAL_MARGIN } from "../lib/codeScroll";
+import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
 
 const INITIAL = "server.port=8080";
 
@@ -524,5 +526,86 @@ describe("CodeEditor 查找匹配选项（R75）", () => {
     const { container } = renderEditor(<CodeEditor value={EDITOR_CASE} onChange={() => {}} format="TEXT" searchTerm="port" />);
     expect(findInput(container)).toBeNull();
     expect(hitLineNumbers(container)).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("CodeEditor 长行里的命中也横向送进视口（轮27 F-7）", () => {
+  const CHAR_W = 8;
+  const VIEWPORT_W = 800;
+  const LONG = `{"a":1,"pad":"${"x".repeat(600)}","serverPort":8080,"pad2":"${"y".repeat(300)}","serverHost":"127.0.0.1"}`;
+
+  beforeEach(() => {
+    // 上一组用例把记忆键写成了「区分大小写 + 全词」，不清掉这里搜 server 会一处命中也没有
+    clearViewState("codeFind.");
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  /**
+   * 编辑态的几何比浏览态多一层：滚动容器是 textarea，命中标记在下层高亮 pre 里。
+   * 水平定位量 pre 里的矩形，写的是 textarea 的 scrollLeft，写完必须同步回 pre——
+   * 不然着色层与选区错开一屏，用户看到的红字仍在屏幕外。
+   */
+  function layout(container: HTMLElement) {
+    const ta = container.querySelector("textarea") as HTMLTextAreaElement;
+    const pre = container.querySelector(".code-editor-pre") as HTMLElement;
+    const scroll = stubCodeHorizontalLayout(ta, pre, {
+      charWidth: CHAR_W,
+      viewportWidth: VIEWPORT_W,
+      contentWidth: LONG.length * CHAR_W,
+    });
+    const preScroll = stubScrollLeft(pre);
+    Object.defineProperty(ta, "clientHeight", { configurable: true, get: () => 100 });
+    Object.defineProperty(ta, "scrollHeight", { configurable: true, get: () => 200 });
+    return { ta, pre, scroll, preScroll };
+  }
+
+  function openFindWithTerm(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = findInput(container);
+    expect(input, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input as HTMLInputElement, { target: { value: term } });
+    return input as HTMLInputElement;
+  }
+
+  it("搜长行里的词：textarea 横向定位，高亮层立刻跟上同一偏移", async () => {
+    const { container } = renderEditor(<CodeEditor value={LONG} onChange={() => {}} format="TEXT" />);
+    const { scroll, preScroll } = layout(container);
+
+    openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector("mark.search-hit-current")).not.toBeNull());
+
+    const current = container.querySelector("mark.search-hit-current") as HTMLElement;
+    expect(scroll.get(), "命中在第 600 列之后，scrollLeft 还是 0 就是没定位").toBeGreaterThan(0);
+    expect(isMarkVisible(container.querySelector("textarea") as HTMLElement, current, HIT_REVEAL_MARGIN)).toBe(true);
+    expect(preScroll.get()).toBe(scroll.get());
+  });
+
+  it("Enter 换命中：两层的横向偏移一起走，且始终相等", async () => {
+    const { container } = renderEditor(<CodeEditor value={LONG} onChange={() => {}} format="TEXT" />);
+    const { ta, scroll, preScroll } = layout(container);
+    const input = openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector("mark.search-hit-current")).not.toBeNull());
+    const leftAtFirst = scroll.get();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(container.querySelector("mark.search-hit-current")).not.toBeNull());
+
+    const current = container.querySelector("mark.search-hit-current") as HTMLElement;
+    expect(scroll.get()).not.toBe(leftAtFirst);
+    expect(isMarkVisible(ta, current, HIT_REVEAL_MARGIN)).toBe(true);
+    expect(preScroll.get()).toBe(scroll.get());
+  });
+
+  it("量不到布局时不许动 textarea 的横向偏移：编辑态尤其不能把用户滚走的位置清零", async () => {
+    const { container } = renderEditor(<CodeEditor value={LONG} onChange={() => {}} format="TEXT" />);
+    const ta = container.querySelector("textarea") as HTMLTextAreaElement;
+    const scroll = stubScrollLeft(ta);
+    scroll.set(500);
+
+    openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector("mark.search-hit-current")).not.toBeNull());
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Enter" });
+
+    expect(scroll.get()).toBe(500);
   });
 });

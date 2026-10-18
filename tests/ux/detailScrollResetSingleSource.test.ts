@@ -74,7 +74,12 @@ describe("详情区滚动复位单一出口（波29 R49）", () => {
   it("CodeView 也走同一份 hook，R9 不再是特例", () => {
     const codeView = read(CODE_VIEW);
     expect(codeView, "CodeView 没有调用滚动复位 hook").toMatch(/useScrollResetOnContentChange\(/);
-    expect(codeView, "CodeView 还在自己用 useLayoutEffect 归零").not.toMatch(/useLayoutEffect\s*\(/);
+    // 波58 F-7 之后 CodeView 允许有自己的 useLayoutEffect（绘制后量命中矩形做水平定位），
+    // 但那条不许顺手归零：归零仍只许走上面这份 hook，否则切文件时会慢一帧、看到旧偏移闪一下。
+    const resetting = [...codeView.matchAll(/useLayoutEffect\(\(\) => \{[\s\S]*?\n\s*\}, \[/g)].filter((m) =>
+      /\.scroll(?:Top|Left)\s*=\s*0/.test(m[0])
+    );
+    expect(resetting, "CodeView 的 useLayoutEffect 里又写了一份归零").toHaveLength(0);
   });
 
   it("lib 模块保住绘制前归零与列表版节点收尾", () => {

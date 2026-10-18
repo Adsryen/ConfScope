@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import { activeLineOf, activeOffsetOf, buildMinimapRows, findCodeHits, hitLines, markHighlightedHtml, splitLines } from "../lib/codeLines";
@@ -7,6 +7,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, selectionTextWithin } from "../lib/findSelection";
+import { revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -148,6 +149,10 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     const first = hits[0];
     if (!first) return false;
     scrollLineIntoView(first.line);
+    // 只滚垂直不够（轮27 F-7）：单行长 JSON 里命中可能在第 4000 列的屏幕外。
+    // 这条路径查找栏没开，DOM 里没有 .search-hit-current，lib 内退到第一处 .search-hit，
+    // 正是 hits[0] 自己，量的就是刚滚过去的那一行。
+    revealMarkHorizontally(el, el);
     return true;
   }, [findOpen, hits, scrollLineIntoView]);
 
@@ -307,6 +312,23 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     scrollLineIntoView(hits[clamp(activeIdx, 0, hits.length - 1)].line);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, effectiveTerm, matchOptions]);
+
+  /**
+   * 当前命中变化后补上水平定位（轮27 F-7，长行里的命中不能只滚垂直）。
+   *
+   * 为什么不能像垂直定位那样写在 navigate 里：navigate 在 setActiveIdx 的 updater 内同步滚动，
+   * 那一刻 DOM 里的 .search-hit-current 仍是上一处命中，量矩形会量到旧位置。
+   * 旧的列宽算式没有这个时序问题（它不读 DOM），换成矩形测量就必须等提交之后——
+   * useLayoutEffect 在绘制前跑完，用户看不到中间那帧偏移。
+   *
+   * 依赖只写 activeOffset：横向偏移被用户自己拖走之后，只要当前命中没变就不许再把他拽回来
+   * （metrics 每滚一格都变，进依赖就成了「一改口径就抖动」的第二份实现）。
+   */
+  useLayoutEffect(() => {
+    if (!findOpen || !hits.length) return;
+    revealMarkHorizontally(areaRef.current, areaRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, activeOffset]);
 
   // 同一份正文里改外部搜索词（没开查找栏）：也跟着定位新词的首个命中。
   // 依赖数组**只许写 searchTerm**：closeFind 只动 findOpen / findTerm，用户主动关栏后

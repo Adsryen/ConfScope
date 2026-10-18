@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeView from "./CodeView";
 import { clearViewState, writeViewState } from "../lib/viewState";
+import { HIT_REVEAL_MARGIN } from "../lib/codeScroll";
+import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
 import type { Format } from "../lib/format";
 
 function renderView(
@@ -366,6 +368,104 @@ describe("CodeView 内容搜索定位（R74）", () => {
     rerender(view({ code: DEEP, searchTerm: "timeout", contentKey: "k2" }));
 
     expect(offsets.top).toBe(0);
+  });
+});
+
+describe("CodeView 长行里的命中也横向送进视口（轮27 F-7）", () => {
+  /** jsdom 无布局，假布局按「每字符 8px、整篇从 x=0 起排」量（见 ../test/codeLayout）。 */
+  const CHAR_W = 8;
+  const VIEWPORT_W = 800;
+  /** 单行长 JSON：Nacos 里最常见的形态。needle 落在第 600 列之后，未修前红字整条在屏幕外。 */
+  const LONG = `{"a":1,"pad":"${"x".repeat(600)}","serverPort":8080,"pad2":"${"y".repeat(300)}","serverHost":"127.0.0.1"}`;
+
+  beforeEach(() => {
+    // 查找口径走 viewState 记忆键（与编辑态同一对），别的用例写过的开关会污染这里的命中数
+    clearViewState("codeFind.");
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  function view(props: { code: string; searchTerm?: string }) {
+    localStorage.setItem("locale", "zh-CN");
+    return (
+      <I18nProvider>
+        <CodeView format="TEXT" {...props} />
+      </I18nProvider>
+    );
+  }
+
+  /** 撑出横向布局：clientWidth / scrollWidth / 可写 scrollLeft / mark 矩形。 */
+  function layout(container: HTMLElement) {
+    const area = container.querySelector(".code-area") as HTMLElement;
+    const scroll = stubCodeHorizontalLayout(area, area, {
+      charWidth: CHAR_W,
+      viewportWidth: VIEWPORT_W,
+      contentWidth: LONG.length * CHAR_W,
+    });
+    Object.defineProperty(area, "clientHeight", { configurable: true, get: () => 100 });
+    Object.defineProperty(area, "scrollHeight", { configurable: true, get: () => 200 });
+    return { area, scroll };
+  }
+
+  function openFindWithTerm(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    expect(input, "Ctrl+F 没能打开查找栏").toBeTruthy();
+    fireEvent.change(input, { target: { value: term } });
+    return input;
+  }
+
+  it("搜长行里的词：当前命中落进横向视口，且真的动过偏移（不是恰好停在 0 撞对）", async () => {
+    const { container } = render(view({ code: LONG }));
+    const { area, scroll } = layout(container);
+
+    openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector(".code-area mark.search-hit-current")).not.toBeNull());
+
+    const current = container.querySelector(".code-area mark.search-hit-current") as HTMLElement;
+    expect(scroll.get(), "命中在第 600 列之后，scrollLeft 还停在 0 就是没定位").toBeGreaterThan(0);
+    expect(isMarkVisible(area, current, HIT_REVEAL_MARGIN)).toBe(true);
+  });
+
+  it("Enter 换到下一处命中：横向跟着换到新的那一处，不留在上一处", async () => {
+    const { container } = render(view({ code: LONG }));
+    const { area, scroll } = layout(container);
+    const input = openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector(".code-area mark.search-hit-current")).not.toBeNull());
+    const leftAtFirst = scroll.get();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(container.querySelector(".code-area mark.search-hit-current")).not.toBeNull());
+
+    const current = container.querySelector(".code-area mark.search-hit-current") as HTMLElement;
+    expect(current.textContent).toBe("server");
+    expect(scroll.get()).not.toBe(leftAtFirst);
+    expect(isMarkVisible(area, current, HIT_REVEAL_MARGIN)).toBe(true);
+  });
+
+  it("内容搜索点开结果（查找栏没开，没有 current）：第一处红字也送进视口", () => {
+    const { container, rerender } = render(view({ code: LONG }));
+    const { area, scroll } = layout(container);
+
+    rerender(view({ code: LONG, searchTerm: "server" }));
+
+    const first = container.querySelector(".code-area mark.search-hit") as HTMLElement;
+    expect(first, "外部搜索词整篇标红，不存在 current，就该退到第一处").toBeTruthy();
+    expect(scroll.get()).toBeGreaterThan(0);
+    expect(isMarkVisible(area, first, HIT_REVEAL_MARGIN)).toBe(true);
+  });
+
+  it("量不到布局时不许动：清掉用户已有的横向偏移比不定位更糟", async () => {
+    const { container } = render(view({ code: LONG }));
+    const area = container.querySelector(".code-area") as HTMLElement;
+    // 只把 scrollLeft 换成可读写，clientWidth / scrollWidth 留在 0：真机对应「视图被保活隐藏」
+    const scroll = stubScrollLeft(area);
+    scroll.set(777);
+
+    openFindWithTerm(container, "server");
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Enter" });
+
+    expect(scroll.get()).toBe(777);
   });
 });
 

@@ -1,4 +1,14 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Format } from "../lib/format";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { isSaveShortcutKey } from "../lib/saveShortcut";
@@ -17,6 +27,7 @@ import {
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
+import { revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -58,7 +69,6 @@ const GUTTER_W = 52;
 const PAD_TOP = 12;
 const PAD_LEFT_EXTRA = 14;
 const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
-const PROBE_CHARS = 20; // 隐形探针里放多少个等宽字符用来量字宽
 
 /**
  * 查找栏选项的模块级常量：与 CodeView 同一口径。
@@ -89,7 +99,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const taRef = useRef<HTMLTextAreaElement>(null);
   const gutterInnerRef = useRef<HTMLDivElement>(null);
   const linesInnerRef = useRef<HTMLDivElement>(null);
-  const probeRef = useRef<HTMLSpanElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
 
   const [findOpen, setFindOpen] = useState(false);
@@ -154,14 +163,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     setMetrics({ scrollTop: top, clientHeight: ta.clientHeight });
   }, []);
 
-  /** 量一个等宽字符的像素宽度；首帧或 jsdom（无布局）量不到时返回 0。 */
-  const measureCharWidth = useCallback((): number => {
-    const probe = probeRef.current;
-    if (!probe) return 0;
-    const width = probe.getBoundingClientRect().width / PROBE_CHARS;
-    return Number.isFinite(width) && width > 0 ? width : 0;
-  }, []);
-
   const scrollLineIntoView = useCallback(
     (line: number) => {
       const ta = taRef.current;
@@ -172,20 +173,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       syncScroll();
     },
     [syncScroll]
-  );
-
-  /** 长行里的命中可能横向滚出视口，按列宽把水平位置也带过去。 */
-  const scrollColumnIntoView = useCallback(
-    (hit: CodeHit) => {
-      const ta = taRef.current;
-      if (!ta) return;
-      const charW = measureCharWidth();
-      if (!charW) return; // 量不到字宽就不动水平滚动，避免把用户已有的横向偏移清掉
-      const x = hit.column * charW;
-      ta.scrollLeft = clamp(x - ta.clientWidth / 2, 0, Math.max(0, ta.scrollWidth - ta.clientWidth));
-      syncScroll();
-    },
-    [measureCharWidth, syncScroll]
   );
 
   /** 把选区与滚动落到一次命中上。注意：只动选区，不动 value。 */
@@ -199,9 +186,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       }
       setPinnedLine(hit.line);
       scrollLineIntoView(hit.line);
-      scrollColumnIntoView(hit);
+      // 水平定位改在命中提交后按 <mark> 矩形做（轮27 F-7，与浏览态同一份实现）：
+      // 这里同步读 DOM 只能读到上一处命中的矩形。
     },
-    [scrollColumnIntoView, scrollLineIntoView]
+    [scrollLineIntoView]
   );
 
   /**
@@ -287,6 +275,22 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     revealHit(hits[clamp(activeIdx, 0, hits.length - 1)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, effectiveTerm, matchOptions]);
+
+  /**
+   * 当前命中变化后把水平位置也带过去（轮27 F-7）：长行 JSON 里的命中只滚垂直照样在屏幕外。
+   *
+   * 量的不是「列 × 字宽」而是高亮层里 <mark> 的实际矩形——那一层与 textarea 逐字同格
+   * （透明 textarea 叠在 pre 上，同一套 padding / line-height / tab-size），
+   * Tab 的两列宽与中日韩的两倍字宽浏览器已经算好，不必再近似。
+   * 依赖只写 activeOffset：用户自己把横向偏移拖走之后，当前命中没变就不许再把他拽回来。
+   */
+  useLayoutEffect(() => {
+    if (!findOpen || !hits.length) return;
+    // 改了 textarea 的横向偏移必须立刻同步高亮层：程序化赋值在 jsdom 里不触发 scroll 事件，
+    // 真机上晚一帧也让着色层与选区错开一格。
+    if (revealMarkHorizontally(taRef.current, preRef.current)) syncScroll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, activeOffset]);
 
   // 内容整体换掉（切文件/切草稿）时收起查找栏，防止旧关键词污染新内容。
   useEffect(() => {
@@ -459,11 +463,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
           </div>
         </div>
       )}
-
-      {/* 隐形探针：量等宽字符像素宽（wrap=off 的横向定位要用），不参与布局与命中 */}
-      <span ref={probeRef} className="code-editor-probe mono" aria-hidden="true">
-        {"0".repeat(PROBE_CHARS)}
-      </span>
 
       {enableFind && !findOpen && (
         <button

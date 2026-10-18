@@ -4389,18 +4389,6 @@ button.diff-workflow-step-btn:hover {
 .code-editor .code-find-open {
   z-index: 4;
 }
-/* 隐形探针：只用来量等宽字符的像素宽（长行命中要按列横向定位），不参与布局 */
-.code-editor-probe {
-  position: absolute;
-  top: 0;
-  left: -9999px;
-  visibility: hidden;
-  pointer-events: none;
-  white-space: pre;
-  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 12.5px;
-}
-
 .conn-mgr {
   display: flex;
   gap: 18px;
