@@ -241,7 +241,10 @@ test("S7 备份快照 WebDAV: 测试→上传当前快照→刷新远端列表�
   // 5) 刷新远端快照（mock 返回 1 个远端包 → 列表渲染 + meta 文案）
   await webdavPanel.getByRole("button", { name: "刷新远端快照" }).click();
   await expect(page.locator(".backup-remote-item").first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("个配置").first()).toBeVisible({ timeout: 5_000 });
+  // 断言必须限定在远端条目作用域内：整页 getByText("个配置").first() 会先命中右栏隐藏占位
+  // 「从左侧选择一个配置查看」（DOM 里在它之前），拿到 hidden 判红 —— 轮37 stash 对照实测
+  // HEAD 与本树同样红，属假红而非布局反噬（真机 error-context 里条目 meta 是「nacos · 13 个配置 · …」）。
+  await expect(page.locator(".backup-remote-item").first()).toContainText("个配置", { timeout: 5_000 });
 
   // 6) 导入远端快照包（mock 返回本地快照 → 状态行「快照已导入」）
   await page.locator(".backup-remote-item", { hasText: "retest-remote-snap.cssnapshot" })
