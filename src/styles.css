@@ -2439,8 +2439,10 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 .code-find-btn {
-  width: 22px;
-  height: 22px;
+  /* 轮37 R88：22 → 24，WCAG 2.2 目标尺寸下限。这条栏 gap 4px、绝对定位浮在正文上，
+     +2px 只让栏本身长高 2px（实测 .code-find 36 → 38），不会压到正文首行。 */
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   border: none;
   background: transparent;
@@ -2460,7 +2462,8 @@ textarea {
 /* 匹配口径开关（Aa 区分大小写 / ab| 全词）：与 .code-find-btn 同尺寸，
    靠边框和"已启用"底色区分，不加文字说明也不会有人把它当计数看 */
 .code-find-toggle {
-  height: 22px;
+  /* 轮37 R88：与 .code-find-btn 同尺寸一起抬到 24（min-width 26 本来就达标，只补高度）。 */
+  height: 24px;
   min-width: 26px;
   padding: 0 5px;
   border-radius: 4px;
@@ -3042,10 +3045,13 @@ button.diff-workflow-step-btn:hover {
 .diff-source-toggle-edge {
   position: absolute;
   left: 50%;
-  bottom: -9px;
+  /* 轮37 R88：边条 18 → 24 高（WCAG 目标尺寸下限），bottom 跟着 -9 → -12 保持「跨在面板边缘上」的对称：
+     改前上下各露 9px，改后各露 12px。F34-6 真机复核过它的滚轮归属与「点它仍能收起/展开」，
+     这两条判据按中心点取样，几何平移后仍然成立（见 99-s-wheel-chrome 复跑读数）。 */
+  bottom: -12px;
   z-index: 5;
   width: 36px;
-  height: 18px;
+  height: 24px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -3544,6 +3550,10 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   color: var(--text-dim);
   cursor: pointer;
+  /* 轮37 R88：复选框的命中区是整行 label（点文字同样能勾），实测行高只有 15~17px，
+     宽度 55~324 再够也补不上高度这一维 ⇒ 给 min-height:24px。复选框本体保持 15px 不放大，
+     视觉密度不变，只是整行可点的高度到位。 */
+  min-height: 24px;
 }
 .check-row input[type="checkbox"] {
   width: 15px;
@@ -4624,8 +4634,12 @@ button.diff-workflow-step-btn:hover {
 }
 .conn-item-action,
 .conn-item-del {
-  width: 22px;
-  height: 22px;
+  /* 轮37 R88：22 → 24。这两个钮是全站唯一的「⧉ 复制 / × 删除」对，删除还是不可逆动作，
+     22px 命中区在 1280x820 默认窗口里实测不达 WCAG 2.2 的 24x24 下限。
+     父行 .conn-item 是 align-items:center 的 flex（行高实测 44），+2px 不改行高；
+     两钮之间还有 gap 8px，各扩 1px 不会互相贴上（乙方案的隐形扩击正是卡在这一步）。 */
+  width: 24px;
+  height: 24px;
   background: none;
   border: none;
   color: var(--text-dim);
@@ -5067,9 +5081,14 @@ button.diff-workflow-step-btn:hover {
    整条被这一份吃掉，写了却永远不生效（R31）。
    R80：padding / font-size 都和 .btn 同特异度，靠文档顺序决胜。这一族 93 处静态用法 +
    7 处模板串用法（AuditView / ConfigBrowser / HistoryView / LogViewer）全部是 `btn btn-sm` 成对出现，
-   所以提复合不缩作用面。改名要连 duplicateSelectors 守卫的 SINGLE_SOURCE_SELECTORS 一起改。 */
+   所以提复合不缩作用面。改名要连 duplicateSelectors 守卫的 SINGLE_SOURCE_SELECTORS 一起改。
+   轮37 R88：纵向 padding 4px → 5px。实测这一族盒高 22px（11px 字 + 8px 上下 padding + 2px 边框），
+   低于 WCAG 2.2 / 2.5.8 的 24x24 有效命中区下限——矩阵筛选条的 dataId↑ / key / status 三个排序钮
+   和关于页的 ⭐ GitHub 链接（`a.btn.btn-sm`，23px）都在这一族。只动纵向、不动横向：
+   加 min-height 对 <a> 不会垂直居中（只有 <button> 的 UA 样式会居中），而 padding 这一条同时管住两种标签，
+   也不会像乙方案的隐形 ::after 那样去抢邻居的点击。 */
 .btn.btn-sm {
-  padding: 4px 8px;
+  padding: 5px 8px;
   font-size: 11px;
 }
 
@@ -5834,12 +5853,16 @@ button.diff-workflow-step-btn:hover {
      实测塌成 0px / 可见 0 行、行也被 .audit-detail-head 拦住点不动。行高实测 48px，
      58(表头) + 4*48 + 余量 = 280 ⇒ 再矮也看得见 4 行，挤不掉的部分交给 .audit-page 自己滚。
      轮36 F-36：280 → 400，把工具栏省下的 146px 接成行数（实测滚到底 4 整行 → 7 整行）。
+     轮37 R88：400 → 402。这条下限的算式是「边框1 + 表头 + 列表体 + 边框1」，不是凭空的整数——
+     列头里的「设基准」按钮补到 24px 有效命中区后，表头实测 58 → 60，若不跟着抬 2px，
+     列表体就被列头从 340 顶成 338（7 行*48=336 仍够，但下限承诺的是 340）。
+     判据与真机读数记在该任务线 prd.md 的 AC4（1+60+340+1=402），改前表头 58 时是 1+58+340+1=400。
      1920x1080 这类高窗口自然高度实测 433px > 400 ⇒ 这条下限不参与它的布局，但同一批工具栏收紧
      仍然让它在 1080 高下从 4 整行变成 7 整行 —— 下限是为矮窗口兜底，高窗口的收益来自工具栏本身。
      刻意不按 100vh 放大到 630px 那类「一屏列表」：.audit-matrix-body 带 overscroll-behavior:contain
      是一块滚动孤岛（F-34 口径），框子顶满视口后 chrome 只剩 28px 可滚（实测），指针落在列表上就再也
      滚不动整页，等于我们自己再造一次 F-34/F-35 正在治的病。 */
-  min-height: 400px;
+  min-height: 402px;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -7935,6 +7958,8 @@ button.diff-workflow-step-btn:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 轮37 R88：同 .check-row，实测 91x17 ⇒ 补到 24 高（inline-flex + align-items:center，文字仍垂直居中）。 */
+  min-height: 24px;
   font-size: 12px;
   color: #9a9aa8;
   white-space: nowrap;
