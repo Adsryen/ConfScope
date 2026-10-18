@@ -1,13 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
 import { MAX_CODE_HITS, normalizeLineEndings } from "../lib/codeLines";
+import { FIND_INPUT_DEFER_MIN_LINES } from "../lib/findInput";
 import { clearViewState, writeViewState } from "../lib/viewState";
 import { FIND_BAR_FALLBACK_HEIGHT, FIND_BAR_GAP, FIND_BAR_TOP, HIT_REVEAL_MARGIN } from "../lib/codeScroll";
 import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
@@ -674,6 +675,24 @@ describe("CodeEditor 查找栏打开时把第一行让到条子下面（轮27 F-
   });
 });
 
+describe("CodeEditor 查找词输入的延迟（轮29 F-16，与浏览态同一份策略）", () => {
+  const BIG = Array.from({ length: FIND_INPUT_DEFER_MIN_LINES }, (_, i) => `key${i}: spring-cloud-${i}`).join("\n");
+
+  it("大文档敲字期间不动命中层，停顿后才落地", async () => {
+    const { container } = renderEditor(<CodeEditor value={BIG} onChange={() => {}} format="YAML" />);
+    fireEvent.keyDown(container.querySelector("textarea") as HTMLTextAreaElement, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "spring" } });
+    expect(input.value, "输入框该是即时值").toBe("spring");
+    expect(container.querySelectorAll(".code-editor-pre mark.search-hit")).toHaveLength(0);
+
+    await settleFindInputCommit();
+    expect(container.querySelectorAll(".code-editor-pre mark.search-hit").length).toBeGreaterThan(0);
+    expect((container.querySelector(".code-find-count") as HTMLElement).textContent).toBe(`第 1/${FIND_INPUT_DEFER_MIN_LINES} 处`);
+  });
+});
+
 describe("CodeEditor 命中触顶要说得出口（轮28 F-10）", () => {
   const CAPPED = Array.from({ length: MAX_CODE_HITS + 1 }, () => "port = 8080;").join("\n");
 
@@ -682,11 +701,13 @@ describe("CodeEditor 命中触顶要说得出口（轮28 F-10）", () => {
     return container.querySelector(".code-find-input") as HTMLInputElement;
   }
 
-  it("编辑态与浏览态同一口径：触顶报「第 x/5000+ 处」，没触顶仍是精确数", () => {
+  it("编辑态与浏览态同一口径：触顶报「第 x/5000+ 处」，没触顶仍是精确数", async () => {
     const { container } = renderEditor(<CodeEditor value={CAPPED} onChange={() => {}} format="Properties" />);
     const input = openFind(container);
     expect(input, "Ctrl+F 没打开编辑态查找栏").toBeTruthy();
     fireEvent.change(input, { target: { value: "port" } });
+    // 5001 行正文已过输入延迟阈值（轮29 F-16）：先让这次提交落地，再读命中
+    await settleFindInputCommit();
 
     const count = container.querySelector(".code-find-count") as HTMLElement;
     expect(count.textContent).toBe(`第 1/${MAX_CODE_HITS}+ 处`);

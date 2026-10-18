@@ -20,6 +20,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, selectionTextWithin } from "../lib/findSelection";
+import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
@@ -125,8 +126,20 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const canScrollContent = metrics.scrollHeight <= 0 || metrics.scrollHeight > metrics.clientHeight + 1;
   const hasMinimap = minimapReserved && canScrollContent;
 
+  /**
+   * 查找词输入的延迟（轮29 F-16）：正文够大时把「每敲一个字重标记整篇 + 重新解析」并成「停顿一次」。
+   *
+   * 实测每键成本 2 000 行 26ms / 20 000 行 177ms / 200 000 行 ≈1 800ms，输入一个六字母的词
+   * 在 10MB 文件里要卡 10.8 秒（`research/bench_f16_keystroke_cost.log`）。阈值以下这个 hook 直接透传、
+   * 不建定时器 ⇒ 小文件仍是逐字实时，既有同步断言的测试一条都不必改成异步。
+   *
+   * `term` 必须就是 `effectiveTerm`：hits / 命中行底色 / 计数 / 缩略图红条全靠这一份，
+   * 另起一个变量标红与行号就会分叉（`findBarMatchOptionsArePaired` 钉的也是这个形状）。
+   */
+  const { term: committedFindTerm, isPending: findTermPending, flush: flushFindTerm } = useDebouncedFindTerm(findTerm, totalLines);
   // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（整体标红，不区分当前命中）。
-  const effectiveTerm = findOpen ? findTerm : (searchTerm ?? "");
+  // 外部搜索词那条路径不进延迟（见 ../lib/findInput 的口径 2）。
+  const effectiveTerm = findOpen ? committedFindTerm : (searchTerm ?? "");
   // 开关只作用于查找栏自己输入的词。栏一关就退回中性口径：外部内容搜索词必须继续
   // 「大小写不敏感子串」，否则代码里的标红会和左侧列表的命中数分叉
   // （configContentSearch.test.ts 钉着这条跨模块不变式）。
@@ -245,6 +258,12 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
 
   const navigate = useCallback(
     (delta: number) => {
+      // 输入框里还有没落进命中层的字符：这次按键只负责提交，新词的 hits 到位后由定位效果落到第一处。
+      // 用它跳等于拿旧词的命中表数格子（轮29 F-16 AC3）。
+      if (findTermPending) {
+        flushFindTerm();
+        return;
+      }
       if (!hits.length) return;
       setActiveIdx((prev) => {
         const next = (prev + delta + hits.length) % hits.length;
@@ -252,7 +271,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
         return next;
       });
     },
-    [hits, scrollLineIntoView]
+    [findTermPending, flushFindTerm, hits, scrollLineIntoView]
   );
 
   const closeFind = useCallback(() => {

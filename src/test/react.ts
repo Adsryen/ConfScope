@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent } from "@testing-library/react";
+import { FIND_INPUT_DEBOUNCE_MS } from "../lib/findInput";
+import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 if (!Element.prototype.scrollIntoView) {
@@ -14,6 +15,22 @@ afterEach(() => {
 });
 
 export * from "@testing-library/react";
+
+/**
+ * 等查找词的输入延迟落地（轮29 F-16）。
+ *
+ * 正文达到 `FIND_INPUT_DEFER_MIN_LINES` 之后，命中层不再逐字实时，而是停顿 `FIND_INPUT_DEBOUNCE_MS`
+ * 才提交一次。用例里凡是「敲完立刻断言命中数/红字个数」而正文又够大的，必须先走这一步；
+ * 别把断言改成 `waitFor` 轮询——那等于把「到底提交了几次」重新藏回看不见的位置。
+ */
+export async function settleFindInputCommit(): Promise<void> {
+  // 必须包在 act 里：定时器在 act 之外写状态时，这次提交会被推到「下一次 act」里落地，
+  // 于是「输入框敲完 → 断言计数 → 按 Enter」三步里，Enter 的那一次 act 才把提交渲染出来，
+  // 换词重置当前命中序号的效果（setActiveIdx(0)）就压掉了 Enter 刚推进的那一格。
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, FIND_INPUT_DEBOUNCE_MS + 20));
+  });
+}
 
 /**
  * 完整的「点遮罩」手势（轮14 波32 / R53）。

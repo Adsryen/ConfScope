@@ -1,8 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "../test/react";
+import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FIND_INPUT_DEFER_MIN_LINES } from "../lib/findInput";
 import { I18nProvider } from "../i18n";
 import CodeView from "./CodeView";
 import { clearViewState, writeViewState } from "../lib/viewState";
@@ -761,6 +762,44 @@ describe("CodeView 查找栏打开时把第一行让到条子下面（轮27 F-8�
   });
 });
 
+describe("CodeView 查找词输入的延迟（轮29 F-16）", () => {
+  /** 正好到阈值：这条用例钉的是「大文档不再逐字重标记整篇」，差一行都不算。 */
+  const BIG = Array.from({ length: FIND_INPUT_DEFER_MIN_LINES }, (_, i) => `key${i}: spring-cloud-${i}`).join("\n");
+
+  it("大文档敲字期间不动命中层，停顿后才落地；输入框始终是即时值", async () => {
+    const { container } = renderView(BIG, "YAML");
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "spring" } });
+    // 用户看得见自己敲的字（输入框即时），但整篇正文还没被重标记：
+    // 实测每键 1 800ms（10MB）到 67ms（247KB），逐字实时就是「打一个字等半秒」。
+    expect(input.value, "输入框该是即时值").toBe("spring");
+    expect(container.querySelectorAll(".code-area mark.search-hit")).toHaveLength(0);
+
+    await settleFindInputCommit();
+    expect(container.querySelectorAll(".code-area mark.search-hit").length).toBeGreaterThan(0);
+    expect((container.querySelector(".code-find-count") as HTMLElement).textContent).toBe(`第 1/${FIND_INPUT_DEFER_MIN_LINES} 处`);
+    // 落地的是这一次输入，不是别的
+    expect((container.querySelector(".code-find-input") as HTMLInputElement).value).toBe("spring");
+  });
+
+  it("还没提交就按 Enter：这一次只提交新词，不拿旧词的命中表跳格子", async () => {
+    const { container } = renderView(BIG, "YAML");
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    const count = () => (container.querySelector(".code-find-count") as HTMLElement).textContent;
+
+    fireEvent.change(input, { target: { value: "spring" } });
+    // 停顿还没到，Enter 不能拿「旧词（空串）」的命中表数格子；这次按键只负责把新词提交。
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(count(), "Enter 应当立刻把没落地的词提交").toBe(`第 1/${FIND_INPUT_DEFER_MIN_LINES} 处`);
+    // 提交过了就不该再有待触发的定时器：下一次 Enter 正常前进
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(count()).toBe("第 2/3000 处");
+  });
+});
+
 describe("CodeView 命中触顶要说得出口（轮28 F-10）", () => {
   /** 正好比上限多一处：少一处就该走「第 1/N 处」的精确文案，多一处就该报得出「+」。 */
   const CAPPED = Array.from({ length: MAX_CODE_HITS + 1 }, () => "port = 8080;").join("\n");
@@ -775,11 +814,13 @@ describe("CodeView 命中触顶要说得出口（轮28 F-10）", () => {
     expect(count.getAttribute("title")).toBeNull();
   });
 
-  it("触顶后计数变成「第 x/5000+ 处」，DOM 里也只有 5000 个红字", () => {
+  it("触顶后计数变成「第 x/5000+ 处」，DOM 里也只有 5000 个红字", async () => {
     const { container } = renderView(CAPPED, "Properties");
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = container.querySelector(".code-find-input") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "port" } });
+    // 5001 行正文已过输入延迟阈值（轮29 F-16）：先让这次提交落地，再读命中
+    await settleFindInputCommit();
 
     const count = container.querySelector(".code-find-count") as HTMLElement;
     expect(count.textContent).toBe(`第 1/${MAX_CODE_HITS}+ 处`);

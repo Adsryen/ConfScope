@@ -31,6 +31,7 @@ import {
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
+import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
@@ -128,8 +129,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const lines = useMemo(() => splitLines(doc), [doc]);
   const totalLines = lines.length;
 
+  /**
+   * 查找词输入的延迟（轮29 F-16，与浏览态同一份策略）：编辑态的正文同样能到几万行，
+   * 阈值以下这个 hook 直接透传、不建定时器，小文件保持逐字实时。
+   * `term` 必须就是 `effectiveTerm`：标红、命中行、计数、跳下一处全靠这一份，分叉就看得见摸得着。
+   */
+  const { term: committedFindTerm, isPending: findTermPending, flush: flushFindTerm } = useDebouncedFindTerm(findTerm, totalLines);
   // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（只标红，不区分当前命中）。
-  const effectiveTerm = findOpen ? findTerm : searchTerm;
+  const effectiveTerm = findOpen ? committedFindTerm : searchTerm;
   // 开关只作用于查找栏自己输入的词。栏一关就退回中性口径：外部内容搜索词必须继续
   // 「大小写不敏感子串」，否则编辑态的标红会和左侧列表的命中数分叉。
   const matchOptions = useMemo<MatchOptions>(
@@ -258,12 +265,17 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   const navigate = useCallback(
     (delta: number) => {
+      // 有字符还没落进命中层：这一次只提交，别拿旧词的命中表跳格子（轮29 F-16 AC3）。
+      if (findTermPending) {
+        flushFindTerm();
+        return;
+      }
       if (!hits.length) return;
       const next = (activeIdx + delta + hits.length) % hits.length;
       setActiveIdx(next);
       revealHit(hits[next]);
     },
-    [activeIdx, hits, revealHit]
+    [activeIdx, findTermPending, flushFindTerm, hits, revealHit]
   );
 
   const revealLine = useCallback(
