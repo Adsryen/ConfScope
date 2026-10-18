@@ -9,7 +9,7 @@
 //  5. 读每块容器的位移，外加 window 冒泡阶段看到的 defaultPrevented（兜底根在元素上，比 window 早）。
 //
 // 覆盖：F34-1 配置浏览（需求三件套 + 左右两列 chrome + 正文原生 + 编辑态 + 历史态）、
-//       F34-2 差异对比单文件态、F34-3 匹配态与批量态（三块列各自命中自己列）、
+//       F34-2 差异对比单文件态、F34-3 匹配态与批量态（三块列各自命中自己列）、F34-6 来源面板底缘的 ⌄ 边条、
 //       F34-4 变更计划（G1：宿主面板自己可滚时组件级根仍旧接管浮层）、
 //       F34-5 新建配置弹框（G2：浮层在弹框里不再是纯死区）。
 // 期望值全部来自 PRD 的 Acceptance Criteria；SKIP 只允许出现在「这块地方根本没有滚动余量」或
@@ -680,6 +680,63 @@ test("F34-5 新建配置弹框：浮层在弹框里不再是纯死区（G2）", 
   await page.getByRole("button", { name: "放弃内容" }).last().click();
   await page.waitForTimeout(400);
   expect(await visible(page, ".modal-overlay").count(), "确认放弃后两层弹层都该收起").toBe(0);
+
+  expect(failures, "真机复核未通过项:\n" + failures.join("\n")).toEqual([]);
+});
+
+test("F34-6 单文件对比来源面板底缘的 ⌄ 边条：两态都归正文，且点它仍能收起/展开", async ({ page, retest }) => {
+  await installRetestBridge(page, retest);
+  await republishRetestData();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootstrap(page);
+  const failures: string[] = [];
+
+  await navigate(page, "配置对比");
+  await page.waitForTimeout(500);
+  await setDiffSource(page, "left", {
+    connection: "Retest Nacos A",
+    namespace: NS_A,
+    group: GROUP,
+    dataId: "svc-gateway.yaml",
+  });
+  await setDiffSource(page, "right", {
+    connection: "Retest Nacos B",
+    namespace: NS_B,
+    group: GROUP,
+    dataId: "svc-gateway.yaml",
+  });
+  await page.getByRole("button", { name: "加载并对比" }).last().click();
+  await expect(visible(page, ".diff-body").first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(500);
+  expect(await visible(page, ".diff-row").count(), "两侧必须真有差异行").toBeGreaterThan(4);
+
+  // 边条是 absolute; bottom:-9px 的一条 36x18，落在 .diff-source-panel 的下边缘外，
+  // 旧口径按 class 匹配（.diff-source-panel）它不在面板内、判成死区；A 按几何：整块压着它才接管。
+  await ensureSourcesPanelExpanded(page);
+  await runProbe(
+    page,
+    { tag: "来源边条 .diff-source-toggle-edge（展开态）", sel: ".diff-source-toggle-edge", expect: ["diff-body"] },
+    failures
+  );
+  await runProbe(
+    page,
+    { tag: "来源面板底缘缝隙 .diff-source-panel", sel: ".diff-source-panel", offset: [-30, -2], expect: ["diff-body"] },
+    failures
+  );
+
+  // 收起态：面板只剩 summary 一行，正文余量变了，归属不许变
+  await visible(page, ".diff-source-toggle-edge").first().click();
+  await expect(visible(page, ".diff-source-panel.collapsed").first()).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(300);
+  await runProbe(
+    page,
+    { tag: "来源边条 .diff-source-toggle-edge（收起态）", sel: ".diff-source-toggle-edge", expect: ["diff-body"] },
+    failures
+  );
+
+  // 边条本身还是个按钮：滚轮归正文这件事不能把点击吞掉
+  await visible(page, ".diff-source-toggle-edge").first().click();
+  await expect(visible(page, ".diff-source-panel.collapsed").first()).toHaveCount(0, { timeout: 10_000 });
 
   expect(failures, "真机复核未通过项:\n" + failures.join("\n")).toEqual([]);
 });
