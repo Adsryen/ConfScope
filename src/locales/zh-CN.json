@@ -851,6 +851,9 @@
     "findClose": "关闭查找",
     "findCloseKey": "关闭查找（Esc）",
     "findCount": "第 {current}/{total} 处",
+
+    "findCountCapped": "第 {current}/{max}+ 处",
+    "findCountCappedHint": "命中太多，只标红前 {max} 处，方向键也在这 {max} 处里跳。换个更长的词能缩小范围",
     "findNone": "无匹配",
     "findCaseSensitive": "区分大小写",
     "findWholeWord": "全词匹配",

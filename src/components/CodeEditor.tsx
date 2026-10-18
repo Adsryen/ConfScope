@@ -18,6 +18,8 @@ import {
   activeOffsetOf,
   findCodeHits,
   hitLines,
+  isHitScanCapped,
+  MAX_CODE_HITS,
   lineOffsets,
   markHighlightedHtml,
   normalizeLineEndings,
@@ -132,6 +134,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   );
   const hits = useMemo(() => findCodeHits(doc, effectiveTerm.trim(), matchOptions), [doc, effectiveTerm, matchOptions]);
   const hitSet = useMemo(() => hitLines(hits), [hits]);
+  // 扫到上限就停 ⇒ 「还有多少处」我们并不真的知道，只能告诉用户「至少 5000 处」（轮28 F-10）。
+  const hitsCapped = isHitScanCapped(hits);
 
   const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
   const currentLine = findOpen ? activeLineOf(hits, activeIdx) : pinnedLine;
@@ -547,9 +551,17 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
           >
             ab|
           </button>
-          <span className="code-find-count" aria-live="polite">
+          {/* 命中触顶时必须说出来（轮28 F-10）：只写「第 1/5000 处」用户会以为文件里一共就 5000 处。
+              「+」进可见文案，解释挂 title——这是 span，title 正常显示，不受轮26 F-1（disabled 控件的 title 不弹）影响。 */}
+          <span
+            className="code-find-count"
+            aria-live="polite"
+            title={hitsCapped ? t("config.findCountCappedHint", { max: MAX_CODE_HITS }) : undefined}
+          >
             {hits.length
-              ? t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })
+              ? hitsCapped
+                ? t("config.findCountCapped", { current: clamp(activeIdx, 0, hits.length - 1) + 1, max: MAX_CODE_HITS })
+                : t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })
               : effectiveTerm
                 ? t("config.findNone")
                 : t("config.findHint")}

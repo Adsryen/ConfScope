@@ -45,6 +45,22 @@ export function lineOffsets(lines: string[]): number[] {
 }
 
 /**
+ * 一次查找最多物化多少处命中。
+ *
+ * 为什么必须有上限（轮28 F-10，实测）：20 万行 / 10MB 的配置里搜「e」有 80 万处，
+ * find 464ms、mark 1956ms、产出 47.7MB HTML、80 万个 `<mark>` 节点；2 万行 / 1MB
+ * （网关路由表这种日常大小）就有 8 万命中 / 4.7MB。命中是「每按一次 Enter 都要重新消费」
+ * 的数据，不设上限等于把整份文件搬进 DOM。
+ *
+ * 5000 的取值依据：提前停扫后 find 从 581ms 降到 211ms，5000 个 `<mark>` 对浏览器无压力；
+ * 再往上（2 万）HTML 体积已经开始随命中数膨胀，而人不可能逐个看完第 5000 处之后的命中。
+ *
+ * 上限必须让用户看见——见 isHitScanCapped 与查找栏的「第 x/5000+ 处」文案，
+ * 悄悄少标几处等于「列表说命中了、代码里标不出来」那类偏差的又一实例。
+ */
+export const MAX_CODE_HITS = 5000;
+
+/**
  * 在整段代码里查找搜索词的全部字面命中，返回带行/列/偏移的结果。
  * 直接在原始文本上匹配（而非高亮后的 HTML），这样跨语法 token 的命中
  * 也能被找到（例如 properties 里被 hljs 拆成两段的 server.port=8080），
@@ -52,8 +68,9 @@ export function lineOffsets(lines: string[]): number[] {
  *
  * options 只服务查找栏（区分大小写 / 全词）；外部内容搜索词必须留空，
  * 否则代码里的标红会和左侧列表的命中数分叉（见 configContentSearch.test.ts）。
+ * 上限只截断**数量**，不改匹配语义。
  */
-export function findCodeHits(code: string, term: string, options: MatchOptions = {}): CodeHit[] {
+export function findCodeHits(code: string, term: string, options: MatchOptions = {}, limit = MAX_CODE_HITS): CodeHit[] {
   const needle = term.trim();
   if (!needle) return [];
   const lines = splitLines(code);
@@ -63,8 +80,18 @@ export function findCodeHits(code: string, term: string, options: MatchOptions =
     const line = lineIndexOfOffset(offsets, index);
     const lineStart = offsets[line] ?? 0;
     hits.push({ line, column: index - lineStart, offset: index, length });
+    // 提前停扫（不是扫完再截断）：扫到底才是那 581ms 的来源，截断必须发生在扫描侧。
+    if (hits.length >= limit) break;
   }
   return hits;
+}
+
+/**
+ * 命中数组「长满到上限」＝ 扫描是被动停的，文件里很可能还有更多命中。
+ * 恰好只有 limit 处命中时会多报一个「+」，但这句话本身依旧成立：我们确实没看完剩下的部分。
+ */
+export function isHitScanCapped(hits: CodeHit[], limit = MAX_CODE_HITS): boolean {
+  return hits.length >= limit;
 }
 
 /** 行首偏移表 → 某偏移所在行（0 基），二分查找。 */

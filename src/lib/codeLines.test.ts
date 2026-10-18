@@ -13,6 +13,8 @@ import {
   markHighlightedHtml,
   normalizeLineEndings,
   splitLines,
+  MAX_CODE_HITS,
+  isHitScanCapped,
 } from "./codeLines";
 
 /** 模拟浏览器解析：剥离标签 + 反转义 &amp;/&lt;/&gt;（&quot;/&#x27; 已被重新转义为原字符）。 */
@@ -216,5 +218,52 @@ describe("findCodeHits 查找栏匹配选项（R75）", () => {
     expect(ww.size).toBeLessThan(plain.size);
     expect(activeLineOf(findCodeHits(code, "port", { caseSensitive: true }), 0)).toBe(1);
     expect(activeLineOf(findCodeHits(code, "port"), 0)).toBe(0);
+  });
+});
+
+describe("findCodeHits 命中上限（轮28 F-10）", () => {
+  // 一行一处命中，第 i 处命中在第 i 行，便于逐处核对偏移/行列没有因为截断而漂移
+  const many = Array.from({ length: MAX_CODE_HITS + 300 }, (_, i) => `k${i} = needle-${i}`).join("\n");
+  const uncapped = () => findCodeHits(many, "needle", {}, Number.MAX_SAFE_INTEGER);
+
+  it("默认扫到 MAX_CODE_HITS 就停，且 isHitScanCapped 报得出「被动停的」", () => {
+    const hits = findCodeHits(many, "needle");
+    expect(hits).toHaveLength(MAX_CODE_HITS);
+    expect(isHitScanCapped(hits)).toBe(true);
+    expect(isHitScanCapped(uncapped())).toBe(true); // 远超上限时同样只能说「还有更多」
+    expect(isHitScanCapped(findCodeHits("needle\nneedle", "needle"))).toBe(false);
+    expect(isHitScanCapped([])).toBe(false);
+  });
+
+  it("截断只是少取，不改前缀的顺序 / 行 / 列 / 偏移口径", () => {
+    const capped = findCodeHits(many, "needle");
+    const full = uncapped();
+    expect(capped).toEqual(full.slice(0, MAX_CODE_HITS));
+    expect(capped.map((h) => h.line)).toEqual(capped.map((_, i) => i));
+    const rowTexts = many.split("\n");
+    expect(capped.map((h) => h.column)).toEqual(capped.map((h) => rowTexts[h.line].indexOf("needle")));
+    for (const hit of capped) expect(many.slice(hit.offset, hit.offset + hit.length)).toBe("needle");
+  });
+
+  it("自定义 limit 同样提前停：只要前 N 处就不该看到第 N+1 处", () => {
+    const hits = findCodeHits(many, "needle", {}, 3);
+    expect(hits).toHaveLength(3);
+    expect(hits[2]).toEqual(uncapped()[2]);
+    expect(isHitScanCapped(hits, 3)).toBe(true);
+    // 上限小于命中数时不该把「刚好等于 limit」当成完整结果误报为未截断
+    expect(isHitScanCapped(findCodeHits(many, "needle", {}, 4), 3)).toBe(true);
+  });
+
+  it("匹配语义不受上限影响（大小写 / 全词 / 外部搜索词中性口径）", () => {
+    const code = Array.from({ length: 20000 }, (_, i) => (i % 2 ? "PORT" : "port")).join("\n");
+    expect(findCodeHits(code, "port", { caseSensitive: true })).toHaveLength(MAX_CODE_HITS);
+    expect(findCodeHits(code, "port", { wholeWord: true })).toHaveLength(MAX_CODE_HITS);
+    expect(findCodeHits(code, "port", { wholeWord: true })).toEqual(findCodeHits(code, "port"));
+  });
+
+  it("空词 / 无命中 / 纯空白词不会被上限逻辑误判成截断", () => {
+    expect(findCodeHits(many, "   ")).toEqual([]);
+    expect(findCodeHits(many, "zzz")).toEqual([]);
+    expect(isHitScanCapped(findCodeHits(many, "zzz"))).toBe(false);
   });
 });

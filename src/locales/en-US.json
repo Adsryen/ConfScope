@@ -851,6 +851,9 @@
     "findClose": "Close find",
     "findCloseKey": "Close find (Esc)",
     "findCount": "{current} of {total}",
+
+    "findCountCapped": "{current} of {max}+",
+    "findCountCappedHint": "Too many matches — only the first {max} are highlighted and navigable. Try a longer term.",
     "findNone": "No matches",
     "findCaseSensitive": "Match case",
     "findWholeWord": "Match whole word",

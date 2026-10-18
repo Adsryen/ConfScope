@@ -8,6 +8,7 @@ import CodeView from "./CodeView";
 import { clearViewState, writeViewState } from "../lib/viewState";
 import { FIND_BAR_FALLBACK_HEIGHT, FIND_BAR_GAP, FIND_BAR_TOP, HIT_REVEAL_MARGIN } from "../lib/codeScroll";
 import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
+import { MAX_CODE_HITS } from "../lib/codeLines";
 import type { Format } from "../lib/format";
 
 function renderView(
@@ -708,5 +709,43 @@ describe("CodeView 查找栏打开时把第一行让到条子下面（轮27 F-8�
     } finally {
       restore();
     }
+  });
+});
+
+describe("CodeView 命中触顶要说得出口（轮28 F-10）", () => {
+  /** 正好比上限多一处：少一处就该走「第 1/N 处」的精确文案，多一处就该报得出「+」。 */
+  const CAPPED = Array.from({ length: MAX_CODE_HITS + 1 }, () => "port = 8080;").join("\n");
+
+  it("未触顶时文案一字不改，也不挂解释 title", () => {
+    const { container } = renderView(MULTI, "Properties");
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "port" } });
+    const count = container.querySelector(".code-find-count") as HTMLElement;
+    expect(count.textContent).toBe("第 1/2 处");
+    expect(count.getAttribute("title")).toBeNull();
+  });
+
+  it("触顶后计数变成「第 x/5000+ 处」，DOM 里也只有 5000 个红字", () => {
+    const { container } = renderView(CAPPED, "Properties");
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "port" } });
+
+    const count = container.querySelector(".code-find-count") as HTMLElement;
+    expect(count.textContent).toBe(`第 1/${MAX_CODE_HITS}+ 处`);
+    expect(count.getAttribute("title"), "限制本身要有一句解释").toContain(`只标红前 ${MAX_CODE_HITS} 处`);
+    expect(container.querySelectorAll(".code-area mark.search-hit")).toHaveLength(MAX_CODE_HITS);
+    // 正文契约不能被这批红字破坏
+    expect((container.querySelector(".code-area") as HTMLElement).textContent).toBe(CAPPED);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect((container.querySelector(".code-find-count") as HTMLElement).textContent).toBe(`第 2/${MAX_CODE_HITS}+ 处`);
+  });
+
+  it("关回查找栏（外部搜索词同样触顶）：不报精确总数，也不留 title 上的空值", () => {
+    const { container } = renderView(CAPPED, "Properties", { searchTerm: "port" });
+    // 外部内容搜索路径没有查找栏，命中数只在列表侧播报，这里只保证红字数量被上限挡住
+    expect(container.querySelectorAll(".code-area mark.search-hit")).toHaveLength(MAX_CODE_HITS);
   });
 });

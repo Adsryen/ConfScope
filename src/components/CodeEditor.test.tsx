@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
-import { normalizeLineEndings } from "../lib/codeLines";
+import { MAX_CODE_HITS, normalizeLineEndings } from "../lib/codeLines";
 import { clearViewState, writeViewState } from "../lib/viewState";
 import { FIND_BAR_FALLBACK_HEIGHT, FIND_BAR_GAP, FIND_BAR_TOP, HIT_REVEAL_MARGIN } from "../lib/codeScroll";
 import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
@@ -671,5 +671,38 @@ describe("CodeEditor 查找栏打开时把第一行让到条子下面（轮27 F-
     } finally {
       restore();
     }
+  });
+});
+
+describe("CodeEditor 命中触顶要说得出口（轮28 F-10）", () => {
+  const CAPPED = Array.from({ length: MAX_CODE_HITS + 1 }, () => "port = 8080;").join("\n");
+
+  function openFind(container: HTMLElement) {
+    fireEvent.keyDown(container.querySelector("textarea") as HTMLTextAreaElement, { key: "f", ctrlKey: true });
+    return container.querySelector(".code-find-input") as HTMLInputElement;
+  }
+
+  it("编辑态与浏览态同一口径：触顶报「第 x/5000+ 处」，没触顶仍是精确数", () => {
+    const { container } = renderEditor(<CodeEditor value={CAPPED} onChange={() => {}} format="Properties" />);
+    const input = openFind(container);
+    expect(input, "Ctrl+F 没打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input, { target: { value: "port" } });
+
+    const count = container.querySelector(".code-find-count") as HTMLElement;
+    expect(count.textContent).toBe(`第 1/${MAX_CODE_HITS}+ 处`);
+    expect(count.getAttribute("title")).toContain(`只标红前 ${MAX_CODE_HITS} 处`);
+    expect(container.querySelectorAll(".code-editor-pre mark.search-hit")).toHaveLength(MAX_CODE_HITS);
+    expect((container.querySelector(".code-editor-pre") as HTMLElement).textContent).toBe(CAPPED);
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect((container.querySelector(".code-find-count") as HTMLElement).textContent).toBe(`第 2/${MAX_CODE_HITS}+ 处`);
+
+    // 未触顶：文案逐字不变，title 不留空值
+    const small = renderEditor(<CodeEditor value={INITIAL + "\nport = 1;"} onChange={() => {}} format="Properties" />);
+    const smallInput = openFind(small.container);
+    fireEvent.change(smallInput, { target: { value: "port" } });
+    const smallCount = small.container.querySelector(".code-find-count") as HTMLElement;
+    expect(smallCount.textContent).toBe("第 1/2 处");
+    expect(smallCount.getAttribute("title")).toBeNull();
   });
 });
