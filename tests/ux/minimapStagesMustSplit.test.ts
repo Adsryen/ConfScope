@@ -335,6 +335,20 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
     expect(handler![1], "取消默认动作不能把跳转一起取消掉").toMatch(/jumpFromPointer\(e\.clientY\);/);
   });
 
+  it("只认主按钮，而且这一句必须排在 preventDefault 之前（轮32 F-31）", () => {
+    // 右键落在这里原先也跳行；更糟的是 pointerdown 被取消之后兼容的 mousedown 不再派发，
+    // 上下文菜单跟着一起没了。顺序错了等于没修：先取消再判断，菜单照样弹不出来。
+    const handler = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(readScannedSource(MM));
+    expect(handler, "读不到 onPointerDown 的函数体").not.toBeNull();
+    const body = handler![1];
+    const guard = body.indexOf("if (e.button !== 0) return;");
+    expect(guard, "没有「只认主按钮」这一句").toBeGreaterThanOrEqual(0);
+    expect(body.indexOf("e.preventDefault();"), "取消在前、判断在后等于没修：右键的 pointerdown 仍被取消，菜单弹不出来").toBeGreaterThan(
+      guard
+    );
+    expect(/jumpFromPointer\(e\.clientY\);/.test(body.slice(guard)), "跳行为主按钮保留").toBe(true);
+  });
+
   it("画条只用正文像素尺，估算分母只许有一个出处", () => {
     const mm = readScannedSource(MM);
     expect(mm.match(/padTop \* 2/g) || [], "又出现第二处「padTop*2 + 行数*行高」估算：那就是第三把尺").toHaveLength(1);
@@ -382,6 +396,22 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
     expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
     const regressedHandler = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(regressed);
     expect(regressedHandler![1], "去掉 preventDefault 之后判据必须看不见它").not.toMatch(/e\.preventDefault\(\);/);
+  });
+
+  it("自检十二：主按钮判断挪到 preventDefault 之后必须判红", () => {
+    const mm = readScannedSource(MM);
+    const guard = "if (e.button !== 0) return;";
+    expect(mm, "锚点不在源码里，这条自检是空转").toContain(guard);
+    const regressed = mm.replace(guard, "").replace("e.preventDefault();", `e.preventDefault();\n        ${guard}`);
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    const body = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(regressed)![1];
+    expect(
+      body.indexOf("e.preventDefault();") < body.indexOf(guard),
+      "取消在前、判断在后：右键的 pointerdown 仍被取消，菜单还是弹不出来"
+    ).toBe(true);
+    // 上面那条「必须在之前」的判据对这份变异必须失配
+    const ordered = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(mm)![1];
+    expect(ordered.indexOf(guard) < ordered.indexOf("e.preventDefault();"), "真源码的顺序判据本身是空转").toBe(true);
   });
 
   it("自检十一：画条退回 (startLine / n) * height 必须判红", () => {

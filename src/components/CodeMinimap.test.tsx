@@ -370,3 +370,109 @@ describe("CodeMinimap 点完之后的焦点（轮31 F-26）", () => {
     expect(mm.getAttribute("contenteditable"), "缩略图不是编辑面").toBeNull();
   });
 });
+
+describe("CodeMinimap 只认主按钮（轮32 F-31）", () => {
+  /**
+   * 缺陷长什么样：`onPointerDown` 无条件 `preventDefault()` + 跳行，没看 `e.button`。
+   * 于是右键落在缩略图上先跳一次行，再因为 pointerdown 被取消而不弹上下文菜单（在正文别处右键是有的）；
+   * 中键「按下即粘贴（X11 primary）/ Windows 自动滚动」同样被吞掉并误跳行。
+   * 触屏与触控笔的 `button` 也是 0，所以修法只认主按钮，不误伤指针输入。
+   */
+  it("右键既不跳行，也不取消 pointerdown（菜单还要靠它前面的那一步）", () => {
+    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+    const before = scroll.state.top;
+    expect(
+      fireEvent.pointerDown(mm, { clientY: 100, pointerId: 1, button: 2, buttons: 2 }),
+      "右键的 pointerdown 被取消：兼容的 mousedown 不再派发，上下文菜单弹不出来"
+    ).toBe(true);
+    expect(scroll.state.top, "右键也跳了行：只是想弹个菜单，正文先跳走了").toBe(before);
+    expect(syncScroll, "右键这一路不该写偏移").not.toHaveBeenCalled();
+  });
+
+  it("中键同样既不跳行也不取消", () => {
+    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+    const before = scroll.state.top;
+    expect(fireEvent.pointerDown(mm, { clientY: 100, pointerId: 1, button: 1, buttons: 4 }), "中键被吞掉了").toBe(true);
+    expect(scroll.state.top, "中键也跳了行").toBe(before);
+    expect(syncScroll).not.toHaveBeenCalled();
+  });
+
+  it("右键按下之后的 pointermove 不许变成拖动", () => {
+    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
+    fireEvent.pointerDown(mm, { clientY: 60, pointerId: 1, button: 2, buttons: 2 });
+    const before = scroll.state.top;
+    fireEvent.pointerMove(mm, { clientY: 140, pointerId: 1, buttons: 2 });
+    expect(scroll.state.top, "右键按着不动也算拖动：draggingRef 只许主按钮置位").toBe(before);
+  });
+
+  it("主按钮、触屏、触控笔都照旧跳行（button 都是 0，修法不误伤指针输入）", () => {
+    for (const [label, init] of [
+      ["鼠标左键", { pointerType: "mouse", button: 0, buttons: 1 }],
+      ["单指", { pointerType: "touch", button: 0, buttons: 1 }],
+      ["触控笔", { pointerType: "pen", button: 0, buttons: 1 }],
+    ] as Array<[string, PointerEventInit]>) {
+      const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+      expect(fireEvent.pointerDown(mm, { clientY: 100, pointerId: 1, ...init }), `${label}：默认动作该被取消`).toBe(false);
+      expect(scroll.state.top, `${label}：跳行被一起挡掉了`).toBeGreaterThan(200);
+      expect(syncScroll, `${label}：写完 scrollTop 必须当帧补同步`).toHaveBeenCalled();
+    }
+  });
+});
+
+describe("CodeMinimap 换屏 / 改缩放之后必须重画（轮32 F-32）", () => {
+  /**
+   * 缺陷长什么样：`devicePixelRatio` 在绘制 effect 内部读，依赖表里没有它，全库也没有任何 dpr 订阅。
+   * 于是拖到另一台屏、改系统缩放之后，画布的物理像素还是按旧 dpr 摆的，与 CSS 尺寸失配 ⇒
+   * 整条缩略图发糊/拉伸，直到别的原因（正文变长、查找栏开合）恰好触发重画才自愈。
+   */
+  function stubDpr(initial: number) {
+    const box = { value: initial };
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, get: () => box.value });
+    const queries: string[] = [];
+    const listeners: Array<() => void> = [];
+    vi.stubGlobal("matchMedia", (query: string) => {
+      queries.push(query);
+      return {
+        media: query,
+        matches: false,
+        addEventListener: (_type: string, cb: () => void) => listeners.push(cb),
+        removeEventListener: () => {},
+      };
+    });
+    return {
+      box,
+      queries,
+      fireChange: () => [...listeners].forEach((cb) => cb()),
+      listenerCount: () => listeners.length,
+    };
+  }
+
+  it("dpr 变了当帧按新 dpr 重画，不用等别的原因触发", () => {
+    const dpr = stubDpr(1);
+    const { mm, rects } = mountMinimap({ hits: [20], currentLine: 20 });
+    const canvas = mm.querySelector("canvas") as HTMLCanvasElement;
+    expect(dpr.listenerCount(), "没有捕获到 dpr 的 change 监听：这条守卫在空转").toBeGreaterThan(0);
+    expect(canvas.width, "dpr=1 时画布宽应等于 CSS 宽").toBe(MINIMAP_W);
+    const painted = rects.length;
+    expect(painted, "没画东西，下面的重画断言是空转").toBeGreaterThan(0);
+
+    rects.length = 0;
+    act(() => {
+      dpr.box.value = 2;
+      dpr.fireChange();
+    });
+    expect(canvas.width, "换屏后画布还按旧 dpr 摆物理像素：整条图发糊").toBe(MINIMAP_W * 2);
+    expect(rects.length, "dpr 变化没触发重画（依赖表里根本没有 dpr）").toBe(painted);
+    // 订阅的 query 里写的是当前 dpr：不跟着换，下一次跨档就没人通知了
+    expect(dpr.queries[dpr.queries.length - 1], "换档之后订阅还挂在旧 dpr 那条 media 上").toContain("2");
+  });
+
+  it("没有 matchMedia 的老 WebView：一次性读取，不抛错也不阻塞绘制", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, get: () => 3 });
+    const { mm, rects } = mountMinimap({ hits: [20], currentLine: 20 });
+    const canvas = mm.querySelector("canvas") as HTMLCanvasElement;
+    expect(rects.length, "读不到 matchMedia 就把绘制整条废掉是回归").toBeGreaterThan(0);
+    expect(canvas.width, "兜底路径也要按 dpr=3 摆画布").toBe(MINIMAP_W * 3);
+  });
+});

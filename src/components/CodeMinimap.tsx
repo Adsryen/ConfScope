@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { decorateMinimapRows, prepareMinimapBuckets } from "../lib/codeLines";
+import { useDevicePixelRatio } from "../lib/useDevicePixelRatio";
 import { useTranslation } from "../i18n";
 
 /**
@@ -85,6 +86,13 @@ interface Props {
 export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineArray, currentLine, metrics, rowHeight, padTop }: Props) {
   const { t } = useTranslation();
 
+  /**
+   * 画布要按它摆物理像素（轮32 F-32）：换屏 / 改缩放之后必须当帧重画，
+   * 所以这里用订阅值而不是在 effect 里现读 `window.devicePixelRatio`——现读的那一份
+   * 不在依赖表里，档位变了没人重画，图会一直糊到别的原因恰好触发重绘才自愈。
+   */
+  const dpr = useDevicePixelRatio();
+
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const draggingRef = useRef(false);
@@ -137,7 +145,6 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     if (width <= 0 || height <= 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const dpr = (window as unknown as { devicePixelRatio?: number }).devicePixelRatio ?? 1;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;
@@ -160,7 +167,7 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     }
     // lines.length 而不是 lines：桶表变了才要重画，正文数组的引用变化由 buckets 那条 memo 收敛。
     // padTop / rowHeight / contentHeight 也在这张表里：查找栏一开合，整张图的 y 都要跟着重画。
-  }, [minimapRows, minimapSize, lines.length, contentHeight, padTop, rowHeight]);
+  }, [minimapRows, minimapSize, lines.length, contentHeight, padTop, rowHeight, dpr]);
 
   /**
    * 点 / 拖缩略图落到某个偏移。
@@ -254,6 +261,10 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
       ref={surfaceRef}
       title={t("config.minimap")}
       onPointerDown={(e) => {
+        // 只认主按钮（轮32 F-31），且这一句必须在 preventDefault 之前：右键落在这里先跳一次行，
+        // 又因为 pointerdown 被取消而不弹上下文菜单（正文别处右键是有的）；中键的粘贴 / 自动滚动同理被吞。
+        // 触屏与触控笔的 button 也是 0，所以这一句不误伤指针输入；draggingRef 只在主按钮那一路置位。
+        if (e.button !== 0) return;
         // 必须取消默认动作（轮31 F-26）：按 Pointer Events 规范，取消 pointerdown 后兼容的
         // mousedown 不再派发，而 mousedown 正是浏览器改焦点的那一步。不取消的话点一下缩略图：
         // 编辑态 textarea 失焦（接着打字全不见，Ctrl+S 也不再被编辑区接管），
