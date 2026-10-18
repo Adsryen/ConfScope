@@ -14,6 +14,8 @@
 // 组件侧只许调用本模块，不许再各写一份水平定位（与 tests/ux/detailScrollResetSingleSource
 // 对滚动归零的口径同源：几何口径的第二份实现就是下一轮 bug 的出处）。
 
+import { CURRENT_HIT_CLASS } from "./codeLines";
+
 /** 查找条自己的几何：`position:absolute; top:8`（styles.css 的 .code-find）。 */
 export const FIND_BAR_TOP = 8;
 /** 量不到栏高时的兜底：Playwright 实测单行态高 34（窄容器 flex-wrap 会到 60，轮26 F-4 记过）。 */
@@ -51,8 +53,11 @@ export function measureFindBarHeight(el: HTMLElement | null): number {
 /** 命中送进视口时左右各留的像素边距：贴着视口边缘会被滚动条与圆角吃掉半个字符。 */
 export const HIT_REVEAL_MARGIN = 24;
 
-/** 当前命中的标记类名（markHighlightedHtml 产出）。一个命中跨语法 token 时会被切成相邻的几个 <mark>。 */
-const CURRENT_MARK_SELECTOR = ".search-hit-current";
+/**
+ * 当前命中的标记类名与 codeLines 同源（轮28 F-14：类改由视图在提交后往 <mark> 上切换，
+ * 不再进高亮 HTML）。一个命中跨语法 token 时会被切成相邻的几个 <mark>，它们带同一个 data-hit。
+ */
+const CURRENT_MARK_SELECTOR = `.${CURRENT_HIT_CLASS}`;
 /** 没有「当前命中」语义时退到整篇标红的第一处（外部内容搜索词路径：栏没开，不存在 current）。 */
 const ANY_MARK_SELECTOR = ".search-hit";
 

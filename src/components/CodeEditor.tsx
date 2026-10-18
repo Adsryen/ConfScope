@@ -15,9 +15,11 @@ import { isSaveShortcutKey } from "../lib/saveShortcut";
 import { highlightCode } from "../lib/highlight";
 import {
   activeLineOf,
-  activeOffsetOf,
+  CURRENT_HIT_CLASS,
+  currentHitSelector,
   findCodeHits,
   hitLines,
+  hitLinesInRange,
   isHitScanCapped,
   MAX_CODE_HITS,
   lineOffsets,
@@ -115,6 +117,8 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const [wholeWord, setWholeWord] = useRememberedState<boolean>("codeFind.wholeWord", false);
 
   const [metrics, setMetrics] = useState({ scrollTop: 0, clientHeight: 0 });
+  /** 带着「当前命中」类的那批 <mark>：html 不变时 React 不重建它们，类只能由这里显式收回。 */
+  const currentHitMarksRef = useRef<HTMLElement[]>([]);
   // 「跳到第 N 行」落点：不在查找态时也要能高亮那一行
   const [pinnedLine, setPinnedLine] = useState<number | null>(null);
 
@@ -137,7 +141,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   // 扫到上限就停 ⇒ 「还有多少处」我们并不真的知道，只能告诉用户「至少 5000 处」（轮28 F-10）。
   const hitsCapped = isHitScanCapped(hits);
 
-  const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
+  // 命中行表（升序）：二分取可视区窗口用得上这份序，见 hitLinesInRange。
+  const hitLineArray = useMemo(() => Array.from(hitSet), [hitSet]);
+
   const currentLine = findOpen ? activeLineOf(hits, activeIdx) : pinnedLine;
 
   // 末尾只在原文本身以换行结尾时才补一个换行,保证高亮层与 textarea 行数严格一致
@@ -146,13 +152,20 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   // (<div>x\n</div> 解析后 textContent 为 x\n\n),导致 pre 比 textarea 多一行、
   // 拖拽选区/滚动同步偏移。因此末尾换行不用裸 "\n" 表示,而是放在一个空 span 里
   // (解析后不产生额外文本),保证高亮层文本与 textarea 值严格一致。
-  const html = useMemo(() => {
+  const baseHtml = useMemo(() => {
     const base = highlightCode(doc, format);
-    const withTail = doc.endsWith("\n") ? base + "<span></span>" : base;
-    // 只在已转义 HTML 的文本区按整文档偏移插标记，标签结构原样保留，
-    // 高亮层的 textContent 仍与 textarea 的值逐字相等（retest 依赖这条）。
-    return markHighlightedHtml(withTail, hits, activeOffset);
-  }, [doc, format, hits, activeOffset]);
+    return doc.endsWith("\n") ? base + "<span></span>" : base;
+  }, [doc, format]);
+  /**
+   * 命中层单独一层，且**不跟着「当前在第几处」重算**（轮28 F-14）。
+   *
+   * 原先 html 的依赖里圈着 activeOffset：每按一次 Enter 换一处命中，整篇文档重新
+   * highlightCode + 重新标记 + 重新解析。实测每次 Enter 的代价 2k 行 25-45ms /
+   * 20k 行（约 1MB）235-342ms / 200k 行（约 10MB）1586-3136ms——编辑态里翻页就是等白屏。
+   * 当前命中改由视图在提交后往 <mark> 上切类，这条依赖本来就不该存在。
+   * 标签结构原样保留，高亮层的 textContent 仍与 textarea 的值逐字相等（retest 依赖这条）。
+   */
+  const html = useMemo(() => markHighlightedHtml(baseHtml, hits), [baseHtml, hits]);
 
   /**
    * 滚动内容顶部的净空（轮27 F-8）：查找条浮在正文之上，开栏期间把第一行让到条子下面。
@@ -290,20 +303,35 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   }, [findOpen, effectiveTerm, matchOptions]);
 
   /**
-   * 当前命中变化后把水平位置也带过去（轮27 F-7）：长行 JSON 里的命中只滚垂直照样在屏幕外。
+   * 当前命中的落地：先给高亮层里这一处的 <mark> 换上 current 类，再把水平位置带过去
+   * （轮28 F-14 + 轮27 F-7）。长行 JSON 里的命中只滚垂直照样在屏幕外。
    *
    * 量的不是「列 × 字宽」而是高亮层里 <mark> 的实际矩形——那一层与 textarea 逐字同格
    * （透明 textarea 叠在 pre 上，同一套 padding / line-height / tab-size），
    * Tab 的两列宽与中日韩的两倍字宽浏览器已经算好，不必再近似。
-   * 依赖只写 activeOffset：用户自己把横向偏移拖走之后，当前命中没变就不许再把他拽回来。
+   *
+   * 换类必须排在量矩形之前：html 不再随当前命中变化（省下来的正是这份重算），
+   * DOM 里的 current 类不会自己挪位置，先量就是量上一处。两步也必须在同一个
+   * useLayoutEffect 里：navigate 在 setState 之后同步滚了垂直，等提交才能读到新的节点。
+   * 依赖里**不许**出现 metrics：用户自己把横向偏移拖走之后，当前命中没变就不许再把他拽回来。
    */
   useLayoutEffect(() => {
+    const pre = preRef.current;
+    for (const mark of currentHitMarksRef.current) mark.classList.remove(CURRENT_HIT_CLASS);
+    currentHitMarksRef.current = [];
     if (!findOpen || !hits.length) return;
+    if (pre) {
+      const marks = pre.querySelectorAll<HTMLElement>(currentHitSelector(clamp(activeIdx, 0, hits.length - 1)));
+      if (marks.length) {
+        for (const mark of marks) mark.classList.add(CURRENT_HIT_CLASS);
+        currentHitMarksRef.current = Array.from(marks);
+      }
+    }
     // 改了 textarea 的横向偏移必须立刻同步高亮层：程序化赋值在 jsdom 里不触发 scroll 事件，
     // 真机上晚一帧也让着色层与选区错开一格。
-    if (revealMarkHorizontally(taRef.current, preRef.current)) syncScroll();
+    if (revealMarkHorizontally(taRef.current, pre)) syncScroll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, activeOffset]);
+  }, [html, findOpen, hits, activeIdx]);
 
   /** 开栏后实测查找条高度（轮27 F-8，与浏览态同一份公式）。 */
   useLayoutEffect(() => {
@@ -354,20 +382,19 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return out;
   }, [visibleRange]);
 
+  /**
+   * 可视区内的命中行（轮28 F-15）：二分取窗口，不再线性扫全量命中。
+   * 「跳到第 N 行」的落点单独补进来——它不是命中，但同样要画命中行底色。
+   */
   const hitRows = useMemo(() => {
-    const seen = new Set<number>();
-    const out: number[] = [];
     const { start, end } = visibleRange;
-    for (const hit of hits) {
-      if (hit.line >= start && hit.line < end && !seen.has(hit.line)) {
-        seen.add(hit.line);
-        out.push(hit.line);
-      }
+    const rows = hitLinesInRange(hitLineArray, start, end);
+    if (pinnedLine !== null && pinnedLine >= start && pinnedLine < end && !rows.includes(pinnedLine)) {
+      rows.push(pinnedLine);
+      rows.sort((a, b) => a - b);
     }
-    if (pinnedLine !== null && pinnedLine >= start && pinnedLine < end && !seen.has(pinnedLine)) out.push(pinnedLine);
-    out.sort((a, b) => a - b);
-    return out;
-  }, [hits, pinnedLine, visibleRange]);
+    return rows;
+  }, [hitLineArray, pinnedLine, visibleRange]);
 
   // Ctrl+F / Cmd+F / F3：编辑态必须自己接管。浏览态 CodeView 的监听在焦点落到
   // textarea 这类可编辑控件时故意不接管（不抢输入框的查找），所以光脚按 Ctrl+F 以前是死键。

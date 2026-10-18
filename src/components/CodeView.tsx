@@ -3,10 +3,12 @@ import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import {
   activeLineOf,
-  activeOffsetOf,
   buildMinimapRows,
+  CURRENT_HIT_CLASS,
+  currentHitSelector,
   findCodeHits,
   hitLines,
+  hitLinesInRange,
   isHitScanCapped,
   markHighlightedHtml,
   MAX_CODE_HITS,
@@ -82,6 +84,8 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const findInputRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
   const findBarRef = useRef<HTMLDivElement | null>(null);
+  /** 带着「当前命中」类的那批 <mark>：html 不变时 React 不重建它们，类只能由这里显式收回。 */
+  const currentHitMarksRef = useRef<HTMLElement[]>([]);
 
   const [findOpen, setFindOpen] = useState(false);
   // 查找栏打开期间实测的条高（px）。窄容器里条子会 flex-wrap 成两行（轮26 F-4 量到 60），
@@ -115,16 +119,26 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   // 扫到上限就停 ⇒ 「还有多少处」我们并不真的知道，只能告诉用户「至少 5000 处」（轮28 F-10）。
   const hitsCapped = isHitScanCapped(hits);
 
-  const activeOffset = findOpen ? activeOffsetOf(hits, activeIdx) : null;
+  // 命中行表（升序）：二分取可视区窗口用得上这份序，见 hitLinesInRange。
+  const hitLineArray = useMemo(() => Array.from(hitSet), [hitSet]);
+
   const currentLine = findOpen ? activeLineOf(hits, activeIdx) : null;
 
-  const html = useMemo(() => {
+  /**
+   * 语法高亮只跟「正文 + 格式」有关（轮28 F-14）。
+   *
+   * 缺陷长什么样：原先 html 的依赖里圈着 activeOffset，于是每按一次 Enter 换一处命中，
+   * 整篇文档都要重新 highlightCode + 重新标记 + 重新交给浏览器解析。实测每次 Enter 的代价
+   * 2k 行 25-45ms / 20k 行（约 1MB）235-342ms / 200k 行（约 10MB）1586-3136ms——
+   * 用户按回车翻页，等到的是一秒以上的白屏。当前命中改到 DOM 类上之后，这条依赖本来就不该存在。
+   */
+  const baseHtml = useMemo(() => {
     const base = highlightCode(code, format);
     // 末尾换行的安全表示：不依赖 HTML 解析行为（详见 highlight.ts 注释）。
-    const withTail = code.endsWith("\n") ? base + "<span></span>" : base;
-    // 只在已转义 HTML 的文本区按整文档偏移插标记，标签结构原样保留。
-    return markHighlightedHtml(withTail, hits, activeOffset);
-  }, [code, format, hits, activeOffset]);
+    return code.endsWith("\n") ? base + "<span></span>" : base;
+  }, [code, format]);
+  // 命中层单独一层：换「当前在第几处」不动这里，只有命中集合变了才重算。
+  const html = useMemo(() => markHighlightedHtml(baseHtml, hits), [baseHtml, hits]);
 
   /**
    * 滚动内容顶部的净空（轮27 F-8）：查找条浮在正文之上，开栏期间必须把第一行让到条子下面。
@@ -342,21 +356,29 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   }, [findOpen, effectiveTerm, matchOptions]);
 
   /**
-   * 当前命中变化后补上水平定位（轮27 F-7，长行里的命中不能只滚垂直）。
+   * 当前命中的落地：先给这一处的 <mark> 换上 current 类，再做水平定位（轮28 F-14 + 轮27 F-7）。
    *
-   * 为什么不能像垂直定位那样写在 navigate 里：navigate 在 setActiveIdx 的 updater 内同步滚动，
-   * 那一刻 DOM 里的 .search-hit-current 仍是上一处命中，量矩形会量到旧位置。
-   * 旧的列宽算式没有这个时序问题（它不读 DOM），换成矩形测量就必须等提交之后——
-   * useLayoutEffect 在绘制前跑完，用户看不到中间那帧偏移。
+   * 为什么这两步必须在同一个 useLayoutEffect 里、而且顺序不能反：
+   * html 不再随当前命中变化（那正是本轮要省下来的钱），DOM 里的 current 类因此不会自己挪位置；
+   * 先量矩形就量到上一处。而水平定位本身仍然必须等提交之后——navigate 在 setActiveIdx 的
+   * updater 内同步滚动，那一刻 DOM 还没换（轮27 的教训），useLayoutEffect 在绘制前跑完，
+   * 用户看不到中间那帧偏移。
    *
-   * 依赖只写 activeOffset：横向偏移被用户自己拖走之后，只要当前命中没变就不许再把他拽回来
+   * 依赖里**不许**出现 metrics：横向偏移被用户自己拖走之后，只要当前命中没变就不许再把他拽回来
    * （metrics 每滚一格都变，进依赖就成了「一改口径就抖动」的第二份实现）。
    */
   useLayoutEffect(() => {
-    if (!findOpen || !hits.length) return;
-    revealMarkHorizontally(areaRef.current, areaRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, activeOffset]);
+    const root = areaRef.current;
+    for (const mark of currentHitMarksRef.current) mark.classList.remove(CURRENT_HIT_CLASS);
+    currentHitMarksRef.current = [];
+    if (!root || !findOpen || !hits.length) return;
+    const marks = root.querySelectorAll<HTMLElement>(currentHitSelector(clamp(activeIdx, 0, hits.length - 1)));
+    if (marks.length) {
+      for (const mark of marks) mark.classList.add(CURRENT_HIT_CLASS);
+      currentHitMarksRef.current = Array.from(marks);
+    }
+    revealMarkHorizontally(root, root);
+  }, [html, findOpen, hits, activeIdx]);
 
   /**
    * 开栏后实测查找条的高度（轮27 F-8）。
@@ -418,19 +440,14 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return out;
   }, [visibleRange]);
 
-  const hitRows = useMemo(() => {
-    const seen = new Set<number>();
-    const out: number[] = [];
-    const { start, end } = visibleRange;
-    for (const hit of hits) {
-      if (hit.line >= start && hit.line < end && !seen.has(hit.line)) {
-        seen.add(hit.line);
-        out.push(hit.line);
-      }
-    }
-    out.sort((a, b) => a - b);
-    return out;
-  }, [hits, visibleRange]);
+  /**
+   * 可视区内的命中行（轮28 F-15）：二分取窗口，不再线性扫全量命中。
+   *
+   * 原先这里是 `for (const hit of hits)`，而这条 memo 挂在 visibleRange 上——每滚一格
+   * 都把 5000 处命中从头扫一遍，绝大多数还在窗口外白扫。命中行表天然升序，二分定位起点
+   * 之后只走窗口内那几行。
+   */
+  const hitRows = useMemo(() => hitLinesInRange(hitLineArray, visibleRange.start, visibleRange.end), [hitLineArray, visibleRange]);
 
   const rowLimit = Math.max(MM_MIN_ROWS, Math.floor(minimapSize.height / MM_ROW_H));
   const minimapRows = useMemo(() => buildMinimapRows(lines, hitSet, currentLine, rowLimit), [lines, hitSet, currentLine, rowLimit]);

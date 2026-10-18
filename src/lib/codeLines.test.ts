@@ -5,10 +5,12 @@ import { describe, expect, it } from "vitest";
 import { highlightCode } from "./highlight";
 import {
   activeLineOf,
-  activeOffsetOf,
   buildMinimapRows,
+  CURRENT_HIT_CLASS,
+  currentHitSelector,
   findCodeHits,
   hitLines,
+  hitLinesInRange,
   lineOffsets,
   markHighlightedHtml,
   normalizeLineEndings,
@@ -91,14 +93,14 @@ describe("markHighlightedHtml", () => {
     const code = 'name = "a<b&c>"\nport: 8080\n';
     const html = baseHtml(code, "Properties");
     const hits = findCodeHits(code, "8080");
-    const marked = markHighlightedHtml(html, hits, hits[0]?.offset ?? null);
+    const marked = markHighlightedHtml(html, hits);
     expect(textContent(marked)).toBe(code);
   });
 
   it("never produces double-escaped entities (the historical &amp;amp; bug)", () => {
     const code = "a & b < c > \"d\" 'e'\nport 8080\n";
     const html = baseHtml(code, "XML");
-    const marked = markHighlightedHtml(html, findCodeHits(code, "port"), null);
+    const marked = markHighlightedHtml(html, findCodeHits(code, "port"));
     expect(marked).not.toContain("&amp;amp;");
     expect(marked).not.toContain("&amp;lt;");
     expect(textContent(marked)).toBe(code);
@@ -110,7 +112,7 @@ describe("markHighlightedHtml", () => {
     const term = "a=1&b=2&c=<x>";
     const hits = findCodeHits(code, term);
     expect(hits).toHaveLength(1);
-    const marked = markHighlightedHtml(html, hits, hits[0].offset);
+    const marked = markHighlightedHtml(html, hits);
     expect(marked).not.toMatch(/&amp;(amp|lt|gt|quot|#)/);
     const marks = [...marked.matchAll(/<mark[^>]*>([\s\S]*?)<\/mark>/g)].map((m) => m[1]);
     expect(marks.length).toBeGreaterThan(0);
@@ -118,20 +120,22 @@ describe("markHighlightedHtml", () => {
     expect(decoded).toBe(term);
     expect(textContent(marked)).toBe(code);
   });
-  it('wraps every hit in <mark class="search-hit"> and marks the active one', () => {
+  it("每处命中标上自己的编号，产出 HTML 里不再有「当前命中」的类（轮28 F-14）", () => {
     const code = "8080 and 18080\nx 8080";
     const html = baseHtml(code, "TEXT");
     const hits = findCodeHits(code, "8080");
     expect(hits).toHaveLength(3);
-    const marked = markHighlightedHtml(html, hits, hits[1].offset);
-    expect((marked.match(/<mark class="search-hit">/g) || []).length).toBe(2);
-    expect((marked.match(/<mark class="search-hit search-hit-current">/g) || []).length).toBe(1);
+    const marked = markHighlightedHtml(html, hits);
+    expect((marked.match(/<mark class="search-hit" data-hit="\d+">/g) || []).length).toBe(3);
+    expect([...marked.matchAll(/data-hit="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([0, 1, 2]);
+    // 当前命中改由视图在提交后切类：写进 HTML 就等于每按一次 Enter 重画整篇
+    expect(marked).not.toContain(CURRENT_HIT_CLASS);
     expect(textContent(marked)).toBe(code);
   });
 
   it("returns html untouched when there are no hits", () => {
     const html = baseHtml("abc", "TEXT");
-    expect(markHighlightedHtml(html, [], null)).toBe(html);
+    expect(markHighlightedHtml(html, [])).toBe(html);
   });
 });
 
@@ -141,14 +145,80 @@ describe("hitLines / active*Of", () => {
     expect([...hitLines(findCodeHits(code, "k=v"))]).toEqual([0, 2]);
   });
 
-  it("clamps the active index for offset and line", () => {
+  it("clamps the active index for line", () => {
     const code = "=1\n=1\n=1";
     const hits = findCodeHits(code, "=1");
     expect(activeLineOf(hits, 1)).toBe(1);
     expect(activeLineOf(hits, 99)).toBe(0);
-    expect(activeOffsetOf(hits, -1)).toBe(hits[0].offset);
-    expect(activeOffsetOf([], 0)).toBeNull();
     expect(activeLineOf([], 0)).toBeNull();
+  });
+});
+
+describe("当前命中的落地方式（轮28 F-14）", () => {
+  it("类名只有一份定义，选择器按命中编号取节点", () => {
+    expect(CURRENT_HIT_CLASS).toBe("search-hit-current");
+    expect(currentHitSelector(0)).toBe('mark[data-hit="0"]');
+    expect(currentHitSelector(4999)).toBe('mark[data-hit="4999"]');
+  });
+
+  it("同一处命中被语法 token 切开时，几个 <mark> 共用同一个编号", () => {
+    // hljs 把 properties 的键与值拆成不同 token，跨 token 的命中会被切成相邻的几个 <mark>
+    const code = "server.port=8080\n";
+    const hits = findCodeHits(code, "server.port=8080");
+    expect(hits).toHaveLength(1);
+    const marked = markHighlightedHtml(baseHtml(code, "Properties"), hits);
+    const indices = [...marked.matchAll(/data-hit="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(indices.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(indices)).toEqual(new Set([0]));
+    expect(textContent(marked)).toBe(code);
+  });
+
+  it("命中不变、只换当前序号时，产出的 HTML 逐字相同（这才省得下重画整篇的钱）", () => {
+    const code = "port\nport\nport\n";
+    const html = baseHtml(code, "TEXT");
+    const hits = findCodeHits(code, "port");
+    expect(hits).toHaveLength(3);
+    expect(markHighlightedHtml(html, hits)).toBe(markHighlightedHtml(html, hits));
+  });
+});
+
+describe("hitLinesInRange（轮28 F-15：命中行窗口要二分，不再线性扫全量）", () => {
+  const lines = Array.from({ length: 500 }, (_, i) => (i % 10 === 0 ? "port=1" : "x")).join("\n");
+  const sorted = Array.from(hitLines(findCodeHits(lines, "port")));
+
+  it("命中行表天然升序——二分的唯一前提", () => {
+    expect(sorted).toEqual([...sorted].sort((a, b) => a - b));
+    expect(sorted.length).toBeGreaterThan(0);
+  });
+
+  it("窗口结果与线性扫全量逐字等价（夹住边界与空窗）", () => {
+    for (const [start, end] of [
+      [0, 1],
+      [0, 500],
+      [10, 11],
+      [11, 19],
+      [9, 21],
+      [499, 500],
+      [500, 600],
+      [-5, 3],
+    ]) {
+      const linear = sorted.filter((line) => line >= start && line < end);
+      expect(hitLinesInRange(sorted, start, end), `窗口 ${start}..${end}`).toEqual(linear);
+    }
+  });
+
+  it("空表、倒窗口、窗口在表外都返回空数组而不是抛错", () => {
+    expect(hitLinesInRange([], 0, 10)).toEqual([]);
+    expect(hitLinesInRange(sorted, 20, 20)).toEqual([]);
+    expect(hitLinesInRange(sorted, 30, 10)).toEqual([]);
+    expect(hitLinesInRange(sorted, 900, 1000)).toEqual([]);
+  });
+
+  it("返回新数组，调用方 push 自己的落点不会污染命中行表", () => {
+    const rows = hitLinesInRange(sorted, 0, 25);
+    const before = [...sorted];
+    rows.push(999);
+    expect(sorted).toEqual(before);
   });
 });
 

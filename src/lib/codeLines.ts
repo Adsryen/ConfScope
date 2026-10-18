@@ -122,11 +122,41 @@ export function offsetToLineColumn(code: string, offset: number): { line: number
   return { line: line + 1, column: clamped - (offsets[line] ?? 0) + 1 };
 }
 
-/** 命中行集合（用于行高亮 / 缩略图标记）。 */
+/**
+ * 命中行集合（用于行高亮 / 缩略图标记）。
+ *
+ * 集合按插入顺序迭代，而 findCodeHits 是从左到右扫的 ⇒ 这份顺序**天然升序**。
+ * hitLinesInRange 的二分依赖这条，改动 findCodeHits 的扫描方向时必须一起改。
+ */
 export function hitLines(hits: CodeHit[]): Set<number> {
   const set = new Set<number>();
   for (const hit of hits) set.add(hit.line);
   return set;
+}
+
+/**
+ * 从升序的命中行表里取出落在 [start, end) 窗口内的行（轮28 F-15）。
+ *
+ * 缺陷长什么样：原先两个视图算「可视区内的命中行」都是 `for (const hit of hits)` 线性扫全量，
+ * 而且这条计算挂在 visibleRange 上——**每滚一格重扫一遍**。5000 处命中 × 每格一次，
+ * 加上命中本来就分布在整篇文档里，滚动时主线程被这份无用重复吃掉一截（实测 20k 行窗口外
+ * 占比 99% 以上，扫到的全是白扫）。
+ *
+ * 输入必须是升序数组（hitLines 的迭代序保证，见其注释）；返回新数组，调用方可直接改。
+ */
+export function hitLinesInRange(sortedHitLines: number[], start: number, end: number): number[] {
+  if (!sortedHitLines.length || end <= start) return [];
+  // 二分找第一个 >= start 的下标
+  let lo = 0;
+  let hi = sortedHitLines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedHitLines[mid] < start) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: number[] = [];
+  for (let i = lo; i < sortedHitLines.length && sortedHitLines[i] < end; i += 1) out.push(sortedHitLines[i]);
+  return out;
 }
 
 const HLJS_TOKEN = /(<[^>]*>)|([^<]+)/g;
@@ -143,21 +173,37 @@ function isBlankLine(line: string): boolean {
 }
 
 /**
- * 在已转义的高亮 HTML 文本区里，把命中区间包进 <mark class="search-hit">。
+ * 当前命中的类名。轮28 F-14 起它**不再由本模块产出**：视图在提交后往对应 <mark> 上切换这个类，
+ * 「整篇高亮」与「现在看第几处」于是分成两个成本层——跳一次命中不该重画整篇文档。
+ * CSS（styles.css 的 .search-hit.search-hit-current）与 codeScroll 的测量选择器都指向这个名字。
+ */
+export const CURRENT_HIT_CLASS = "search-hit-current";
+
+/**
+ * 第 hitIndex 处命中在 DOM 里的节点选择器。
+ * data-hit 由 markHighlightedHtml 打进每个 <mark>，同一处命中被语法 token 切开时
+ * 几个 <mark> 共用同一个编号，所以选择器要拿去 querySelectorAll 而不是 querySelector。
+ */
+export function currentHitSelector(hitIndex: number): string {
+  return `mark[data-hit="${hitIndex}"]`;
+}
+
+/**
+ * 在已转义的高亮 HTML 文本区里，把命中区间包进 <mark class="search-hit" data-hit="编号">。
  * 做法：把 HTML 拆成「标签」与「文本」两类片段，只对文本片段按其解码后的
  * 整文档偏移做切分，再逐段用 escapeHtml 重新转义输出——标签结构原样保留，
  * 文本经过一次「解码→再转义」回到与输入等价的形态。搜索词因此能正确标红，
  * 且不会再出现历史版本里 &amp;amp; 这样的二次转义。
  * 命中跨越标签边界时，会在两侧各产出一个 <mark>（视觉上仍是连续标红）。
+ *
+ * 编号就是 hits 里的下标：视图靠它把「当前命中」落到 DOM 类上（见 CURRENT_HIT_CLASS），
+ * 这样换当前命中时这个函数完全不用重跑。data-hit 是属性，不进 textContent，
+ * 「剥离标签后逐字等于原文」这条契约不受影响。
  */
-export function markHighlightedHtml(html: string, hits: CodeHit[], activeOffset: number | null): string {
+export function markHighlightedHtml(html: string, hits: CodeHit[]): string {
   if (!hits.length) return html;
-  const ranges: Array<{ start: number; end: number; active: boolean }> = hits
-    .map((hit) => ({
-      start: hit.offset,
-      end: hit.offset + hit.length,
-      active: activeOffset !== null && hit.offset === activeOffset,
-    }))
+  const ranges: Array<{ start: number; end: number; hitIndex: number }> = hits
+    .map((hit, hitIndex) => ({ start: hit.offset, end: hit.offset + hit.length, hitIndex }))
     .sort((a, b) => a.start - b.start);
 
   let out = "";
@@ -188,8 +234,10 @@ export function markHighlightedHtml(html: string, hits: CodeHit[], activeOffset:
           cursor = range.start;
         }
         const clipEnd = Math.min(range.end, segEnd);
-        const cls = range.active ? "search-hit search-hit-current" : "search-hit";
-        out += `<mark class="${cls}">` + escapeHtml(decoded.slice(cursor - segStart, clipEnd - segStart)) + "</mark>";
+        out +=
+          `<mark class="search-hit" data-hit="${range.hitIndex}">` +
+          escapeHtml(decoded.slice(cursor - segStart, clipEnd - segStart)) +
+          "</mark>";
         cursor = clipEnd;
       }
       probe += 1;
@@ -320,13 +368,6 @@ export function buildMinimapRows(lines: string[], hits: Set<number>, currentLine
     out.push({ startLine, endLine, widthRatio: longest / maxLen, kind, hasHit, isCurrent });
   }
   return out;
-}
-
-/** 由命中列表得到「当前命中」的偏移（activeIdx 越界时回退到首个命中）。 */
-export function activeOffsetOf(hits: CodeHit[], activeIdx: number): number | null {
-  if (!hits.length) return null;
-  const idx = activeIdx >= 0 && activeIdx < hits.length ? activeIdx : 0;
-  return hits[idx].offset;
 }
 
 /** 由命中列表得到「当前命中」所在行。 */
