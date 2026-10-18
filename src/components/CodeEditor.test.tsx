@@ -3,7 +3,7 @@
  */
 import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { useRef, useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
@@ -725,5 +725,70 @@ describe("CodeEditor 命中触顶要说得出口（轮28 F-10）", () => {
     const smallCount = small.container.querySelector(".code-find-count") as HTMLElement;
     expect(smallCount.textContent).toBe("第 1/2 处");
     expect(smallCount.getAttribute("title")).toBeNull();
+  });
+});
+
+/**
+ * 轮30 F-21：编辑态的行号 / 命中行底色按 `visibleRange = f(clientHeight)` 虚拟化，
+ * 而 `clientHeight` 只由 scroll 事件与挂载时那两次同步更新。浏览态有
+ * `new ResizeObserver(() => syncScroll()); ro.observe(area)`，编辑态只观察了查找条。
+ * 于是把面板拉高 / 浏览器缩放 / 侧栏收起之后没有 scroll 事件，下半截就没有行号，得手动滚一下才补齐。
+ */
+describe("CodeEditor 容器尺寸变化（轮30 F-21）", () => {
+  const BIG = Array.from({ length: 100 }, (_, i) => `key${i}=value${i}`).join("\n");
+
+  // 假的 ResizeObserver 是全局替身，用完必须撤掉，别让它渗到后面的用例里。
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** 装一个假 ResizeObserver，返回「触发所有已登记的回调」。 */
+  function stubResizeObserver() {
+    const registered: Array<() => void> = [];
+    class FakeRO {
+      constructor(cb: () => void) {
+        registered.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeRO);
+    return () => registered.forEach((cb) => cb());
+  }
+
+  function stubViewport(ta: HTMLTextAreaElement, readHeight: () => number) {
+    Object.defineProperty(ta, "clientHeight", { configurable: true, get: readHeight });
+    Object.defineProperty(ta, "scrollHeight", { configurable: true, get: () => 4000 });
+    Object.defineProperty(ta, "scrollTop", { configurable: true, get: () => 0, set: () => {} });
+  }
+
+  it("拉高面板后行号必须补齐：不用滚一下", async () => {
+    const fire = stubResizeObserver();
+    const { container } = renderEditor(<CodeEditor value={BIG} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+    let viewportH = 100;
+    stubViewport(ta, () => viewportH);
+    fireEvent.scroll(ta);
+
+    // 视口 100px / 行高 20px：只渲染窗口内那几行号（+1 行余量）
+    await waitFor(() => expect(gutterNumbers(container).length).toBeGreaterThan(0));
+    const shortCount = gutterNumbers(container).length;
+    expect(shortCount).toBeLessThan(20);
+
+    viewportH = 600;
+    fire();
+
+    await waitFor(() => expect(gutterNumbers(container).length).toBeGreaterThan(shortCount));
+    expect(Number(gutterNumbers(container)[gutterNumbers(container).length - 1])).toBeGreaterThanOrEqual(30);
+  });
+
+  it("没挂尺寸观察就不算这条口径：自检——撤掉 observe 后用例必须失效", () => {
+    const fire = stubResizeObserver();
+    const { container } = renderEditor(<CodeEditor value={BIG} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+    stubViewport(ta, () => 100);
+    fireEvent.scroll(ta);
+    const before = gutterNumbers(container).length;
+    fire();
+    expect(gutterNumbers(container).length).toBe(before);
   });
 });

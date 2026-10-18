@@ -380,6 +380,21 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * 容器尺寸变化（含首次布局）刷新视口高度（轮30 F-21，与浏览态同一口径）。
+   *
+   * 缺陷长什么样：行号与命中行底色按 `visibleRange = f(clientHeight)` 虚拟化，而 clientHeight 只由
+   * scroll 事件和挂载时那两次同步更新。把详情面板拉高、缩放浏览器、收起左侧列表都**不会**派发 scroll
+   * 事件 ⇒ clientHeight 停在旧值 ⇒ 下半截既没有行号也没有命中行底色，得手动滚一下才补齐。
+   */
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => syncScroll());
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, [syncScroll]);
+
   const visibleRange = useMemo(() => {
     const { scrollTop, clientHeight } = metrics;
     if (clientHeight <= 0) return { start: 0, end: Math.min(totalLines, MAX_FALLBACK_ROWS) };
