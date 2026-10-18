@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { decorateMinimapRows, prepareMinimapBuckets } from "../lib/codeLines";
 import { useDevicePixelRatio } from "../lib/useDevicePixelRatio";
-import { useWheelScrollsContainer } from "../lib/useWheelScrollsContainer";
 import { useTranslation } from "../i18n";
 
 /**
@@ -194,17 +193,13 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
   );
 
   /**
-   * 滚轮落在缩略图那 66px 上 ⇒ 滚正文（轮31 F-25）。
-   *
-   * 换算档位、夹界、为什么必须原生 non-passive 监听，全部收在 src/lib/useWheelScrollsContainer.ts：
-   * 查找条与 ⌕ 浮标（轮32 F-33）撞的是同一件事——浮层是滚动容器的**兄弟节点**，滚轮打上去时浏览器
-   * 往上找的「最近可滚祖先」是外层面板而不是正文，指针在代码区里、正文一动不动。抄第二份换算
-   * 就是下一轮 bug 的出处，所以这里只递几何与同步。
-   *
-   * reattachKey 递 canScrollContent：元素会因为「内容不满一屏」自己消失又回来，
-   * 回来时是新节点，不重挂监听就等于这条出口静默失活（与下面尺寸观察同一件事）。
+   * 滚轮落在缩略图那 66px 上 ⇒ 滚正文（轮31 F-25），但**这里不挂监听**（轮33 F-34）：
+   * 缩略图与查找条、⌕ 浮标撞的是同一件事——浮层是滚动容器的兄弟节点，滚轮打上去时浏览器往上找的
+   * 「最近可滚祖先」是外层面板而不是正文。出口统一在宿主的兜底根（CodeView / CodeEditor 各自挂
+   * `useWheelColumnResolver`，把 `.code-area` / `textarea` 登记成唯一靶面），换算只有一份（wheelScroll.ts）。
+   * 组件自己不再监听，也就不用再管「不满一屏时元素消失又回来、回来是新节点」的重挂问题：
+   * 登记的是正文容器的 ref，缩略图换不换节点都不影响解析。
    */
-  useWheelScrollsContainer(surfaceRef, { containerRef, syncScroll, rowHeight, reattachKey: canScrollContent });
 
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;

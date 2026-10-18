@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { type RowType, diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
+import { useWheelSurface } from "../lib/useWheelColumnResolver";
 
 export type MergeActionDirection = "left-to-right" | "right-to-left";
 export type MergeActionScope = "row" | "block";
@@ -120,6 +121,14 @@ export default function DiffPanel({
     if (controlledOnlyChanges === undefined) setLocalOnlyChanges(value);
     onOnlyChangesChange?.(value);
   };
+  /**
+   * `.diff-body` 是本面板唯一的滚动容器，登记给页面级滚轮兜底当靶子（轮33 F-34）。
+   * 兄弟节点 `.diff-warnings` / `.diff-stats` / `.diff-head` 的祖先链里一个可滚容器都没有
+   * （research/p3_batch_match_chrome.txt），单文件态那 5 条死区就在这一块；批量态
+   * `.diff-stats` / `.diff-head` 还被复用进左列列表项里，所以只能按几何选，不能按 class 选。
+   */
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useWheelSurface(bodyRef);
   const result = useMemo(() => diffLines(leftText, rightText), [leftText, rightText]);
 
   const rows = useMemo(
@@ -168,7 +177,7 @@ export default function DiffPanel({
         </div>
       </div>
 
-      <div className="diff-body mono">
+      <div className="diff-body mono" ref={bodyRef}>
         {rows.length === 0 ? (
           <div className="diff-empty">{t("diff.noDiffRows")}</div>
         ) : (

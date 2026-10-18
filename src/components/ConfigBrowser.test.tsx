@@ -14,6 +14,7 @@ import ConfigBrowser from "./ConfigBrowser";
 import ErrorDialog from "./ErrorDialog";
 import MessageCenter from "./MessageCenter";
 import { getTaskManager } from "../lib/taskmanager";
+import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
 
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
@@ -1458,4 +1459,164 @@ describe("ConfigBrowser", () => {
     });
   });
 
+});
+
+/**
+ * 轮33 F-34：配置浏览页的 chrome 条上的滚轮必须滚「同一列的正文」，不是一动不动。
+ *
+ * 几何与落点坐标一律抄真机取证 research/p4_browse_chrome.txt 的 B1（1440×900），
+ * 这样守卫钉的是**实测那一版布局**上的关系，而不是我们自己想象的矩形：
+ *   可滚容器  browser-items @184,256,359,644（余 8956）｜code-area @544,179,896,682（余 7338）
+ *   死区落点  .browser-search-mode(315,105) .browser-search(484,193) .browser-count(424,242)
+ *             .detail-header(1112,109) .fmt-bar(1052,159)（轮33 实测这 5 块 + 分页条全部一格不动）
+ * jsdom 没有布局引擎 ⇒ 闸门要的 overflow/两个高度、选列要的矩形都得按上面这组数字自己装。
+ * `.page-header` 不在这个 DOM 里（它在 App 的 `.page-surface` 上、`.browser` 外面），
+ * 所以「页头不接管」由接线处 `root = .browser` 这条静态守卫 + 真机探针钉，不在这里假造。
+ */
+describe("ConfigBrowser 滚轮兜底：chrome 条滚同一列正文（轮33 F-34）", () => {
+  const ITEMS = { left: 184, right: 543, top: 256, bottom: 900 };
+  const ITEMS_ROOM = 8956;
+  const CODE = { left: 544, right: 1440, top: 179, bottom: 861 };
+  const CODE_ROOM = 7338;
+
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+    // 登记表是模块级的：上一条用例登记的节点不会因为这一条重新渲染而消失
+    __clearWheelSurfacesForTest();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.getConfigDocument.mockReset();
+    apiMocks.listConfigs.mockResolvedValue(configPage());
+    apiMocks.getConfig.mockResolvedValue('{"server":{"port":8080}}');
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8080}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
+    // 探针口径的视口：候选的可见面积按 window.innerWidth/innerHeight 裁
+    Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 900, configurable: true });
+  });
+
+  /** 装成「真的有得滚」：inline overflow-y + 两个高度差出一屏以上的余量。 */
+  function makeScrollable(el: HTMLElement, rect: { left: number; right: number; top: number; bottom: number }, room: number) {
+    el.style.overflowY = "auto";
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => rect.bottom - rect.top });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => rect.bottom - rect.top + room });
+    el.getBoundingClientRect = () =>
+      ({
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+        x: rect.left,
+        y: rect.top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    el.scrollTop = 0;
+  }
+
+  function wheelOn(target: Element, x: number, y: number, deltaY = 120): WheelEvent {
+    const event = new WheelEvent("wheel", { cancelable: true, bubbles: true, clientX: x, clientY: y, deltaY });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  /** 打开一条配置，让右列的 `.code-area`（CodeView）挂出来，再把两列几何装好。 */
+  async function renderTwoColumns(pages = 1) {
+    if (pages > 1) {
+      // 分页条只在多页时渲染（Pager: pages <= 1 直接 return null）
+      apiMocks.listConfigs.mockResolvedValue({ ...configPage(), totalCount: 120, pagesAvailable: pages });
+    }
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeInTheDocument());
+    const items = document.querySelector<HTMLElement>(".browser-items")!;
+    const code = document.querySelector<HTMLElement>(".code-area")!;
+    makeScrollable(items, ITEMS, ITEMS_ROOM);
+    makeScrollable(code, CODE, CODE_ROOM);
+    return { items, code };
+  }
+
+  // 表格第 5 列是页夹具的分页数：`.pager` 只在多页时存在。B1 那行 `.pager` 量的是历史 tab 的分页条
+  // （在 `.browser-detail` 里，按几何归右列），与这里的列表分页条是同一族形状的两侧，各自钉一条。
+  const CHROME: [string, number, number, "left" | "right", number][] = [
+    [".browser-search-mode", 315, 105, "left", 1],
+    [".browser-search", 484, 193, "left", 1],
+    [".browser-count", 424, 242, "left", 1],
+    [".pager", 364, 910, "left", 2],
+    [".detail-header", 1112, 109, "right", 1],
+    [".fmt-bar", 1052, 159, "right", 1],
+  ];
+
+  for (const [sel, x, y, column, pages] of CHROME) {
+    it(`滚轮落在 ${sel} 的 (${x},${y}) ⇒ 滚${column === "left" ? "左列文件列表" : "右列正文"}，另一列一动不动`, async () => {
+      const { items, code } = await renderTwoColumns(pages);
+      const chrome = document.querySelector(sel);
+      expect(chrome, `${sel} 没渲染出来，这条守卫就成了空转`).not.toBeNull();
+
+      const event = wheelOn(chrome!, x, y);
+
+      const moved = column === "left" ? items : code;
+      const still = column === "left" ? code : items;
+      expect(moved.scrollTop, "chrome 条上还是一片死区：兜底没把这一格投给本列正文").toBe(120);
+      expect(still.scrollTop, "滚轮落在哪一列就只滚哪一列，不许串列").toBe(0);
+      expect(event.defaultPrevented, "不取消默认动作：外层面板会跟着一起滚").toBe(true);
+    });
+  }
+
+  it("硬闸门：落点的祖先链里已经有可滚容器 ⇒ 整格交还原生，兜底不抢", async () => {
+    const { items, code } = await renderTwoColumns();
+    const row = document.querySelector(".browser-items .browser-item")!;
+    expect(row, "列表没渲染出条目，这条守卫是空转").not.toBeNull();
+
+    const event = wheelOn(row, 364, 578);
+
+    expect(event.defaultPrevented, "闸门不满足还 preventDefault：把原生滚动抢过来自己算一遍").toBe(false);
+    expect(items.scrollTop, "列表里的滚轮要由浏览器自己滚，兜底一律不碰").toBe(0);
+    expect(code.scrollTop).toBe(0);
+  });
+
+  it("禁区：弹框子树一律不接（实测同一 .modal-overlay 换几何就有两种结果，不按 CSS 推断）", async () => {
+    const { items, code } = await renderTwoColumns();
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    const overlay = document.querySelector<HTMLElement>(".modal-overlay");
+    expect(overlay, "确认弹框没出来").not.toBeNull();
+    // 弹框就挂在 .browser 子树里（不是 portal），闸门对它判的是「死区」——只有黑名单拦得住
+    expect(overlay!.closest(".browser"), "弹框不在页面根子树里，这条守卫就证明不了黑名单在起作用").not.toBeNull();
+
+    const event = wheelOn(overlay!, 364, 450);
+
+    expect(event.defaultPrevented, "弹框暗区被接管：点遮罩关弹框的语义就跟着没了").toBe(false);
+    expect(items.scrollTop).toBe(0);
+    expect(code.scrollTop).toBe(0);
+  });
+
+  it("chrome 条上的 ctrl+wheel（捏合）与纯横向照样放手", async () => {
+    const { items, code } = await renderTwoColumns();
+    const count = document.querySelector(".browser-count")!;
+
+    const pinch = new WheelEvent("wheel", { cancelable: true, bubbles: true, ctrlKey: true, clientX: 424, clientY: 242, deltaY: 120 });
+    const sideways = new WheelEvent("wheel", { cancelable: true, bubbles: true, clientX: 424, clientY: 242, deltaX: 120 });
+    act(() => {
+      count.dispatchEvent(pinch);
+      count.dispatchEvent(sideways);
+    });
+
+    expect(pinch.defaultPrevented, "ctrl+wheel 是捏合缩放：我们只接纵向").toBe(false);
+    expect(sideways.defaultPrevented, "deltaY=0 是纯横向：正文没有横向滚动时这格归浏览器").toBe(false);
+    expect(items.scrollTop, "放手就不能顺手写偏移").toBe(0);
+    expect(code.scrollTop).toBe(0);
+
+    // 同一块上的普通一格仍然要接管（否则「放手」就成了「不接」）
+    expect(wheelOn(count, 424, 242).defaultPrevented).toBe(true);
+    expect(items.scrollTop).toBe(120);
+  });
 });

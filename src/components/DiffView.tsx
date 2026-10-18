@@ -19,6 +19,7 @@ import {
 import { loadSettings } from "../store/settings";
 import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
 import { useTranslation } from "../i18n";
+import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import { exportDiff, type DiffItem } from "../lib/export";
 import {
   applyEntryRiskSummary,
@@ -731,6 +732,21 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
+  /**
+   * 滚轮兜底（轮33 F-34）：根取 `.diff-workspace` 而不是 `.diff-view`——`.page-header` 就在
+   * DiffView 自己的 return 里、语义上「不属于任何一列」，本轮按 PRD 划入禁区不接。
+   * 宽栏实测（research/p3_batch_match_chrome.txt）：单文件态 5 条 chrome、批量态 6 条、匹配态 3 条
+   * 全是一动不动的死区（页内死区 28.3%–29.6% 视口），而窄栏 900×700 两态全 OK——差别只在
+   * chrome 的祖先链里有没有可滚容器。所以这里只登记「谁可以被滚」，选谁交给几何。
+   */
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const batchNavScrollRef = useRef<HTMLDivElement>(null);
+  const matchLeftScrollRef = useRef<HTMLDivElement>(null);
+  const matchRightScrollRef = useRef<HTMLDivElement>(null);
+  useWheelColumnResolver(workspaceRef);
+  useWheelSurface(batchNavScrollRef);
+  useWheelSurface(matchLeftScrollRef);
+  useWheelSurface(matchRightScrollRef);
   const sourcesRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const loadBothRef = useRef<(() => Promise<void>) | null>(null);
@@ -1653,7 +1669,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
         </div>
       </div>
 
-      <div className="diff-workspace">
+      <div className="diff-workspace" ref={workspaceRef}>
         <div className="diff-main-column">
           <div className={`diff-source-panel${sourcesCollapsed ? " collapsed" : ""}`}>
             <div className="diff-source-summary" aria-hidden={!sourcesCollapsed}>
@@ -1914,7 +1930,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <div className="match-side-by-side">
                   <div className="match-side-list left">
                     <div className="match-side-title">{t("diff.sourceA")}</div>
-                    <div className="match-side-scroll">
+                    <div className="match-side-scroll" ref={matchLeftScrollRef}>
                       {matchResults.map((item) => (
                         <label className={`match-side-row match-item ${item.presence}`} key={item.dataId}>
                           <input type="checkbox" checked={selectedIds.has(item.dataId)} onChange={() => toggleSelect(item.dataId)} />
@@ -1929,7 +1945,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                   </div>
                   <div className="match-side-list right">
                     <div className="match-side-title">{t("diff.sourceB")}</div>
-                    <div className="match-side-scroll" tabIndex={0} role="region" aria-label={t("diff.sourceB")}>
+                    <div className="match-side-scroll" ref={matchRightScrollRef} tabIndex={0} role="region" aria-label={t("diff.sourceB")}>
                       {matchResults.map((item) => (
                         <div className={`match-side-row match-counterpart ${item.presence}`} key={item.dataId}>
                           <span className={`match-dataid${item.presence === "left-only" ? " missing" : ""}`} title={item.dataId}>
@@ -1991,7 +2007,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                 <div className="batch-diff-layout">
                   <aside className="batch-diff-nav" aria-label={t("diff.batchFileList")}>
                     <div className="batch-diff-nav-head">{t("diff.batchFileList")}</div>
-                    <div className="batch-diff-nav-scroll">
+                    <div className="batch-diff-nav-scroll" ref={batchNavScrollRef}>
                       {batchResults.map((item) => {
                         const stats = batchResultStatsMap[item.dataId] ?? batchResultStats(item.leftText, item.rightText);
                         const active = item.dataId === selectedBatchItem?.dataId;

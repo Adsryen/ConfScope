@@ -37,9 +37,24 @@ const MULTI = 'server.port=8080\nname = "a<b&c>"\nqps: 10000\nport = 8081\n';
  */
 const VIEWPORT_H = 100;
 const CONTENT_H = 600;
+/** 兜底解析器要的两样东西：overflow-y 与矩形。jsdom 两样都是空，装了才谈得上「按几何选面」。 */
+const SURFACE_W = 1200;
 
 function stubGeometry(pre: HTMLElement, writes?: { count: number }) {
   const offsets = { top: 0, left: 0 };
+  pre.style.overflowY = "auto";
+  pre.getBoundingClientRect = () =>
+    ({
+      left: 0,
+      right: SURFACE_W,
+      top: 0,
+      bottom: VIEWPORT_H,
+      width: SURFACE_W,
+      height: VIEWPORT_H,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
   Object.defineProperty(pre, "scrollTop", {
     configurable: true,
     get: () => offsets.top,
@@ -1073,8 +1088,9 @@ describe("CodeView 滚轮落在查找控件上（轮32 F-33）", () => {
    * 外层面板也始终 0（不是双滚，是纯死区）。
    * research/wheelopen_probe.txt 同一形状：关着查找栏那颗 ⌕ 浮标（26×26）也是 120 不动。
    *
-   * 换算档位、夹界、放手条件由 src/lib/useWheelScrollsContainer.test.tsx 钉；
-   * 这里钉的是接线：视图递进去的容器与 syncScroll 必须真的把三层一起当帧带走。
+   * 换算档位、夹界、放手条件由 src/lib/useWheelColumnResolver.test.tsx 钉（全站唯一一份实现）；
+   * 这里钉的是接线：组件自带的兜底根要能把指针那一格解析到 .code-area，
+   * 且递进去的 syncScroll 必须真的把三层一起当帧带走。
    */
   function wheelOn(target: EventTarget, init: WheelEventInit): WheelEvent {
     // jsdom 的 fireEvent.wheel 造出来的事件读不到 deltaY，直接构造 WheelEvent（与缩略图同一手法）

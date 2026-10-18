@@ -14,7 +14,7 @@ import {
   splitLines,
 } from "../lib/codeLines";
 import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
-import { useWheelScrollsContainer } from "../lib/useWheelScrollsContainer";
+import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
@@ -429,18 +429,25 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   }, [findOpen]);
 
   /**
-   * 滚轮落在查找条 / ⌕ 浮标上 ⇒ 滚正文（轮32 F-33）。
-   *
-   * 取证 research/wheelbar_probe.txt + wheelopen_probe.txt：条子 532×38（窄容器换行 418×38）、
-   * 浮标 26×26，都完全压在正文之上；正文偏移 120 时滚一格，计数上 / 条内空隙 / 空隙偏左 / 浮标上
-   * 四个落点全部停在 120，外层面板也始终 0 —— 不是双滚，是纯死区。换算与放手条件在
-   * src/lib/useWheelScrollsContainer.ts，与缩略图共用同一份（轮31 F-25 那条）。
-   *
-   * reattachKey 都递 findOpen：两个元素互斥渲染且每次都是新节点，
-   * 关栏再开栏时不重挂监听就等于这条出口静默失活。
+   * `.code-area` 登记给页面级滚轮兜底当靶子（轮33 F-34）：配置浏览右列的 `.detail-header` /
+   * `.fmt-bar` / `.pager` 是它的兄弟节点，祖先链零可滚容器（research/p4_browse_chrome.txt），
+   * 兜底解析器按指针 x 命中这一列后，必须能拿到 areaRef 与它这份当帧同步——同步逻辑在这儿，
+   * 所以登记也在这儿，页面侧不必把 ref 一路穿下来。
    */
-  useWheelScrollsContainer(findBarRef, { containerRef: areaRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
-  useWheelScrollsContainer(findOpenBtnRef, { containerRef: areaRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+  useWheelSurface(areaRef, { syncScroll, rowHeight: ROW_H });
+
+  /**
+   * 这块组件自带一个滚轮兜底根（轮33 F-34 要求 2 的收尾）：查找条 / ⌕ 浮标 / 缩略图都是
+   * `.code-area` 的兄弟节点，压在正文之上（取证 research/wheelbar_probe.txt + wheelopen_probe.txt：
+   * 条子 532×38、浮标 26×26，正文偏移 120 时滚一格四个落点全部停在 120，外层也始终 0 —— 纯死区）。
+   * 根选 `.code-view`：`.code-body` 是 overflow:hidden，浮层的祖先链零可滚容器 ⇒ 闸门放行，
+   * 组件内部只有 `.code-area` 一块登记面 ⇒ 按几何必投正文，不存在选错列的余地。
+   *
+   * 为什么在组件里挂根、而不是让每个宿主页面各挂一次：CodeView 同时被配置浏览、历史版本、
+   * 变更计划用着，页面级根只在配置浏览存在，删掉旧的 per-surface 监听后另外两个宿主会静默退回死区。
+   * 外层页面根与这里叠着挂没问题：内层先 preventDefault，外层解析器看到 defaultPrevented 就让路。
+   */
+  useWheelColumnResolver(rootRef, { localPriority: true });
 
   // 净空变了但没有滚动事件（padding 变化不触发 scroll）：补一次同步，
   // 否则缩略图的视口比例还按旧 scrollHeight 算，点缩略图会跳偏。

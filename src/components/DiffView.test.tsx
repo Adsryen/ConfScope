@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor, within } from "../test/react";
+import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
 import DiffView from "./DiffView";
 import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
+import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
@@ -1360,4 +1361,251 @@ describe("DiffView", () => {
     await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalledTimes(4));
     expect(await screen.findByText("全部配置加载失败")).toBeInTheDocument();
   }, 15000);
+});
+
+/**
+ * 轮33 F-34：差异对比页的 chrome 条上的滚轮必须滚「指针所在那一列的正文」。
+ *
+ * 两态的矩形与落点全部照抄真机取证 research/p3_batch_match_chrome.txt（宽栏 1440×900）：
+ *   M1 批量对比  batch-diff-nav-scroll @200,297,250,587（余 3968）｜diff-body @462,362,962,522（余 7078）
+ *   M3 同名匹配  match-side-scroll @198,297,608,258（余 2477）｜右列同尺寸 x 818..1426
+ * 轮33 实测这两态共 9 块 chrome 一动不动（页内死区 28.3%–29.6% 视口），窄栏 900×700 反而全 OK，
+ * 差别只在 chrome 的祖先链里有没有可滚容器 ⇒ 守卫钉的是「闸门 + 按几何选列」，不是按 class 打补丁。
+ * 尤其 `.diff-stats` 在批量态被复用进左列列表项（`.batch-diff-nav-stats`），按类名挂处理器必然抢错。
+ *
+ * 注意取证口径：p3 的坐标来自手写 fixture `research/f_diff3.html`，不是真页面。fixture 里那行
+ * `.batch-diff-toolbar` 在真实组件中根本不存在（只剩 styles.css 里的死样式），所以这里不钉它，
+ * 改成钉批量态真实存在的通栏条 `.batch-diff-failures-head`。真机复核（PRD 待办）必须按真实 DOM 重跑一遍。
+ */
+describe("DiffView 滚轮兜底：chrome 条滚同一列正文（轮33 F-34）", () => {
+  const NAV = { left: 200, right: 450, top: 297, bottom: 884 };
+  const NAV_ROOM = 3968;
+  const BODY = { left: 462, right: 1424, top: 362, bottom: 884 };
+  const BODY_ROOM = 7078;
+  const MATCH_LEFT = { left: 198, right: 806, top: 297, bottom: 555 };
+  const MATCH_RIGHT = { left: 818, right: 1426, top: 297, bottom: 555 };
+  const MATCH_ROOM = 2477;
+
+  beforeEach(() => {
+    localStorage.clear();
+    __clearWheelSurfacesForTest();
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 }]);
+    Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 900, configurable: true });
+  });
+
+  /** jsdom 没布局：闸门要的 overflow/两个高度与选列要的矩形按取证数字装。 */
+  function makeScrollable(el: HTMLElement, rect: { left: number; right: number; top: number; bottom: number }, room: number) {
+    el.style.overflowY = "auto";
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => rect.bottom - rect.top });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => rect.bottom - rect.top + room });
+    el.getBoundingClientRect = () =>
+      ({
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+        x: rect.left,
+        y: rect.top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    el.scrollTop = 0;
+  }
+
+  function wheelOn(target: Element, x: number, y: number, deltaY = 120): WheelEvent {
+    const event = new WheelEvent("wheel", { cancelable: true, bubbles: true, clientX: x, clientY: y, deltaY });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  async function renderBatchDiff(opts: { failing?: boolean } = {}) {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "gateway.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => {
+      if (opts.failing && dataId === "gateway.yaml") throw new Error("EOF");
+      return `${dataId}: content-${dataId}`;
+    });
+    renderDiff([nacosConn]);
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    // 「对比选中（N）」要等 loadConfigs 把 dataId 列表填回来才出现，同步 getBy 抢不到。
+    await screen.findByText(/找到 2 个 dataId/);
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（2）" }));
+    await screen.findByText(opts.failing ? "已生成 1 个文件对比" : "已生成 2 个文件对比");
+    const nav = document.querySelector<HTMLElement>(".batch-diff-nav-scroll")!;
+    const body = document.querySelector<HTMLElement>(".diff-body")!;
+    expect(nav, "批量态的左列没渲染出来").not.toBeNull();
+    expect(body, "批量态的主区正文没渲染出来").not.toBeNull();
+    makeScrollable(nav, NAV, NAV_ROOM);
+    makeScrollable(body, BODY, BODY_ROOM);
+    return { nav, body };
+  }
+
+  async function renderMatchLists() {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        selectedProject: "Order",
+        left: { connId: "left-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        right: { connId: "right-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        mode: "text",
+      })
+    );
+    apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems:
+        conn.id === "left-nacos"
+          ? [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "left-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ]
+          : [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "right-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ],
+    }));
+    renderDiff([leftApplyConn, rightApplyConn]);
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    await screen.findByText("找到 3 个 dataId，已选 3 个");
+    fireEvent.click(screen.getByRole("button", { name: "仅对比同名存在的文件" }));
+    await screen.findByText("找到 3 个 dataId，已选 1 个");
+    const left = document.querySelector<HTMLElement>(".match-side-list.left .match-side-scroll")!;
+    const right = document.querySelector<HTMLElement>(".match-side-list.right .match-side-scroll")!;
+    expect(left, "匹配态左列表没渲染出来").not.toBeNull();
+    expect(right, "匹配态右列表没渲染出来").not.toBeNull();
+    makeScrollable(left, MATCH_LEFT, MATCH_ROOM);
+    makeScrollable(right, MATCH_RIGHT, MATCH_ROOM);
+    return { left, right };
+  }
+
+  const BATCH_CHROME: [string, number, number, "nav" | "body"][] = [
+    [".diff-loadbar", 592, 180, "body"],
+    [".batch-diff-nav-head", 325, 280, "nav"],
+    [".batch-diff-main-head", 943, 283, "body"],
+    [".diff-panel .diff-stats", 1063, 320, "body"],
+    [".diff-panel .diff-head", 943, 350, "body"],
+  ];
+
+  for (const [sel, x, y, column] of BATCH_CHROME) {
+    it(`批量态：滚轮落在 ${sel} 的 (${x},${y}) ⇒ 滚${column === "nav" ? "左列文件列表" : "主区正文"}，另一列一动不动`, async () => {
+      const { nav, body } = await renderBatchDiff();
+      const chrome = document.querySelector(sel);
+      expect(chrome, `${sel} 没渲染出来，这条守卫就成了空转`).not.toBeNull();
+
+      const event = wheelOn(chrome!, x, y);
+
+      const moved = column === "nav" ? nav : body;
+      const still = column === "nav" ? body : nav;
+      expect(moved.scrollTop, "M1 实测这块是纯死区：兜底要把这一格投给本列正文").toBe(120);
+      expect(still.scrollTop, "串列了：滚轮落在哪一列就只滚哪一列").toBe(0);
+      expect(event.defaultPrevented, "不取消默认动作：外层面板会跟着一起滚").toBe(true);
+    });
+  }
+
+  it("批量态：左列列表项里的 .diff-stats 不被抢走（按 class 挂处理器必错的正是这一块）", async () => {
+    const { nav, body } = await renderBatchDiff();
+    const reused = document.querySelector(".batch-diff-nav-scroll .diff-stats");
+    expect(reused, "列表项里没有复用的 .diff-stats，这条守卫是空转").not.toBeNull();
+
+    const event = wheelOn(reused!, 325, 500);
+
+    expect(event.defaultPrevented, "它就在可滚的左列里 ⇒ 归原生，兜底一格都不许接").toBe(false);
+    expect(nav.scrollTop, "抢过来自己写偏移就等于把左列的原生滚动接管了一遍").toBe(0);
+    expect(body.scrollTop, "同类名的另一块在主区，按类名选目标会滚错列").toBe(0);
+  });
+
+  it("批量态：正文与左列自身（落点在可滚容器内）保持原生语义，不被兜底改写", async () => {
+    const { nav, body } = await renderBatchDiff();
+    const bodyItem = document.querySelector(".diff-body .diff-row") ?? document.querySelector(".diff-body");
+    const navItem = document.querySelector(".batch-diff-nav-item");
+    expect(bodyItem).not.toBeNull();
+    expect(navItem, "批量态列表项没渲染出来").not.toBeNull();
+
+    expect(wheelOn(bodyItem!, 943, 623).defaultPrevented, "正文上的滚轮归原生").toBe(false);
+    expect(wheelOn(navItem!, 325, 591).defaultPrevented, "列表项上的滚轮归原生").toBe(false);
+    expect(body.scrollTop).toBe(0);
+    expect(nav.scrollTop).toBe(0);
+  });
+
+  /**
+   * 批量态真正横跨两列的 chrome 条只有失败汇总的头部（有失败项才出现）：它不在任何可滚容器里，
+   * 兜底要按 x 把它投给所在列的正文；紧挨着它的 .batch-diff-failures-list 自己就是可滚容器（max-height 170），
+   * 那一格归原生。y=229 沿用 p3 的取证带，x 取两列各自的中线——真实 DOM 里这条是通栏的，两半都钉才站得住。
+   */
+  const BATCH_FULLWIDTH_CHROME: [string, number, number, "nav" | "body"][] = [
+    [".batch-diff-failures-head", 325, 229, "nav"],
+    [".batch-diff-failures-head", 943, 229, "body"],
+  ];
+
+  for (const [sel, x, y, column] of BATCH_FULLWIDTH_CHROME) {
+    it(`批量态：通栏的 ${sel} 在 x=${x} ⇒ 滚${column === "nav" ? "左列文件列表" : "主区正文"}`, async () => {
+      const { nav, body } = await renderBatchDiff({ failing: true });
+      const chrome = document.querySelector(sel);
+      expect(chrome, `${sel} 没渲染出来，这条守卫就成了空转`).not.toBeNull();
+      expect(document.querySelector(".batch-diff-failures-list"), "失败列表没渲染出来").not.toBeNull();
+
+      const event = wheelOn(chrome!, x, y);
+
+      const moved = column === "nav" ? nav : body;
+      const still = column === "nav" ? body : nav;
+      expect(moved.scrollTop, "通栏 chrome 条也要按 x 分列，不能整条投给同一块").toBe(120);
+      expect(still.scrollTop, "串列了").toBe(0);
+      expect(event.defaultPrevented).toBe(true);
+    });
+  }
+
+  it("批量态：失败列表自己可滚 ⇒ 里面的落点归原生，兜底不许抢", async () => {
+    const { nav, body } = await renderBatchDiff({ failing: true });
+    const item = document.querySelector(".batch-diff-failures-item");
+    expect(item, "失败条目没渲染出来，这条守卫是空转").not.toBeNull();
+    const list = document.querySelector<HTMLElement>(".batch-diff-failures-list")!;
+    makeScrollable(list, { left: 200, right: 1424, top: 236, bottom: 400 }, 300);
+
+    const event = wheelOn(item!, 943, 300);
+
+    expect(event.defaultPrevented, "祖先链里有可滚容器 ⇒ 闸门必须放手").toBe(false);
+    expect(body.scrollTop, "抢过来就是二次改写原生滚动").toBe(0);
+    expect(nav.scrollTop).toBe(0);
+    expect(list.scrollTop, "失败列表自己的滚动不该被动到").toBe(0);
+  });
+
+  const MATCH_CHROME: [string, number, number, "left" | "right"][] = [
+    [".diff-loadbar", 592, 180, "left"],
+    [".match-list-head", 652, 231, "left"],
+    [".match-side-list.left .match-side-title", 502, 282, "left"],
+    [".match-side-list.right .match-side-title", 1122, 282, "right"],
+  ];
+
+  for (const [sel, x, y, column] of MATCH_CHROME) {
+    it(`匹配态：滚轮落在 ${sel} 的 (${x},${y}) ⇒ 滚${column}侧列表`, async () => {
+      const { left, right } = await renderMatchLists();
+      const chrome = document.querySelector(sel);
+      expect(chrome, `${sel} 没渲染出来，这条守卫就成了空转`).not.toBeNull();
+
+      const event = wheelOn(chrome!, x, y);
+
+      const moved = column === "left" ? left : right;
+      const still = column === "left" ? right : left;
+      expect(moved.scrollTop, "M3 实测这三块是纯死区").toBe(120);
+      expect(still.scrollTop, "两条列表上下不分开、只靠 x 分列，串了就说明选的不是指针那一列").toBe(0);
+      expect(event.defaultPrevented).toBe(true);
+    });
+  }
 });

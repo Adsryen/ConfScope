@@ -23,6 +23,7 @@ import { recordOperation } from "../store/operationHistory";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
+import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import AlertModal, { type AlertItem } from "./AlertModal";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import ConfirmModal from "./ConfirmModal";
@@ -155,6 +156,18 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
   // 编辑态命令式入口：查找栏、以及校验错误「跳到第 N 行」的落点（R22 / R28）
   const editorRef = useRef<CodeEditorHandle>(null);
+  /**
+   * 滚轮兜底的两个角色（轮33 F-34）：`.browser` 是这一页的根（`.page-header` 在它外面，天然不接），
+   * `.browser-items` 是左列唯一的滚动容器——`research/p4_browse_chrome.txt` 实测出
+   * `.browser-search` / `.browser-search-mode` / `.browser-count` 三块（含右下角那块空隙）
+   * 既不在它子树里、自己也没有滚动容器，祖先链零可滚容器 ⇒ 滚轮一格都不动（页内死区 22.2% 视口）。
+   */
+  const browserRootRef = useRef<HTMLDivElement>(null);
+  const itemsScrollRef = useRef<HTMLDivElement>(null);
+  useWheelColumnResolver(browserRootRef);
+  // 列表行高不固定（摘要会换行），所以不给 rowHeight：deltaMode=1（Linux 上 WebKitGTK 常见）
+  // 按 wheelScroll 的默认基数换算，宁可一格少滚一点，也不要按一个猜不准的行高把列表甩出半屏。
+  useWheelSurface(itemsScrollRef);
   const dirty = editing && draft !== content;
   const isLocalSnapshot = conn.sourceType === "local-snapshot";
   const isContentSearchActive = searchMode === "content" && Boolean(contentTerm);
@@ -948,7 +961,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   };
 
   return (
-    <div className="browser">
+    <div className="browser" ref={browserRootRef}>
       <div className="browser-list">
         <div className="browser-search">
           <div className="browser-search-mode" role="group" aria-label={t("config.searchMode")}>
@@ -1102,7 +1115,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             )}
           </div>
         )}
-        <div className="browser-items" {...busyProps(listLoading || contentSearching)}>
+        <div className="browser-items" ref={itemsScrollRef} {...busyProps(listLoading || contentSearching)}>
           {listLoading && (
             <div className="pad-msg" role="status" aria-live="polite">
               {t("config.loading")}

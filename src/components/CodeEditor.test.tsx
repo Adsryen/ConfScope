@@ -992,12 +992,18 @@ describe("CodeEditor 右侧缩略图（轮30 F-24，与浏览态同一份实现�
   const MM_LINES = Array.from({ length: 40 }, (_, i) => `key${i} = value${i}`).join("\n");
   const MM_DOC = `${MM_LINES}\n`;
 
-  /** jsdom 没布局：滚动容器的高度与 scrollTop 都得自己装（与浏览态同一手法）。 */
+  /**
+   * jsdom 没布局：滚动容器的高度与 scrollTop 都得自己装（与浏览态同一手法）。
+   * overflow-y 与矩形是轮33 F-34 起兜底解析器另外要的两样，缺一样就解析不出这块面。
+   */
   function stubSurface(el: HTMLElement) {
     const offsets = { top: 0 };
     Object.defineProperty(el, "scrollTop", { configurable: true, get: () => offsets.top, set: (v: number) => (offsets.top = v) });
     Object.defineProperty(el, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
     Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    el.style.overflowY = "auto";
+    el.getBoundingClientRect = () =>
+      ({ left: 0, right: 1200, top: 0, bottom: VIEWPORT_H, width: 1200, height: VIEWPORT_H, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     return offsets;
   }
 
@@ -1196,12 +1202,18 @@ describe("CodeEditor 滚轮落在查找控件上（轮32 F-33，与浏览态同�
   const CONTENT_H = 400;
   const FIND_DOC = "server.port=8080\nname = a\nport = 8081\n";
 
-  /** jsdom 没布局：滚动容器的偏移与两个高度都得自己装（与缩略图那组同一手法）。 */
+  /**
+   * jsdom 没布局：滚动容器的高度与 scrollTop 都得自己装（与缩略图那组同一手法）。
+   * overflow-y 与矩形是轮33 F-34 起兜底解析器另外要的两样，缺一样就解析不出这块面。
+   */
   function stubSurface(el: HTMLElement) {
     const offsets = { top: 0 };
     Object.defineProperty(el, "scrollTop", { configurable: true, get: () => offsets.top, set: (v: number) => (offsets.top = v) });
     Object.defineProperty(el, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
     Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    el.style.overflowY = "auto";
+    el.getBoundingClientRect = () =>
+      ({ left: 0, right: 1200, top: 0, bottom: VIEWPORT_H, width: 1200, height: VIEWPORT_H, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     return offsets;
   }
 

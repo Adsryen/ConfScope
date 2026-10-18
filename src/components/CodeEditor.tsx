@@ -34,7 +34,7 @@ import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
 import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
-import { useWheelScrollsContainer } from "../lib/useWheelScrollsContainer";
+import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -409,16 +409,15 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return () => ro.disconnect();
   }, [findOpen]);
 
+  // 编辑态同一件事：`.fmt-bar` / `.pager` 这些兄弟 chrome 条上的滚轮要滚 textarea（轮33 F-34）
+  useWheelSurface(taRef, { syncScroll, rowHeight: ROW_H });
   /**
-   * 滚轮落在查找条 / ⌕ 浮标上 ⇒ 滚正文（轮32 F-33，与浏览态同一份出口）。
-   *
-   * 取证 research/wheelbar_probe.txt + wheelopen_probe.txt：浮层完全压在正文之上，滚一格
-   * 正文停在原值、外层也始终 0 —— 纯死区。编辑态里更贵：正文是 textarea，指针从条子上挪回来
-   * 继续滚却不动，用户只会觉得「编辑器卡住了」。
-   * reattachKey 递 findOpen：两个元素互斥渲染且每次都是新节点，不重挂就等于静默失活。
+   * 组件自带的兜底根，覆盖压在 textarea 上的查找条 / ⌕ 浮标 / 缩略图（轮32 F-33 → 轮33 F-34 收口）。
+   * `.code-editor` 是 overflow:hidden，浮层的祖先链零可滚容器 ⇒ 闸门放行；组件内只登记了 taRef 一块面
+   * ⇒ 按几何必投正文。编辑态里这条更贵：正文是 textarea，指针从条子上挪回来继续滚却不动，
+   * 用户只会觉得「编辑器卡住了」。宿主（配置编辑 / 变更计划）没有页面级根也不会静默失活，原因见 CodeView 同段说明。
    */
-  useWheelScrollsContainer(findBarRef, { containerRef: taRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
-  useWheelScrollsContainer(findOpenBtnRef, { containerRef: taRef, syncScroll, rowHeight: ROW_H, reattachKey: findOpen });
+  useWheelColumnResolver(rootRef, { localPriority: true });
 
   // 净空变化不触发 scroll 事件，补一次同步让高亮层与行号网格跟上新 padding。
   useLayoutEffect(() => {

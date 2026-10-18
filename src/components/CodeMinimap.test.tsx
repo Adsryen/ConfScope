@@ -254,84 +254,51 @@ describe("CodeMinimap 画条的尺子（轮31 F-27）", () => {
   });
 });
 
-describe("CodeMinimap 的滚轮出口（轮31 F-25）", () => {
+describe("CodeMinimap 不挂自己的滚轮监听（轮33 F-34：出口收进宿主的兜底根）", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("滚轮落在缩略图那 66px 上，正文必须跟手（不是外层面板动）", () => {
+  /**
+   * 轮31 F-25 那条结论没丢——「滚轮落在缩略图那 66px 上 ⇒ 滚正文」现在由宿主兜底负责，
+   * 逐点复跑在 src/components/CodeView.test.tsx「拖缩略图的当帧同步」与
+   * src/components/CodeEditor.test.tsx「右侧缩略图」两组里（含 deltaMode=1 那一格）；
+   * 换算/夹界/放手在 src/lib/useWheelColumnResolver.test.tsx。
+   *
+   * 这里改钉的是所有权边界：缩略图自己一份监听都不许挂。页面级兜底已经会处理这块落点，
+   * 组件再挂一份就是同一格滚两遍（双滚），而且那份监听挂在会随「不满一屏」消失又重建的节点上，
+   * 正是轮33 抓出来的静默失活形状。
+   */
+  it("孤立渲染（没有宿主兜底根）时，缩略图上的滚轮一格都不该动正文", () => {
     const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
     const event = wheelOn(mm, { deltaY: 100, deltaMode: 0 });
-    expect(scroll.state.top, "滚轮打在缩略图上，正文一动不动：最近的可滚祖先是外层面板").toBe(300);
-    expect(syncScroll, "写完 scrollTop 必须当帧补同步（轮30 F-20 那条不变式，新出口不许漏）").toHaveBeenCalled();
-    expect(event.defaultPrevented, "不取消默认动作，外层面板会跟着一起滚（双滚）").toBe(true);
+
+    expect(scroll.state.top, "缩略图自己还在处理滚轮：出口没收干净").toBe(200);
+    expect(event.defaultPrevented, "没人接管就不许取消默认动作，取消了外层面板就滚不动了").toBe(false);
+    expect(syncScroll, "没写偏移就不该当帧补同步").not.toHaveBeenCalled();
   });
 
-  it("向上滚要退回去，并且两头都夹在滚得动的范围内", () => {
-    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
-    wheelOn(mm, { deltaY: -100 });
-    expect(scroll.state.top, "负增量没退").toBe(100);
-
-    wheelOn(mm, { deltaY: 100000 });
-    const maxScroll = CONTENT_H - VIEWPORT_H;
-    expect(scroll.state.top, "上界要夹在 scrollHeight - clientHeight，不是 scrollHeight").toBe(maxScroll);
-
-    wheelOn(mm, { deltaY: -100000 });
-    expect(scroll.state.top, "下界不许滚成负偏移").toBe(0);
-  });
-
-  it("deltaMode 要换算：1 是行、2 是页，只认 deltaY 当像素在 Linux 上每格只滚一点", () => {
-    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
-
-    wheelOn(mm, { deltaY: 3, deltaMode: 1 });
-    expect(scroll.state.top, "行模式没按行高换算（WebKitGTK 常见就是这个）").toBe(200 + 3 * ROW_H);
-
-    scroll.state.top = 200;
-    wheelOn(mm, { deltaY: 1, deltaMode: 2 });
-    expect(scroll.state.top, "页模式没按正文视口高换算").toBe(200 + VIEWPORT_H);
-
-    scroll.state.top = 200;
-    wheelOn(mm, { deltaY: 3, deltaMode: 0 });
-    expect(scroll.state.top, "像素模式反倒被换算错了").toBe(203);
-  });
-
-  it("横向滚与捏合缩放不接管：那两下留给原生，别吞掉浏览器自己的档位", () => {
-    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
-
-    const horizontal = wheelOn(mm, { deltaY: 0, deltaX: 120 });
-    expect(scroll.state.top, "deltaY=0 却动了纵向偏移").toBe(200);
-    expect(horizontal.defaultPrevented, "横向滚动被吞了：正文本来就横滚不动").toBe(false);
-
-    const pinch = wheelOn(mm, { deltaY: 100, ctrlKey: true });
-    expect(scroll.state.top, "捏合缩放被当成了滚动").toBe(200);
-    expect(pinch.defaultPrevented, "ctrl+wheel 要留给浏览器缩放").toBe(false);
-    expect(syncScroll, "这两种情况都不该写偏移").not.toHaveBeenCalled();
-  });
-
-  it("wheel 必须是元素上的原生监听且 passive:false —— onWheel 里 preventDefault 根本无效", () => {
+  it("一份 wheel 监听都不挂（React 的 onWheel 也不算：它是 passive 的，preventDefault 无效）", () => {
     const registrations = spyWheelRegistrations();
     const { mm } = mountMinimap({ scrollTop: 200 });
 
-    const mine = registrations.filter((entry) => entry.target === mm);
-    expect(mine, "缩略图自己没有挂出 wheel 监听（React 的 onWheel 不算：它是 passive 的）").toHaveLength(1);
-    const options = mine[0].options;
     expect(
-      typeof options === "object" && options !== null && (options as AddEventListenerOptions).passive === false,
-      "监听是 passive 的，preventDefault 会被浏览器忽略"
-    ).toBe(true);
+      registrations.filter((entry) => entry.target === mm),
+      "缩略图挂出了自己的滚轮监听，兜底根那份和它必然打架"
+    ).toHaveLength(0);
+    // JSX 里有没有写 onWheel 由 tests/ux/wheelFallbackWiring.test.ts 静态钉（React 的 onWheel 不落到属性上，这里查不出来）
   });
 
-  it("卸载后不许残留监听（换文件时不能拿旧正文的偏移继续滚）", () => {
+  it("重挂新节点也带不出监听：内容不满一屏收起再回来，出口不靠节点身份", () => {
     const registrations = spyWheelRegistrations();
     const { mm } = mountMinimap({ scrollTop: 200 });
-    expect(registrations.filter((entry) => entry.target === mm)).toHaveLength(1);
-    // 重挂一次：canScrollContent 从假翻真时元素是新的，监听必须跟着新元素走，不能留在旧的死节点上
     const { mm: second } = mountMinimap({ scrollTop: 0 });
+
+    expect(second, "换了节点才看得出「监听是抄在旧节点上」").not.toBe(mm);
     expect(
-      registrations.filter((entry) => entry.target === second),
-      "第二个实例没挂上自己的监听"
-    ).toHaveLength(1);
-    expect(second).not.toBe(mm);
+      registrations.filter((entry) => entry.target === mm || entry.target === second),
+      "新旧节点上都不许有滚轮监听"
+    ).toHaveLength(0);
   });
 });
 

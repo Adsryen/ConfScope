@@ -28,7 +28,9 @@ const LIB = "src/lib/codeLines.ts";
 const MM = "src/components/CodeMinimap.tsx";
 const VIEW = "src/components/CodeView.tsx";
 const EDITOR = "src/components/CodeEditor.tsx";
-const HOOK = "src/lib/useWheelScrollsContainer.ts";
+// 轮33 F-34：换算/夹界/当帧同步这份出口收在 wheelScroll.ts，页面级兜底解析在 useWheelColumnResolver.ts
+const WHEEL_CORE = "src/lib/wheelScroll.ts";
+const RESOLVER = "src/lib/useWheelColumnResolver.ts";
 const CSS_FILE = "src/styles.css";
 
 const CSS = readFileSync(join(PROJECT_ROOT, CSS_FILE), "utf8");
@@ -305,16 +307,16 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
       let window = "";
       for (let j = i + 1; j < lines.length; j += 1) {
         window += `${lines[j]}\n`;
-        if (/^ {2,4}\}/.test(lines[j])) break;
+        if (/^ {0,4}\}/.test(lines[j])) break;
       }
-      if (!/syncScroll\(\)/.test(window)) offenders.push(i + 1);
+      if (!/syncScroll\??\.?\(\)/.test(window)) offenders.push(i + 1);
     });
     return offenders;
   }
 
   it("每一处写 scrollTop 都在同一个函数里补了同步", () => {
-    // 轮32 F-33 起滚轮那一份住在共享出口里，缩略图自己只剩点击/拖动这一处：两份都要扫
-    for (const file of [MM, HOOK] as const) {
+    // 轮32 F-33 起滚轮那一份住在共享出口里，轮33 F-34 起那份出口住在 wheelScroll.ts：两份都要扫
+    for (const file of [MM, WHEEL_CORE] as const) {
       const src = readScannedSource(file);
       const writes = src.split("\n").filter((line) => /\.scrollTop\s*=[^=]/.test(line));
       expect(writes.length, `${file} 连一处写偏移都没有？那这条守卫是空转`).toBeGreaterThan(0);
@@ -322,46 +324,71 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
     }
   });
 
-  it("wheel 必须是元素上的原生 non-passive 监听，三个消费方都不许出现 onWheel", () => {
-    const hook = readScannedSource(HOOK);
-    const listener = /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(hook);
-    expect(listener, "wheel 没走原生监听，或第三个参数没显式写选项").not.toBeNull();
-    expect(listener![1].replace(/\s+/g, " "), "passive 必须是 false，否则浏览器直接忽略 preventDefault").toMatch(/passive: false/);
-    expect(hook, "卸载时不摘监听：浮层重建会攒出一串 handler，同一格滚轮滚好几遍").toMatch(/removeEventListener\("wheel"/);
+  it("wheel 监听全站只许兜底根挂一份，且必须 non-passive；消费方一律不出现 onWheel", () => {
+    // 轮33 F-34 起全站只剩这一份监听（页面根 / 组件根各挂一次，实现只有 useWheelColumnResolver 一份）
+    for (const file of [RESOLVER] as const) {
+      const src = readScannedSource(file);
+      const listener = /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(src);
+      expect(listener, `${file}：wheel 没走原生监听，或第三个参数没显式写选项`).not.toBeNull();
+      expect(listener![1].replace(/\s+/g, " "), `${file}：passive 必须是 false，否则浏览器直接忽略 preventDefault`).toMatch(
+        /passive: false/
+      );
+      expect(src, `${file}：卸载时不摘监听：浮层重建会攒出一串 handler，同一格滚轮滚好几遍`).toMatch(/removeEventListener\("wheel"/);
+    }
     for (const file of [MM, VIEW, EDITOR] as const) {
       const src = readScannedSource(file);
       expect(src, `${file}：React 18 的 onWheel 挂在根容器且是 passive，preventDefault 实测无效（双滚拦不住）`).not.toMatch(/onWheel=\{/);
-      expect(src, `${file}：换算只许住在 ${HOOK} 里，抄第二份就是下一轮 bug 的出处`).not.toMatch(/addEventListener\("wheel"/);
+      expect(src, `${file}：换算只许住在 ${WHEEL_CORE} 里，抄第二份就是下一轮 bug 的出处`).not.toMatch(/addEventListener\("wheel"/);
     }
   });
 
-  it("滚轮出口只许有一份实现，三块浮层各自都要接上（轮32 F-33）", () => {
-    const hook = readScannedSource(HOOK);
-    expect(hook, "deltaMode 三档换算没收在共享出口里：Linux 上 WebKitGTK 按行给，当像素等于没滚").toMatch(
+  it("滚轮出口只许有一份实现，三块浮层各自都要接上（轮32 F-33 → 轮33 F-34 换接线形状）", () => {
+    const core = readScannedSource(WHEEL_CORE);
+    expect(core, "deltaMode 三档换算没收在共享出口里：Linux 上 WebKitGTK 按行给，当像素等于没滚").toMatch(
       /event\.deltaMode === 1 \? rowHeight : event\.deltaMode === 2/
     );
-    expect(hook, "写完偏移不许夹界：负偏移会让行号层与正文错开").toMatch(
+    expect(core, "写完偏移不许夹界：负偏移会让行号层与正文错开").toMatch(
       /el\.scrollTop = clamp\(el\.scrollTop \+ delta, 0, Math\.max\(0, el\.scrollHeight - el\.clientHeight\)\);/
     );
-    // 缩略图一块浮层，查找条与 ⌕ 浮标互斥渲染 ⇒ 两个视图各两块
-    const expectations = [
-      [MM, 1, "reattachKey: canScrollContent"],
-      [VIEW, 2, "reattachKey: findOpen"],
-      [EDITOR, 2, "reattachKey: findOpen"],
-    ] as const;
-    for (const [file, calls, reattach] of expectations) {
+    // 消费方只许调出口：自己写 scrollTop 或再抄一份 deltaMode，就是下一轮「两份实现分叉」的出处
+    for (const file of [RESOLVER] as const) {
       const src = readScannedSource(file);
-      expect((src.match(/useWheelScrollsContainer\(/g) || []).length, `${file} 的滚轮出口接了几块浮层？`).toBe(calls);
-      expect((src.match(/reattachKey:/g) || []).length, `${file} 每一处接线都要递重挂依据`).toBe(calls);
-      expect(src, `${file} 的 reattachKey 要跟着浮层的存在性走，写死或漏掉都等于静默失活`).toContain(reattach);
+      expect(src, `${file}：deltaMode 换算抄出了第二份`).not.toMatch(/deltaMode/);
+      expect(src, `${file}：绕过出口自己写正文偏移`).not.toMatch(/\.scrollTop\s*=[^=]/);
+      expect(src, `${file}：没接共享出口`).toMatch(/consumeWheel\(/);
     }
-    const view = readScannedSource(VIEW);
-    expect(view, "查找条没接上：实测 research/wheelbar_probe.txt 那块 532×38 的纯死区").toMatch(/useWheelScrollsContainer\(findBarRef,/);
-    expect(view, "⌕ 浮标没接上：实测 research/wheelopen_probe.txt 那颗 26×26 也是同一块死区").toMatch(
-      /useWheelScrollsContainer\(findOpenBtnRef,/
+    // 轮33 F-34 换的是接线形状：消费方不再「一块浮层挂一份监听」，
+    // 而是「把自己的正文登记成滚动面 + 组件自带一个兜底根」。
+    // 查找条 / ⌕ 浮标 / 缩略图这三块浮层（research/wheelbar_probe.txt 的 532×38、wheelopen_probe.txt 的 26×26）
+    // 从此不需要各自接线：它们是根内的落点，兜底按几何把那一格投给登记的正文面。
+    // 逐点结论（滚一格要动正文 + 当帧三层同步）在 CodeView.test.tsx / CodeEditor.test.tsx 复跑过才删的旧接线。
+    for (const [file, surface] of [
+      [VIEW, "areaRef"],
+      [EDITOR, "taRef"],
+    ] as const) {
+      const src = readScannedSource(file);
+      expect((src.match(/useWheelSurface\(/g) || []).length, `${file} 登记了几块滚动面？`).toBe(1);
+      expect(src, `${file} 没把正文容器登记给兜底`).toContain(`useWheelSurface(${surface},`);
+      // 轮33 F-34 G1/G2：组件级根必须自己开 localPriority。宿主面板（.apply-detail / .modal-overlay）
+      // 在落点的祖先链里，不开就会被闸门挡掉，查找浮标重新变回死区——这条不是可选优化。
+      expect(src, `${file} 没挂组件自己的兜底根：宿主页面（历史版本 / 变更计划）没有页面级根，会退回死区`).toMatch(
+        /useWheelColumnResolver\(rootRef,\s*\{\s*localPriority:\s*true\s*\}\)/
+      );
+      // 判据只看这一句调用本身：组件里别处 normal 地用 ref.current（量尺寸、滚到某行）不在此列
+      const call = /useWheelSurface\([^;]*\)/.exec(src)?.[0] ?? "";
+      expect(call, `${file}：读不到那句登记`).not.toBe("");
+      expect(call, `${file}：登记的必须是引用，不是登记那一刻的节点`).not.toMatch(/\.current\b/);
+      expect((src.match(/useWheelScrollsContainer\(/g) || []).length, `${file} 还留着旧的 per-surface 接线`).toBe(0);
+      expect(src, `${file} 还在递 reattachKey：改成登记引用之后这个概念就不该存在了`).not.toMatch(/reattachKey/);
+    }
+    const mm = readScannedSource(MM);
+    expect(mm, "缩略图还在自己接滚轮出口：它会和兜底根抢同一格，同一格滚两遍").not.toMatch(
+      /useWheelSurface\(|useWheelColumnResolver\(|useWheelScrollsContainer\(/
     );
-    expect(readScannedSource(EDITOR).match(/useWheelScrollsContainer\(findBarRef,/), "编辑态查找条没接上").not.toBeNull();
-    expect(readScannedSource(EDITOR).match(/useWheelScrollsContainer\(findOpenBtnRef,/), "编辑态 ⌕ 浮标没接上").not.toBeNull();
+    expect(
+      (readScannedSource(VIEW).match(/reattachKey/g) || []).length + (readScannedSource(EDITOR).match(/reattachKey/g) || []).length,
+      "reattachKey 这套概念已经整体退场，别在注释里留着它当依据"
+    ).toBe(0);
   });
 
   it("pointerdown 必须取消默认动作（mousedown 才是抢焦点那一步）", () => {
@@ -404,23 +431,25 @@ describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27�
   });
 
   it("自检八：新出口只写偏移不补同步必须判红", () => {
-    const mm = readScannedSource(HOOK);
-    const regressed = mm.replace(
-      "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));\n      syncScroll();",
-      "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));"
+    const core = readScannedSource(WHEEL_CORE);
+    const write = "  el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));";
+    const regressed = core.replace(
+      `${write}
+  opts.syncScroll?.();`,
+      write
     );
-    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(core);
     expect(unsyncedScrollWrites(regressed), "漏掉当帧同步的那一行必须被抓出来").toEqual([
       regressed.slice(0, regressed.indexOf("el.scrollTop = clamp(el.scrollTop + delta")).split("\n").length,
     ]);
   });
 
   it("自检九：wheel 退回 passive 档位、丢掉原生监听、或改用 JSX 的 onWheel 都必须判红", () => {
-    const hook = readScannedSource(HOOK);
-    const registration = 'surface.addEventListener("wheel", onWheel, { passive: false });';
-    expect(hook, "锚点不在共享出口里，这条自检是空转").toContain(registration);
+    const hook = readScannedSource(RESOLVER);
+    const registration = 'root.addEventListener("wheel", onWheel, { passive: false });';
+    expect(hook, "锚点不在兜底解析器里，这条自检是空转").toContain(registration);
 
-    const passive = hook.replace(registration, 'surface.addEventListener("wheel", onWheel, { passive: true });');
+    const passive = hook.replace(registration, 'root.addEventListener("wheel", onWheel, { passive: true });');
     expect(passive, "变异没落到源码里，这条自检是空转").not.toBe(hook);
     expect(
       /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(passive)![1].replace(/\s+/g, " "),
