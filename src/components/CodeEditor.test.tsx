@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
+import { act, fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
@@ -1076,6 +1076,24 @@ describe("CodeEditor 右侧缩略图（轮30 F-24，与浏览态同一份实现�
     expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "行号层没当帧跟上").toBe(follow);
     expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层没当帧跟上").toBe(follow);
     await waitFor(() => expect((container.querySelector(".code-minimap-viewport") as HTMLElement).style.top).toBe("62.5%"));
+  });
+
+  it("滚轮落在缩略图上：textarea 与行号层、命中行层当帧一起走（轮31 F-25）", async () => {
+    const { container } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+    const offsets = stubSurface(ta);
+    fireEvent.scroll(ta);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    act(() => {
+      mm.dispatchEvent(new WheelEvent("wheel", { deltaY: 3, deltaMode: 1, cancelable: true, bubbles: true }));
+    });
+
+    // deltaMode=1 是「行」：3 格 × ROW_H(20)，编辑态同样不许当像素用（当像素就只滚 3px）
+    expect(offsets.top, "滚轮打在缩略图上，正文一动不动").toBe(60);
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "行号层慢一帧").toBe("translateY(-60px)");
+    expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层慢一帧").toBe("translateY(-60px)");
   });
 
   it("在缩略图上拖动：每一次 pointermove 都当帧同步，且上界夹在可滚最大值", async () => {

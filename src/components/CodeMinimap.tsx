@@ -176,6 +176,46 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     [containerRef, syncScroll]
   );
 
+  /**
+   * 滚轮落在缩略图那 66px 上 ⇒ 滚正文（轮31 F-25）。
+   *
+   * 缺陷长什么样：`.code-minimap` 是滚动容器（浏览态 `.code-area` / 编辑态 `textarea`）的**兄弟节点**，
+   * 两者都 `inset:0` 铺在 `overflow:hidden` 的 `.code-body` / `.code-editor` 里。滚轮事件打在缩略图上时，
+   * 浏览器往上找的「最近可滚祖先」是外层面板而不是正文：指针明明在代码区里，正文一动不动，
+   * 用户只会觉得「滚到右边那条就卡住」。VSCode 的 minimap 上滚轮滚的正是正文。
+   *
+   * 为什么必须是元素上的原生监听，而不是 JSX 里的 `onWheel`：React 18 把 wheel 挂在根容器上且是
+   * **passive** 监听，`e.preventDefault()` 直接失效（探针实测：`onWheel` 里调了 preventDefault，
+   * 事件到手仍是 `defaultPrevented === false`，证据留在任务目录 research/wheel_probe.txt）。
+   * 不取消默认动作又会让外层面板跟着一起滚——双滚比不滚更糟。
+   *
+   * `deltaMode` 三种档位都要换算：0 像素（Chromium/WebView2）、1 行（Linux 上 WebKitGTK 常见）、
+   * 2 页。只认 `deltaY` 当像素，行/页模式在 Linux 上每格就只滚一两个像素量级。
+   * 写完偏移照旧**当帧**补 `syncScroll()`，这条新出口不许漏轮30 F-20 那条不变式。
+   */
+  useEffect(() => {
+    const mm = surfaceRef.current;
+    if (!mm) return;
+    const onWheel = (event: WheelEvent) => {
+      // 滚动容器在 handler 里现取，不在 effect 头cache：与 jumpFromPointer 同一口径，
+      // 换文件时视图可能重建节点，抓住旧节点就等于对着一份已经不存在的正文算偏移
+      const el = containerRef.current;
+      if (!el) return;
+      // 只接管纵向：横向（shift+滚 / 触控板横划）与捏合缩放（ctrl+wheel）都留给原生
+      if (event.deltaY === 0 || event.ctrlKey) return;
+      const unit = event.deltaMode === 1 ? rowHeight : event.deltaMode === 2 ? (el.clientHeight > 0 ? el.clientHeight : rowHeight) : 1;
+      const delta = event.deltaY * unit;
+      if (!Number.isFinite(delta) || delta === 0) return;
+      event.preventDefault();
+      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));
+      syncScroll();
+    };
+    mm.addEventListener("wheel", onWheel, { passive: false });
+    return () => mm.removeEventListener("wheel", onWheel);
+    // canScrollContent 在依赖里：元素会因为「内容不满一屏」自己消失又回来，
+    // 回来时是新节点，不重挂监听就等于这条出口静默失活（与下面尺寸观察同一件事）。
+  }, [containerRef, syncScroll, rowHeight, canScrollContent]);
+
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;
     if (scrollHeight <= 0 || clientHeight <= 0 || lines.length <= 0) return null;

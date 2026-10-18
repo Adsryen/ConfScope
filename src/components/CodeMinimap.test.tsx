@@ -159,6 +159,32 @@ function drawnBars(rects: Rect[]): Rect[] {
   return [...byY.values()].sort((a, b) => a.y - b.y);
 }
 
+/** 记录元素上真实挂出的 wheel 监听（含第三个参数），用来钉 passive:false。 */
+function spyWheelRegistrations() {
+  const entries: Array<{ target: EventTarget; options: AddEventListenerOptions | boolean | undefined }> = [];
+  const original = Element.prototype.addEventListener;
+  vi.spyOn(Element.prototype, "addEventListener").mockImplementation(function (
+    this: Element,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: AddEventListenerOptions | boolean
+  ) {
+    if (type === "wheel") entries.push({ target: this, options });
+    return original.call(this, type, listener, options);
+  });
+  return entries;
+}
+
+/**
+ * jsdom 的 fireEvent.wheel 造出来的事件读不到 deltaY（testing-library 的初始化不带这几个字段），
+ * 所以这里直接构造 WheelEvent——deltaMode 也要能带进去（行 / 页模式是这轮要断言的东西）。
+ */
+function wheelOn(target: EventTarget, init: WheelEventInit): WheelEvent {
+  const event = new WheelEvent("wheel", { cancelable: true, bubbles: true, ...init });
+  target.dispatchEvent(event);
+  return event;
+}
+
 describe("CodeMinimap 画条的尺子（轮31 F-27）", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -225,5 +251,86 @@ describe("CodeMinimap 画条的尺子（轮31 F-27）", () => {
     for (let r = 1; r < bars.length; r += 1) {
       expect(bars[r].y, "桶序不能倒着画").toBeGreaterThan(bars[r - 1].y);
     }
+  });
+});
+
+describe("CodeMinimap 的滚轮出口（轮31 F-25）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("滚轮落在缩略图那 66px 上，正文必须跟手（不是外层面板动）", () => {
+    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+    const event = wheelOn(mm, { deltaY: 100, deltaMode: 0 });
+    expect(scroll.state.top, "滚轮打在缩略图上，正文一动不动：最近的可滚祖先是外层面板").toBe(300);
+    expect(syncScroll, "写完 scrollTop 必须当帧补同步（轮30 F-20 那条不变式，新出口不许漏）").toHaveBeenCalled();
+    expect(event.defaultPrevented, "不取消默认动作，外层面板会跟着一起滚（双滚）").toBe(true);
+  });
+
+  it("向上滚要退回去，并且两头都夹在滚得动的范围内", () => {
+    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
+    wheelOn(mm, { deltaY: -100 });
+    expect(scroll.state.top, "负增量没退").toBe(100);
+
+    wheelOn(mm, { deltaY: 100000 });
+    const maxScroll = CONTENT_H - VIEWPORT_H;
+    expect(scroll.state.top, "上界要夹在 scrollHeight - clientHeight，不是 scrollHeight").toBe(maxScroll);
+
+    wheelOn(mm, { deltaY: -100000 });
+    expect(scroll.state.top, "下界不许滚成负偏移").toBe(0);
+  });
+
+  it("deltaMode 要换算：1 是行、2 是页，只认 deltaY 当像素在 Linux 上每格只滚一点", () => {
+    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
+
+    wheelOn(mm, { deltaY: 3, deltaMode: 1 });
+    expect(scroll.state.top, "行模式没按行高换算（WebKitGTK 常见就是这个）").toBe(200 + 3 * ROW_H);
+
+    scroll.state.top = 200;
+    wheelOn(mm, { deltaY: 1, deltaMode: 2 });
+    expect(scroll.state.top, "页模式没按正文视口高换算").toBe(200 + VIEWPORT_H);
+
+    scroll.state.top = 200;
+    wheelOn(mm, { deltaY: 3, deltaMode: 0 });
+    expect(scroll.state.top, "像素模式反倒被换算错了").toBe(203);
+  });
+
+  it("横向滚与捏合缩放不接管：那两下留给原生，别吞掉浏览器自己的档位", () => {
+    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+
+    const horizontal = wheelOn(mm, { deltaY: 0, deltaX: 120 });
+    expect(scroll.state.top, "deltaY=0 却动了纵向偏移").toBe(200);
+    expect(horizontal.defaultPrevented, "横向滚动被吞了：正文本来就横滚不动").toBe(false);
+
+    const pinch = wheelOn(mm, { deltaY: 100, ctrlKey: true });
+    expect(scroll.state.top, "捏合缩放被当成了滚动").toBe(200);
+    expect(pinch.defaultPrevented, "ctrl+wheel 要留给浏览器缩放").toBe(false);
+    expect(syncScroll, "这两种情况都不该写偏移").not.toHaveBeenCalled();
+  });
+
+  it("wheel 必须是元素上的原生监听且 passive:false —— onWheel 里 preventDefault 根本无效", () => {
+    const registrations = spyWheelRegistrations();
+    const { mm } = mountMinimap({ scrollTop: 200 });
+
+    const mine = registrations.filter((entry) => entry.target === mm);
+    expect(mine, "缩略图自己没有挂出 wheel 监听（React 的 onWheel 不算：它是 passive 的）").toHaveLength(1);
+    const options = mine[0].options;
+    expect(
+      typeof options === "object" && options !== null && (options as AddEventListenerOptions).passive === false,
+      "监听是 passive 的，preventDefault 会被浏览器忽略"
+    ).toBe(true);
+  });
+
+  it("卸载后不许残留监听（换文件时不能拿旧正文的偏移继续滚）", () => {
+    const registrations = spyWheelRegistrations();
+    const { mm } = mountMinimap({ scrollTop: 200 });
+    expect(registrations.filter((entry) => entry.target === mm)).toHaveLength(1);
+    // 重挂一次：canScrollContent 从假翻真时元素是新的，监听必须跟着新元素走，不能留在旧的死节点上
+    const { mm: second } = mountMinimap({ scrollTop: 0 });
+    expect(
+      registrations.filter((entry) => entry.target === second),
+      "第二个实例没挂上自己的监听"
+    ).toHaveLength(1);
+    expect(second).not.toBe(mm);
   });
 });

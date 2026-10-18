@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { StrictMode } from "react";
-import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
+import { act, fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FIND_INPUT_DEFER_MIN_LINES } from "../lib/findInput";
 import { I18nProvider } from "../i18n";
@@ -980,6 +980,30 @@ describe("CodeView 拖缩略图的当帧同步（轮30 F-20）", () => {
     ).toBe(follow);
     expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层没当帧跟上").toBe(follow);
     await waitFor(() => expect((container.querySelector(".code-minimap-viewport") as HTMLElement).style.top).toBe("66.66666666666666%"));
+  });
+
+  /**
+   * 缩略图是 .code-area 的**兄弟节点**，滚轮打在它身上时最近的可滚祖先是外层面板，
+   * 于是「指针在代码区、正文不动」。组件侧的换算是 CodeMinimap.test.tsx 钉的，
+   * 这里钉的是接线：视图递进去的 syncScroll 必须真的把三层一起当帧带走。
+   */
+  it("滚轮落在缩略图上：正文与行号层、命中行层当帧一起走", async () => {
+    const { container } = renderView(MULTI);
+    const area = container.querySelector(".code-area") as HTMLElement;
+    const offsets = stubGeometry(area);
+    fireEvent.scroll(area);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    act(() => {
+      mm.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, deltaMode: 0, cancelable: true, bubbles: true }));
+    });
+
+    expect(offsets.top, "滚轮打在缩略图上，正文一动不动").toBe(40);
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "行号层慢一帧").toBe("translateY(-40px)");
+    expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层慢一帧").toBe("translateY(-40px)");
+    // 视口框跟着新偏移走：40 / 600（scrollHeight），证明 metrics 也收到了这一次程序化滚动
+    await waitFor(() => expect((container.querySelector(".code-minimap-viewport") as HTMLElement).style.top).toBe("6.666666666666667%"));
   });
 
   it("在缩略图上拖动：每一次 pointermove 都当帧同步（不许只等 pointerup）", async () => {
