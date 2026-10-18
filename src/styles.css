@@ -5600,8 +5600,12 @@ button.diff-workflow-step-btn:hover {
 .audit-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  /* 轮36 F-36：工具栏原本恒 398px（实测与视口宽度、环境卡数都无关），占掉默认窗口
+     1280x820 的 48.5%，把列表顶到「滚动到底只有 4 整行」。这里与 .audit-env-card 一起
+     收紧纵向节奏：398 → 252。省下的 146px 由 .audit-matrix{min-height} 那档接住，
+     转成列表行数，而不是转成更长的空白滚动距离。 */
+  gap: 8px;
+  padding: 10px 12px;
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -5610,20 +5614,26 @@ button.diff-workflow-step-btn:hover {
 .audit-project-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .audit-envs {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
 }
 
 .audit-env-card {
+  /* 轮36 F-36：卡内 namespace / group / dataId 筛选三个字段原本纵向堆 3 行（卡片实测 216px），
+     而字段里的输入框被 .search-input{max-width:220px} 钉在 220px —— 1280 窗口下卡片内宽 444px，
+     横向白给 ~224px。改成「标题占整行 + 字段横排、放不下自己换行」：实测 98px（3 字段各 152px 宽，
+     RETEST-PROD 这类值不截断）；宽度降到 1100/980 时字段回落成 2 行、卡片 155px，
+     仍然矮于改前的 216px ⇒ 没有任何一档比改前更高。basis 140px 是这三个短字符串的最小可读宽。 */
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 10px;
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -5635,6 +5645,13 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 轮36 F-36：环境卡转成 row 布局后，标题行要独占一整行，字段才有整条宽度去并排。 */
+  flex: 0 0 100%;
+}
+
+.audit-env-card > .field {
+  /* 轮36 F-36：同 .audit-env-card 注释，字段横向并排、宽度不足自动换行。 */
+  flex: 1 1 140px;
 }
 
 .audit-env-name {
@@ -5650,7 +5667,7 @@ button.diff-workflow-step-btn:hover {
 
 /* 设置区域 */
 .audit-settings-toggle {
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .audit-settings {
@@ -5815,8 +5832,14 @@ button.diff-workflow-step-btn:hover {
   flex: 1;
   /* 轮34 F-35：这里原本是 min-height:0，整页只有它允许收缩，于是默认窗口 1280x820 点开详情后
      实测塌成 0px / 可见 0 行、行也被 .audit-detail-head 拦住点不动。行高实测 48px，
-     58(表头) + 4*48 + 余量 = 280 ⇒ 再矮也看得见 4 行，挤不掉的部分交给 .audit-page 自己滚。 */
-  min-height: 280px;
+     58(表头) + 4*48 + 余量 = 280 ⇒ 再矮也看得见 4 行，挤不掉的部分交给 .audit-page 自己滚。
+     轮36 F-36：280 → 400，把工具栏省下的 146px 接成行数（实测滚到底 4 整行 → 7 整行）。
+     1920x1080 这类高窗口自然高度实测 433px > 400 ⇒ 这条下限不参与它的布局，但同一批工具栏收紧
+     仍然让它在 1080 高下从 4 整行变成 7 整行 —— 下限是为矮窗口兜底，高窗口的收益来自工具栏本身。
+     刻意不按 100vh 放大到 630px 那类「一屏列表」：.audit-matrix-body 带 overscroll-behavior:contain
+     是一块滚动孤岛（F-34 口径），框子顶满视口后 chrome 只剩 28px 可滚（实测），指针落在列表上就再也
+     滚不动整页，等于我们自己再造一次 F-34/F-35 正在治的病。 */
+  min-height: 400px;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
