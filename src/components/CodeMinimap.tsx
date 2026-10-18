@@ -245,6 +245,11 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
       ref={surfaceRef}
       title={t("config.minimap")}
       onPointerDown={(e) => {
+        // 必须取消默认动作（轮31 F-26）：按 Pointer Events 规范，取消 pointerdown 后兼容的
+        // mousedown 不再派发，而 mousedown 正是浏览器改焦点的那一步。不取消的话点一下缩略图：
+        // 编辑态 textarea 失焦（接着打字全不见，Ctrl+S 也不再被编辑区接管），
+        // 浏览态焦点从键盘层 .code-area 挪到 .code-view（tabIndex=-1），方向键 / PageUp / PageDown 当场失效。
+        e.preventDefault();
         draggingRef.current = true;
         e.currentTarget.setPointerCapture?.(e.pointerId);
         jumpFromPointer(e.clientY);

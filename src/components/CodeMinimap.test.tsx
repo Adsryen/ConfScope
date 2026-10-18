@@ -334,3 +334,39 @@ describe("CodeMinimap 的滚轮出口（轮31 F-25）", () => {
     expect(second).not.toBe(mm);
   });
 });
+
+describe("CodeMinimap 点完之后的焦点（轮31 F-26）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * 证据边界（PRD 里写明的口径）：jsdom 不实现「点击改焦点」，所以焦点丢失这一步在单测里测不出来。
+   * 能测、也正是我们要钉的那一步是**有没有取消引发它的那个默认动作**：按 Pointer Events 规范，
+   * `pointerdown` 被取消后兼容的 `mousedown` 不再派发，而 `mousedown` 正是浏览器改焦点的那一步。
+   * fireEvent 返回的是 dispatchEvent 的结果——调过 preventDefault 就是 false。
+   */
+  it("点缩略图取消 pointerdown 的默认动作，跳行照旧", () => {
+    const { mm, scroll, syncScroll } = mountMinimap({ scrollTop: 200 });
+    const notCancelled = fireEvent.pointerDown(mm, { clientY: 100, pointerId: 1 });
+    expect(notCancelled, "pointerdown 没取消：mousedown 照发，textarea 失焦（打字无效、Ctrl+S 不再被接管）").toBe(false);
+    expect(scroll.state.top, "取消默认动作不能把跳行一起取消掉").toBeGreaterThan(200);
+    expect(syncScroll, "写完 scrollTop 必须当帧补同步").toHaveBeenCalled();
+  });
+
+  it("拖动过程中每一下都不留焦点尾巴：pointermove / pointerup 不许把默认动作吃掉", () => {
+    const { mm, scroll } = mountMinimap({ scrollTop: 200 });
+    expect(fireEvent.pointerDown(mm, { clientY: 60, pointerId: 1, buttons: 1 }), "按下必须取消").toBe(false);
+    const before = scroll.state.top;
+    expect(fireEvent.pointerMove(mm, { clientY: 140, pointerId: 1, buttons: 1 }), "拖动不该取消默认动作（它本来没有默认动作）").toBe(true);
+    expect(scroll.state.top, "拖动没跟着走").not.toBe(before);
+    expect(fireEvent.pointerUp(mm, { clientY: 140, pointerId: 1 }), "抬起不该取消默认动作").toBe(true);
+  });
+
+  it("缩略图自己不许做成可聚焦元素（焦点只能留在正文/编辑区）", () => {
+    const { mm } = mountMinimap({ scrollTop: 200 });
+    expect(mm.hasAttribute("tabindex"), "给缩略图加 tabIndex 等于把焦点从键盘层手里抢走").toBe(false);
+    expect(mm.tabIndex, "div 默认 tabIndex 是 -1，任何 >=0 都意味着它能进 Tab 序列").toBeLessThan(0);
+    expect(mm.getAttribute("contenteditable"), "缩略图不是编辑面").toBeNull();
+  });
+});
