@@ -9,6 +9,23 @@
   --bg-active: #094771;
   --accent: #007acc;
   --accent-h: #1a8fe3;
+  /* ── 按用途分层的颜色令牌（轮38 R91）────────────────────────────────
+     --accent / --accent-h 从此只管填充与描边。它们一旦被当作文字色就必然不达 AA：
+     #007acc 在 bg/bg2/bg3 上只有 3.70 / 3.40 / 3.04:1（正文都是 11~12.5px，走 4.5 档）。
+     品牌色本身逐值不动（R95），改的是「谁在用哪个 token」。 */
+  /* 强调色文字 / 图标：#4fc3f7 在 bg/bg2/bg3/bg-hover 上为 8.32 / 7.64 / 6.85 / 5.90 */
+  --accent-text: #4fc3f7;
+  /* 压在饱和填充上的标签色：白字在 --accent 上 4.51、在 --accent-h 上只有 3.45
+     ——而 --accent-h 正是 .btn-primary:hover 的底色，浅字方案在 hover 态无解。
+     黑色标签分别是 4.66 / 6.08，两态都达标，代价是蓝底按钮转黑字（44 处，刻意收敛）。 */
+  --on-accent: #000000;
+  /* 需要承载白字的红色填充：--red #f44747 上白字只有 3.60:1，降到 #c8353a 后 5.22:1。
+     注意 --red 继续用于描边与文字（图形按 3:1 口径），别把它也一起改暗。 */
+  --red-fill: #c8353a;
+  /* tint chip（半透明着色底）上的 tone 文字：--red-h #ff6b6b 叠在 rgba(244,71,71,.16)∘--bg3
+     上只有 4.19:1，#ff8f8f 同位置 5.31:1；紫色同理 #ba68c8 3.59 → #ce93d8 5.34。 */
+  --red-text: #ff8f8f;
+  --purple-text: #ce93d8;
   --text: #cccccc;
   /* 次要文本（R15）：#7a7a7a 在 --bg 上只有 3.88:1，正文都是 11–12px，达不到 WCAG AA 的 4.5:1。
      #a0a0a0 在 bg/bg2/bg3/bg-hover 上为 6.38 / 5.86 / 5.25 / 4.52，层次仍在但可读。
@@ -249,7 +266,7 @@ textarea {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: var(--red);
+  background: var(--red-fill);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -450,7 +467,7 @@ textarea {
 }
 
 .message-icon-btn.danger:hover:not(:disabled) {
-  color: var(--red-h);
+  color: var(--red-text);
   border-color: rgba(244, 71, 71, 0.45);
   background: var(--diff-del-bg);
 }
@@ -703,7 +720,7 @@ textarea {
 }
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 .btn-primary:hover:not(:disabled) {
@@ -1346,7 +1363,7 @@ textarea {
   border: 1px solid rgba(244, 71, 71, 0.35);
   border-radius: 4px;
   background: rgba(244, 71, 71, 0.12);
-  color: var(--red-h);
+  color: var(--red-text);
   font-size: 11px;
 }
 
@@ -1923,7 +1940,7 @@ textarea {
 }
 
 .browser-target-arrow {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 20px;
 }
 
@@ -2539,7 +2556,7 @@ textarea {
   color: var(--text-dim);
 }
 .hljs-meta {
-  color: #808080;
+  color: var(--text-dim);
 }
 
 /* ── History ── */
@@ -2636,7 +2653,7 @@ textarea {
 }
 .op-D {
   background: var(--diff-del-bg);
-  color: var(--red-h);
+  color: var(--red-text);
 }
 .op-x {
   background: var(--bg3);
@@ -2810,7 +2827,7 @@ button.diff-workflow-step-btn:hover {
 .diff-workflow-step.current .diff-workflow-step-mark {
   border-color: rgba(79, 195, 247, 0.8);
   background: var(--accent);
-  color: #071016;
+  color: var(--on-accent);
 }
 
 /* stepper 回退时，目标区域（来源面板 / 对比结果）的高亮闪烁提示 */
@@ -3177,7 +3194,7 @@ button.diff-workflow-step-btn:hover {
   border-color: rgba(244, 192, 106, 0.4);
 }
 .env-badge.env-prod {
-  color: #e57373;
+  color: var(--red-text);
   background: rgba(244, 67, 54, 0.15);
   border-color: rgba(190, 80, 90, 0.45);
 }
@@ -3192,9 +3209,10 @@ button.diff-workflow-step-btn:hover {
   background: rgba(184, 192, 204, 0.08);
   border-color: rgba(184, 192, 204, 0.32);
 }
-/* other 的文字走 --text-dim（波6 的 AA 口径），不再硬编码 #9e9e9e。 */
+/* other 的字面底比 --bg3 亮（rgba(158,158,158,.15) 叠 --bg3 实测 #3e3e41，--text-dim 在其上只有
+   4.08:1），轮38 R91 起一律走更亮一档的 --text-dim-raised（同底 6.18:1）。 */
 .env-badge.env-other {
-  color: var(--text-dim);
+  color: var(--text-dim-raised);
   background: rgba(158, 158, 158, 0.15);
   border-color: var(--border);
 }
@@ -3463,23 +3481,24 @@ button.diff-workflow-step-btn:hover {
 }
 /* 内容搜索命中高亮（列表摘要与代码视图共用）——命中词标红 */
 .search-hit {
-  background: rgba(244, 71, 71, 0.35);
-  color: var(--red-h);
+  /* 轮38 R91：高亮底越饱和，压在上头的正文与标红词越互相打架；降到 0.18 并把文字换成 --red-text。 */
+  background: rgba(244, 71, 71, 0.18);
+  color: var(--red-text);
   border-radius: 2px;
   padding: 0 1px;
   box-shadow: inset 0 0 0 1px rgba(244, 71, 71, 0.5);
 }
 .code-area .search-hit {
-  background: rgba(244, 71, 71, 0.45);
+  background: rgba(244, 71, 71, 0.28);
 }
 /* 当前命中：更亮的实心红底白字；用 .search-hit.search-hit-current 复合选择器提升特异性，压过 .code-area .search-hit */
 .search-hit.search-hit-current {
-  background: var(--red);
+  background: var(--red-fill);
   color: #fff;
   box-shadow: inset 0 0 0 1px var(--red-h);
 }
 .code-area .search-hit.search-hit-current {
-  background: var(--red);
+  background: var(--red-fill);
   color: #fff;
 }
 
@@ -4278,7 +4297,7 @@ button.diff-workflow-step-btn:hover {
   padding: 10px 12px;
   border: 1px solid rgba(244, 71, 71, 0.3);
   border-radius: 6px;
-  color: var(--red-h);
+  color: var(--red-text);
   background: var(--diff-del-bg);
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -4659,7 +4678,7 @@ button.diff-workflow-step-btn:hover {
   font-size: 16px;
 }
 .conn-item-del:hover {
-  background: var(--red);
+  background: var(--red-fill);
   color: #fff;
 }
 .conn-item-del.confirm {
@@ -4667,7 +4686,7 @@ button.diff-workflow-step-btn:hover {
   padding: 0 8px;
   font-size: 11px;
   color: #fff;
-  background: var(--red);
+  background: var(--red-fill);
 }
 
 .pwd-field {
@@ -4705,7 +4724,7 @@ button.diff-workflow-step-btn:hover {
   background: var(--diff-add-bg);
 }
 .local-validation.err {
-  color: var(--red-h);
+  color: var(--red-text);
   background: var(--diff-del-bg);
 }
 .local-validation-path {
@@ -4889,7 +4908,7 @@ button.diff-workflow-step-btn:hover {
   color: var(--green);
 }
 .test-trace-step.checked .trace-status {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .test-trace-step.error .trace-status {
   color: var(--red-h);
@@ -5116,14 +5135,14 @@ button.diff-workflow-step-btn:hover {
   padding: 0 2px;
   border: 0;
   background: none;
-  color: var(--accent-h);
+  color: var(--accent-text);
   font-size: 12.5px;
   text-decoration: underline;
   cursor: pointer;
   white-space: nowrap;
 }
 .alert-jump:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ── Toast ── */
@@ -5318,7 +5337,7 @@ button.diff-workflow-step-btn:hover {
   padding: 3px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   background: rgba(0, 122, 204, 0.12);
   border: 1px solid rgba(0, 122, 204, 0.3);
   border-radius: 999px;
@@ -5399,7 +5418,7 @@ button.diff-workflow-step-btn:hover {
   position: absolute;
   left: 0;
   top: 0;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 11px;
   line-height: 1.55;
 }
@@ -5412,7 +5431,7 @@ button.diff-workflow-step-btn:hover {
 }
 
 .about-section a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 
@@ -5533,7 +5552,7 @@ button.diff-workflow-step-btn:hover {
 
 .update-progress-pct {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 13px;
 }
 
@@ -5564,7 +5583,7 @@ button.diff-workflow-step-btn:hover {
 }
 
 .about-footer a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
   font-weight: 500;
 }
@@ -5740,7 +5759,7 @@ button.diff-workflow-step-btn:hover {
   border-radius: 3px;
   font-family: monospace;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .ignore-rule-reason {
@@ -5833,15 +5852,15 @@ button.diff-workflow-step-btn:hover {
 }
 .audit-summary-item.err {
   background: rgba(244, 67, 54, 0.12);
-  color: #e57373;
+  color: var(--red-text);
 }
 .audit-summary-item.missing {
   background: rgba(158, 158, 158, 0.12);
-  color: #9e9e9e;
+  color: var(--text-dim-raised);
 }
 .audit-summary-item.dim {
   background: rgba(158, 158, 158, 0.08);
-  color: #757575;
+  color: var(--text-dim-raised);
 }
 
 /* 矩阵表格 */
@@ -5995,15 +6014,15 @@ button.diff-workflow-step-btn:hover {
 }
 .audit-status-badge.err {
   background: rgba(244, 67, 54, 0.15);
-  color: #e57373;
+  color: var(--red-text);
 }
 .audit-status-badge.missing {
   background: rgba(158, 158, 158, 0.15);
-  color: #9e9e9e;
+  color: var(--text-dim-raised);
 }
 .audit-status-badge.dim {
   background: rgba(158, 158, 158, 0.1);
-  color: #757575;
+  color: var(--text-dim-raised);
 }
 
 .audit-key-path {
@@ -6211,7 +6230,7 @@ button.diff-workflow-step-btn:hover {
 }
 .history-type.delete {
   background: rgba(244, 67, 54, 0.15);
-  color: #e57373;
+  color: var(--red-text);
 }
 .history-type.rollback {
   background: rgba(255, 152, 0, 0.15);
@@ -6225,7 +6244,7 @@ button.diff-workflow-step-btn:hover {
 }
 .history-type.export {
   background: rgba(156, 39, 176, 0.15);
-  color: #ba68c8;
+  color: var(--purple-text);
 }
 
 .history-result {
@@ -6428,7 +6447,7 @@ button.diff-workflow-step-btn:hover {
 }
 
 .backup-item-count {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .backup-item-time {
@@ -6530,7 +6549,7 @@ button.diff-workflow-step-btn:hover {
 }
 
 .backup-config-type {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .backup-config-compare {
@@ -6671,7 +6690,7 @@ button.diff-workflow-step-btn:hover {
 
 .task-status-pending {
   background: rgba(158, 158, 158, 0.15);
-  color: #9e9e9e;
+  color: var(--text-dim-raised);
 }
 
 .task-status-running {
@@ -6686,7 +6705,7 @@ button.diff-workflow-step-btn:hover {
 
 .task-status-failed {
   background: rgba(244, 67, 54, 0.15);
-  color: #e57373;
+  color: var(--red-text);
 }
 
 .task-status-cancelled {
@@ -7285,12 +7304,12 @@ button.diff-workflow-step-btn:hover {
 .apply-action-delete,
 .apply-action-parse_error,
 .apply-blocked {
-  color: var(--red-h);
+  color: var(--red-text);
   background: rgba(244, 71, 71, 0.14);
 }
 
 .apply-action-skip {
-  color: var(--text-dim);
+  color: var(--text-dim-raised);
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -7932,14 +7951,14 @@ button.diff-workflow-step-btn:hover {
   font-weight: 600;
 }
 .log-viewer .log-event-kind.danger {
-  color: #e06c75;
+  color: var(--red-text);
 }
 .log-viewer .log-event-ts {
-  color: #6b6b78;
+  color: var(--text-dim);
 }
 .log-viewer .log-event-loc,
 .log-viewer .log-event-dir {
-  color: #8a8a99;
+  color: var(--text-dim);
 }
 .log-viewer .log-event-payload {
   margin: 0;
