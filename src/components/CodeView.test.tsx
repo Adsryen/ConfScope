@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { StrictMode } from "react";
 import { fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FIND_INPUT_DEFER_MIN_LINES } from "../lib/findInput";
@@ -26,6 +27,55 @@ function renderView(
 }
 
 const MULTI = 'server.port=8080\nname = "a<b&c>"\nqps: 10000\nport = 8081\n';
+
+/**
+ * 共享假几何（R74 起，轮29 复用）。
+ *
+ * jsdom 没有布局：clientHeight / scrollHeight 恒为 0，`scrollLineIntoView` 的 clamp 结果也就恒为 0，
+ * 「跳没跳」和「跳歪了」在这种桩下分不开。所以先把高度撑出来，再让 scrollTop 可读写。
+ * 传 `writes` 时顺手记一次赋值次数——轮29 F-17 要钉的正是「按一次 Enter 到底滚了几回」。
+ */
+const VIEWPORT_H = 100;
+const CONTENT_H = 600;
+
+function stubGeometry(pre: HTMLElement, writes?: { count: number }) {
+  const offsets = { top: 0, left: 0 };
+  Object.defineProperty(pre, "scrollTop", {
+    configurable: true,
+    get: () => offsets.top,
+    set: (value: number) => {
+      offsets.top = value;
+      if (writes) writes.count += 1;
+    },
+  });
+  Object.defineProperty(pre, "scrollLeft", {
+    configurable: true,
+    get: () => offsets.left,
+    set: (value: number) => {
+      offsets.left = value;
+    },
+  });
+  Object.defineProperty(pre, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
+  Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+  return offsets;
+}
+
+/**
+ * 行号槽里第 N 行的 top 就是「行 i 的 top = PAD_TOP + i * ROW_H」这条公式的另一个出口，
+ * 拿它当期望值就不用把 CodeView 的几何常量抄第二份（抄第二份等于埋一条会随波次腐烂的假断言）。
+ */
+/**
+ * 24 行正文，needle（timeout）分别落在第 12 行与第 21 行（0 基 11 / 20）——刻意离文件开头足够远，
+ * 「停在开头」和「跳到命中行」在断言里才分得开。R74 与轮29 F-17/F-18 共用这一份。
+ */
+const DEEP_LINES = Array.from({ length: 24 }, (_, i) => (i === 11 ? "timeout = 3000" : i === 20 ? "timeout = 5000" : `key${i} = ${i}`));
+const DEEP = `${DEEP_LINES.join("\n")}\n`;
+
+function expectedTopFor(container: HTMLElement, lineOneBased: number) {
+  const row = [...container.querySelectorAll<HTMLElement>(".code-ln")].find((el) => el.textContent === String(lineOneBased));
+  expect(row, `行号槽里没有第 ${lineOneBased} 行，视口范围算错了`).toBeTruthy();
+  return parseFloat(row!.style.top) - VIEWPORT_H / 2;
+}
 
 describe("CodeView 行号 / 命中 / 标红", () => {
   afterEach(() => {
@@ -319,12 +369,6 @@ describe("CodeView 输入法组合态（R11）", () => {
 });
 
 describe("CodeView 内容搜索定位（R74）", () => {
-  /** 24 行正文，needle 分别落在第 12 行与第 21 行（0 基 11 / 20）——刻意离文件开头足够远。 */
-  const DEEP_LINES = Array.from({ length: 24 }, (_, i) => (i === 11 ? "timeout = 3000" : i === 20 ? "timeout = 5000" : `key${i} = ${i}`));
-  const DEEP = `${DEEP_LINES.join("\n")}\n`;
-  const VIEWPORT_H = 100;
-  const CONTENT_H = 600;
-
   function view(props: { code: string; searchTerm?: string; contentKey?: string }) {
     localStorage.setItem("locale", "zh-CN");
     return (
@@ -332,36 +376,6 @@ describe("CodeView 内容搜索定位（R74）", () => {
         <CodeView format="TEXT" {...props} />
       </I18nProvider>
     );
-  }
-
-  /** jsdom 无布局：scrollTop 可读写之外还要把 clientHeight / scrollHeight 撑出来，否则 clamp 后恒等于 0。 */
-  function stubGeometry(pre: HTMLElement) {
-    const offsets = { top: 0, left: 0 };
-    Object.defineProperty(pre, "scrollTop", {
-      configurable: true,
-      get: () => offsets.top,
-      set: (value: number) => {
-        offsets.top = value;
-      },
-    });
-    Object.defineProperty(pre, "scrollLeft", {
-      configurable: true,
-      get: () => offsets.left,
-      set: (value: number) => {
-        offsets.left = value;
-      },
-    });
-    Object.defineProperty(pre, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
-    Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => CONTENT_H });
-    return offsets;
-  }
-
-  /** 行号槽里第 N 行的 top 就是「行 i 的 top = PAD_TOP + i * ROW_H」这条公式的另一个出口，
-   *  拿它当期望值就不用把 CodeView 的几何常量抄第二份（抄第二份等于埋一条会随波次腐烂的假断言）。 */
-  function expectedTopFor(container: HTMLElement, lineOneBased: number) {
-    const row = [...container.querySelectorAll<HTMLElement>(".code-ln")].find((el) => el.textContent === String(lineOneBased));
-    expect(row, `行号槽里没有第 ${lineOneBased} 行，视口范围算错了`).toBeTruthy();
-    return parseFloat(row!.style.top) - VIEWPORT_H / 2;
   }
 
   it("内容搜索点开文件：首个命中落在视口中间，不再停在文件开头", () => {
@@ -431,6 +445,73 @@ describe("CodeView 内容搜索定位（R74）", () => {
     rerender(view({ code: DEEP, searchTerm: "timeout", contentKey: "k2" }));
 
     expect(offsets.top).toBe(0);
+  });
+});
+
+describe("CodeView 跳下一处的滚动落地（轮29 F-17 / F-18）", () => {
+  /** 全文只剩一处 timeout（第 12 行）：F-18 的症状只在「命中数为 1」时暴露。 */
+  const SINGLE_HIT = `${DEEP_LINES.map((line, i) => (i === 20 ? "key20 = 20" : line)).join("\n")}\n`;
+
+  /** 开查找栏并输入词，等命中落地。 */
+  async function openFindWith(container: HTMLElement, needle: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: needle } });
+    await waitFor(() => expect(container.querySelector(".code-area mark.search-hit-current")).not.toBeNull());
+    return input;
+  }
+
+  it("StrictMode 下按一次 Enter 只给 scrollTop 赋值一次", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const { container } = render(
+      <StrictMode>
+        <I18nProvider>
+          <CodeView code={DEEP} format="TEXT" />
+        </I18nProvider>
+      </StrictMode>
+    );
+    const writes = { count: 0 };
+    const offsets = stubGeometry(container.querySelector(".code-area") as HTMLElement, writes);
+    const input = await openFindWith(container, "timeout");
+    expect(offsets.top, "开栏 / 改词没把首个命中拉进视口").toBe(expectedTopFor(container, 12));
+    writes.count = 0; // 只数 Enter 这一次提交
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(offsets.top, "Enter 没跳到第二处").toBe(expectedTopFor(container, 21));
+    // 旧实现把滚动写在 setActiveIdx 的 updater 里：StrictMode 每次更新把 updater 调两遍，
+    // 一次 Enter 就给 scrollTop 赋值两次（真浏览器里 React 未来重放 updater 同样会多滚）。
+    expect(writes.count, "一次 Enter 给 scrollTop 赋了不止一次值：滚动又回到 setState updater 里了").toBe(1);
+  });
+
+  it("全文只有一处命中时 Enter / F3 仍把那一处拉回视口", async () => {
+    const { container } = renderView(SINGLE_HIT, "TEXT");
+    const offsets = stubGeometry(container.querySelector(".code-area") as HTMLElement);
+    const input = await openFindWith(container, "timeout");
+    const top = expectedTopFor(container, 12);
+    expect(offsets.top).toBe(top);
+
+    // 用户自己滚走了。命中只有 1 处时 (0 + 1 + 1) % 1 还是 0：F-17 把滚动挪出 updater 之后，
+    // 序号没变就没有任何重渲染，落地效果不跑，看起来就是快捷键整个失效——navTick 是这条的解药。
+    offsets.top = 0;
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(offsets.top, "命中只有一处时 Enter 一动不动").toBe(top);
+
+    offsets.top = 0;
+    // 打在输入框上（真机就是这个焦点态）：window 上做这件事会被 takesThisView 的「焦点在
+    // 别处可编辑控件」那条挡掉，那是另一条口径，不属这条用例。
+    fireEvent.keyDown(input, { key: "F3" });
+    expect(offsets.top, "命中只有一处时 F3 一动不动").toBe(top);
+
+    offsets.top = 0;
+    fireEvent.keyDown(input, { key: "F3", shiftKey: true });
+    expect(offsets.top, "命中只有一处时 Shift+F3 一动不动").toBe(top);
+
+    offsets.top = 0;
+    // 「上一处 / 下一处」按钮走同一条 navigate，症状一模一样；按 aria-label 取，类名是三个按钮共用
+    fireEvent.click(container.querySelector('button[aria-label="下一处"]') as HTMLElement);
+    expect(offsets.top, "命中只有一处时点「下一处」按钮一动不动").toBe(top);
   });
 });
 
@@ -795,6 +876,33 @@ describe("CodeView 查找词输入的延迟（轮29 F-16）", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(count(), "Enter 应当立刻把没落地的词提交").toBe(`第 1/${FIND_INPUT_DEFER_MIN_LINES} 处`);
     // 提交过了就不该再有待触发的定时器：下一次 Enter 正常前进
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(count()).toBe("第 2/3000 处");
+  });
+
+  it("补一个字母凑出「无匹配」时，Enter 只提交新词，不许报旧词表里的「第 2/3000 处」（轮29 F-16 AC3 的另一半）", async () => {
+    // 延迟落地自带一个错开：输入框里的词是即时值，命中表用的词还停在上一格。
+    // 错开本身没事，出事的是「拿旧词的命中表数格子」——最刺眼的形状就是输入 springx（0 处命中）
+    // 却显示「第 2/3000 处」：计数说的是一座已经不存在的桥。所以这次按键只许提交新词。
+    // 顺带钉住另一头：凑不出命中的那个字母也必须留在输入框里，否则用户在长文档里永远打不出新词。
+    const { container } = renderView(BIG, "YAML");
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    const count = () => (container.querySelector(".code-find-count") as HTMLElement).textContent;
+
+    fireEvent.change(input, { target: { value: "spring" } });
+    fireEvent.keyDown(input, { key: "Enter" }); // 提交：命中表是 spring 的 3000 处，停在第 1 处
+    expect(count()).toBe("第 1/3000 处");
+
+    fireEvent.change(input, { target: { value: "springx" } });
+    expect(input.value, "最新那次输入必须留在输入框里，否则永远打不出 springx").toBe("springx");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(count(), "Enter 只负责提交新词：新词没有命中，不许报旧词表里的「第 2/3000 处」").toBe("无匹配");
+
+    // 再补回有命中的词，同一条路径要能正常前进（提交一次落在第 1 处，下一次才前进）
+    fireEvent.change(input, { target: { value: "spring" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(count()).toBe("第 1/3000 处");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(count()).toBe("第 2/3000 处");
   });

@@ -22,8 +22,18 @@ import { readScannedSource, sourceFiles } from "./scanUtils";
 const LIB = "src/lib/codeLines.ts";
 const SCROLL_LIB = "src/lib/codeScroll.ts";
 const VIEWS = [
-  { file: "src/components/CodeView.tsx", sourceVar: "code" },
-  { file: "src/components/CodeEditor.tsx", sourceVar: "doc" },
+  {
+    file: "src/components/CodeView.tsx",
+    sourceVar: "code",
+    // 轮29 F-18：浏览态把跳转计数与滚动都并进这条效果，navTick / scrollLineIntoView 必须在依赖里。
+    deps: "html, findOpen, hits, activeIdx, navTick, scrollLineIntoView",
+  },
+  {
+    file: "src/components/CodeEditor.tsx",
+    sourceVar: "doc",
+    // 编辑态的垂直滚动本来就在 updater 之外（revealHit），没有 F-18 那个症状，口径不动。
+    deps: "html, findOpen, hits, activeIdx",
+  },
 ] as const;
 
 const CURRENT_CLASS = "search-hit-current";
@@ -94,7 +104,7 @@ describe("当前命中不许重画整篇文档（轮28 F-14）", () => {
   });
 
   it("先切类再定位，且收在同一个 useLayoutEffect 里", () => {
-    for (const { file } of VIEWS) {
+    for (const { file, deps: expectedDeps } of VIEWS) {
       const effects = layoutEffectsWithDeps(readScannedSource(file));
       expect(effects.length, `${file} 一条 useLayoutEffect 都没解析到（形状变了，守卫在空转）`).toBeGreaterThan(0);
       const found = effects.filter((effect) => effect.body.includes("revealMarkHorizontally"));
@@ -103,7 +113,7 @@ describe("当前命中不许重画整篇文档（轮28 F-14）", () => {
       expect(body, `${file} 没在同一个块里收回上一处的 current 类`).toContain(REMOVE_CLASS);
       expect(body, `${file} 没按命中编号取节点`).toContain("currentHitSelector(");
       expect(classIsAppliedBeforeReveal(body), `${file} 又先量矩形后切类：量到的是上一处的位置`).toBe(true);
-      expect(deps, `${file} 的定位效果依赖数组变了`).toBe("html, findOpen, hits, activeIdx");
+      expect(deps, `${file} 的定位效果依赖数组变了`).toBe(expectedDeps);
       // 轮27 钉过的口径：横向偏移被用户自己拖走之后，当前命中没变就不许再把他拽回来
       expect(deps, `${file} 把 metrics 圈进了定位依赖（每滚一格都把他拽回上一处）`).not.toMatch(/metrics/);
       // 旧的「按 activeOffset 定位」那条效果不许和这条并存：两条会各写一次 scrollLeft

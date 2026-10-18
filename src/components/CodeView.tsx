@@ -95,6 +95,17 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const [findBarHeight, setFindBarHeight] = useState(0);
   const [findTerm, setFindTerm] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  /**
+   * 跳转计数（轮29 F-18）。
+   *
+   * 这是把滚动挪出 setState updater（F-17）之后**立刻**暴露的下一条：全文只有 1 处命中时
+   * `(0 + 1 + 1) % 1 === 0`，activeIdx 值没变，React 连重渲染都省了，落地效果根本不跑——
+   * 用户连按 Enter / F3，计数一直是「第 1/1 处」，屏幕一动不动，看起来像快捷键失效。
+   * 旧实现在这里"能用"靠的正是 updater 里那句副作用，等于拿脏写法把这条盖住了。
+   * 修法是用一个纯计数器表达「我又跳了一次」，序号不变也照样把那一处再送进视口。
+   * 编辑态没这个毛病（它在 updater 之外自己调 revealHit，见 CodeEditor.navigate）。
+   */
+  const [navTick, setNavTick] = useState(0);
   // 查找栏的两个匹配开关：浏览态与编辑态共用同一对记忆键（切视图不丢口径）。
   // 走 viewState 唯一实现、不落 localStorage——用户要的是「这台机器这次会话里记住」，
   // 不是「重启后所有文件都按全词搜」。
@@ -265,13 +276,13 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
         return;
       }
       if (!hits.length) return;
-      setActiveIdx((prev) => {
-        const next = (prev + delta + hits.length) % hits.length;
-        scrollLineIntoView(hits[next].line);
-        return next;
-      });
+      // updater 只算序号，不滚动（轮29 F-17）：滚动是副作用，写在 updater 里等于把它交给
+      // React 决定跑几次——StrictMode 每次更新都把 updater 调两遍，一次 Enter 就给 scrollTop
+      // 赋值两次。真正的落地排在下面的 useLayoutEffect（提交后、绘制前）。
+      setActiveIdx((prev) => (prev + delta + hits.length) % hits.length);
+      setNavTick((tick) => tick + 1);
     },
-    [findTermPending, flushFindTerm, hits, scrollLineIntoView]
+    [findTermPending, flushFindTerm, hits]
   );
 
   const closeFind = useCallback(() => {
@@ -389,37 +400,36 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return () => window.removeEventListener("keydown", handler, true);
   }, [active, enableFind, findOpen, navigate, openFind]);
 
-  // 打开 / 改变查找词后，滚动到首个命中（导航本身在 navigate 内即时滚动）。
-  useEffect(() => {
-    if (!findOpen || !hits.length) return;
-    scrollLineIntoView(hits[clamp(activeIdx, 0, hits.length - 1)].line);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, effectiveTerm, matchOptions]);
-
   /**
-   * 当前命中的落地：先给这一处的 <mark> 换上 current 类，再做水平定位（轮28 F-14 + 轮27 F-7）。
+   * 当前命中的落地：垂直（把所在行送进视口中线）→ 给这一处的 <mark> 换 current 类 → 水平定位。
+   * 三步同一条 useLayoutEffect（轮28 F-14 + 轮27 F-7 + 轮29 F-17/F-18）。
    *
-   * 为什么这两步必须在同一个 useLayoutEffect 里、而且顺序不能反：
-   * html 不再随当前命中变化（那正是本轮要省下来的钱），DOM 里的 current 类因此不会自己挪位置；
-   * 先量矩形就量到上一处。而水平定位本身仍然必须等提交之后——navigate 在 setActiveIdx 的
-   * updater 内同步滚动，那一刻 DOM 还没换（轮27 的教训），useLayoutEffect 在绘制前跑完，
-   * 用户看不到中间那帧偏移。
+   * 为什么顺序不能反：html 不再随当前命中变化（那正是轮28 省下来的钱），DOM 里的 current 类
+   * 因此不会自己挪位置，先量矩形就量到上一处。垂直排最前还有一层原因：长行里 <mark> 的矩形
+   * 要等到它所在行进了视口才量得准。
+   *
+   * 垂直原先散在两条出口：navigate 的 setState updater（副作用，StrictMode 下被重复执行）和一条
+   * 只管「开栏 / 改词」的 useEffect（绘制后才跑，会闪一帧旧位置）。合并到这里之后，
+   * 开栏、改词、改口径、Enter / F3 导航共用同一次「提交后、绘制前」的落地。
    *
    * 依赖里**不许**出现 metrics：横向偏移被用户自己拖走之后，只要当前命中没变就不许再把他拽回来
    * （metrics 每滚一格都变，进依赖就成了「一改口径就抖动」的第二份实现）。
+   * navTick 是 F-18 的补丁：命中只有一处时 activeIdx 不变，靠它把「再跳一次」这件事传进来。
    */
   useLayoutEffect(() => {
     const root = areaRef.current;
     for (const mark of currentHitMarksRef.current) mark.classList.remove(CURRENT_HIT_CLASS);
     currentHitMarksRef.current = [];
     if (!root || !findOpen || !hits.length) return;
-    const marks = root.querySelectorAll<HTMLElement>(currentHitSelector(clamp(activeIdx, 0, hits.length - 1)));
+    const idx = clamp(activeIdx, 0, hits.length - 1);
+    scrollLineIntoView(hits[idx].line);
+    const marks = root.querySelectorAll<HTMLElement>(currentHitSelector(idx));
     if (marks.length) {
       for (const mark of marks) mark.classList.add(CURRENT_HIT_CLASS);
       currentHitMarksRef.current = Array.from(marks);
     }
     revealMarkHorizontally(root, root);
-  }, [html, findOpen, hits, activeIdx]);
+  }, [html, findOpen, hits, activeIdx, navTick, scrollLineIntoView]);
 
   /**
    * 开栏后实测查找条的高度（轮27 F-8）。
