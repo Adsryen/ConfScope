@@ -984,3 +984,155 @@ describe("CodeEditor 容器尺寸变化（轮30 F-21）", () => {
     expect(gutterNumbers(container).length).toBe(before);
   });
 });
+
+describe("CodeEditor 右侧缩略图（轮30 F-24，与浏览态同一份实现）", () => {
+  const VIEWPORT_H = 100;
+  const CONTENT_H = 400;
+  const MM_H = 200;
+  const MM_LINES = Array.from({ length: 40 }, (_, i) => `key${i} = value${i}`).join("\n");
+  const MM_DOC = `${MM_LINES}\n`;
+
+  /** jsdom 没布局：滚动容器的高度与 scrollTop 都得自己装（与浏览态同一手法）。 */
+  function stubSurface(el: HTMLElement) {
+    const offsets = { top: 0 };
+    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => offsets.top, set: (v: number) => (offsets.top = v) });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    return offsets;
+  }
+
+  function stubGeometry(el: HTMLElement, clientHeight: number, scrollHeight: number) {
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => clientHeight });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    fireEvent.scroll(el);
+  }
+
+  /** jsdom 的 getBoundingClientRect 恒给全 0，点击映射必须自己有高度。 */
+  function stubMinimapRect(mm: HTMLElement, top = 0, height = MM_H) {
+    mm.getBoundingClientRect = () =>
+      ({ top, height, bottom: top + height, left: 0, right: 66, width: 66, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  }
+
+  const padVars = (container: HTMLElement) => {
+    const root = container.querySelector(".code-editor") as HTMLElement;
+    return [root.style.getPropertyValue("--code-pad-right"), root.style.getPropertyValue("--code-find-right")];
+  };
+
+  it("编辑态出现缩略图与 canvas；showMinimap=false 时整条收起、留白退回窄值", async () => {
+    const { container } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+    stubGeometry(ta, VIEWPORT_H, CONTENT_H);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+    expect(container.querySelector(".code-minimap canvas")).not.toBeNull();
+
+    const { container: off } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" showMinimap={false} />);
+    const offTa = textarea(off);
+    stubGeometry(offTa, VIEWPORT_H, CONTENT_H);
+    await waitFor(() => expect(off.querySelector(".code-minimap")).toBeNull());
+    expect(padVars(off), "设置关了就不该再为缩略图让位").toEqual(["14px", "16px"]);
+  });
+
+  // 轮28 F-13 的同一条口径在编辑态同样成立：留白跟着显隐抖就是抖动本身。
+  it("不满一屏时缩略图收起，右侧留白却按设置继续预留（防自激振荡）", async () => {
+    const { container } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+
+    stubGeometry(ta, VIEWPORT_H, CONTENT_H);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+    const shown = padVars(container);
+
+    stubGeometry(ta, CONTENT_H, CONTENT_H);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).toBeNull());
+    expect(padVars(container), "留白跟着显隐变 ⇒ 正文宽变 ⇒ 高度又变 ⇒ 抖动").toEqual(shown);
+
+    stubGeometry(ta, VIEWPORT_H, CONTENT_H);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+  });
+
+  it("空正文不渲染缩略图", () => {
+    const { container } = renderEditor(<CodeEditor value="" onChange={() => {}} format="Properties" />);
+    expect(container.querySelector(".code-minimap")).toBeNull();
+  });
+
+  /**
+   * F-20 那条不变式在编辑态一样成立：行号层与命中行底色层是 textarea **之外**的独立层，
+   * 靠 transform 跟手，浏览器不会替我们滚它们，而 scroll 事件是异步派发的。
+   * jsdom 根本不派发 scroll ⇒ 少一次当帧同步必红。
+   */
+  it("点缩略图落地的那一帧，行号层与命中行层必须已经跟到新偏移", async () => {
+    const { container } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" searchTerm="key20" />);
+    const ta = textarea(container);
+    const offsets = stubSurface(ta);
+    fireEvent.scroll(ta);
+    await waitFor(() => expect(container.querySelector(".code-minimap-viewport")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    stubMinimapRect(mm);
+    fireEvent.pointerDown(mm, { clientY: 150, pointerId: 1 });
+
+    // 0.75 * 400 - 100/2 = 250
+    expect(offsets.top, "点缩略图没把正文滚过去").toBe(250);
+    const follow = "translateY(-250px)";
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "行号层没当帧跟上").toBe(follow);
+    expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层没当帧跟上").toBe(follow);
+    await waitFor(() => expect((container.querySelector(".code-minimap-viewport") as HTMLElement).style.top).toBe("62.5%"));
+  });
+
+  it("在缩略图上拖动：每一次 pointermove 都当帧同步，且上界夹在可滚最大值", async () => {
+    const { container } = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="Properties" />);
+    const ta = textarea(container);
+    const offsets = stubSurface(ta);
+    fireEvent.scroll(ta);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    stubMinimapRect(mm);
+    fireEvent.pointerDown(mm, { clientY: 20, pointerId: 1 });
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform).toBe(`translateY(${-offsets.top}px)`);
+
+    fireEvent.pointerMove(mm, { clientY: 120, pointerId: 1 });
+    expect(offsets.top, "拖动没跟着走").toBe(190); // 0.6 * 400 - 100/2
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "拖动时行号层慢一帧").toBe("translateY(-190px)");
+
+    fireEvent.pointerMove(mm, { clientY: 200, pointerId: 1 });
+    expect(offsets.top, "上界要夹在 scrollHeight - clientHeight，不是 scrollHeight").toBe(300);
+  });
+
+  /**
+   * AC6 最硬的一条判据：同一份点击映射与同一份视口公式。
+   * 两份实现会在这条上分叉——所以这里不读源码，直接拿两个视图的实测值对撞。
+   */
+  it("两侧同一份点击映射与视口框：同样的几何、同一个落点，编辑态与浏览态必须逐值相等", async () => {
+    const view = render(
+      <I18nProvider>
+        <CodeView code={MM_DOC} format="TEXT" />
+      </I18nProvider>
+    );
+    const editor = renderEditor(<CodeEditor value={MM_DOC} onChange={() => {}} format="TEXT" />);
+
+    const area = view.container.querySelector(".code-area") as HTMLElement;
+    const ta = editor.container.querySelector("textarea") as HTMLTextAreaElement;
+    const viewOffsets = stubSurface(area);
+    const editorOffsets = stubSurface(ta);
+    fireEvent.scroll(area);
+    fireEvent.scroll(ta);
+    await waitFor(() => expect(view.container.querySelector(".code-minimap-viewport")).not.toBeNull());
+    await waitFor(() => expect(editor.container.querySelector(".code-minimap-viewport")).not.toBeNull());
+
+    const vpOf = (c: HTMLElement) => {
+      const vp = c.querySelector(".code-minimap-viewport") as HTMLElement;
+      return `${vp.style.top}/${vp.style.height}`;
+    };
+    expect(vpOf(editor.container), "视口框公式与浏览态分叉").toBe(vpOf(view.container));
+
+    const viewMm = view.container.querySelector(".code-minimap") as HTMLElement;
+    const editorMm = editor.container.querySelector(".code-minimap") as HTMLElement;
+    stubMinimapRect(viewMm);
+    stubMinimapRect(editorMm);
+    for (const clientY of [0, 40, 100, 150, MM_H]) {
+      fireEvent.pointerDown(viewMm, { clientY, pointerId: 1 });
+      fireEvent.pointerDown(editorMm, { clientY, pointerId: 1 });
+      expect(editorOffsets.top, `clientY=${clientY} 时两侧点击映射分叉`).toBe(viewOffsets.top);
+    }
+  });
+});

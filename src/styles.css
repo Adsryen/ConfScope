@@ -4356,6 +4356,11 @@ button.diff-workflow-step-btn:hover {
   --code-gutter-w: 52px;
   --code-pad-top: 12px;
   --code-pad-left: calc(var(--code-gutter-w) + 14px);
+  /* 右侧两条留白：基础值给正文与查找条，编辑态开着缩略图时由组件按 76px 覆盖（轮30 F-24）。
+     --code-minimap-w 与 .code-view 同值，宽度只在 CodeMinimap 的 MINIMAP_W 有一份解释。 */
+  --code-pad-right: 14px;
+  --code-find-right: 16px;
+  --code-minimap-w: 66px;
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -4366,8 +4371,9 @@ button.diff-workflow-step-btn:hover {
   margin: 0;
   position: absolute;
   inset: 0;
-  /* 左侧让出行号槽：滚动时文本从槽下面穿过，不会压住行号 */
-  padding: var(--code-pad-top) 14px 12px var(--code-pad-left);
+  /* 左侧让出行号槽：滚动时文本从槽下面穿过，不会压住行号；
+     右侧让出缩略图（--code-pad-right），否则最后几列字被 66px 的图盖住 */
+  padding: var(--code-pad-top) var(--code-pad-right) 12px var(--code-pad-left);
   border: 0;
   font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 12.5px;
@@ -4399,6 +4405,11 @@ button.diff-workflow-step-btn:hover {
 }
 /* 编辑态的行号槽要压在横向滚动的文本之上（浏览态同款规则，这里只提层） */
 .code-editor .code-gutter {
+  z-index: 3;
+}
+/* 缩略图同理，而且它必须收得到指针事件：textarea 是 inset:0 铺满的，
+   层级不靠 DOM 顺序赌（R83），用复合选择器的特异度赢过 .code-editor-ta 的 z-index: 2 */
+.code-editor .code-minimap {
   z-index: 3;
 }
 .code-editor .code-find,

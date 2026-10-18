@@ -3,8 +3,6 @@ import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import {
   activeLineOf,
-  decorateMinimapRows,
-  prepareMinimapBuckets,
   CURRENT_HIT_CLASS,
   currentHitSelector,
   findCodeHits,
@@ -15,6 +13,7 @@ import {
   MAX_CODE_HITS,
   splitLines,
 } from "../lib/codeLines";
+import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
 import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
@@ -52,8 +51,6 @@ interface Props {
 const ROW_H = 20;
 const GUTTER_W = 52;
 const PAD_TOP = 6;
-const MM_ROW_H = 2.5;
-const MM_MIN_ROWS = 8;
 const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
 
 /**
@@ -81,10 +78,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const areaRef = useRef<HTMLPreElement>(null);
   const gutterInnerRef = useRef<HTMLDivElement>(null);
   const linesInnerRef = useRef<HTMLDivElement>(null);
-  const minimapRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
-  const draggingRef = useRef(false);
   const findBarRef = useRef<HTMLDivElement | null>(null);
   /** 带着「当前命中」类的那批 <mark>：html 不变时 React 不重建它们，类只能由这里显式收回。 */
   const currentHitMarksRef = useRef<HTMLElement[]>([]);
@@ -113,7 +107,6 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const [wholeWord, setWholeWord] = useRememberedState<boolean>("codeFind.wholeWord", false);
 
   const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
-  const [minimapSize, setMinimapSize] = useState({ width: 0, height: 0 });
 
   const lines = useMemo(() => splitLines(code), [code]);
   const totalLines = lines.length;
@@ -126,16 +119,9 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
    */
   const minimapReserved = showMinimap && totalLines > 0;
   /**
-   * 缩略图表面只在内容真能滚时出现（轮28 F-13）。
-   *
-   * 缺陷长什么样：不满一屏时 `jumpFromPointer` 算出的 scrollTop 恒被夹到 0——一个「看得见、
-   * 点不动、还占着右侧留白」的死控件，而且视口遮罩铺满整条，看着像能拖。
-   *
-   * 量不到（首帧 / jsdom：scrollHeight 与 clientHeight 都是 0）时**放行**：
-   * 「没测到」不等于「测到了且不需要滚」，放行让首帧不闪，组件测试也照常渲染。
+   * 缩略图表面本身交给共享组件 CodeMinimap（轮30 F-24），「内容到底能不能滚」由它自己判。
+   * 视图这里只留**留白**的依据：设置开着且有正文就留位，不跟着显隐抖（轮28 F-13 那条自激振荡）。
    */
-  const canScrollContent = metrics.scrollHeight <= 0 || metrics.scrollHeight > metrics.clientHeight + 1;
-  const hasMinimap = minimapReserved && canScrollContent;
 
   /**
    * 查找词输入的延迟（轮29 F-16）：正文够大时把「每敲一个字重标记整篇 + 重新解析」并成「停顿一次」。
@@ -350,18 +336,6 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return () => ro.disconnect();
   }, [syncScroll]);
 
-  useEffect(() => {
-    const mm = minimapRef.current;
-    if (!mm || typeof ResizeObserver === "undefined") return;
-    const measure = () => setMinimapSize({ width: mm.clientWidth, height: mm.clientHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(mm);
-    return () => ro.disconnect();
-    // 依赖写 hasMinimap 而不是 showMinimap：元素会因为「内容不满一屏」自己消失，
-    // 只盯设置位的话，重新挂载后没人再量它，rowLimit 永远停在兜底值。
-  }, [hasMinimap]);
-
   // Ctrl+F / Cmd+F / F3：仅在焦点落在本视图、或没有任何输入框持有焦点时接管，
   // 绝不从其他输入框（如配置列表搜索框）抢走原生查找。
   useEffect(() => {
@@ -500,84 +474,10 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
    */
   const hitRows = useMemo(() => hitLinesInRange(hitLineArray, visibleRange.start, visibleRange.end), [hitLineArray, visibleRange]);
 
-  const rowLimit = Math.max(MM_MIN_ROWS, Math.floor(minimapSize.height / MM_ROW_H));
-  /**
-   * 缩略图分两阶段算（轮28 F-12）。
-   *
-   * 原先 `minimapRows` 的依赖里圈着 currentLine，而桶内的行长 / 行类型 / 条宽只跟正文有关——
-   * 每按一次 Enter 就把 20 万行重新 `line.replace(/\t/g, "  ")` 一遍再求最长（实测单次 21-46ms）。
-   * 拆开之后：桶表只在「正文或桶数」变了才重算，命中与当前命中只是往桶上贴两个布尔。
-   */
-  const buckets = useMemo(() => prepareMinimapBuckets(lines, rowLimit), [lines, rowLimit]);
-  const minimapRows = useMemo(() => decorateMinimapRows(buckets, hitLineArray, currentLine), [buckets, hitLineArray, currentLine]);
-
-  // 画缩略图：命中行用红色覆盖，当前命中更亮。
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const { width, height } = minimapSize;
-    // 未测量出尺寸（首帧 / jsdom）时先跳过，顺带避免无谓地调用 getContext。
-    if (width <= 0 || height <= 0) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const dpr = (window as unknown as { devicePixelRatio?: number }).devicePixelRatio ?? 1;
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    const n = Math.max(1, lines.length);
-    for (const row of minimapRows) {
-      if (row.kind === "blank") continue;
-      const y = (row.startLine / n) * height;
-      const h = Math.max(1, ((row.endLine - row.startLine) / n) * height - 0.5);
-      const barWidth = Math.max(3, row.widthRatio * (width - 8));
-      ctx.fillStyle = row.kind === "comment" ? "rgba(180, 180, 180, 0.16)" : "rgba(220, 220, 220, 0.24)";
-      ctx.fillRect(4, y, barWidth, h);
-      if (row.hasHit) {
-        ctx.fillStyle = row.isCurrent ? "#ff6b6b" : "rgba(244, 71, 71, 0.9)";
-        ctx.fillRect(4, y, barWidth, h);
-      }
-    }
-  }, [minimapRows, minimapSize, lines.length]);
-
-  /**
-   * 点/拖缩略图落到某个偏移。
-   *
-   * 写完 scrollTop 必须**当帧**补一次 `syncScroll()`（轮30 F-20）：行号层与命中行底色层在滚动
-   * 容器**之外**，靠 `translateY(-scrollTop)` 跟手，浏览器不会替我们滚它们；而 scroll 事件是异步
-   * 派发的——连续拖动时每帧都在写偏移，事件永远排在后面，于是正文到位了、侧栏还停在上一帧。
-   * `scrollLineIntoView` 早就是「写完立刻同步」，这条出口以前漏了。
-   */
-  const jumpFromPointer = useCallback(
-    (clientY: number) => {
-      const mm = minimapRef.current;
-      const el = areaRef.current;
-      if (!mm || !el || el.scrollHeight <= 0) return;
-      const rect = mm.getBoundingClientRect();
-      const ratio = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
-      // 上界是「滚得动的最大偏移」= scrollHeight - clientHeight，不是 scrollHeight：写成后者等于没夹，
-      // 拖到底部时 metrics 会收到一个越界的 scrollTop（浏览器自己再夹一次，遮罩比例就偏了）。
-      el.scrollTop = clamp(ratio * el.scrollHeight - el.clientHeight / 2, 0, Math.max(0, el.scrollHeight - el.clientHeight));
-      syncScroll();
-    },
-    [syncScroll]
-  );
-
-  const viewport = useMemo(() => {
-    const { scrollTop, scrollHeight, clientHeight } = metrics;
-    if (scrollHeight <= 0 || clientHeight <= 0 || totalLines <= 0) return null;
-    const contentH = padTop * 2 + totalLines * ROW_H;
-    const topPct = clamp((scrollTop / scrollHeight) * 100, 0, 100);
-    const heightPct = clamp((clientHeight / scrollHeight) * 100, (ROW_H / contentH) * 100, 100 - topPct);
-    return { topPct, heightPct };
-  }, [metrics, totalLines, padTop]);
-
-  const padRight = minimapReserved ? GUTTER_W + 24 : GUTTER_W + 16;
+  const padRight = minimapReserved ? MINIMAP_RESERVED_RIGHT : GUTTER_W + 16;
   const padRightVar = {
     "--code-pad-right": `${padRight}px`,
-    "--code-find-right": `${minimapReserved ? GUTTER_W + 24 : 16}px`,
+    "--code-find-right": `${minimapReserved ? MINIMAP_RESERVED_RIGHT : 16}px`,
   } as CSSProperties;
 
   return (
@@ -621,30 +521,17 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
           </div>
         </div>
 
-        {hasMinimap && (
-          <div
-            className="code-minimap"
-            ref={minimapRef}
-            title={t("config.minimap")}
-            onPointerDown={(e) => {
-              draggingRef.current = true;
-              e.currentTarget.setPointerCapture?.(e.pointerId);
-              jumpFromPointer(e.clientY);
-            }}
-            onPointerMove={(e) => {
-              if (draggingRef.current) jumpFromPointer(e.clientY);
-            }}
-            onPointerUp={(e) => {
-              draggingRef.current = false;
-              e.currentTarget.releasePointerCapture?.(e.pointerId);
-            }}
-            onPointerCancel={() => {
-              draggingRef.current = false;
-            }}
-          >
-            <canvas className="code-minimap-canvas" ref={canvasRef} />
-            {viewport && <div className="code-minimap-viewport" style={{ top: `${viewport.topPct}%`, height: `${viewport.heightPct}%` }} />}
-          </div>
+        {minimapReserved && (
+          <CodeMinimap
+            containerRef={areaRef}
+            syncScroll={syncScroll}
+            lines={lines}
+            hitLineArray={hitLineArray}
+            currentLine={currentLine}
+            metrics={metrics}
+            rowHeight={ROW_H}
+            padTop={padTop}
+          />
         )}
 
         {enableFind && !findOpen && (

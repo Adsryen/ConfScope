@@ -28,6 +28,7 @@ import {
   splitLines,
   type CodeHit,
 } from "../lib/codeLines";
+import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
@@ -47,6 +48,8 @@ interface Props {
   searchTerm?: string;
   /** 是否启用编辑态视图内查找（Ctrl+F / F3）。 */
   enableFind?: boolean;
+  /** 是否显示右侧缩略图。与浏览态同一个默认值、同一份实现（CodeMinimap，轮30 F-24）。 */
+  showMinimap?: boolean;
   /**
    * 宿主页面是否在前台。被保活隐藏的页面里的编辑器不能再挂全局 Ctrl+F 监听，
    * 否则隐藏的查找栏会抢走前台页面的快捷键。
@@ -73,6 +76,8 @@ const ROW_H = 20;
 const GUTTER_W = 52;
 const PAD_TOP = 12;
 const PAD_LEFT_EXTRA = 14;
+/** 正文右侧的基础留白（px）：不缩进来给缩略图让位时就是它，与 CSS 的 --code-pad-right 同源。 */
+const PAD_RIGHT = 14;
 const MAX_FALLBACK_ROWS = 200; // clientHeight 未知（首帧 / jsdom）时兜底渲染的行数
 
 /**
@@ -91,10 +96,14 @@ function clamp(value: number, min: number, max: number): number {
  *
  *  与浏览态对齐的三件事（R22）：行号槽、搜索词标红与命中行高亮、视图内 Ctrl+F 查找。
  *  另有一条编辑态专属快捷键（R47）：Ctrl/Cmd+S 走宿主的 onSave，保存的是这份内容而不是整个网页。
- *  刻意不做缩略图：编辑态内容一直在变，重算成本换来的收益低于风险。
+ *  右侧缩略图与浏览态共用同一份实现（CodeMinimap，轮30 F-24）：这条控件原先只有浏览态有，
+ *  同一个详情面板切到「编辑」，红条、视口框、点击跳转整条消失，几万行只能拖滚动条。
+ *  「编辑态正文一直在变，重算不划算」是当初不做的理由，现在两阶段拆分（轮28 F-12）把账算清了：
+ *  贵的一趟线性扫正文（20 万行实测 21-46ms）只在正文变时跑，而编辑态每敲一个字本来就要重跑
+ *  highlightCode（同规模实测 300ms+）——桶表那一趟是它的零头，红条与视口框则完全不重算正文。
  *  不变式：查找定位只改 textarea 的选区与滚动，绝不改 value。 */
 const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
-  { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, active = true, onSave }: Props,
+  { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, showMinimap = true, active = true, onSave }: Props,
   ref
 ) {
   const { t } = useTranslation();
@@ -126,7 +135,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const [caseSensitive, setCaseSensitive] = useRememberedState<boolean>("codeFind.caseSensitive", false);
   const [wholeWord, setWholeWord] = useRememberedState<boolean>("codeFind.wholeWord", false);
 
-  const [metrics, setMetrics] = useState({ scrollTop: 0, clientHeight: 0 });
+  const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   /** 带着「当前命中」类的那批 <mark>：html 不变时 React 不重建它们，类只能由这里显式收回。 */
   const currentHitMarksRef = useRef<HTMLElement[]>([]);
   // 「跳到第 N 行」落点：不在查找态时也要能高亮那一行
@@ -176,6 +185,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   const currentLine = findOpen ? activeLineOf(hits, activeIdx) : pinnedLine;
 
+  /**
+   * 右侧留白的依据（与浏览态同一条口径，轮28 F-13）：设置开着且有正文就留位。
+   * **不许**跟着缩略图的实际显隐变——「收起缩略图 ⇒ 正文变宽 ⇒ 可能不再需要滚 ⇒ 又该收起」是自激振荡。
+   * 显隐本身（能不能滚）归 CodeMinimap 自己判。
+   */
+  const minimapReserved = showMinimap && totalLines > 0;
+
   // 末尾只在原文本身以换行结尾时才补一个换行,保证高亮层与 textarea 行数严格一致
   // (无条件补 "\n" 会让高亮层多出一行空行,拖拽选区/滚动同步在长文档上发生偏移)
   // 高亮层用 HTML 表示,而 HTML 解析会把“片段末尾的换行”再补一个换行
@@ -216,7 +232,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     const transform = `translateY(${-top}px)`;
     if (gutterInnerRef.current) gutterInnerRef.current.style.transform = transform;
     if (linesInnerRef.current) linesInnerRef.current.style.transform = transform;
-    setMetrics({ scrollTop: top, clientHeight: ta.clientHeight });
+    setMetrics({ scrollTop: top, scrollHeight: ta.scrollHeight, clientHeight: ta.clientHeight });
   }, []);
 
   const scrollLineIntoView = useCallback(
@@ -528,6 +544,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     "--code-gutter-w": `${GUTTER_W}px`,
     "--code-pad-top": `${padTop}px`,
     "--code-pad-left": `${GUTTER_W + PAD_LEFT_EXTRA}px`,
+    // 两条右向留白一起让位：正文不被 66px 的缩略图盖住，查找条也不压在它上面
+    "--code-pad-right": `${minimapReserved ? MINIMAP_RESERVED_RIGHT : PAD_RIGHT}px`,
+    "--code-find-right": `${minimapReserved ? MINIMAP_RESERVED_RIGHT : 16}px`,
   } as CSSProperties;
 
   return (
@@ -563,6 +582,20 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         onScroll={syncScroll}
         onKeyDown={onKeyDown}
       />
+
+      {/* 右侧缩略图：与浏览态同一份实现（轮30 F-24），递进去的只有数据与几何 */}
+      {minimapReserved && (
+        <CodeMinimap
+          containerRef={taRef}
+          syncScroll={syncScroll}
+          lines={lines}
+          hitLineArray={hitLineArray}
+          currentLine={currentLine}
+          metrics={metrics}
+          rowHeight={ROW_H}
+          padTop={padTop}
+        />
+      )}
 
       {/* 行号槽：与浏览态复用同一套 .code-gutter/.code-ln 与 CSS 变量 */}
       {totalLines > 0 && (
