@@ -1023,3 +1023,45 @@ describe("CodeView 拖缩略图的当帧同步（轮30 F-20）", () => {
     expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "拖动时行号层慢一帧").toBe("translateY(-310px)");
   });
 });
+
+describe("CodeView 查找栏按钮的焦点（轮32 F-29）", () => {
+  /**
+   * 证据边界（同轮31 F-26 的口径）：jsdom 不实现「点击改焦点」，焦点丢失这一步在单测里测不出来。
+   * 能测、也正好是修法本身的是**有没有取消引发它的那个默认动作**：改焦点的是 mousedown，
+   * fireEvent 返回的是 dispatchEvent 的结果——调过 preventDefault 就是 false。
+   * 真机的完整链条在 research/focus_probe.txt：点 next 后 activeElement 变成按钮，再敲「99」两个字符全丢。
+   */
+  function openFindWithTerm(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    expect(input, "Ctrl+F 没能打开查找栏").toBeTruthy();
+    fireEvent.change(input, { target: { value: term } });
+    return input;
+  }
+
+  function navButtons(container: HTMLElement): HTMLButtonElement[] {
+    return [...container.querySelectorAll<HTMLButtonElement>(".code-find-btn")];
+  }
+
+  it("点 ↑↓ 取消 mousedown，跳转仍生效；✕ 明确不取消（它自己负责归还焦点）", () => {
+    const { container } = renderView(MULTI, "TEXT");
+    openFindWithTerm(container, "port");
+    const [prev, next, close] = navButtons(container);
+    expect([prev, next, close], "查找栏的 ↑↓✕ 读不到三个按钮").toHaveLength(3);
+
+    // 对照组：轮22 起就带 preventDefault 的口径开关
+    const toggle = container.querySelector(".code-find-toggle") as HTMLButtonElement;
+    expect(fireEvent.mouseDown(toggle), "开关原本就承诺不抢焦点").toBe(false);
+
+    expect(fireEvent.mouseDown(next), "点 ↓ 不取消 mousedown：焦点跑到按钮上，接着敲的字符全丢").toBe(false);
+    expect(fireEvent.mouseDown(prev), "点 ↑ 同上").toBe(false);
+    expect(fireEvent.mouseDown(close), "✕ 的 mousedown 必须留着：closeFind 靠点击把焦点还给 .code-area").toBe(true);
+
+    // 挡住 mousedown 不能把跳转一起挡掉
+    const count = container.querySelector(".code-find-count") as HTMLElement;
+    fireEvent.click(next);
+    expect(count.textContent, "点 ↓ 没跳到第 2 处").toContain("2/2");
+    fireEvent.click(prev);
+    expect(count.textContent, "点 ↑ 没跳回第 1 处").toContain("1/2");
+  });
+});

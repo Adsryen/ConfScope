@@ -603,9 +603,13 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
                   ? t("config.findNone")
                   : t("config.findHint")}
             </span>
+            {/* ↑↓ 与上面两个开关同一口径（轮32 F-29）：点跳转不许把焦点从查找输入框 / textarea 上抢走——
+                抢走之后接着敲的字符哪儿都不去（真机取证见任务目录 research/focus_probe.txt）。
+                下面的 ✕ 反过来：它的语义是「结束查找，把焦点还给正文」，onClick 里那句 focus 依赖这次点击，别照抄。 */}
             <button
               type="button"
               className="code-find-btn"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => navigate(-1)}
               disabled={!hits.length}
               title={t("config.findPrevKey")}
@@ -617,6 +621,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
             <button
               type="button"
               className="code-find-btn"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => navigate(1)}
               disabled={!hits.length}
               title={t("config.findNextKey")}

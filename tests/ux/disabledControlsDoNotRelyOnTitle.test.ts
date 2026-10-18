@@ -36,12 +36,12 @@ const BASELINE: Record<string, string[]> = {
     '<button className="btn btn-ghost btn-sm backup-config-compare" onClick={() => jumpToDiff(selectedSnapshot, cfg)} disabled={!selectedSnapshot.path} tit',
   ],
   "src/components/CodeEditor.tsx": [
-    '<button type="button" className="code-find-btn" onClick={() => navigate(-1)} disabled={!hits.length} title={t("config.findPrevKey")} aria-label={t("co',
-    '<button type="button" className="code-find-btn" onClick={() => navigate(1)} disabled={!hits.length} title={t("config.findNextKey")} aria-label={t("con',
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(-1)} disabled={!hits.length} title={t(',
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(1)} disabled={!hits.length} title={t("',
   ],
   "src/components/CodeView.tsx": [
-    '<button type="button" className="code-find-btn" onClick={() => navigate(-1)} disabled={!hits.length} title={t("config.findPrevKey")} aria-label={t("co',
-    '<button type="button" className="code-find-btn" onClick={() => navigate(1)} disabled={!hits.length} title={t("config.findNextKey")} aria-label={t("con',
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(-1)} disabled={!hits.length} title={t(',
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(1)} disabled={!hits.length} title={t("',
   ],
   "src/components/ConfigBrowser.tsx": [
     '<button className="btn btn-ghost btn-sm browser-icon-btn" onClick={() => searchMode === "content" ? searchAllContent(search, selectedGroup) : fetchLis',

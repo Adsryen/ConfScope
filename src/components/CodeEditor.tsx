@@ -683,9 +683,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
                 ? t("config.findNone")
                 : t("config.findHint")}
           </span>
+          {/* ↑↓ 与上面两个开关同一口径（轮32 F-29）：编辑态里代价更高——焦点离开 textarea
+              连当前选区一起消失，接着打字全不见，Ctrl+S 也不再被编辑区接管。
+              下面的 ✕ 不挡：它 onClick 里就是 taRef.focus()，归还焦点靠这次点击。 */}
           <button
             type="button"
             className="code-find-btn"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => navigate(-1)}
             disabled={!hits.length}
             title={t("config.findPrevKey")}
@@ -697,6 +701,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
           <button
             type="button"
             className="code-find-btn"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => navigate(1)}
             disabled={!hits.length}
             title={t("config.findNextKey")}

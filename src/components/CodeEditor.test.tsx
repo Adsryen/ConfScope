@@ -1154,3 +1154,39 @@ describe("CodeEditor 右侧缩略图（轮30 F-24，与浏览态同一份实现�
     }
   });
 });
+
+describe("CodeEditor 查找栏按钮的焦点（轮32 F-29）", () => {
+  /**
+   * 编辑态比浏览态更贵：焦点一旦离开 textarea，当前选区跟着消失，接着打字全不见，
+   * Ctrl+S 也不再被编辑区接管（保存快捷键挂在 textarea 的按键路径上）。
+   * jsdom 测不出焦点丢失，钉的是「有没有取消 mousedown 那一步」（与 CodeView 同一口径）。
+   */
+  const EDITOR_FIND_DOC = "server.port=8080\nname = a\nport = 8081\n";
+
+  function openFind(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = container.querySelector(".code-find-input") as HTMLInputElement;
+    expect(input, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input, { target: { value: term } });
+    return input;
+  }
+
+  it("点 ↑↓ 取消 mousedown，跳转仍生效；✕ 明确不取消", () => {
+    const { container } = renderEditor(<CodeEditor value={EDITOR_FIND_DOC} onChange={() => {}} format="Properties" />);
+    openFind(container, "port");
+    const [prev, next, close] = [...container.querySelectorAll<HTMLButtonElement>(".code-editor .code-find-btn")];
+    expect([prev, next, close], "编辑态查找栏的 ↑↓✕ 读不到三个按钮").toHaveLength(3);
+
+    const toggle = container.querySelector(".code-editor .code-find-toggle") as HTMLButtonElement;
+    expect(fireEvent.mouseDown(toggle), "开关原本就承诺不抢焦点").toBe(false);
+    expect(fireEvent.mouseDown(next), "点 ↓ 不取消 mousedown：textarea 失焦 + 选区消失").toBe(false);
+    expect(fireEvent.mouseDown(prev), "点 ↑ 同上").toBe(false);
+    expect(fireEvent.mouseDown(close), "✕ 的 mousedown 必须留着：closeFind 靠它把焦点还给 textarea").toBe(true);
+
+    const count = container.querySelector(".code-find-count") as HTMLElement;
+    fireEvent.click(next);
+    expect(count.textContent, "点 ↓ 没跳到第 2 处").toContain("2/2");
+    fireEvent.click(prev);
+    expect(count.textContent, "点 ↑ 没跳回第 1 处").toContain("1/2");
+  });
+});
