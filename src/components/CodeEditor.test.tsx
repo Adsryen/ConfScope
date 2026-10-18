@@ -9,7 +9,7 @@ import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
 import CodeView from "./CodeView";
 import { normalizeLineEndings } from "../lib/codeLines";
 import { clearViewState, writeViewState } from "../lib/viewState";
-import { HIT_REVEAL_MARGIN } from "../lib/codeScroll";
+import { FIND_BAR_FALLBACK_HEIGHT, FIND_BAR_GAP, FIND_BAR_TOP, HIT_REVEAL_MARGIN } from "../lib/codeScroll";
 import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
 
 const INITIAL = "server.port=8080";
@@ -607,5 +607,69 @@ describe("CodeEditor 长行里的命中也横向送进视口（轮27 F-7）", ()
     fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Enter" });
 
     expect(scroll.get()).toBe(500);
+  });
+});
+
+describe("CodeEditor 查找栏打开时把第一行让到条子下面（轮27 F-8）", () => {
+  const OPEN_PAD = FIND_BAR_TOP + FIND_BAR_FALLBACK_HEIGHT + FIND_BAR_GAP;
+
+  function fakeBarHeight(height: number) {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => height });
+    return () => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "offsetHeight", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    };
+  }
+
+  function padTopOf(root: HTMLElement) {
+    return root.style.getPropertyValue("--code-pad-top");
+  }
+
+  function rowTop(container: HTMLElement, selector: string, text: string) {
+    const row = [...container.querySelectorAll<HTMLElement>(selector)].find((el) => el.textContent === text);
+    expect(row, `${selector} 里没有这一行`).toBeTruthy();
+    return parseFloat(row!.style.top);
+  }
+
+  it("开栏把净空从 12px 抬到条底之下，关栏原样退回", async () => {
+    const { container } = renderEditor(<CodeEditor value={INITIAL} onChange={() => {}} format="TEXT" />);
+    const root = container.querySelector(".code-editor") as HTMLElement;
+    expect(padTopOf(root)).toBe("12px");
+    expect(rowTop(container, ".code-ln", "1")).toBe(12);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+
+    // 命中行底色层要有东西可查：先输入一个真命中的词（.code-line 只在有命中时渲染）
+    fireEvent.change(container.querySelector(".code-find-input") as HTMLInputElement, { target: { value: "server" } });
+    await waitFor(() => expect(container.querySelector(".code-line")).not.toBeNull());
+
+    expect(padTopOf(root)).toBe(`${OPEN_PAD}px`);
+    // textarea / 高亮 pre / 行号槽 / 命中行底色层共用这一条 CSS 变量，改一处四层一起让位
+    expect(rowTop(container, ".code-ln", "1")).toBe(OPEN_PAD);
+    expect(rowTop(container, ".code-line", "")).toBeGreaterThanOrEqual(OPEN_PAD);
+    expect(rowTop(container, ".code-ln", "1") - (FIND_BAR_TOP + FIND_BAR_FALLBACK_HEIGHT)).toBeGreaterThanOrEqual(FIND_BAR_GAP);
+
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).toBeNull());
+    expect(padTopOf(root)).toBe("12px");
+    expect(rowTop(container, ".code-ln", "1")).toBe(12);
+  });
+
+  it("量到条子换成两行高 60px 时按实测算", async () => {
+    const restore = fakeBarHeight(60);
+    try {
+      const { container } = renderEditor(<CodeEditor value={INITIAL} onChange={() => {}} format="TEXT" />);
+      const root = container.querySelector(".code-editor") as HTMLElement;
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+      await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+
+      const measured = FIND_BAR_TOP + 60 + FIND_BAR_GAP;
+      expect(padTopOf(root)).toBe(`${measured}px`);
+      expect(rowTop(container, ".code-ln", "1")).toBe(measured);
+    } finally {
+      restore();
+    }
   });
 });

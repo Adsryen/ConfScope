@@ -2,7 +2,16 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HIT_REVEAL_MARGIN, neededScrollLeftForMark, revealMarkHorizontally } from "./codeScroll";
+import {
+  FIND_BAR_FALLBACK_HEIGHT,
+  FIND_BAR_GAP,
+  FIND_BAR_TOP,
+  HIT_REVEAL_MARGIN,
+  measureFindBarHeight,
+  neededScrollLeftForMark,
+  padTopForFindBar,
+  revealMarkHorizontally,
+} from "./codeScroll";
 
 function rect(left: number, width: number): DOMRect {
   return {
@@ -167,5 +176,52 @@ describe("revealMarkHorizontally：从 DOM 量矩形并写回偏移", () => {
     const doc = buildDoc([{ cls: "search-hit search-hit-current", left: 4000, width: 80 }]);
     doc.setLeft(4080 - 800 + HIT_REVEAL_MARGIN - 0.5);
     expect(revealMarkHorizontally(doc.scroller, doc.scroller)).toBe(false);
+  });
+});
+
+describe("padTopForFindBar：查找栏打开时正文顶部该留多少净空（轮27 F-8）", () => {
+  it("关栏原样返回基础值：浏览态 6 / 编辑态 12，不许把正文凭空顶下去", () => {
+    expect(padTopForFindBar(6, false, 34)).toBe(6);
+    expect(padTopForFindBar(12, false, 34)).toBe(12);
+    expect(padTopForFindBar(6, false, 0)).toBe(6);
+  });
+
+  it("开栏按「条顶偏移 + 实测条高 + 栏底间隙」给：窄容器 flex-wrap 成两行（60）也跟着长", () => {
+    expect(padTopForFindBar(6, true, 34)).toBe(FIND_BAR_TOP + 34 + FIND_BAR_GAP);
+    expect(padTopForFindBar(6, true, 60)).toBe(FIND_BAR_TOP + 60 + FIND_BAR_GAP);
+    expect(padTopForFindBar(6, true, 34)).toBe(50);
+    expect(padTopForFindBar(6, true, 60)).toBe(76);
+  });
+
+  it("量不到条高时退到兜底常量：开栏那一帧还没有布局，留少了就等于没修", () => {
+    expect(padTopForFindBar(6, true)).toBe(FIND_BAR_TOP + FIND_BAR_FALLBACK_HEIGHT + FIND_BAR_GAP);
+    expect(padTopForFindBar(6, true, 0)).toBe(50);
+    expect(padTopForFindBar(6, true, Number.NaN)).toBe(50);
+    expect(padTopForFindBar(6, true, -12)).toBe(50);
+  });
+
+  it("只增不减：基础净空本来就够时按基础值，不许倒过来把第一行抬进条子里", () => {
+    expect(padTopForFindBar(120, true, 10)).toBe(120);
+  });
+});
+
+describe("measureFindBarHeight：查找条高度量不到就交 0 给公式兜底", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function elWithHeight(height: number | null) {
+    return { offsetHeight: height } as unknown as HTMLElement;
+  }
+
+  it("null / 0 / 非有限数一律 0：调用方不必再判一次", () => {
+    expect(measureFindBarHeight(null)).toBe(0);
+    expect(measureFindBarHeight(elWithHeight(0))).toBe(0);
+    expect(measureFindBarHeight(elWithHeight(-4))).toBe(0);
+    expect(measureFindBarHeight(elWithHeight(Number.NaN))).toBe(0);
+    expect(measureFindBarHeight(elWithHeight(Number.POSITIVE_INFINITY))).toBe(0);
+  });
+
+  it("量得到就照实返回", () => {
+    expect(measureFindBarHeight(elWithHeight(34))).toBe(34);
+    expect(measureFindBarHeight(elWithHeight(60))).toBe(60);
   });
 });

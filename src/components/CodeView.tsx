@@ -7,7 +7,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, selectionTextWithin } from "../lib/findSelection";
-import { revealMarkHorizontally } from "../lib/codeScroll";
+import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -71,8 +71,12 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
+  const findBarRef = useRef<HTMLDivElement | null>(null);
 
   const [findOpen, setFindOpen] = useState(false);
+  // 查找栏打开期间实测的条高（px）。窄容器里条子会 flex-wrap 成两行（轮26 F-4 量到 60），
+  // 照常量留净空照样盖住正文，所以量得到就按量的算，量不到退到兜底常量。
+  const [findBarHeight, setFindBarHeight] = useState(0);
   const [findTerm, setFindTerm] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   // 查找栏的两个匹配开关：浏览态与编辑态共用同一对记忆键（切视图不丢口径）。
@@ -110,6 +114,12 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return markHighlightedHtml(withTail, hits, activeOffset);
   }, [code, format, hits, activeOffset]);
 
+  /**
+   * 滚动内容顶部的净空（轮27 F-8）：查找条浮在正文之上，开栏期间必须把第一行让到条子下面。
+   * 关栏回到 CSS 里的基础值，别把净空留在原地让正文凭空矮一截。
+   */
+  const padTop = padTopForFindBar(PAD_TOP, findOpen, findBarHeight);
+
   const syncScroll = useCallback(() => {
     const el = areaRef.current;
     if (!el) return;
@@ -121,12 +131,18 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     setMetrics({ scrollTop: top, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
   }, []);
 
-  const scrollLineIntoView = useCallback((line: number) => {
-    const el = areaRef.current;
-    if (!el) return;
-    const y = PAD_TOP + line * ROW_H;
-    el.scrollTop = clamp(y - el.clientHeight / 2, 0, Math.max(0, el.scrollHeight - el.clientHeight));
-  }, []);
+  const scrollLineIntoView = useCallback(
+    (line: number) => {
+      const el = areaRef.current;
+      if (!el) return;
+      const y = padTop + line * ROW_H;
+      el.scrollTop = clamp(y - el.clientHeight / 2, 0, Math.max(0, el.scrollHeight - el.clientHeight));
+      // 程序化滚动当帧补一次同步（与 CodeEditor 同一口径）：真机靠 scroll 事件回来自愈，
+      // 但净空随查找栏开合变化时根本没有滚动事件，行号层/命中行层会按旧 scrollTop 排。
+      syncScroll();
+    },
+    [padTop, syncScroll]
+  );
 
   /**
    * 外部内容搜索词（查找栏没开）时的定位：把首个命中拉进视口中间。
@@ -330,6 +346,32 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, activeOffset]);
 
+  /**
+   * 开栏后实测查找条的高度（轮27 F-8）。
+   *
+   * 绘制前量：净空公式在首次开栏那一帧用兜底常量（单行态实测就是 34），
+   * 真量出别的高度（换行 / 别的语言文案更高）再改，用户看不到中间那帧跳动。
+   */
+  useLayoutEffect(() => {
+    if (!findOpen) {
+      setFindBarHeight(0);
+      return;
+    }
+    const measure = () => setFindBarHeight(measureFindBarHeight(findBarRef.current));
+    measure();
+    const el = findBarRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [findOpen]);
+
+  // 净空变了但没有滚动事件（padding 变化不触发 scroll）：补一次同步，
+  // 否则缩略图的视口比例还按旧 scrollHeight 算，点缩略图会跳偏。
+  useLayoutEffect(() => {
+    syncScroll();
+  }, [padTop, syncScroll]);
+
   // 同一份正文里改外部搜索词（没开查找栏）：也跟着定位新词的首个命中。
   // 依赖数组**只许写 searchTerm**：closeFind 只动 findOpen / findTerm，用户主动关栏后
   // 刚看的那处命中该留在屏幕上，不许被这条拽回第一处（CodeView.test.tsx R74 钉住）。
@@ -353,10 +395,10 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const visibleRange = useMemo(() => {
     const { scrollTop, clientHeight } = metrics;
     if (clientHeight <= 0) return { start: 0, end: Math.min(totalLines, MAX_FALLBACK_ROWS) };
-    const start = clamp(Math.floor((scrollTop - PAD_TOP) / ROW_H) - 1, 0, totalLines);
-    const end = clamp(Math.ceil((scrollTop + clientHeight - PAD_TOP) / ROW_H) + 1, 0, totalLines);
+    const start = clamp(Math.floor((scrollTop - padTop) / ROW_H) - 1, 0, totalLines);
+    const end = clamp(Math.ceil((scrollTop + clientHeight - padTop) / ROW_H) + 1, 0, totalLines);
     return { start, end };
-  }, [metrics, totalLines]);
+  }, [metrics, totalLines, padTop]);
 
   const lineNumbers = useMemo(() => {
     const out: number[] = [];
@@ -426,17 +468,17 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;
     if (scrollHeight <= 0 || clientHeight <= 0 || totalLines <= 0) return null;
-    const contentH = PAD_TOP * 2 + totalLines * ROW_H;
+    const contentH = padTop * 2 + totalLines * ROW_H;
     const topPct = clamp((scrollTop / scrollHeight) * 100, 0, 100);
     const heightPct = clamp((clientHeight / scrollHeight) * 100, (ROW_H / contentH) * 100, 100 - topPct);
     return { topPct, heightPct };
-  }, [metrics, totalLines]);
+  }, [metrics, totalLines, padTop]);
 
   const padRight = hasMinimap ? GUTTER_W + 24 : GUTTER_W + 16;
   const padRightVar = { "--code-pad-right": `${padRight}px`, "--code-find-right": `${hasMinimap ? GUTTER_W + 24 : 16}px` } as CSSProperties;
 
   return (
-    <div className="code-view" ref={rootRef} tabIndex={-1}>
+    <div className="code-view" ref={rootRef} tabIndex={-1} style={{ "--code-pad-top": `${padTop}px` } as CSSProperties}>
       <div className="code-body">
         <div className="code-lines" aria-hidden="true">
           <div className="code-lines-layer" ref={linesInnerRef}>
@@ -444,7 +486,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               <div
                 key={`hit-${line}`}
                 className={`code-line${line === currentLine ? " is-current" : " is-hit"}`}
-                style={{ top: PAD_TOP + line * ROW_H }}
+                style={{ top: padTop + line * ROW_H }}
               />
             ))}
           </div>
@@ -468,7 +510,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
               <div
                 key={`ln-${i}`}
                 className={`code-ln${i === currentLine ? " is-current" : hitSet.has(i) ? " is-hit" : ""}`}
-                style={{ top: PAD_TOP + i * ROW_H }}
+                style={{ top: padTop + i * ROW_H }}
               >
                 {i + 1}
               </div>
@@ -517,7 +559,7 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
         )}
 
         {enableFind && findOpen && (
-          <div className="code-find" role="search" style={padRightVar}>
+          <div className="code-find" ref={findBarRef} role="search" style={padRightVar}>
             <input
               ref={findInputRef}
               className="code-find-input mono"

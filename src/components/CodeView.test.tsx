@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n";
 import CodeView from "./CodeView";
 import { clearViewState, writeViewState } from "../lib/viewState";
-import { HIT_REVEAL_MARGIN } from "../lib/codeScroll";
+import { FIND_BAR_FALLBACK_HEIGHT, FIND_BAR_GAP, FIND_BAR_TOP, HIT_REVEAL_MARGIN } from "../lib/codeScroll";
 import { isMarkVisible, stubCodeHorizontalLayout, stubScrollLeft } from "../test/codeLayout";
 import type { Format } from "../lib/format";
 
@@ -347,13 +347,25 @@ describe("CodeView 内容搜索定位（R74）", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
     expect(offsets.top).toBe(expectedTopFor(container, 12));
+    const firstHitTop = offsets.top;
 
     fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Enter" }); // 下一处
     expect(offsets.top).toBe(expectedTopFor(container, 21));
+    const lastHitTop = offsets.top;
 
     fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Escape" });
     await waitFor(() => expect(container.querySelector(".code-find-input")).toBeNull());
-    expect(offsets.top).toBe(expectedTopFor(container, 21));
+    // 关栏把净空退回 6px，行号层与命中行层的 top 一起上移，但**滚动位置该原样留着**：
+    // 不许把刚看的那一处拽回第一处（这条用例的原始靶子）。
+    // 这里不能再套 expectedTopFor()——它按当前净空算「该行居中」的目标值，而 jsdom 没有
+    // scroll anchoring，净空变化不会顺手补偿 scrollTop（真机会补偿，用户眼里的位置同样不动）。
+    expect(offsets.top, "关栏后滚动位置被改写了").toBe(lastHitTop);
+    expect(offsets.top).not.toBe(firstHitTop);
+    // 刚看的那一行还在渲染窗口内（净空变了也不能把窗口算漏），只是不再算当前命中
+    expect([...container.querySelectorAll<HTMLElement>(".code-ln")].some((el) => el.textContent === "21")).toBe(true);
+    expect([...container.querySelectorAll<HTMLElement>(".code-ln")].find((el) => el.textContent === "21")!.className).not.toContain(
+      "is-current"
+    );
   });
 
   it("视口量不到高度时不定位，退回纯归零（宿主被保活隐藏 / 首帧未布局）", () => {
@@ -630,5 +642,71 @@ describe("CodeView 查找匹配选项（R75）", () => {
     // 打开查找栏后，记住的口径才接管
     openFindWithTerm(container, "port");
     expect(hitLineNumbers(container)).toEqual([2, 3]);
+  });
+});
+
+describe("CodeView 查找栏打开时把第一行让到条子下面（轮27 F-8）", () => {
+  /**
+   * jsdom 没有布局，条高量到 0 ⇒ 净空走 lib 的兜底常量（真机由 ResizeObserver 按实测值替换）。
+   * 期望值一律从常量推，不在测试里抄第二份算式。
+   */
+  const OPEN_PAD = FIND_BAR_TOP + FIND_BAR_FALLBACK_HEIGHT + FIND_BAR_GAP;
+
+  /** 借 prototype 上的 offsetHeight 假造条高：窄容器里查找栏 flex-wrap 成两行是真会发生的事。 */
+  function fakeBarHeight(height: number) {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => height });
+    return () => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "offsetHeight", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    };
+  }
+
+  function padTopOf(root: HTMLElement) {
+    return root.style.getPropertyValue("--code-pad-top");
+  }
+
+  function rowTop(container: HTMLElement, selector: string, text: string) {
+    const row = [...container.querySelectorAll<HTMLElement>(selector)].find((el) => el.textContent === text);
+    expect(row, `${selector} 里没有这一行`).toBeTruthy();
+    return parseFloat(row!.style.top);
+  }
+
+  it("开栏把净空从 6px 抬到条底之下，关栏原样退回", async () => {
+    const { container } = renderView(MULTI, "Properties", { searchTerm: "8080" });
+    const root = container.querySelector(".code-view") as HTMLElement;
+    expect(padTopOf(root)).toBe("6px");
+    expect(rowTop(container, ".code-ln", "1")).toBe(6);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+
+    expect(padTopOf(root)).toBe(`${OPEN_PAD}px`);
+    // 第一行与命中行底色层都跟着净空走：条子占 8..42，两行都必须在 42 之下
+    expect(rowTop(container, ".code-ln", "1")).toBe(OPEN_PAD);
+    const barBottom = FIND_BAR_TOP + FIND_BAR_FALLBACK_HEIGHT;
+    expect(rowTop(container, ".code-ln", "1") - barBottom).toBeGreaterThanOrEqual(FIND_BAR_GAP);
+    expect(rowTop(container, ".code-line", "")).toBeGreaterThanOrEqual(OPEN_PAD);
+
+    fireEvent.keyDown(container.querySelector(".code-find-input") as HTMLElement, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).toBeNull());
+    expect(padTopOf(root)).toBe("6px");
+    expect(rowTop(container, ".code-ln", "1")).toBe(6);
+  });
+
+  it("量到条子换成两行高 60px 时按实测算：留少了第一行照样被盖住", async () => {
+    const restore = fakeBarHeight(60);
+    try {
+      const { container } = renderView(MULTI, "Properties");
+      const root = container.querySelector(".code-view") as HTMLElement;
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+      await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+
+      const measured = FIND_BAR_TOP + 60 + FIND_BAR_GAP;
+      expect(padTopOf(root)).toBe(`${measured}px`);
+      expect(rowTop(container, ".code-ln", "1")).toBe(measured);
+    } finally {
+      restore();
+    }
   });
 });

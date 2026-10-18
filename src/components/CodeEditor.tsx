@@ -27,7 +27,7 @@ import {
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
-import { revealMarkHorizontally } from "../lib/codeScroll";
+import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
 
 interface Props {
@@ -100,8 +100,11 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const gutterInnerRef = useRef<HTMLDivElement>(null);
   const linesInnerRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
+  const findBarRef = useRef<HTMLDivElement | null>(null);
 
   const [findOpen, setFindOpen] = useState(false);
+  // 查找栏打开期间实测的条高（px）：与浏览态同一口径，量不到退到兜底常量。
+  const [findBarHeight, setFindBarHeight] = useState(0);
   const [findTerm, setFindTerm] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   // 查找栏的两个匹配开关：与浏览态（CodeView）共用同一对记忆键，
@@ -147,6 +150,12 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return markHighlightedHtml(withTail, hits, activeOffset);
   }, [doc, format, hits, activeOffset]);
 
+  /**
+   * 滚动内容顶部的净空（轮27 F-8）：查找条浮在正文之上，开栏期间把第一行让到条子下面。
+   * 编辑态的 pre / textarea 共用同一条 CSS 变量，改这一处三层（文本 / 行号 / 命中底色）一起走。
+   */
+  const padTop = padTopForFindBar(PAD_TOP, findOpen, findBarHeight);
+
   const syncScroll = useCallback(() => {
     const ta = taRef.current;
     const pre = preRef.current;
@@ -167,12 +176,12 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     (line: number) => {
       const ta = taRef.current;
       if (!ta) return;
-      const y = PAD_TOP + line * ROW_H;
+      const y = padTop + line * ROW_H;
       ta.scrollTop = clamp(y - ta.clientHeight / 2, 0, Math.max(0, ta.scrollHeight - ta.clientHeight));
       // 直接调一次同步：程序化滚动在 jsdom 里不触发 scroll 事件，真机也要保证当帧对齐
       syncScroll();
     },
-    [syncScroll]
+    [padTop, syncScroll]
   );
 
   /** 把选区与滚动落到一次命中上。注意：只动选区，不动 value。 */
@@ -292,6 +301,26 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findOpen, activeOffset]);
 
+  /** 开栏后实测查找条高度（轮27 F-8，与浏览态同一份公式）。 */
+  useLayoutEffect(() => {
+    if (!findOpen) {
+      setFindBarHeight(0);
+      return;
+    }
+    const measure = () => setFindBarHeight(measureFindBarHeight(findBarRef.current));
+    measure();
+    const el = findBarRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [findOpen]);
+
+  // 净空变化不触发 scroll 事件，补一次同步让高亮层与行号网格跟上新 padding。
+  useLayoutEffect(() => {
+    syncScroll();
+  }, [padTop, syncScroll]);
+
   // 内容整体换掉（切文件/切草稿）时收起查找栏，防止旧关键词污染新内容。
   useEffect(() => {
     setFindOpen(false);
@@ -310,10 +339,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const visibleRange = useMemo(() => {
     const { scrollTop, clientHeight } = metrics;
     if (clientHeight <= 0) return { start: 0, end: Math.min(totalLines, MAX_FALLBACK_ROWS) };
-    const start = clamp(Math.floor((scrollTop - PAD_TOP) / ROW_H) - 1, 0, totalLines);
-    const end = clamp(Math.ceil((scrollTop + clientHeight - PAD_TOP) / ROW_H) + 1, 0, totalLines);
+    const start = clamp(Math.floor((scrollTop - padTop) / ROW_H) - 1, 0, totalLines);
+    const end = clamp(Math.ceil((scrollTop + clientHeight - padTop) / ROW_H) + 1, 0, totalLines);
     return { start, end };
-  }, [metrics, totalLines]);
+  }, [metrics, totalLines, padTop]);
 
   const lineNumbers = useMemo(() => {
     const out: number[] = [];
@@ -409,7 +438,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const vars = {
     "--code-row-h": `${ROW_H}px`,
     "--code-gutter-w": `${GUTTER_W}px`,
-    "--code-pad-top": `${PAD_TOP}px`,
+    "--code-pad-top": `${padTop}px`,
     "--code-pad-left": `${GUTTER_W + PAD_LEFT_EXTRA}px`,
   } as CSSProperties;
 
@@ -422,7 +451,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             <div
               key={`line-${line}`}
               className={`code-line${line === currentLine ? " is-current" : " is-hit"}`}
-              style={{ top: PAD_TOP + line * ROW_H }}
+              style={{ top: padTop + line * ROW_H }}
             />
           ))}
         </div>
@@ -455,7 +484,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
               <div
                 key={`ln-${i}`}
                 className={`code-ln${i === currentLine ? " is-current" : hitSet.has(i) ? " is-hit" : ""}`}
-                style={{ top: PAD_TOP + i * ROW_H }}
+                style={{ top: padTop + i * ROW_H }}
               >
                 {i + 1}
               </div>
@@ -478,7 +507,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       )}
 
       {enableFind && findOpen && (
-        <div className="code-find" role="search">
+        <div className="code-find" ref={findBarRef} role="search">
           <input
             ref={findInputRef}
             className="code-find-input mono"

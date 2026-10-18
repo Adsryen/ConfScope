@@ -14,6 +14,40 @@
 // 组件侧只许调用本模块，不许再各写一份水平定位（与 tests/ux/detailScrollResetSingleSource
 // 对滚动归零的口径同源：几何口径的第二份实现就是下一轮 bug 的出处）。
 
+/** 查找条自己的几何：`position:absolute; top:8`（styles.css 的 .code-find）。 */
+export const FIND_BAR_TOP = 8;
+/** 量不到栏高时的兜底：Playwright 实测单行态高 34（窄容器 flex-wrap 会到 60，轮26 F-4 记过）。 */
+export const FIND_BAR_FALLBACK_HEIGHT = 34;
+/** 栏底与正文第一行之间留的空隙：贴边看着像被裁，也给滚动条圆角留位。 */
+export const FIND_BAR_GAP = 8;
+
+/**
+ * 查找栏打开期间，滚动内容顶部该留多少净空。
+ *
+ * 缺陷长什么样（轮27 F-8）：查找条浮在正文之上，而 `scrollLineIntoView` 是
+ * `clamp(y - clientHeight / 2, 0, …)` —— 目标行在文件开头时算出负数被夹到 0，
+ * **已经没有任何滚动余量**把行让到条子下面。于是搜 `spring:` / `serverPort:` 这类
+ * 就在第 1 行的顶层键，开栏后红字与命中行底色整条被查找条盖住（实测盖住第 1-2 行）。
+ *
+ * 只能靠留白解决：行 i 的 top = padTop + i * ROW_H 是行号层 / 命中行层 / 缩略图 /
+ * 可见区间共用的同一条公式，所以净空必须由这**一个**数导出，三层跟着走。
+ * 取 max(基础值, …)：万一某个容器里条子比正文本来留的上边距还矮，退化成原样，不许把正文顶下去。
+ *
+ * @param basePadTop 组件自己关栏时的上边距（浏览态 6 / 编辑态 12，与 CSS 变量同源）
+ * @param measuredBarHeight 实测栏高；量不到（首帧 / 视图被保活隐藏 / jsdom）传 0，走兜底常量
+ */
+export function padTopForFindBar(basePadTop: number, findOpen: boolean, measuredBarHeight = 0): number {
+  if (!findOpen) return basePadTop;
+  const barHeight = measuredBarHeight > 0 ? measuredBarHeight : FIND_BAR_FALLBACK_HEIGHT;
+  return Math.max(basePadTop, FIND_BAR_TOP + barHeight + FIND_BAR_GAP);
+}
+
+/** 实测查找条高度。量不到返回 0，交给 padTopForFindBar 兜底，调用方不必再判一次有限性。 */
+export function measureFindBarHeight(el: HTMLElement | null): number {
+  const height = el?.offsetHeight ?? 0;
+  return Number.isFinite(height) && height > 0 ? height : 0;
+}
+
 /** 命中送进视口时左右各留的像素边距：贴着视口边缘会被滚动条与圆角吃掉半个字符。 */
 export const HIT_REVEAL_MARGIN = 24;
 
