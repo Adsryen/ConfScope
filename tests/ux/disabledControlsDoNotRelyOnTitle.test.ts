@@ -60,10 +60,6 @@ const BASELINE: Record<string, string[]> = {
   "src/components/DeleteConfirm.tsx": [
     '<button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>',
   ],
-  "src/components/DiffPanel.tsx": [
-    '<button type="button" className={mergeActionClass("right-to-left", mergeState)} onClick={() => onMergeAction(rowIndex, "right-to-left", mergeTargetRow',
-    '<button type="button" className={mergeActionClass("left-to-right", mergeState)} onClick={() => onMergeAction(rowIndex, "left-to-right", mergeTargetRow',
-  ],
   "src/components/DiffView.tsx": [
     '<button type="button" className="btn btn-ghost btn-sm" onClick={() => doMatch()} disabled={matchLoading} title={t("diff.refreshMatch")} >',
   ],

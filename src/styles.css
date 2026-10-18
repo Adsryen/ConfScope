@@ -3750,15 +3750,31 @@ button.diff-workflow-step-btn:hover {
   line-height: 1;
   cursor: pointer;
 }
-.diff-merge-btn:hover:not(:disabled),
-.diff-merge-btn:focus-visible:not(:disabled) {
+/* 点不动的箭头不许在 hover / 聚焦时亮起来：原生 disabled 换成了 aria-disabled
+   （disabled 按钮上 Blink 不弹 title，禁用理由就没处说了），所以 :not(:disabled) 这一道挡不住它。
+   提亮（文字/描边）两条规则各加一道 :not([aria-disabled="true"])，描边环单独留着——
+   键盘能走到这颗箭头，看不见焦点环更糟。 */
+.diff-merge-btn:hover:not(:disabled):not([aria-disabled="true"]),
+.diff-merge-btn:focus-visible:not(:disabled):not([aria-disabled="true"]) {
   color: var(--text-hi);
   border-color: var(--accent);
 }
+/* 描边单独一条：点不动的箭头照样能被键盘走到，看不见焦点环比看不见提亮更糟 */
 .diff-merge-btn:focus-visible:not(:disabled) {
   box-shadow: var(--focus-ring-shadow);
 }
-.diff-merge-btn:disabled {
+/* 提亮方是 .diff-row:hover .diff-merge-center .diff-merge-btn (0,4,0) 与
+   .diff-merge-center:focus-within .diff-merge-btn (0,3,0)，都高于裸 .diff-merge-btn:disabled
+   (0,2,0)：鼠标一进这一行，点不动的箭头就亮成和能点的一模一样（实测 opacity 0.28 → 1，
+   见本任务 research/arrow_aria_disabled_probe.cjs）。禁用态因此写成一条规则里的六个选择器，
+   逐个上下文都比提亮方高一级（静止态也要压过 .diff-merge-center .diff-merge-btn 的 0.46，
+   所以裸形式带上 .diff-merge-center 前缀凑到 (0,3,0)）——靠特异度赢，不靠文档顺序。 */
+.diff-merge-center .diff-merge-btn:disabled,
+.diff-merge-center .diff-merge-btn[aria-disabled="true"],
+.diff-merge-center:focus-within .diff-merge-btn:disabled,
+.diff-merge-center:focus-within .diff-merge-btn[aria-disabled="true"],
+.diff-row:hover .diff-merge-center .diff-merge-btn:disabled,
+.diff-row:hover .diff-merge-center .diff-merge-btn[aria-disabled="true"] {
   opacity: 0.28;
   cursor: not-allowed;
   color: var(--text-dim);

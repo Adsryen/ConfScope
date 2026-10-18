@@ -977,6 +977,7 @@
     "mergeScopeRow": "Row",
     "mergeScopeBlock": "Block",
     "mergeAddToRightPlan": "Take left to right preview",
+    "mergeUnavailableRightOnly": "The left side has no such line, so there is nothing to take",
     "mergeDraftSummary": "{right} files queued for the right target",
     "mergeDraftEmpty": "No merge preview changes yet",
     "mergeClearDraft": "Reset preview",

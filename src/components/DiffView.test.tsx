@@ -659,7 +659,15 @@ describe("DiffView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
 
     fireEvent.click(screen.getByRole("button", { name: /right-only\.yaml/ }));
-    expect(screen.getByRole("button", { name: "Take left to right preview" })).toBeDisabled();
+    // 加不进去的箭头（轮27 F-9）：不能用原生 disabled——Blink 在 disabled 控件上整段跳过 title，
+    // 而这颗箭头是 icon-only，「为什么点不动」没有第二个可见渠道。口径 = aria-disabled + 点击早退。
+    const blockedArrow = screen.getByRole("button", { name: "Take left to right preview" });
+    expect(blockedArrow).toHaveAttribute("aria-disabled", "true");
+    expect(blockedArrow).not.toHaveAttribute("disabled");
+    expect(blockedArrow).toHaveAttribute("title", "The left side has no such line, so there is nothing to take");
+    // 点它不许真的产生合并草稿：计划入口仍然只带着刚才 left-only 那 1 个文件
+    fireEvent.click(blockedArrow);
+    expect(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Take right to left preview" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));

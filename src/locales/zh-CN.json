@@ -977,6 +977,7 @@
     "mergeScopeRow": "按行",
     "mergeScopeBlock": "按差异块",
     "mergeAddToRightPlan": "拿左侧到右侧预览",
+    "mergeUnavailableRightOnly": "左侧没有这一项，箭头暂时加不进去",
     "mergeDraftSummary": "待带入右侧 {right} 个文件",
     "mergeDraftEmpty": "尚未产生合并预览",
     "mergeClearDraft": "重置预览",

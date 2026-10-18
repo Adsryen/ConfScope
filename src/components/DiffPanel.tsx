@@ -32,6 +32,14 @@ interface Props {
   getMergeActionState?: (rowIndex: number) => MergeActionState | undefined;
   mergeActionScope?: MergeActionScope;
   mergeActionAvailability?: MergeActionAvailability;
+  /**
+   * 箭头不可用时的理由（轮27 F-9）。
+   *
+   * 这颗箭头是 icon-only，禁用理由没有第二个可见渠道；而原生 `disabled` 按钮上 Blink 整段跳过
+   * title（轮26 F-1 实测）⇒ 不可用时改挂 `aria-disabled` + 点击早退，把理由放进 title。
+   * 不给理由时 title 退回动作名（行为同旧版，只是提示变得看得见）。
+   */
+  mergeActionUnavailableReason?: string;
   onMergeAction?: (rowIndex: number, direction: MergeActionDirection, rowIndexes?: number[]) => void;
   /** 展示在 diff 区顶部的警告条（如 duplicate key 提示）。 */
   warnings?: string[];
@@ -101,6 +109,7 @@ export default function DiffPanel({
   getMergeActionState,
   mergeActionScope = "block",
   mergeActionAvailability,
+  mergeActionUnavailableReason,
   onMergeAction,
   warnings,
 }: Props) {
@@ -173,6 +182,9 @@ export default function DiffPanel({
             const blockPosition = canMerge && blockMode ? changeBlockPosition(mergeTargetRows, rowIndex) : null;
             const showMergeActions = canMerge && (!blockMode || mergeTargetRows[0] === rowIndex);
             const showBlockBrace = canMerge && blockMode && blockPosition !== null && blockPosition !== "single";
+            // 点不动时 title 换成理由：这颗箭头是 icon-only，理由看不见就等于没修（轮27 F-9）。
+            // 宿主没给理由则退回动作名，不留空提示。
+            const leftToRightTitle = (!canMergeLeftToRight && mergeActionUnavailableReason) || mergeActionLabels?.leftToRight || "";
             return (
               <div
                 className={`diff-row ${r.type}${onMergeAction ? " with-merge" : ""}${mergeState ? ` merge-${mergeState.direction}` : ""}`}
@@ -190,7 +202,8 @@ export default function DiffPanel({
                         onClick={() => onMergeAction(rowIndex, "right-to-left", mergeTargetRows)}
                         aria-label={mergeActionLabels.rightToLeft}
                         title={mergeActionLabels.rightToLeft}
-                        disabled={!canMergeRightToLeft}
+                        // 旧版这里写着 disabled={!canMergeRightToLeft}，但本行的渲染条件已经要求
+                        // canMergeRightToLeft 为真才画这颗箭头 ⇒ 那个表达式永远取 false，是死代码。
                       >
                         {"\u2190"}
                       </button>
@@ -199,10 +212,16 @@ export default function DiffPanel({
                       <button
                         type="button"
                         className={mergeActionClass("left-to-right", mergeState)}
-                        onClick={() => onMergeAction(rowIndex, "left-to-right", mergeTargetRows)}
+                        onClick={() => {
+                          // 不可用时照样响应点击（原生 disabled 会把事件整颗吞掉，提示也就没处显示），
+                          // 所以这道早退闸就是「点不动」的实现本身。
+                          if (!canMergeLeftToRight) return;
+                          onMergeAction(rowIndex, "left-to-right", mergeTargetRows);
+                        }}
                         aria-label={mergeActionLabels.leftToRight}
-                        title={mergeActionLabels.leftToRight}
-                        disabled={!canMergeLeftToRight}
+                        // 键盘 Enter / Space 在原生 button 上会合成一次 click ⇒ 这道闸同时护住键盘路径。
+                        aria-disabled={!canMergeLeftToRight || undefined}
+                        title={leftToRightTitle}
                       >
                         {"\u2192"}
                       </button>

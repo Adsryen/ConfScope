@@ -2058,6 +2058,10 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
                           }}
                           mergeActionScope={mergeSelectionScope}
                           mergeActionAvailability={mergeAvailabilityForPresence(selectedBatchItem.presence)}
+                          // 右侧独有项的箭头点不动，理由只能挂在提示上（这颗箭头是 icon-only）
+                          mergeActionUnavailableReason={
+                            selectedBatchItem.presence === "right-only" ? t("diff.mergeUnavailableRightOnly") : undefined
+                          }
                           getMergeActionState={(rowIndex) => {
                             const direction = mergeSelections[mergeSelectionKey(selectedBatchItem.dataId, rowIndex)];
                             return direction ? { direction } : undefined;
