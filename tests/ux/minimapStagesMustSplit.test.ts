@@ -288,6 +288,118 @@ describe("缩略图让开原生滚动条（轮31 F-28）", () => {
   });
 });
 
+describe("缩略图的鼠标出口必须自己收尾（轮31 F-25 / F-26 / F-27）", () => {
+  /**
+   * 写完 scrollTop 的出口必须当帧补一次同步（轮30 F-20 那条不变式）。
+   *
+   * 判据按「写入点 → 所属函数收尾」取窗口：行号层与命中行底色层在滚动容器之外，靠
+   * `translateY(-scrollTop)` 跟手，浏览器不替我们滚它们，而 scroll 事件是异步派发的——
+   * 新出口（点击、拖动、滚轮）只要少一次当帧同步，侧栏就永远慢一帧。
+   */
+  function unsyncedScrollWrites(source: string): number[] {
+    const lines = source.split("\n");
+    const offenders: number[] = [];
+    lines.forEach((line, i) => {
+      if (!/\.scrollTop\s*=[^=]/.test(line)) return;
+      let window = "";
+      for (let j = i + 1; j < lines.length; j += 1) {
+        window += `${lines[j]}\n`;
+        if (/^ {2,4}\}/.test(lines[j])) break;
+      }
+      if (!/syncScroll\(\)/.test(window)) offenders.push(i + 1);
+    });
+    return offenders;
+  }
+
+  it("每一处写 scrollTop 都在同一个函数里补了同步", () => {
+    const mm = readScannedSource(MM);
+    const writes = mm.split("\n").filter((line) => /\.scrollTop\s*=[^=]/.test(line));
+    expect(writes.length, "缩略图连一处写偏移都没有？那这条守卫是空转").toBeGreaterThan(0);
+    expect(unsyncedScrollWrites(mm), "这些行写了正文偏移却没当帧同步行号层与命中行层").toEqual([]);
+  });
+
+  it("wheel 必须是元素上的原生 non-passive 监听，JSX 里不许出现 onWheel", () => {
+    const mm = readScannedSource(MM);
+    expect(mm, "React 18 的 onWheel 挂在根容器且是 passive，preventDefault 实测无效（双滚拦不住）").not.toMatch(/onWheel=\{/);
+    const listener = /addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(mm);
+    expect(listener, "wheel 没走原生监听，或第三个参数没显式写选项").not.toBeNull();
+    expect(listener![1].replace(/\s+/g, " "), "passive 必须是 false，否则浏览器直接忽略 preventDefault").toMatch(/passive: false/);
+    expect(mm, "卸载时不摘监听：换文件重挂会攒出一串 handler，同一格滚轮滚好几遍").toMatch(/removeEventListener\("wheel"/);
+  });
+
+  it("pointerdown 必须取消默认动作（mousedown 才是抢焦点那一步）", () => {
+    const mm = readScannedSource(MM);
+    const handler = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(mm);
+    expect(handler, "读不到 onPointerDown 的函数体").not.toBeNull();
+    expect(handler![1], "不取消 pointerdown：编辑态 textarea 失焦，浏览态方向键当场失效").toMatch(/e\.preventDefault\(\);/);
+    expect(handler![1], "取消默认动作不能把跳转一起取消掉").toMatch(/jumpFromPointer\(e\.clientY\);/);
+  });
+
+  it("画条只用正文像素尺，估算分母只许有一个出处", () => {
+    const mm = readScannedSource(MM);
+    expect(mm.match(/padTop \* 2/g) || [], "又出现第二处「padTop*2 + 行数*行高」估算：那就是第三把尺").toHaveLength(1);
+    expect(mm, "视口框自己估分母（把 padBottom 当 padTop）").not.toMatch(/padTop \* 2 \+ totalLines \* rowHeight/);
+    expect(mm, "画条又退回行序号比例尺：画的和跳的会差一个 padTop").not.toMatch(/row\.startLine \/ n\) \* height/);
+    expect(mm, "画条必须按正文像素：(padTop + startLine*rowHeight) / contentHeight * height").toMatch(
+      /y = \(\(padTop \+ row\.startLine \* rowHeight\) \/ contentHeight\) \* height;/
+    );
+    expect(mm, "分母要收在一条 memo 里，两个出口各取一次").toMatch(/const contentHeight = useMemo\(/);
+    // 这条 memo 的依赖数组被 Prettier 排在下一行，通用 memoDeps（要求 ] 紧跟 )）会一路扫到别人的依赖表，这里单独宽松提取。
+    const denomDeps = /const contentHeight = useMemo\([\s\S]*?,\s*\[([^\]]*)\]\s*\n\s*\);/.exec(mm);
+    expect(denomDeps, "分母的依赖数组读不到").not.toBeNull();
+    expect(denomDeps![1].replace(/\s+/g, " ").trim(), "分母的依赖少一项，查找栏开合或正文变长时画条就不跟着动").toBe(
+      "metrics.scrollHeight, padTop, lines.length, rowHeight"
+    );
+  });
+
+  it("自检八：新出口只写偏移不补同步必须判红", () => {
+    const mm = readScannedSource(MM);
+    const regressed = mm.replace(
+      "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));\n      syncScroll();",
+      "      el.scrollTop = clamp(el.scrollTop + delta, 0, Math.max(0, el.scrollHeight - el.clientHeight));"
+    );
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    expect(unsyncedScrollWrites(regressed), "漏掉当帧同步的那一行必须被抓出来").toEqual([
+      regressed.slice(0, regressed.indexOf("el.scrollTop = clamp(el.scrollTop + delta")).split("\n").length,
+    ]);
+  });
+
+  it("自检九：wheel 退回 React 的 onWheel 必须判红", () => {
+    const mm = readScannedSource(MM);
+    const regressed = mm
+      .replace('mm.addEventListener("wheel", onWheel, { passive: false });', "const onWheelJsx = onWheel;")
+      .replace('className="code-minimap"', 'className="code-minimap" onWheel={(e) => onWheel(e.nativeEvent)}');
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    expect(regressed, "出现 onWheel= 就必须判红（passive 监听里 preventDefault 无效）").toMatch(/onWheel=\{/);
+    expect(/addEventListener\("wheel",\s*[^,]+,\s*\{([^}]*)\}\)/.exec(regressed), "原生监听没了也必须判红").toBeNull();
+  });
+
+  it("自检十：pointerdown 不再 preventDefault 必须判红", () => {
+    const mm = readScannedSource(MM);
+    const handler = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(mm);
+    expect(handler, "读不到 onPointerDown，这条自检是空转").not.toBeNull();
+    const regressed = mm.replace(handler![1], handler![1].replace("e.preventDefault();", ""));
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    const regressedHandler = /onPointerDown=\{\s*\(e\)\s*=>\s*\{([\s\S]*?)\n {6}\}\}/.exec(regressed);
+    expect(regressedHandler![1], "去掉 preventDefault 之后判据必须看不见它").not.toMatch(/e\.preventDefault\(\);/);
+  });
+
+  it("自检十一：画条退回 (startLine / n) * height 必须判红", () => {
+    const mm = readScannedSource(MM);
+    const regressed = mm
+      .replace("const y = ((padTop + row.startLine * rowHeight) / contentHeight) * height;", "const y = (row.startLine / n) * height;")
+      .replace(
+        "const h = Math.max(1, (((row.endLine - row.startLine) * rowHeight) / contentHeight) * height - MM_BAR_ROW_GAP);",
+        "const h = Math.max(1, ((row.endLine - row.startLine) / n) * height - MM_BAR_ROW_GAP);"
+      );
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(mm);
+    expect(regressed, "退回行序号尺就必须判红").toMatch(/row\.startLine \/ n\) \* height/);
+    expect(regressed, "像素尺那条判据对变异样本必须失配").not.toMatch(
+      /y = \(\(padTop \+ row\.startLine \* rowHeight\) \/ contentHeight\) \* height;/
+    );
+  });
+});
+
 describe("自检：几种退回都必须判红", () => {
   it("自检一：把 currentLine 圈回 buckets 依赖必须判红", () => {
     const mm = readScannedSource(MM);
