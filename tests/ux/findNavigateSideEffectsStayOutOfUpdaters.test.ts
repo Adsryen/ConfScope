@@ -45,9 +45,12 @@ function effectBlocks(src: string, kind: "useEffect" | "useLayoutEffect"): strin
  * 守卫就空转了。括号配对从调用起点走到配平的那个右括号，表达式体与块体都能完整取到。
  */
 function setActiveIdxArgs(nav: string): string | null {
-  const call = "setActiveIdx(";
-  const at = nav.indexOf(call);
-  if (at < 0) return null;
+  // 两个视图的提交口不同名：浏览态直接 setActiveIdx，编辑态连着口径一起存，叫 commitActiveIdx
+  // （轮30 F-22）。判据盯的是「这个调用」，不是这个字。
+  const m = nav.match(/(setActiveIdx|commitActiveIdx)\(/);
+  if (!m || m.index === undefined) return null;
+  const call = m[0];
+  const at = m.index;
   let depth = 0;
   for (let i = at + call.length - 1; i < nav.length; i += 1) {
     const ch = nav[i];
@@ -64,19 +67,74 @@ function setActiveIdxArgs(nav: string): string | null {
 function updaterSideEffectViolation(src: string): string | null {
   const nav = navigateBlock(src);
   const args = setActiveIdxArgs(nav);
-  if (!args) return "navigate 里没有 setActiveIdx(...) 调用";
+  if (!args) return "navigate 里没有跳转序号的提交调用";
   if (SIDE_EFFECT.test(args)) return `setState updater 里写了副作用：setActiveIdx(${args})`;
   if (/=>\s*\{/.test(args)) return `updater 是块体写法，副作用查无可查：setActiveIdx(${args})`;
   return null;
 }
 
-/** 垂直落地口径：绘制后滚的出口必须为 0，绘制前的落地出口必须恰好一条且带上水平定位。违规返回说明。 */
+/**
+ * 垂直落地的两种写法：浏览态直接 `scrollLineIntoView`，编辑态经 `revealHit`（里面滚行 + 落选区）。
+ * 判据要认两种，否则编辑态把滚动包进 revealHit 就扫不到了——那正是轮30 F-22 的那条出口。
+ */
+const VERTICAL_LANDING = /(scrollLineIntoView|revealHit)\(/;
+
+/** 绘制后滚的出口必须为 0，绘制前的落地出口必须恰好一条。违规返回说明。 */
 function paintOrderViolation(src: string): string | null {
-  const late = effectBlocks(src, "useEffect").filter((block) => block.includes("scrollLineIntoView("));
+  const late = effectBlocks(src, "useEffect").filter((block) => VERTICAL_LANDING.test(block));
   if (late.length) return `又出现 ${late.length} 条绘制后才滚的 useEffect：会先闪一帧旧位置，还与定位效果各写一次`;
-  const landing = effectBlocks(src, "useLayoutEffect").filter((block) => block.includes("scrollLineIntoView("));
+  const landing = effectBlocks(src, "useLayoutEffect").filter((block) => VERTICAL_LANDING.test(block));
   if (landing.length !== 1) return `垂直落地不在唯一那条绘制前的 useLayoutEffect 里（找到 ${landing.length} 条）`;
-  if (!landing[0].includes("revealMarkHorizontally")) return "垂直落地与水平定位分家了：两条出口会互相覆盖";
+  // 浏览态把三步写在同一条里：切类与水平必须都在这条里，且排在垂直之后
+  if (landing[0].includes("classList.add(CURRENT_HIT_CLASS)")) {
+    if (!landing[0].includes("revealMarkHorizontally")) return "垂直落地与水平定位分家了：两条出口会互相覆盖";
+    const vertical = landing[0].search(VERTICAL_LANDING);
+    const addClass = landing[0].indexOf("classList.add(CURRENT_HIT_CLASS)");
+    const reveal = landing[0].indexOf("revealMarkHorizontally");
+    if (!(addClass > vertical && reveal > addClass)) return "落地顺序不是「垂直 → 换类 → 水平」：先量就量到上一处";
+  }
+  return null;
+}
+
+/** 唯一那条绘制前的落地效果（顺带钉住「恰好一条」，取到多条就是守卫在空转）。 */
+function landingBlock(src: string): string {
+  const landing = effectBlocks(src, "useLayoutEffect").filter((block) => VERTICAL_LANDING.test(block));
+  expect(landing.length, `绘制前的落地效果应有且只有一条，找到 ${landing.length} 条`).toBe(1);
+  return landing[0];
+}
+
+/** 一条效果的依赖数组文本（形如 `  }, [a, b]);` 的那三行）。 */
+function effectDeps(block: string): string {
+  const m = block.match(/\}, \[([^\]]*)\]\);\s*$/);
+  expect(m, "取不到依赖数组，这条守卫在空转").toBeTruthy();
+  return m?.[1] ?? "";
+}
+
+/**
+ * 编辑态专属的口径（轮30 F-22）：正文不许进落地的依赖。
+ *
+ * 为什么浏览态能带 html 而编辑态不能：浏览态的正文只读，`html` 变了就是「换了内容 / 改了词」，
+ * 落回当前那处正是用户要的；编辑态的字是用户自己敲的，正文一变就落回第一处命中，
+ * 光标会在下一个字被从正在编辑的行拽走——配置直接改到别的行上去。
+ */
+function landingFollowsBodyViolation(src: string): string | null {
+  const deps = effectDeps(landingBlock(src));
+  if (/\b(doc|lines|hits|html|totalLines)\b/.test(deps)) {
+    return `正文进了落地依赖：打字会把光标与视口从正在编辑的那行拽到第一处命中（[${deps.trim()}]）`;
+  }
+  return null;
+}
+
+/** 编辑态专属的口径（轮30 F-22）：垂直落地必须排在「换类 + 水平定位」那条之前。 */
+function landingBeforeDecorateViolation(src: string): string | null {
+  const landing = landingBlock(src);
+  const decorate = effectBlocks(src, "useLayoutEffect").find((b) => b.includes("revealMarkHorizontally"));
+  expect(decorate, "没找到换类 + 水平定位那条效果，这条守卫在空转").toBeTruthy();
+  const at = src.indexOf(landing);
+  const decorateAt = src.indexOf(decorate as string);
+  expect(at, "落地效果不在源文件里（切片口径失效）").toBeGreaterThanOrEqual(0);
+  // 同一批 useLayoutEffect 按声明顺序执行：排在后面就会先按旧位置量一次矩形
+  if (at > decorateAt) return "垂直落地声明在「换类 + 水平」之后：同一次提交里量到的是没滚过的旧位置";
   return null;
 }
 
@@ -104,6 +162,13 @@ describe("跳下一处的副作用留在更新之外（轮29 F-17 / F-18）", ()
   it("浏览态的垂直落地只有一个出口：绘制前的 useLayoutEffect，不许有第二条 useEffect 在滚", () => {
     const violation = paintOrderViolation(readScannedSource(CODE_VIEW));
     expect(violation, violation ?? "").toBeNull();
+  });
+
+  it("编辑态的垂直落地也只有一个出口，且不跟正文变化跑（轮30 F-22）", () => {
+    const src = readScannedSource(CODE_EDITOR);
+    expect(paintOrderViolation(src), "编辑态的落地出口形状不对").toBeNull();
+    expect(landingFollowsBodyViolation(src), "编辑态的落地不许把正文也算作触发条件").toBeNull();
+    expect(landingBeforeDecorateViolation(src), "编辑态的垂直落地要排在换类 + 水平之前").toBeNull();
   });
 
   it("落地顺序：垂直 → 换当前命中的类 → 水平（先切类才量得准）", () => {
@@ -138,8 +203,8 @@ describe("守卫自身不空转：五种退回必须判红", () => {
     const honest = readScannedSource(CODE_EDITOR);
     expect(updaterSideEffectViolation(honest)).toBeNull();
     const regressed = honest.replace("revealHit(hits[next]);", "").replace(
-      "setActiveIdx(next);",
-      `setActiveIdx(() => {
+      "commitActiveIdx(next);",
+      `commitActiveIdx(() => {
         revealHit(hits[next]);
         return next;
       });`
@@ -181,5 +246,31 @@ ${ANCHOR}`
     const regressed = block.replace("    scrollLineIntoView(hits[idx].line);\n", "");
     expect(regressed, "变异没撤掉垂直落地，这条自检是空转").not.toContain("scrollLineIntoView(hits[idx].line)");
     expect(regressed.indexOf("scrollLineIntoView("), "撤掉垂直落地后这条判据不再成立（vertical 取到 -1）").toBe(-1);
+  });
+
+  it("退回「编辑态的落地写在绘制后的 useEffect 里」判红", () => {
+    const honest = readScannedSource(CODE_EDITOR);
+    const landing = landingBlock(honest);
+    const regressed = honest.replace(landing, landing.replace("useLayoutEffect", "useEffect"));
+    expect(regressed, "变异没落到编辑态的落地效果上，这条自检是空转").not.toBe(honest);
+    expect(paintOrderViolation(regressed), "编辑态的落地退回绘制后的 useEffect 却没判红").not.toBeNull();
+  });
+
+  it("退回「正文进了编辑态落地的依赖」判红", () => {
+    const honest = readScannedSource(CODE_EDITOR);
+    const landing = landingBlock(honest);
+    const regressed = honest.replace(landing, landing.replace("[findOpen,", "[html, findOpen,"));
+    expect(regressed, "变异没改到依赖数组，这条自检是空转").not.toBe(honest);
+    expect(landingFollowsBodyViolation(regressed), "正文进了落地依赖却没判红（打字会拽走光标）").not.toBeNull();
+  });
+
+  it("退回「编辑态的落地声明在换类之后」判红", () => {
+    const honest = readScannedSource(CODE_EDITOR);
+    const landing = landingBlock(honest);
+    const decorate = effectBlocks(honest, "useLayoutEffect").find((b) => b.includes("revealMarkHorizontally")) as string;
+    // 把两条对调：落地跑到换类 + 水平之后
+    const swapped = honest.replace(landing, "@@LANDING@@").replace(decorate, landing).replace("@@LANDING@@", decorate);
+    expect(swapped, "对调没改动源码，这条自检是空转").not.toBe(honest);
+    expect(landingBeforeDecorateViolation(swapped), "落地排在换类之后却没判红").not.toBeNull();
   });
 });

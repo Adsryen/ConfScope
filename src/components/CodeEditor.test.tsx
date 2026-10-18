@@ -734,6 +734,198 @@ describe("CodeEditor 命中触顶要说得出口（轮28 F-10）", () => {
  * `new ResizeObserver(() => syncScroll()); ro.observe(area)`，编辑态只观察了查找条。
  * 于是把面板拉高 / 浏览器缩放 / 侧栏收起之后没有 scroll 事件，下半截就没有行号，得手动滚一下才补齐。
  */
+/**
+ * 轮30 F-22 / F-23：编辑态的查找落地。
+ *
+ * F-22 的真症状比 PRD 原先写的更窄也更常见：跳完第三处再改词，落地效果读的是**这一次提交里的旧序号**
+ * （归零挂在另一条 useEffect 上，跑在落地之后），于是视图跳到「新词的第三处」、计数却写「第 1 处」；
+ * 紧接着的第二次重渲染只换类 + 水平定位，垂直不再动——用户读到"红字在第一处，屏幕停在别处"。
+ * 修法两条：序号连着它所属的口径在渲染期派生（不再有先后），落地从绘制后的 useEffect 挪到绘制前的
+ * useLayoutEffect（不再闪一帧旧位置）。
+ *
+ * 但有一条**不许**跟着浏览态改：落地不许把「正文变了」也算作触发条件。编辑态的字是用户自己敲的，
+ * 一旦"正文变了就落回第一处"，他在第 31 行改值，第二个字符就落到第一条命中那一行——直接改坏配置。
+ * 浏览态的落地依赖里有 html 没这个问题：那边正文只读。下面第二条用例把这条分叉钉住。
+ */
+describe("CodeEditor 查找落地的口径（轮30 F-22）", () => {
+  const VIEWPORT_H = 100;
+  const CONTENT_H = 4000;
+
+  // 「beta」不区分大小写 9 处（1/2/3/5/20/35/40/41/42 行），区分大小写只剩 6 处（1/2/3/40/41/42 行）。
+  // 两套命中表都超过 6 处，勾上「区分大小写」时旧序号 5 不会被 clamp 顺手夹回第一处——
+  // 「按旧序号跳」与「按新序号跳」在断言里才分得开。
+  const LAND_LINES = Array.from({ length: 60 }, (_, i) => `key${i} = ${i}`);
+  for (const i of [1, 2, 3, 40, 41, 42]) LAND_LINES[i] = `beta = ${i}`;
+  for (const i of [5, 20, 35]) LAND_LINES[i] = `BETA = ${i}`;
+  const LAND = `${LAND_LINES.join("\n")}\n`;
+  const ALPHA_FIRST_OFFSET = LAND.indexOf("beta");
+
+  function LandHarness() {
+    const [value, setValue] = useState(LAND);
+    return <CodeEditor value={value} onChange={setValue} format="TEXT" />;
+  }
+
+  /** scrollTop 可读写 + 高度撑出来：jsdom 没布局，「跳没跳」与「跳歪了」否则分不开。 */
+  function stubEditorGeometry(ta: HTMLTextAreaElement) {
+    const offsets = { top: 0, left: 0, writes: 0 };
+    Object.defineProperty(ta, "scrollTop", {
+      configurable: true,
+      get: () => offsets.top,
+      set: (v: number) => {
+        offsets.top = v;
+        offsets.writes += 1;
+      },
+    });
+    Object.defineProperty(ta, "scrollLeft", { configurable: true, get: () => offsets.left, set: (v: number) => (offsets.left = v) });
+    Object.defineProperty(ta, "clientHeight", { configurable: true, get: () => VIEWPORT_H });
+    Object.defineProperty(ta, "scrollHeight", { configurable: true, get: () => CONTENT_H });
+    return offsets;
+  }
+
+  /** 选区也换成可读写的假实现：revealHit 会不会把光标搬走，得看得见。 */
+  function stubSelection(ta: HTMLTextAreaElement) {
+    const sel = { start: 0, end: 0 };
+    Object.defineProperty(ta, "selectionStart", { configurable: true, get: () => sel.start, set: (v: number) => (sel.start = v) });
+    Object.defineProperty(ta, "selectionEnd", { configurable: true, get: () => sel.end, set: (v: number) => (sel.end = v) });
+    ta.setSelectionRange = (start: number, end: number) => {
+      sel.start = start;
+      sel.end = end;
+    };
+    return sel;
+  }
+
+  /**
+   * 行 i 的 top = padTop + i * ROW_H：从根节点的两个 CSS 变量取，不把组件常量抄第二份。
+   * 走屏幕外的行（断言"停在原处"时目标行常常不在可视区）不能像浏览态那样从 .code-ln 反查。
+   */
+  function lineTop(container: HTMLElement, lineIndex: number) {
+    const root = container.querySelector(".code-editor") as HTMLElement;
+    const padTop = parseFloat(root.style.getPropertyValue("--code-pad-top"));
+    const rowH = parseFloat(root.style.getPropertyValue("--code-row-h"));
+    expect(Number.isFinite(padTop), "净空读不到：查找栏净空那条口径断了").toBe(true);
+    return padTop + lineIndex * rowH;
+  }
+
+  const expectedTopFor = (container: HTMLElement, lineIndex: number) => Math.max(0, lineTop(container, lineIndex) - VIEWPORT_H / 2);
+
+  function openFindBar(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = findInput(container);
+    expect(input, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input as HTMLInputElement, { target: { value: term } });
+    return input as HTMLInputElement;
+  }
+
+  const offsetOfLine = (text: string, line: number) => text.split("\n").slice(0, line).join("\n").length + (line > 0 ? 1 : 0);
+  const countText = (container: HTMLElement) => (container.querySelector(".code-find-count") as HTMLElement).textContent ?? "";
+
+  beforeEach(() => {
+    clearViewState("codeFind.");
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  it("跳完第六处再改口径：视图、计数、当前命中类在同一次提交里落到第一处", () => {
+    const { container } = renderEditor(<LandHarness />);
+    const ta = textarea(container);
+    const offsets = stubEditorGeometry(ta);
+    openFindBar(container, "beta");
+
+    expect(countText(container)).toContain("第 1/9");
+    expect(offsets.top).toBe(expectedTopFor(container, 1));
+
+    for (let i = 0; i < 5; i += 1) {
+      const before = offsets.writes;
+      fireEvent.keyDown(window, { key: "F3" });
+      expect(offsets.writes - before, "一次 F3 给 scrollTop 赋了不止一次值").toBe(1);
+    }
+    expect(countText(container)).toContain("第 6/9");
+    expect(offsets.top).toBe(expectedTopFor(container, 35));
+
+    // 改口径：命中收窄到 6 处，序号归第一处。归零挂在一条 useEffect 上、跑在落地之后时，
+    // 这一次落地读到的还是旧序号 5 → 视图跳到「新表的第 6 处」（第 43 行），
+    // 计数与当前命中类却在第一处——下一次重渲染只换类 + 水平定位，垂直不再补。
+    fireEvent.click(container.querySelectorAll<HTMLButtonElement>(".code-editor .code-find-toggle")[0]);
+
+    expect(countText(container)).toContain("第 1/6");
+    expect(offsets.top, "改口径后视图停在旧序号那一处：归零与落地分在两次提交里").toBe(expectedTopFor(container, 1));
+    expect((container.querySelector(".code-editor .code-ln.is-current") as HTMLElement).textContent).toBe("2");
+  });
+
+  it("开着查找栏打字：不许把视口与光标从正在编辑的那行拽到第一处命中", () => {
+    const { container } = renderEditor(<LandHarness />);
+    const ta = textarea(container);
+    const offsets = stubEditorGeometry(ta);
+    const sel = stubSelection(ta);
+    openFindBar(container, "alpha");
+
+    // 用户滚到第 31 行、把光标放进去（第 31 行不含 alpha，第一处在第 6 行）
+    const caret = offsetOfLine(LAND, 30);
+    const restingTop = expectedTopFor(container, 30);
+    offsets.top = restingTop;
+    fireEvent.scroll(ta);
+    ta.setSelectionRange(caret, caret);
+
+    fireEvent.change(ta, { target: { value: `${LAND.slice(0, caret)}X${LAND.slice(caret)}` } });
+
+    expect(offsets.top, "正文一变就落回第一处：正在编辑的行会被丢到屏幕外").toBe(restingTop);
+    expect(sel.start, "正文一变就把光标送到第一处命中：下一个字符会改坏别的行").toBe(caret);
+    expect(container.querySelector(".code-editor-pre")?.textContent).toContain("Xkey30");
+    expect(ALPHA_FIRST_OFFSET).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 轮30 F-23：`closeFind` 清了 findOpen / findTerm / activeIdx，唯独没清 pinnedLine，
+ * 而 revealHit 每跳一处都往里写一次。Esc 关栏后那一行还带着整行底色，
+ * 用户会以为这一行有什么特殊含义（浏览态关栏就干净收回：currentLine 只跟 findOpen）。
+ */
+describe("CodeEditor 关栏收回命中行底色（轮30 F-23）", () => {
+  /** 带外部内容搜索词的编辑态：关栏后命中行底色该留着（那是搜索词口径），只收回「刚看过第几处」。 */
+  function PinHarness() {
+    const ref = useRef<CodeEditorHandle>(null);
+    const [value, setValue] = useState(MULTI);
+    return (
+      <>
+        <button type="button" onClick={() => ref.current?.revealLine(3)}>
+          jump
+        </button>
+        <CodeEditor ref={ref} value={value} onChange={setValue} format="Properties" searchTerm="port" />
+      </>
+    );
+  }
+
+  function openFindBar(container: HTMLElement, term: string) {
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = findInput(container);
+    expect(input, "Ctrl+F 没能打开编辑态查找栏").toBeTruthy();
+    fireEvent.change(input as HTMLInputElement, { target: { value: term } });
+    return input as HTMLInputElement;
+  }
+
+  it("Esc 关栏后不留 is-current，而「跳到第 N 行」的高亮照常", () => {
+    const { container } = renderEditor(<PinHarness />);
+    expect(container.querySelectorAll(".code-editor .code-line.is-hit")).toHaveLength(2); // 第 1、3 行
+
+    const input = openFindBar(container, "port");
+    fireEvent.keyDown(window, { key: "F3" });
+    expect(container.querySelector(".code-editor .code-line.is-current")).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(findInput(container)).toBeNull();
+    expect(container.querySelector(".code-editor .code-line.is-current"), "关栏后上一处命中的整行底色还留着").toBeNull();
+    expect(container.querySelector(".code-editor .code-ln.is-current"), "关栏后行号还留着当前命中色").toBeNull();
+    // 命中行底色本身不动：还红着哪些行由外部搜索词说了算，不是「刚看过第几处」
+    expect(container.querySelectorAll(".code-editor .code-line.is-hit")).toHaveLength(2);
+
+    // 「跳到第 N 行」的落点走的是同一层，不许被关栏那次清理顺手带走
+    fireEvent.click(screen.getByText("jump"));
+    const current = container.querySelector(".code-editor .code-line.is-current") as HTMLElement;
+    expect(current, "revealLine 的跳行高亮被一起清掉了").toBeTruthy();
+    expect(current.style.top).toBe("52px");
+  });
+});
+
 describe("CodeEditor 容器尺寸变化（轮30 F-21）", () => {
   const BIG = Array.from({ length: 100 }, (_, i) => `key${i}=value${i}`).join("\n");
 

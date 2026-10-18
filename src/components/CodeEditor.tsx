@@ -111,7 +111,16 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   // 查找栏打开期间实测的条高（px）：与浏览态同一口径，量不到退到兜底常量。
   const [findBarHeight, setFindBarHeight] = useState(0);
   const [findTerm, setFindTerm] = useState("");
-  const [activeIdx, setActiveIdx] = useState(0);
+  /**
+   * 「当前在第几处」连着它所属的查找口径存（轮30 F-22）。
+   *
+   * 缺陷长什么样：归零原先挂在一条 useEffect 上，跑在落地**之后**。跳完第六处再勾「区分大小写」，
+   * 同一次提交里落地读到的还是旧序号 → 视图跳到新表的第六处，计数与当前命中类却已经写到第一处；
+   * 紧跟着的第二次重渲染只换类 + 水平定位，垂直不再补——用户读到"红字在第一处，屏幕停在别处"。
+   * 渲染期就把"不属于当前口径的序号"读成 0：口径变化的那一次提交里落地、换类、计数用的是同一份，
+   * 那条归零 effect 也就不需要了。
+   */
+  const [idxScope, setIdxScope] = useState<{ open: boolean; term: string; opts: MatchOptions; doc: string; idx: number } | null>(null);
   // 查找栏的两个匹配开关：与浏览态（CodeView）共用同一对记忆键，
   // 浏览态勾了「区分大小写」再进编辑态不必重勾一遍。
   const [caseSensitive, setCaseSensitive] = useRememberedState<boolean>("codeFind.caseSensitive", false);
@@ -150,6 +159,20 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   // 命中行表（升序）：二分取可视区窗口用得上这份序，见 hitLinesInRange。
   const hitLineArray = useMemo(() => Array.from(hitSet), [hitSet]);
+
+  // 口径（开栏状态 / 查找词 / 匹配开关 / 正文）逐位对得上才认这个序号，否则按第一处读。
+  // 比的是身份而不是拼字符串：正文可能几十万行，每渲染拼一份 `${doc}` 是白扔的钱（轮29 刚为这个打过架）。
+  const inScope =
+    idxScope !== null &&
+    idxScope.open === findOpen &&
+    idxScope.term === effectiveTerm &&
+    idxScope.opts === matchOptions &&
+    idxScope.doc === doc;
+  const activeIdx = inScope ? idxScope.idx : 0;
+  const commitActiveIdx = useCallback(
+    (idx: number) => setIdxScope({ open: findOpen, term: effectiveTerm, opts: matchOptions, doc, idx }),
+    [findOpen, effectiveTerm, matchOptions, doc]
+  );
 
   const currentLine = findOpen ? activeLineOf(hits, activeIdx) : pinnedLine;
 
@@ -254,7 +277,11 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   const closeFind = useCallback(() => {
     setFindOpen(false);
     setFindTerm("");
-    setActiveIdx(0);
+    // 关栏把「刚看过第几处」一起收回（轮30 F-23）：pinnedLine 是「跳到第 N 行」的落点专用层，
+    // revealHit 每次跳转都往里写，不清就会在 Esc 之后留一整行底色，用户以为那行有什么特殊含义。
+    // 浏览态同样是 findOpen 一关 currentLine 就归 null（currentMustNotPersistAfterClose 钉着）。
+    // 序号不用在这里归零：开栏状态与查找词都变了，派生口径自己读成第一处。
+    setPinnedLine(null);
     // 查找结束回到编辑：把焦点还给文本区，用户不用重新点一下才能继续打字
     taRef.current?.focus();
   }, []);
@@ -272,10 +299,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       }
       if (!hits.length) return;
       const next = (activeIdx + delta + hits.length) % hits.length;
-      setActiveIdx(next);
+      commitActiveIdx(next);
       revealHit(hits[next]);
     },
-    [activeIdx, findTermPending, flushFindTerm, hits, revealHit]
+    [activeIdx, commitActiveIdx, findTermPending, flushFindTerm, hits, revealHit]
   );
 
   const revealLine = useCallback(
@@ -300,15 +327,18 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
 
   useImperativeHandle(ref, () => ({ openFind, revealLine }), [openFind, revealLine]);
 
-  // 搜索词 / 匹配口径 / 内容变化：重置当前命中序号，避免越界或指向改动前的位置。
-  // 口径必须进依赖：勾上「全词」后命中会变少，旧的 activeIdx 可能已经越过新的末尾，
-  // 计数「第 N/M 处」会显示成不存在的位置。
-  useEffect(() => {
-    setActiveIdx(0);
-  }, [effectiveTerm, matchOptions, doc]);
-
-  // 打开 / 改变查找词后，把选区与滚动落到当前命中（前后导航在 navigate 里即时做）。
-  useEffect(() => {
+  /**
+   * 开栏 / 改词 / 改口径后，把选区与滚动落到当前命中（前后导航在 navigate 里即时做）。
+   *
+   * 绘制前落地（轮30 F-22，与浏览态同一条口径）：这条原先是 useEffect，先画一帧旧位置再跳，
+   * 用户读到的是"改了词屏幕闪一下才动"；两条出口各写一次滚动还会互相覆盖。
+   *
+   * 依赖里**不许**出现 doc / lines / hits / html：编辑态的字是用户自己敲的，正文一变就落回第一处，
+   * 下一个字符就会被塞进第一条命中那一行——配置直接被改到别的行上去。浏览态的落地依赖里有 html
+   * 没有这个问题（那边正文只读），这条分叉是有意的，由「开着查找栏打字」那条用例钉住。
+   * 旧序号读错的问题也不在这里补，由上面的 idxScope 派生负责。
+   */
+  useLayoutEffect(() => {
     if (!findOpen || !hits.length) return;
     revealHit(hits[clamp(activeIdx, 0, hits.length - 1)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -576,7 +606,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
             aria-label={t("config.findPlaceholder")}
             onChange={(e) => {
               setFindTerm(e.target.value);
-              setActiveIdx(0);
+              commitActiveIdx(0);
             }}
             onKeyDown={onFindKeyDown}
           />
