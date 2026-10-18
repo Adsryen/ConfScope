@@ -947,3 +947,55 @@ describe("CodeView 命中触顶要说得出口（轮28 F-10）", () => {
     expect(container.querySelectorAll(".code-area mark.search-hit")).toHaveLength(MAX_CODE_HITS);
   });
 });
+
+describe("CodeView 拖缩略图的当帧同步（轮30 F-20）", () => {
+  /** jsdom 的 getBoundingClientRect 恒给全 0，缩略图的点击映射得自己有高度。 */
+  function stubMinimapRect(mm: HTMLElement, top: number, height: number) {
+    mm.getBoundingClientRect = () =>
+      ({ top, height, bottom: top + height, left: 0, right: 66, width: 66, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  }
+
+  /**
+   * 行号层与命中行底色层是 .code-area **之外**的独立层，靠 transform 跟手，浏览器不会替我们滚它们。
+   * 而 `scroll` 事件是异步派发的：连续拖动时每帧都在写 scrollTop，事件永远排在后面，
+   * 于是正文到位了、侧栏还停在上一帧（`scrollLineIntoView` 早就是"写完立刻 syncScroll"，这条出口漏了）。
+   */
+  it("点缩略图落地的那一帧，行号层与命中行层必须已经跟到新偏移", async () => {
+    const { container } = renderView(MULTI);
+    const area = container.querySelector(".code-area") as HTMLElement;
+    const offsets = stubGeometry(area);
+    fireEvent.scroll(area);
+    await waitFor(() => expect(container.querySelector(".code-minimap-viewport")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    stubMinimapRect(mm, 0, 200);
+    fireEvent.pointerDown(mm, { clientY: 150, pointerId: 1 });
+
+    // 0.75 * 600 - 100/2 = 400
+    expect(offsets.top, "点缩略图没把正文滚过去").toBe(400);
+    const follow = "translateY(-400px)";
+    expect(
+      (container.querySelector(".code-gutter-layer") as HTMLElement).style.transform,
+      "行号层没当帧跟上：等 scroll 事件就是慢一帧"
+    ).toBe(follow);
+    expect((container.querySelector(".code-lines-layer") as HTMLElement).style.transform, "命中行底色层没当帧跟上").toBe(follow);
+    await waitFor(() => expect((container.querySelector(".code-minimap-viewport") as HTMLElement).style.top).toBe("66.66666666666666%"));
+  });
+
+  it("在缩略图上拖动：每一次 pointermove 都当帧同步（不许只等 pointerup）", async () => {
+    const { container } = renderView(MULTI);
+    const area = container.querySelector(".code-area") as HTMLElement;
+    const offsets = stubGeometry(area);
+    fireEvent.scroll(area);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+
+    const mm = container.querySelector(".code-minimap") as HTMLElement;
+    stubMinimapRect(mm, 0, 200);
+    fireEvent.pointerDown(mm, { clientY: 20, pointerId: 1 });
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform).toBe(`translateY(${-offsets.top}px)`);
+
+    fireEvent.pointerMove(mm, { clientY: 120, pointerId: 1 });
+    expect(offsets.top, "拖动没跟着走").toBe(310); // 0.6 * 600 - 50
+    expect((container.querySelector(".code-gutter-layer") as HTMLElement).style.transform, "拖动时行号层慢一帧").toBe("translateY(-310px)");
+  });
+});

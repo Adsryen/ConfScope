@@ -542,14 +542,28 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     }
   }, [minimapRows, minimapSize, lines.length]);
 
-  const jumpFromPointer = useCallback((clientY: number) => {
-    const mm = minimapRef.current;
-    const el = areaRef.current;
-    if (!mm || !el || el.scrollHeight <= 0) return;
-    const rect = mm.getBoundingClientRect();
-    const ratio = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
-    el.scrollTop = clamp(ratio * el.scrollHeight - el.clientHeight / 2, 0, el.scrollHeight);
-  }, []);
+  /**
+   * 点/拖缩略图落到某个偏移。
+   *
+   * 写完 scrollTop 必须**当帧**补一次 `syncScroll()`（轮30 F-20）：行号层与命中行底色层在滚动
+   * 容器**之外**，靠 `translateY(-scrollTop)` 跟手，浏览器不会替我们滚它们；而 scroll 事件是异步
+   * 派发的——连续拖动时每帧都在写偏移，事件永远排在后面，于是正文到位了、侧栏还停在上一帧。
+   * `scrollLineIntoView` 早就是「写完立刻同步」，这条出口以前漏了。
+   */
+  const jumpFromPointer = useCallback(
+    (clientY: number) => {
+      const mm = minimapRef.current;
+      const el = areaRef.current;
+      if (!mm || !el || el.scrollHeight <= 0) return;
+      const rect = mm.getBoundingClientRect();
+      const ratio = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      // 上界是「滚得动的最大偏移」= scrollHeight - clientHeight，不是 scrollHeight：写成后者等于没夹，
+      // 拖到底部时 metrics 会收到一个越界的 scrollTop（浏览器自己再夹一次，遮罩比例就偏了）。
+      el.scrollTop = clamp(ratio * el.scrollHeight - el.clientHeight / 2, 0, Math.max(0, el.scrollHeight - el.clientHeight));
+      syncScroll();
+    },
+    [syncScroll]
+  );
 
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;
