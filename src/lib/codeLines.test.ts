@@ -8,7 +8,10 @@ import {
   buildMinimapRows,
   CURRENT_HIT_CLASS,
   currentHitSelector,
+  decorateMinimapRows,
   findCodeHits,
+  MINIMAP_WIDTH_RULER_PERCENTILE,
+  prepareMinimapBuckets,
   hitLines,
   hitLinesInRange,
   lineOffsets,
@@ -252,6 +255,118 @@ describe("buildMinimapRows", () => {
   it("normalises widthRatio against the longest line, tabs counted as two spaces", () => {
     const rows = buildMinimapRows(["\tshort", "much_longer_line_here"], new Set(), null, 1);
     expect(rows[0].widthRatio).toBeCloseTo(1, 5);
+  });
+
+  // 薄封装必须与两阶段同源：口径只有一份，否则画布侧与视图侧会分叉。
+  it("buildMinimapRows 是 prepare + decorate 的薄封装（逐字等价）", () => {
+    const doc = "# c\nport=8080\n\nserver=1\nname=x\n";
+    const lines = splitLines(doc);
+    const hits = hitLines(findCodeHits(doc, "port"));
+    for (const rowLimit of [1, 2, 3, 5, 12, 40]) {
+      expect(decorateMinimapRows(prepareMinimapBuckets(lines, rowLimit), Array.from(hits), 3), `rowLimit=${rowLimit}`).toEqual(
+        buildMinimapRows(lines, hits, 3, rowLimit)
+      );
+    }
+  });
+});
+
+describe("prepareMinimapBuckets 的条宽标尺（轮28 F-11）", () => {
+  const CANVAS_W = 66;
+  const CANVAS_PAD = 8;
+  /** 画布侧的条宽公式（CodeView 画缩略图那段），拿来把 ratio 换算成像素。 */
+  const barWidth = (ratio: number) => Math.max(3, ratio * (CANVAS_W - CANVAS_PAD));
+
+  it("一行超长值不许把整张图压扁：800 行正常配置 + 1 行 60000 字符", () => {
+    const lines = Array.from({ length: 800 }, (_, i) => `key${(i % 40) + 1}=value`).concat(["crt=" + "A".repeat(60000)]);
+    const buckets = prepareMinimapBuckets(lines, 267).buckets;
+    const widths = buckets.map((b) => barWidth(b.widthRatio));
+    const p50 = widths.slice().sort((a, b) => a - b)[Math.floor(widths.length / 2)];
+    // 旧口径（全文 maxLen 归一）实测 p50 = 3.0px、266/267 个桶塌到下限
+    expect(p50, "p50 还在下限附近说明标尺仍是全文 maxLen").toBeGreaterThan(50);
+    expect(widths.filter((w) => w <= 3.001).length, "塌到 3px 下限的桶").toBe(0);
+    // 超长那行仍画满宽（它确实是最长的一行，信息没丢）
+    expect(Math.max(...widths)).toBeCloseTo(CANVAS_W - CANVAS_PAD, 5);
+  });
+
+  it("标尺是桶最长行的 p95：多数桶仍按相对长度分层，离群值只触顶", () => {
+    const lines = [...Array.from({ length: 10 }, () => "a".repeat(5)), ...Array.from({ length: 9 }, () => "a".repeat(10)), "a".repeat(60)];
+    const { buckets, perRow } = prepareMinimapBuckets(lines, lines.length);
+    expect(perRow).toBe(1);
+    expect(buckets.length).toBe(20);
+    // 桶数 20 时 p95 的秩 = ceil(0.95*20) = 19 ⇒ 标尺取到 10，最长的 60 被压掉
+    const short = buckets.filter((b) => b.endLine - b.startLine === 1).slice(0, 10);
+    const mid = buckets.slice(10, 19);
+    expect(short.every((b) => b.widthRatio < mid[0].widthRatio)).toBe(true);
+    expect(mid.every((b) => b.widthRatio === 1)).toBe(true);
+    expect(buckets[19].widthRatio).toBe(1); // 离群桶触顶，不越界
+    // 短桶按比例存活：旧口径下 5/60 = 0.083 ⇒ 条宽塌到 3px
+    expect(barWidth(short[0].widthRatio)).toBeGreaterThan(3);
+    expect(short[0].widthRatio).toBeCloseTo(0.5, 5);
+  });
+
+  it("ratio 永远不超过 1，空正文不炸", () => {
+    expect(prepareMinimapBuckets([], 40)).toEqual({ perRow: 1, totalLines: 0, buckets: [] });
+    const allBlank = prepareMinimapBuckets(["", "  ", ""], 8);
+    expect(allBlank.buckets.every((b) => b.kind === "blank")).toBe(true);
+    expect(allBlank.buckets.every((b) => b.widthRatio >= 0 && b.widthRatio <= 1)).toBe(true);
+  });
+
+  it("桶边界覆盖全部行且不超过 rowLimit，Tab 按两格算", () => {
+    const lines = Array.from({ length: 200 }, (_, i) => `\tline ${i}`);
+    const { perRow, buckets } = prepareMinimapBuckets(lines, 40);
+    expect(perRow).toBe(5);
+    expect(buckets.length).toBe(40);
+    expect(buckets[0].startLine).toBe(0);
+    expect(buckets[buckets.length - 1].endLine).toBe(200);
+    expect(buckets.reduce((n, b) => n + (b.endLine - b.startLine), 0)).toBe(200);
+    // "\tline 0" → "  line 0" 共 8 字符；每桶最长随序号递增，但都被同一把标尺归一
+    expect(buckets[0].widthRatio).toBeLessThanOrEqual(1);
+    expect(buckets[39].widthRatio).toBe(1);
+  });
+
+  it("p95 常量是 0.95（改它要一起改单测的秩）", () => {
+    expect(MINIMAP_WIDTH_RULER_PERCENTILE).toBe(0.95);
+  });
+});
+
+describe("decorateMinimapRows 只贴命中（轮28 F-12）", () => {
+  const lines = Array.from({ length: 20 }, (_, i) => `line${i}`);
+
+  it("命中行按 floor(line / perRow) 落桶，越界的命中忽略", () => {
+    const buckets = prepareMinimapBuckets(lines, 4); // perRow = 5
+    expect(buckets.perRow).toBe(5);
+    // 0 与 4 同属桶 0（去重后仍只亮一次），5 → 桶 1，19 → 桶 3，20 / -1 越界忽略
+    const rows = decorateMinimapRows(buckets, [0, 4, 5, 19, 20, -1], null);
+    expect(rows.map((r) => r.hasHit)).toEqual([true, true, false, true]);
+    expect(rows.filter((r) => r.hasHit).length).toBe(3);
+  });
+
+  it("当前命中落在包含它的那一桶，null / 越界时一桶都不亮", () => {
+    const buckets = prepareMinimapBuckets(lines, 4);
+    // perRow = 5 ⇒ 第 12 行属于桶 2（10~14）
+    expect(decorateMinimapRows(buckets, [], 12).map((r) => r.isCurrent)).toEqual([false, false, true, false]);
+    expect(decorateMinimapRows(buckets, [], null).some((r) => r.isCurrent)).toBe(false);
+    expect(decorateMinimapRows(buckets, [], 999).some((r) => r.isCurrent)).toBe(false);
+  });
+
+  it("静态部分逐字来自桶：不重算行长、也不改 kind", () => {
+    const buckets = prepareMinimapBuckets(lines, 4);
+    const rows = decorateMinimapRows(buckets, [], null);
+    expect(rows.map((r) => [r.startLine, r.endLine, r.widthRatio, r.kind])).toEqual(
+      buckets.buckets.map((b) => [b.startLine, b.endLine, b.widthRatio, b.kind])
+    );
+  });
+
+  it("可反复调用：不吃掉桶，也不因第二次调用少标命中", () => {
+    const buckets = prepareMinimapBuckets(lines, 4);
+    const first = decorateMinimapRows(buckets, [0], 3);
+    const second = decorateMinimapRows(buckets, [0], 3);
+    expect(second).toEqual(first);
+    expect(buckets.buckets.every((b) => !("hasHit" in b))).toBe(true);
+  });
+
+  it("空桶表返回空行（画布侧据此跳过绘制）", () => {
+    expect(decorateMinimapRows(prepareMinimapBuckets([], 40), [], null)).toEqual([]);
   });
 });
 

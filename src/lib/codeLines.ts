@@ -323,51 +323,136 @@ function decodeHljsText(raw: string): string {
 export interface MinimapRow {
   startLine: number;
   endLine: number; // 不含
-  /** 该行桶内最长行相对全文最长行的比例（0~1），用于条宽。 */
+  /** 该行桶内最长行相对标尺（桶最长行的 p95，见 MINIMAP_WIDTH_RULER_PERCENTILE）的比例，0~1，用于条宽。 */
   widthRatio: number;
   kind: "blank" | "comment" | "code";
   hasHit: boolean;
   isCurrent: boolean;
 }
 
+/** 缩略图一桶里「只跟正文有关」的部分：桶边界、条宽、行长类型（轮28 F-12）。 */
+export interface MinimapBucket {
+  startLine: number;
+  endLine: number; // 不含
+  widthRatio: number;
+  kind: MinimapRow["kind"];
+}
+
+/** prepareMinimapBuckets 的产物：桶表 + 命中行落桶需要的几何。 */
+export interface MinimapBuckets {
+  /** 每桶覆盖的真实行数；decorate 用 `floor(line / perRow)` 直接把命中行落到桶上。 */
+  perRow: number;
+  totalLines: number;
+  buckets: MinimapBucket[];
+}
+
 /**
- * 把所有行分桶到固定 rowLimit 行，供 canvas 缩略图逐行画条。
- * 命中行标 hasHit，当前命中行标 isCurrent。
+ * 条宽标尺的分位（轮28 F-11）。
+ *
+ * 缺陷长什么样：原先用**全文最长行**归一，配置里只要有一行超长值（证书 / base64 / 内嵌脚本），
+ * 其余桶的 ratio 就趋近 0，全部塌到画布的 3px 下限。66px 画布 / 2.5px 行高 ⇒ 267 桶，
+ * 「800 行正常配置 + 第 401 行是 60000 字符证书」这份数据实测条宽 p50 = 3.0px，266/267 个桶
+ * 塌到下限——缩略图唯一的用处就是告诉用户「哪里内容密集」，于是整张图失去信息。
+ * 改成**桶最长行的 p95** 当标尺：普通桶拿满宽，那根超长行 `min(1, …)` 触顶画满宽（它确实是最长的，
+ * 信息没丢）。桶级计算，个数 ≤ 桶数，且不随「当前在第几处」重算。
  */
-export function buildMinimapRows(lines: string[], hits: Set<number>, currentLine: number | null, rowLimit: number): MinimapRow[] {
+export const MINIMAP_WIDTH_RULER_PERCENTILE = 0.95;
+
+/**
+ * 最近秩分位数：入参升序。
+ *
+ * 桶数 ≤ 19 时秩正好落在最后一个元素上（等价于取最大值），所以小文件的条宽口径与旧实现逐字相同，
+ * 只有桶数多到能容下一两个离群值时才开始「压掉最长的少数桶」。
+ */
+function percentileAscending(sorted: number[], p: number): number {
+  if (!sorted.length) return 0;
+  const rank = Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length)));
+  return sorted[rank - 1];
+}
+
+/**
+ * 第一阶段（贵）：把所有行分桶到固定 rowLimit 行，算出桶边界 / 条宽 / 行长类型。
+ *
+ * 只读正文——命中、当前命中一概不碰，所以「跳到下一处」不该重跑这里：
+ * 实测 20 万行单次 21ms（rowLimit 300）/ 24-46ms（rowLimit 40），原先挂在含 currentLine 的
+ * memo 上，等于每按一次 Enter 再付一次。顺带修掉旧实现「每行做两次
+ * `line.replace(/\t/g, "  ")`」（一次求 maxLen、一次求桶内最长）的重复分配：现在单趟扫描。
+ */
+export function prepareMinimapBuckets(lines: string[], rowLimit: number): MinimapBuckets {
   const total = lines.length;
-  if (!total) return [];
+  if (!total) return { perRow: 1, totalLines: 0, buckets: [] };
   const limit = Math.max(1, Math.min(rowLimit, total));
   const perRow = Math.ceil(total / limit);
-  const rows = Math.ceil(total / perRow);
 
-  let maxLen = 1;
-  for (const line of lines) {
+  const longestPerBucket: number[] = [];
+  const kinds: MinimapBucket["kind"][] = [];
+  let longest = 0;
+  let kind: MinimapBucket["kind"] = "blank";
+  for (let li = 0; li < total; li += 1) {
+    const line = lines[li];
     const len = line.replace(/\t/g, "  ").length;
-    if (len > maxLen) maxLen = len;
+    if (len > longest) longest = len;
+    if (kind === "blank" && !isBlankLine(line)) {
+      kind = isCommentLine(line) ? "comment" : "code";
+    }
+    if (li % perRow === perRow - 1 || li === total - 1) {
+      longestPerBucket.push(longest);
+      kinds.push(kind);
+      longest = 0;
+      kind = "blank";
+    }
   }
 
-  const out: MinimapRow[] = [];
-  for (let r = 0; r < rows; r += 1) {
-    const startLine = r * perRow;
-    const endLine = Math.min(startLine + perRow, total);
-    let longest = 0;
-    let kind: MinimapRow["kind"] = "blank";
-    let hasHit = false;
-    let isCurrent = false;
-    for (let li = startLine; li < endLine; li += 1) {
-      const line = lines[li];
-      const len = line.replace(/\t/g, "  ").length;
-      if (len > longest) longest = len;
-      if (hits.has(li)) hasHit = true;
-      if (li === currentLine) isCurrent = true;
-      if (kind === "blank" && !isBlankLine(line)) {
-        kind = isCommentLine(line) ? "comment" : "code";
-      }
-    }
-    out.push({ startLine, endLine, widthRatio: longest / maxLen, kind, hasHit, isCurrent });
+  const ruler = Math.max(
+    1,
+    percentileAscending(
+      [...longestPerBucket].sort((a, b) => a - b),
+      MINIMAP_WIDTH_RULER_PERCENTILE
+    )
+  );
+  const buckets: MinimapBucket[] = longestPerBucket.map((longestInBucket, r) => ({
+    startLine: r * perRow,
+    endLine: Math.min((r + 1) * perRow, total),
+    widthRatio: Math.min(1, longestInBucket / ruler),
+    kind: kinds[r],
+  }));
+  return { perRow, totalLines: total, buckets };
+}
+
+/**
+ * 第二阶段（便宜）：把命中与当前命中落到桶上。
+ *
+ * 代价只跟「桶数 + 命中数」有关，不再遍历全文：命中行 `floor(line / perRow)` 直接落桶。
+ * sortedHitLines 传升序表（hitLines 的迭代序，见其注释），这里不依赖顺序，但保持与
+ * hitLinesInRange 同一份输入，视图不必再排第二次。
+ */
+export function decorateMinimapRows(buckets: MinimapBuckets, sortedHitLines: number[], currentLine: number | null): MinimapRow[] {
+  const { perRow, totalLines, buckets: prepared } = buckets;
+  if (!totalLines || !prepared.length) return [];
+  const currentRow = currentLine !== null && currentLine >= 0 && currentLine < totalLines ? Math.floor(currentLine / perRow) : -1;
+  const out: MinimapRow[] = prepared.map((bucket, r) => ({
+    startLine: bucket.startLine,
+    endLine: bucket.endLine,
+    widthRatio: bucket.widthRatio,
+    kind: bucket.kind,
+    hasHit: false,
+    isCurrent: r === currentRow,
+  }));
+  for (const line of sortedHitLines) {
+    if (line < 0 || line >= totalLines) continue;
+    out[Math.floor(line / perRow)].hasHit = true;
   }
   return out;
+}
+
+/**
+ * 一次性拿到最终桶（两阶段的薄封装，口径只有一份）。
+ *
+ * 视图侧不许用它——那边必须拆成两条 memo（见 prepareMinimapBuckets / decorateMinimapRows），
+ * 否则「跳一处命中」又要重算整篇的行长与类型。这里保留给单次计算的场景与单测口径。
+ */
+export function buildMinimapRows(lines: string[], hits: Set<number>, currentLine: number | null, rowLimit: number): MinimapRow[] {
+  return decorateMinimapRows(prepareMinimapBuckets(lines, rowLimit), Array.from(hits), currentLine);
 }
 
 /** 由命中列表得到「当前命中」所在行。 */

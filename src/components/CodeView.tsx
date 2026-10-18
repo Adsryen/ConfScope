@@ -3,7 +3,8 @@ import { Format } from "../lib/format";
 import { highlightCode } from "../lib/highlight";
 import {
   activeLineOf,
-  buildMinimapRows,
+  decorateMinimapRows,
+  prepareMinimapBuckets,
   CURRENT_HIT_CLASS,
   currentHitSelector,
   findCodeHits,
@@ -104,6 +105,25 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
 
   const lines = useMemo(() => splitLines(code), [code]);
   const totalLines = lines.length;
+
+  /**
+   * 右侧留白按设置预留（轮28 F-13）。
+   *
+   * 这个条件**不许**跟着缩略图的显隐变：「隐藏缩略图 ⇒ 正文宽 8px ⇒ 可能不再需要横向滚动条
+   * ⇒ clientHeight 变 ⇒ 又该显示缩略图」是一个自激振荡，留白跟着抖就是抖动本身。
+   */
+  const minimapReserved = showMinimap && totalLines > 0;
+  /**
+   * 缩略图表面只在内容真能滚时出现（轮28 F-13）。
+   *
+   * 缺陷长什么样：不满一屏时 `jumpFromPointer` 算出的 scrollTop 恒被夹到 0——一个「看得见、
+   * 点不动、还占着右侧留白」的死控件，而且视口遮罩铺满整条，看着像能拖。
+   *
+   * 量不到（首帧 / jsdom：scrollHeight 与 clientHeight 都是 0）时**放行**：
+   * 「没测到」不等于「测到了且不需要滚」，放行让首帧不闪，组件测试也照常渲染。
+   */
+  const canScrollContent = metrics.scrollHeight <= 0 || metrics.scrollHeight > metrics.clientHeight + 1;
+  const hasMinimap = minimapReserved && canScrollContent;
 
   // 查找栏打开时以查找词为准；否则沿用外部内容搜索词（整体标红，不区分当前命中）。
   const effectiveTerm = findOpen ? findTerm : (searchTerm ?? "");
@@ -308,7 +328,9 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     const ro = new ResizeObserver(measure);
     ro.observe(mm);
     return () => ro.disconnect();
-  }, [showMinimap]);
+    // 依赖写 hasMinimap 而不是 showMinimap：元素会因为「内容不满一屏」自己消失，
+    // 只盯设置位的话，重新挂载后没人再量它，rowLimit 永远停在兜底值。
+  }, [hasMinimap]);
 
   // Ctrl+F / Cmd+F / F3：仅在焦点落在本视图、或没有任何输入框持有焦点时接管，
   // 绝不从其他输入框（如配置列表搜索框）抢走原生查找。
@@ -450,7 +472,15 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
   const hitRows = useMemo(() => hitLinesInRange(hitLineArray, visibleRange.start, visibleRange.end), [hitLineArray, visibleRange]);
 
   const rowLimit = Math.max(MM_MIN_ROWS, Math.floor(minimapSize.height / MM_ROW_H));
-  const minimapRows = useMemo(() => buildMinimapRows(lines, hitSet, currentLine, rowLimit), [lines, hitSet, currentLine, rowLimit]);
+  /**
+   * 缩略图分两阶段算（轮28 F-12）。
+   *
+   * 原先 `minimapRows` 的依赖里圈着 currentLine，而桶内的行长 / 行类型 / 条宽只跟正文有关——
+   * 每按一次 Enter 就把 20 万行重新 `line.replace(/\t/g, "  ")` 一遍再求最长（实测单次 21-46ms）。
+   * 拆开之后：桶表只在「正文或桶数」变了才重算，命中与当前命中只是往桶上贴两个布尔。
+   */
+  const buckets = useMemo(() => prepareMinimapBuckets(lines, rowLimit), [lines, rowLimit]);
+  const minimapRows = useMemo(() => decorateMinimapRows(buckets, hitLineArray, currentLine), [buckets, hitLineArray, currentLine]);
 
   // 画缩略图：命中行用红色覆盖，当前命中更亮。
   useEffect(() => {
@@ -492,8 +522,6 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     el.scrollTop = clamp(ratio * el.scrollHeight - el.clientHeight / 2, 0, el.scrollHeight);
   }, []);
 
-  const hasMinimap = showMinimap && totalLines > 0;
-
   const viewport = useMemo(() => {
     const { scrollTop, scrollHeight, clientHeight } = metrics;
     if (scrollHeight <= 0 || clientHeight <= 0 || totalLines <= 0) return null;
@@ -503,8 +531,11 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return { topPct, heightPct };
   }, [metrics, totalLines, padTop]);
 
-  const padRight = hasMinimap ? GUTTER_W + 24 : GUTTER_W + 16;
-  const padRightVar = { "--code-pad-right": `${padRight}px`, "--code-find-right": `${hasMinimap ? GUTTER_W + 24 : 16}px` } as CSSProperties;
+  const padRight = minimapReserved ? GUTTER_W + 24 : GUTTER_W + 16;
+  const padRightVar = {
+    "--code-pad-right": `${padRight}px`,
+    "--code-find-right": `${minimapReserved ? GUTTER_W + 24 : 16}px`,
+  } as CSSProperties;
 
   return (
     <div className="code-view" ref={rootRef} tabIndex={-1} style={{ "--code-pad-top": `${padTop}px` } as CSSProperties}>

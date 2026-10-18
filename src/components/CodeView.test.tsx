@@ -96,6 +96,55 @@ describe("CodeView 缩略图", () => {
     const { container } = renderView("");
     expect(container.querySelector(".code-minimap")).toBeNull();
   });
+
+  /** jsdom 里 scrollHeight / clientHeight 恒 0，几何只能自己装（与「有可见布局尺寸后显示视口框」同一手法）。 */
+  function setGeometry(pre: HTMLElement, clientHeight: number, scrollHeight: number) {
+    Object.defineProperty(pre, "clientHeight", { configurable: true, get: () => clientHeight });
+    Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    fireEvent.scroll(pre);
+  }
+
+  const padVars = (pre: HTMLElement) => [pre.style.getPropertyValue("--code-pad-right"), pre.style.getPropertyValue("--code-find-right")];
+
+  // 轮28 F-13：不满一屏时 jumpFromPointer 算出的 scrollTop 恒被夹到 0——
+  // 一个「看得见、点不动、还占着右侧留白」的死控件，索性不出现。
+  it("量到「不满一屏」收起缩略图，但右侧留白按设置继续预留（防自激振荡）", async () => {
+    const { container } = renderView(MULTI);
+    const area = container.querySelector(".code-area") as HTMLElement;
+
+    setGeometry(area, 100, 400);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+    const shown = padVars(area);
+
+    setGeometry(area, 400, 400);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).toBeNull());
+    expect(padVars(area), "留白跟着缩略图显隐变 ⇒ 正文宽变 ⇒ 高度又变 ⇒ 抖动").toEqual(shown);
+
+    // 再变回可滚：缩略图得重新出现（ResizeObserver 的依赖必须跟着显隐位，否则重新挂载后没人量它）
+    setGeometry(area, 100, 400);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+  });
+
+  it("阈值是「多出一行以上」：差 1px 算不能滚，差 2px 算能滚", async () => {
+    const { container } = renderView(MULTI);
+    const area = container.querySelector(".code-area") as HTMLElement;
+    setGeometry(area, 400, 401);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).toBeNull());
+    setGeometry(area, 400, 402);
+    await waitFor(() => expect(container.querySelector(".code-minimap")).not.toBeNull());
+  });
+
+  it("量不到几何时放行：首帧不该闪没", () => {
+    const { container } = renderView(MULTI);
+    expect(container.querySelector(".code-minimap")).not.toBeNull();
+  });
+
+  it("showMinimap=false 时留白退回窄值（与显隐门控是两条独立口径）", () => {
+    const { container } = renderView(MULTI, "TEXT", { showMinimap: false });
+    const area = container.querySelector(".code-area") as HTMLElement;
+    expect(container.querySelector(".code-minimap")).toBeNull();
+    expect(padVars(area)).toEqual(["68px", "16px"]);
+  });
 });
 
 describe("CodeView Ctrl+F 查找", () => {
