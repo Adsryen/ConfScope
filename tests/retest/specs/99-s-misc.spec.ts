@@ -8,7 +8,7 @@
 import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog, ensureSourcesPanelExpanded } from "./ui";
+import { navigate, dismissStartupDialog, ensureSourcesPanelExpanded, clickSourcesToggle } from "./ui";
 import { backToBrowseFromPlan, expectNoDisabledWriteError, expectPlanItem } from "./planExit";
 import { loadRetestState } from "../state";
 
@@ -61,13 +61,14 @@ test("S13 对比页来源面板折叠/展开: 收起→摘要条→展开→字�
   await expect(panel).not.toHaveClass(/collapsed/);
 
   const toggle = page.locator(".diff-source-toggle-edge").first();
-  // 收起
-  await toggle.click({ force: true });
+  // 收起（轮44 R90：一律走 clickSourcesToggle——force 点击会按坐标派发，边条跨在面板边缘外，
+  // 折叠动画期间坐标飘出去就被加载条的「加载并对比」接走，白付一趟完整对比）
+  await clickSourcesToggle(toggle);
   await expect(panel).toHaveClass(/collapsed/, { timeout: 5_000 });
 
   // 展开：点击 toggle 后轮询确认展开（折叠/展开是同一按钮的 toggle 语义）
   for (let i = 0; i < 3 && (await panel.first().evaluate((el) => el.classList.contains("collapsed"))); i++) {
-    await toggle.click({ force: true });
+    await clickSourcesToggle(toggle);
     await page.waitForTimeout(300);
   }
   await expect(panel).not.toHaveClass(/collapsed/, { timeout: 5_000 });

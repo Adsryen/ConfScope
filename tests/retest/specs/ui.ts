@@ -94,16 +94,47 @@ export async function selectSel(page: Page, panel: Locator, fieldLabel: string, 
   });
 }
 
+/** 点来源面板的折叠/展开边条。
+ *  轮44 R90：这里绝不能用 `force: true`。force 点击跳过命中校验、按元素中心坐标派发鼠标事件，
+ *  而边条是 `position:absolute; bottom:-12px` 跨在面板边缘上的 36x24 小块，折叠动画期间面板高度
+ *  在变（max-height 200ms），坐标一旦落到边条外面就会被下面的加载条接走——真机实测堆栈
+ *  （`loadBoth <- HTMLUnknownElement.callCallback2`）证明点边条点出了「加载并对比」，
+ *  一条用例里凭空多出一趟完整对比（两趟 compare_start、左右各多取一次正文），
+ *  还把「取数次数」类断言（DK-03、AC3）的判据污染成不可信。
+ *  探针实测（1280x720）：折叠态边条中心 (732,140) 的 `elementFromPoint` 就是边条自己，
+ *  普通点击（带命中校验）直接成功，所以正常点就好；被过渡/遮罩挡住时退到 DOM click。
+ */
+export async function clickSourcesToggle(toggle: Locator): Promise<void> {
+  await toggle.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => undefined);
+  const err = await toggle.click({ timeout: 5_000 }).then(() => null).catch((e) => String(e));
+  if (err) {
+    await toggle.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
+  }
+}
+
 /** 确保对比页来源面板处于展开状态（折叠时点「展开来源」），并等 CSS 过渡（约 200ms）稳定。 */
 export async function ensureSourcesPanelExpanded(page: Page): Promise<void> {
-  const panel = page.locator(".diff-source-panel");
-  if ((await panel.count()) === 0) return;
-  const collapsed = await panel.first().evaluate((el) => el.classList.contains("collapsed"));
-  if (collapsed) {
-    await page.locator(".diff-source-toggle-edge").first().click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  const panels = page.locator(".diff-source-panel");
+  if ((await panels.count()) === 0) return;
+  const panel = panels.first();
+  const toggle = page.locator(".diff-source-toggle-edge").first();
+  const isCollapsed = () => panel.evaluate((el) => el.classList.contains("collapsed"));
+  /**
+   * 轮44 R90：「展开」在这里不是一个动作，而是一个收敛过程。
+   * 来源面板有两条自动收起的路径（启动自动对比成功、智能匹配成功，见 DiffView 的
+   * setSourcesCollapsed），它们都可能在「刚点完展开」之后才落地：retest 种子的 cs.ui 写死
+   * mode:"diff" + diffAutoCompare:true，每次加载都会自动比一轮，慢机上这一轮要 400ms+，
+   * 实测把 S13 打成 22s 红（展开→被收起→断言 not.toHaveClass(/collapsed/) 一直不满足）。
+   * 所以点开后必须再观察一个窗口，确认它仍然是开的才算数；被自动收起了就再点一次。
+   */
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (await isCollapsed()) {
+      await clickSourcesToggle(toggle);
+    }
+    // 覆盖折叠/展开过渡（max-height 200ms + 内部 padding 200ms）与后到的自动收起
+    await page.waitForTimeout(600);
+    if (!(await isCollapsed())) return;
   }
-  // 等扩展过渡（max-height 200ms + 内部 padding 200ms）稳定
-  await page.waitForTimeout(450);
 }
 
 /** 在 .source-picker 面板内按字段名定位 Combobox（.combo）并填入文本（可选再从候选里点选）。 */
