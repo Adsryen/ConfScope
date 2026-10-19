@@ -18,7 +18,13 @@
 import { expect, test } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog } from "./ui";
+import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { loadRetestState } from "../state";
+
+const state = loadRetestState();
+const NS_A = state.nacos.a.namespace;
+const NS_B = state.nacos.b.namespace;
+const GROUP = "RETEST-PROD";
 
 interface ContrastOpts {
   normal: number;
@@ -216,6 +222,19 @@ function measurePair(el: HTMLElement, o: ContrastOpts) {
 
 const OPTS: ContrastOpts = { normal: 4.5, large: 3, largePx: 24, largeBoldPx: 18.66, invisibleBelow: 0.05 };
 const VIEWS = ["配置浏览", "配置对比", "配置矩阵", "操作历史", "备份快照", "任务中心", "审计日志", "连接管理", "SSH 隧道", "设置", "关于"];
+// 轮44：普查必须覆盖的完整状态清单。对比页保活后「带结果的深状态」成为用户常态，
+// 少了任何一档，24px/对比度这类真缺口就会扫不到（本轮就是这么漏掉批量结果的 2 组）。
+const DEEP_SCANS = [
+  "配置浏览+选中文件",
+  "配置浏览+代码查找命中",
+  "配置浏览+内容搜索命中列表",
+  "配置浏览+历史变更diff+命中",
+  "配置矩阵+详情",
+  "配置对比+展开来源面板",
+  "配置对比+匹配列表",
+  "配置对比+批量结果",
+];
+const EXPECTED_SCANS = [...VIEWS, ...DEEP_SCANS];
 
 test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async ({ page, retest }) => {
   test.setTimeout(420_000);
@@ -231,6 +250,10 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   let invisibleTotal = 0;
   let inactiveTotal = 0;
   const real: Record<string, ContrastGroup & { states: string[] }> = {};
+  // 轮44 R94 取证：take 是 async，历史上这里漏过一次 await，扫描在 SUMMARY 之后才落账，
+  // 结果「配置对比+批量结果 真不达组=2」打印出来了却进不了断言（假绿）。
+  // 故每个状态扫完登记一次，末尾用下面的守卫保证没有状态被静默跳过。
+  const statesScanned: string[] = [];
 
   const take = async (state: string) => {
     const r = await page.evaluate(scanContrast, OPTS);
@@ -246,6 +269,7 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
       const s = (real[g.key] = real[g.key] || { ...g, states: [] });
       if (!s.states.includes(state)) s.states.push(state);
     });
+    statesScanned.push(state);
   };
 
   for (const label of VIEWS) {
@@ -261,6 +285,64 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   await expect(page.locator(".code-area").first()).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(600);
   await take("配置浏览+选中文件");
+
+  // 轮44 R94 新增：代码内查找命中档。以前普查从没扫过这一档，而它正是「彩色 token 压红底」
+  // 唯一会真渲染出来的地方：普通命中是 rgba 命中底 + --red-text，当前命中是不透明 --red-fill +
+  // 白字，任何语法色在实心红底上都没有解，只能靠命中范围内回继承色兜住（见 styles.css / G5）。
+  await page.keyboard.press("Control+f");
+  const findInput = page.locator(".code-find-input").filter({ visible: true }).first();
+  await expect(findInput).toBeVisible({ timeout: 10_000 });
+  await findInput.fill("module");
+  await expect(page.locator(".code-area mark.search-hit").filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".code-area mark.search-hit-current").filter({ visible: true }).first()).toBeVisible({ timeout: 10_000 });
+  await page.waitForTimeout(400);
+  await take("配置浏览+代码查找命中");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+
+  // 轮44 R94 再新增：页面级「内容搜索」这一档。用户的主场景就是它（搜内容 ⇒ 摘要标红 ⇒ 选中行 ⇒ 正文标红），
+  // 而以前普查只在 DataId 模式下扫列表，从没扫过「选中行底色 + 命中词」这个组合：
+  // 实测摘要里的命中词落在 --bg-active 上只有 4.26:1，就是这一档揪出来的。
+  await page.locator(".browser-search-mode .btn", { hasText: "内容" }).first().click({ timeout: 15_000 });
+  await page.locator(".browser-search .search-input").first().fill("enabled");
+  await expect(page.locator(".browser-item-summary mark.search-hit").first()).toBeVisible({ timeout: 30_000 });
+  await page.locator(".browser-item", { hasText: "svc-billing.yaml" }).first().click({ timeout: 15_000 });
+  await expect(page.locator(".content-box .code-area").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".code-area mark.search-hit").filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(500);
+  await take("配置浏览+内容搜索命中列表");
+  // 证据锚点：这一档必须真的存在「选中行 + 摘要命中词」这一对，否则 A 桶=0 可能只是空转。
+  // 文字色还必须是 raised 令牌——轮44 实测 --red-text #ff8f8f 叠在 --bg-active 上只有 4.26:1（11px 正文）。
+  const activeHit = page.locator(".browser-item.active .browser-item-summary mark.search-hit").first();
+  await expect(activeHit, "内容搜索下没有选中行的摘要命中词，这一档等于没扫").toBeVisible({ timeout: 10_000 });
+  const activeHitColor = await activeHit.evaluate((el) => getComputedStyle(el).color);
+  const plainHitColor = await page
+    .locator(".browser-item:not(.active):not(:hover) .browser-item-summary mark.search-hit")
+    .first()
+    .evaluate((el) => getComputedStyle(el).color);
+  expect(activeHitColor, "选中行里的命中词没走 raised 红，--bg-active 上不达 AA").toBe("rgb(255, 179, 179)");
+  expect(plainHitColor, "未选中行应保持 --red-text，别把 raised 铺成全站默认").toBe("rgb(255, 143, 143)");
+
+  // 统一视图（.udiff-*）带命中底。它是和 .diff-cell 完全不同的一套 DOM，承托面到底是 --bg 还是 --bg3
+  // 不能靠推断——离线地板（contrastTokens G5）要用实测说话（实测 #5a2929 = 0.28∘--bg，逐位吻合 ⇒ --bg）。
+  // 注意：这里**不按 Ctrl+F**。只有 CodeView / CodeEditor 注册了查找键所有权（src/lib/findKeyOwnership），
+  // diff 正文里的命中一律来自上面的页面级内容搜索——拿 Ctrl+F 去开这一档会永远开不了，
+  // 上一版本就是这么假绿了整轮的（断言写成「没接管就报错」，报错信息反而没人看到）。
+  await page.locator(".detail-tabs .tab-btn", { hasText: "历史变更" }).first().click({ timeout: 15_000 });
+  await expect(page.locator(".history-item").first()).toBeVisible({ timeout: 30_000 });
+  await page.locator(".history-item").first().locator(".history-item-main").click({ timeout: 15_000 });
+  await expect(page.locator(".diff-panel .udiff-row").filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".diff-panel .udiff-text mark.search-hit").filter({ visible: true }).first()).toBeVisible({
+    timeout: 15_000,
+  });
+  await page.waitForTimeout(500);
+  await take("配置浏览+历史变更diff+命中");
+
+  // 收尾：清空内容搜索并切回 DataId 模式，别把带色列表留给后面的状态。
+  await page.locator(".browser-search .search-input").first().fill("");
+  await page.locator(".browser-search-mode .btn", { hasText: "文件名" }).first().click({ timeout: 15_000 });
+  await page.locator(".detail-tabs .tab-btn", { hasText: "内容" }).first().click({ timeout: 15_000 });
+  await page.waitForTimeout(250);
 
   await navigate(page, "配置矩阵");
   await page.waitForTimeout(800);
@@ -279,6 +361,28 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   await page.waitForTimeout(500);
   await take("配置对比+展开来源面板");
 
+  // ── 轮44 新增：对比页带结果的深状态（保活让它成为普查必须覆盖的常态） ──
+  // 改造前对比页切走即卸载，这两屏只有用户手动跑批量时才出现，普查的「配置对比+结果」
+  // 走的是审计矩阵跳转（不自动比对，页面上其实没有结果）。轮44 常驻挂载后上一次跑完的差异
+  // 一直留在可见子树里，普查真的会扫到它们——实测正是这样揪出 .diff-workflow-step-btn(82x22)
+  // 与 .diff-toggle(78x17) 两处不达 24px、以及 hljs-comment 在 diff 语义底色上的 3.49~4.17:1。
+  await navigate(page, "配置对比");
+  await page.waitForTimeout(600);
+  await setDiffSource(page, "left", { connection: "Retest Nacos A", namespace: NS_A, group: GROUP });
+  await setDiffSource(page, "right", { connection: "Retest Nacos B", namespace: NS_B, group: GROUP });
+  await page.getByRole("button", { name: "加载并对比" }).last().click();
+  await expect(page.locator(".match-list").filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(400);
+  await take("配置对比+匹配列表");
+
+  const matchBoxes = page.locator(".match-side-list.left .match-side-row input");
+  await matchBoxes.nth(0).check();
+  await matchBoxes.nth(1).check();
+  await page.getByRole("button", { name: /对比选中/ }).last().click();
+  await expect(page.locator(".batch-diff .batch-diff-nav-item").filter({ visible: true }).first()).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+  await take("配置对比+批量结果");
+
   const merged = Object.keys(real).map((k) => real[k]).sort((a, b) => a.min - b.min);
   console.log(
     `CONTRAST_SUMMARY ${JSON.stringify({
@@ -288,6 +392,12 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
       merged,
     })}`,
   );
+
+  // 防漏 await：漏掉 await 的 take 不会在这里出现 ⇒ 直接判红，而不是留下一行没人读的日志
+  expect(
+    [...new Set(statesScanned)].sort(),
+    "这些状态没有被真正扫描（多半是调用 take 时漏了 await）",
+  ).toEqual(EXPECTED_SCANS.slice().sort());
 
   // 防空转：解析器一旦失效（选择器改动 / evaluate 拿不到节点），三条地板都会先炸
   expect(scannedTotal, "13 个状态一共只量到这么点文本节点，普查多半没真正跑起来").toBeGreaterThan(1_500);

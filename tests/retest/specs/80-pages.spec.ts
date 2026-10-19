@@ -145,10 +145,15 @@ test("T-PG-03 关于页: 应用信息与检查更新", async ({ page, retest }) 
   await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
   await dismissStartupDialog(page);
   await navigate(page, "关于");
-  await expect(page.getByText("ConfScope").first()).toBeVisible({ timeout: 15_000 });
-  await page.locator("button", { hasText: "检查更新" }).first().click();
-  await expect(page.locator(".test-msg.ok, .test-msg").first()).toBeVisible({ timeout: 30_000 });
-  const msg = await page.locator(".test-msg").first().innerText();
+  // 轮44 起浏览页/对比页常驻挂载（切走只 hidden、不卸载），整份 DOM 里会同时存在别的视图的正文：
+  // 播种配置正文里那句「# 注意: 本文件由 ConfScope 管理」就在隐藏子树里，全页 getByText("ConfScope").first()
+  // 按文档顺序先命中它 ⇒ 判 hidden 直接红（真机实测 16.3s 超时，基线 1.4s 绿）。
+  // 断言一律限定在当前这页的 .page-surface 根里——保活之后这才是「这一页」的定义。
+  const about = page.locator(".page-surface.about-page");
+  await expect(about.getByText("ConfScope").first()).toBeVisible({ timeout: 15_000 });
+  await about.locator("button", { hasText: "检查更新" }).first().click();
+  await expect(about.locator(".test-msg.ok, .test-msg").first()).toBeVisible({ timeout: 30_000 });
+  const msg = await about.locator(".test-msg").first().innerText();
   console.log(`[T-PG-03] 更新提示 = ${msg.slice(0, 100)}`);
   expect(msg).toMatch(/最新版本|已是最新|无更新|没有可用更新/);
   await page.screenshot({ path: "results/pg03-about.png", fullPage: true });

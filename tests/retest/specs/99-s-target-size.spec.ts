@@ -16,7 +16,13 @@
 import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog } from "./ui";
+import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { loadRetestState } from "../state";
+
+const state = loadRetestState();
+const NS_A = state.nacos.a.namespace;
+const NS_B = state.nacos.b.namespace;
+const GROUP = "RETEST-PROD";
 
 /** WCAG 2.2 / 2.5.8 Target Size (Minimum)。 */
 const MIN_TARGET = 24;
@@ -25,6 +31,21 @@ const MIN_TARGET = 24;
 const EXEMPT = [{ cls: "about-footer-link-inline-exempt", reason: "页脚句子内的行内链接，WCAG 2.5.8 Inline exception" }];
 
 const VIEWS = ["配置浏览", "配置对比", "配置矩阵", "操作历史", "备份快照", "任务中心", "审计日志", "连接管理", "SSH 隧道", "设置", "关于"];
+// 轮44 R88：与对比度普查同一口径，把「必须扫到的状态」写成清单。check() 是 async，
+// 上一版这里有两处漏了 await，失败数组在断言之后才落账 ⇒ 报红被静默吞掉（假绿）。
+// 现在每个状态扫完登记一次，末尾逐条比对，少一个状态就当场判红。
+const DEEP_CHECKS = [
+  "配置浏览+选中文件",
+  "配置浏览+查找条",
+  "配置浏览+内容搜索命中列表",
+  "配置矩阵+结果",
+  "配置矩阵+详情",
+  "配置对比+结果",
+  "侧边栏收起",
+  "配置对比+匹配列表",
+  "配置对比+批量结果",
+];
+const EXPECTED_CHECKS = [...VIEWS, ...DEEP_CHECKS];
 
 interface TargetReport {
   fails: { sel: string; own: string; eff: string; inline: boolean; txt: string }[];
@@ -104,7 +125,7 @@ function scanTargets(minTarget: number): TargetReport {
   return { fails, scanned, exemptHits };
 }
 
-test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 5 个带数据状态）", async ({ page, retest }) => {
+test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数据状态）", async ({ page, retest }) => {
   test.setTimeout(420_000);
   await installRetestBridge(page, retest);
   await republishRetestData();
@@ -116,9 +137,11 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 5 个带数
   const failures: string[] = [];
   let totalScanned = 0;
   let totalExempt = 0;
+  const statesChecked: string[] = [];
 
   const check = async (state: string) => {
     const r = await page.evaluate(scanTargets, MIN_TARGET);
+    statesChecked.push(state);
     totalScanned += r.scanned;
     totalExempt += r.exemptHits;
     console.log(`R88 ${state} 控件=${r.scanned} 豁免=${r.exemptHits} 失败=${r.fails.length} ${JSON.stringify(r.fails)}`);
@@ -147,6 +170,19 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 5 个带数
   await page.keyboard.press("Escape");
   await page.waitForTimeout(250);
 
+  // 轮44 R88：内容搜索（用户主场景）。这一档会把列表项换成「复选框 + 摘要」的形态，
+  // .browser-result-check（实测 78x17）与 .browser-replace-btn 只在这里存在，以前普查从没扫过。
+  // 扫完切回 DataId 模式，别把带色列表留给后面的状态。
+  await page.locator(".browser-search-mode .btn", { hasText: "内容" }).first().click({ timeout: 15_000 });
+  await page.locator(".browser-search .search-input").first().fill("enabled");
+  await expect(page.locator(".browser-item-summary mark.search-hit").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".browser-result-check").first()).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(500);
+  await check("配置浏览+内容搜索命中列表");
+  await page.locator(".browser-search .search-input").first().fill("");
+  await page.locator(".browser-search-mode .btn", { hasText: "文件名" }).first().click({ timeout: 15_000 });
+  await page.waitForTimeout(250);
+
   await navigate(page, "配置矩阵");
   await page.waitForTimeout(800);
   await page.getByRole("button", { name: "+ 环境" }).click();
@@ -169,6 +205,34 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 5 个带数
   await check("侧边栏收起");
   await page.locator(".sidebar-toggle").click();
   await page.waitForTimeout(400);
+
+  // ── 轮44 新增：对比页带结果的深状态（保活让它成为普查必须覆盖的常态） ──
+  // 改造前对比页切走即卸载，这两屏只有用户手动跑批量时才出现，普查的「配置对比+结果」
+  // 走的是审计矩阵跳转（不自动比对，页面上其实没有结果）。轮44 常驻挂载后上一次跑完的差异
+  // 一直留在可见子树里，普查真的会扫到它们——实测正是这样揪出 .diff-workflow-step-btn(82x22)
+  // 与 .diff-toggle(78x17) 两处不达 24px、以及 hljs-comment 在 diff 语义底色上的 3.49~4.17:1。
+  await navigate(page, "配置对比");
+  await page.waitForTimeout(600);
+  await setDiffSource(page, "left", { connection: "Retest Nacos A", namespace: NS_A, group: GROUP });
+  await setDiffSource(page, "right", { connection: "Retest Nacos B", namespace: NS_B, group: GROUP });
+  await page.getByRole("button", { name: "加载并对比" }).last().click();
+  await expect(page.locator(".match-list").filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(400);
+  await check("配置对比+匹配列表");
+
+  const matchBoxes = page.locator(".match-side-list.left .match-side-row input");
+  await matchBoxes.nth(0).check();
+  await matchBoxes.nth(1).check();
+  await page.getByRole("button", { name: /对比选中/ }).last().click();
+  await expect(page.locator(".batch-diff .batch-diff-nav-item").filter({ visible: true }).first()).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(500);
+  await check("配置对比+批量结果");
+
+  // 防漏 await 守卫：清单里的状态一个都不能少（少一个就是某处 check() 忘了 await）
+  expect(
+    [...new Set(statesChecked)].sort(),
+    "普查覆盖的状态和清单不一致：多半是某处 check() 漏了 await，或新增状态没登记",
+  ).toEqual(EXPECTED_CHECKS.slice().sort());
 
   // 白名单确实被用到（说明豁免逻辑没空转），且控件普查覆盖足够广
   expect(EXEMPT.length, "豁免白名单只允许已写明理由的那几条").toBe(1);
