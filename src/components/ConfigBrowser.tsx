@@ -1317,6 +1317,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 group={selected.group}
                 currentContent={content}
                 format={fmt}
+                searchTerm={isContentSearchActive ? contentTerm : undefined}
                 onRolledBack={() => selected && openConfig(selected)}
               />
             )}

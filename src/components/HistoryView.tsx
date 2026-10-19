@@ -33,6 +33,15 @@ interface Props {
   onRolledBack: () => void;
   /** 宿主页面被保活隐藏时传 false：本页的 CodeView 不再劫持全局 Ctrl+F。 */
   active?: boolean;
+  /**
+   * 页面级正文搜索词（配置浏览「按内容搜索」模式的词），原样透传给「原始内容」的 CodeView。
+   *
+   * 词只有 ConfigBrowser 一个来源（`isContentSearchActive ? contentTerm : undefined`），
+   * 本页不再起第二份搜索状态、也不复制 searchMode 判定：标红、命中行底色、行号当前态、
+   * 缩略图红条、首处命中定位、Ctrl+F 预填全部复用 CodeView 已有的那一套（轮40 R40-1/R40-2）。
+   * 缺省（按 dataId 搜索或空词）时必须传 undefined：正文一处都不许标。
+   */
+  searchTerm?: string;
 }
 
 const PAGE_SIZE = 50;
@@ -52,6 +61,7 @@ export default function HistoryView({
   currentContent,
   format,
   active = true,
+  searchTerm,
 }: Props) {
   const { t } = useTranslation();
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -391,6 +401,7 @@ export default function HistoryView({
                     code={contents[dv!] ?? ""}
                     format={format}
                     active={active}
+                    searchTerm={searchTerm}
                     contentKey={`${tenant}::${group}::${dataId}::${dv}`}
                   />
                 ) : (
