@@ -1,4 +1,4 @@
-import { test, expect, fetchNacosContent } from "./retestTest";
+import { test, expect, fetchNacosContent, fetchNacosContentUntil } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog } from "./ui";
@@ -16,13 +16,18 @@ const GROUP = "RETEST-PROD";
 const FIND = "每季度复核";
 const REPLACE = "每半年复核";
 
-/** 重新发布种子数据并轮询确认 A 侧基线恢复（publish 异步落库，偶尔返回后尚未可查）。 */
+/**
+ * 重新发布种子数据并轮询确认 A 侧基线恢复（publish 异步落库，偶尔返回后尚未可查）。
+ * 两个命中配置都要查：内容搜索用例会断言「恰好 2 个命中」，只要 svc-search.yaml
+ * 还留着上一次替换的结果，前置条件就假了——后面的红会显得像替换功能坏了。
+ */
 async function republishAndVerifyBaseline() {
   await republishRetestData();
+  const targets = ["svc-billing.yaml", "svc-search.yaml"];
   for (let i = 0; i < 10; i++) {
     try {
-      const text = await fetchNacosContent(BASE_A, NS_A, "svc-billing.yaml", GROUP);
-      if (text.includes(FIND)) return;
+      const texts = await Promise.all(targets.map((dataId) => fetchNacosContent(BASE_A, NS_A, dataId, GROUP)));
+      if (texts.every((text) => text.includes(FIND))) return;
     } catch {
       /* retry */
     }
@@ -142,9 +147,11 @@ test("T-CR-01 内容批量替换: 来源连接作为目标（原地）→ 执行
   await executePlan(page);
   mark("执行完成");
 
-  // 落库验证：A 侧两个配置就地变为替换后内容
+  // 落库验证：A 侧两个配置就地变为替换后内容。
+  // 必须轮询读：Nacos v1 写后读是最终一致的，POST 返回 true 后立刻 GET 可能仍回旧值
+  // （桥日志里 publish 已真实发生，单次读却读到替换前内容 → 轮43 的 T-CR-01/02 假红）。
   for (const dataId of ["svc-billing.yaml", "svc-search.yaml"]) {
-    const after = await fetchNacosContent(BASE_A, NS_A, dataId, GROUP);
+    const after = await fetchNacosContentUntil(BASE_A, NS_A, dataId, GROUP, (text) => text.includes(REPLACE));
     expect(after).toContain(REPLACE);
     expect(after).not.toContain(FIND);
   }
@@ -183,9 +190,9 @@ test("T-CR-02 内容批量替换: 跨环境 A→B → 执行 → B 侧落库（�
   await executePlan(page);
   mark("执行完成");
 
-  // 落库验证：B 侧两个配置变为 A 的替换后内容
+  // 落库验证：B 侧两个配置变为 A 的替换后内容（同样轮询读，理由见 T-CR-01）
   for (const dataId of ["svc-billing.yaml", "svc-search.yaml"]) {
-    const after = await fetchNacosContent(BASE_B, NS_B, dataId, GROUP);
+    const after = await fetchNacosContentUntil(BASE_B, NS_B, dataId, GROUP, (text) => text.includes(REPLACE));
     expect(after).toContain(REPLACE);
   }
   mark("B 侧落库断言通过");

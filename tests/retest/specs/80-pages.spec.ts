@@ -116,9 +116,24 @@ test("T-PG-02 备份快照页: 快照列表展示", async ({ page, retest }) => 
   await dismissStartupDialog(page);
   await navigate(page, "备份快照");
   await expect(page.locator(".backup-view")).toBeVisible({ timeout: 15_000 });
-  // 刷新加载快照列表
-  await page.locator("button[title*='刷新'], .backup-view button").first().click().catch(() => {});
-  await page.waitForTimeout(1000);
+
+  // 刷新加载快照列表。选择器必须限定在 .backup-view 内：`button[title*='刷新']` 是全站匹配，
+  // 而配置浏览页是保活的（App.tsx .browse-cache 切走只 display:none），它的「刷新列表」按钮
+  // title 同样含「刷新」且在 DOM 里更靠前——first() 命中的是那个看不见按钮，
+  // Playwright 没有配 actionTimeout，会一路等到 test 超时（480s）才红。轮43 实测就是这形态。
+  const refresh = page.locator(".backup-view .page-actions button").filter({ visible: true }).first();
+  await expect(refresh).toBeVisible({ timeout: 10_000 });
+  await refresh.click({ timeout: 10_000 });
+
+  // 刷新后必须给出可判定的呈现：有快照就列出来，没有就走空态，两者都不出现 = 卡住/白屏。
+  const snapshotItems = page.locator(".backup-view .backup-item");
+  await expect
+    .poll(async () => (await snapshotItems.count()) + (await page.locator(".backup-view .data-empty-state").count()), {
+      timeout: 15_000,
+      message: "刷新后既没有快照条目也没有空态提示",
+    })
+    .toBeGreaterThan(0);
+  console.log(`[T-PG-02] 快照条目数 = ${await snapshotItems.count()}`);
   await page.screenshot({ path: "results/pg02-backup.png", fullPage: true });
 });
 
@@ -172,18 +187,25 @@ test("T-PG-05 设置页: 开发者清理缓存（localStorage + audit-trail）",
   // 开发者面板：清理缓存按钮
   const clearBtn = page.locator("#settings-developer button").filter({ hasText: "清理缓存" }).first();
   await expect(clearBtn).toBeVisible({ timeout: 10_000 });
-  // 确认对话框
-  page.once("dialog", (d) => void d.accept());
+  // 二次确认走应用内 ConfirmModal，不是原生 confirm()（WebView2 里原生框跟随系统浅色、
+  // 还同步阻塞主线程）。断言锁结构不锁文案：role=dialog + 危险按钮，文案改了也不会红。
   await clearBtn.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  await dialog.locator(".modal-footer .btn-danger").click({ timeout: 10_000 });
 
   // 成功提示
   await expect(page.locator("#settings-developer .test-msg.ok")).toBeVisible({ timeout: 10_000 });
 
-  // localStorage cs.* 被清空
+  // 清的是本机缓存：种下去的探针键必须消失。
+  // 不再断言「cs.* 全空」——AGENTS.md 第 6 条 + src/lib/cacheCleanup.ts 的既定合同是
+  // 「清理后从主数据文件重新水合」，装了 Go 绑定时 cs.connections 等键会立刻回来，
+  // 那才是正确行为（用户数据不能因为清缓存而丢）。
   const csKeys = await page.evaluate(() =>
     Object.keys(window.localStorage).filter((k) => k.startsWith("cs."))
   );
-  expect(csKeys).toEqual([]);
+  console.log(`[T-PG-05] 清理后残留 cs.* = ${JSON.stringify(csKeys)}`);
+  expect(csKeys).not.toContain("cs.retest.probe");
 
   // audit-trail.jsonl 被 truncate 为空（web 手动桥经 vite 中间件 /__retest_audit_clear 真实落盘；
   // 原生则走 Go ClearAuditTrail truncate，由 Go 单测 TestClearTruncatesTrail 覆盖）

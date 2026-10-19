@@ -277,7 +277,10 @@ test("L1 连接不可达: 浏览页错误展示与重试按钮", async ({ page }
   // 浏览页 header 自绘 Select 触发器顺序固定：项目 / 环境 / 来源 / 命名空间 / 分组。
   // 自绘 Select 选项靠 onMouseDown 选中 → 用真实指针点击。
   await nav(page, "配置浏览");
-  await expect(page.locator(".browse-header .sel-trigger").nth(1)).toBeEnabled({ timeout: 30_000 });
+  // 浏览页作用域条的自绘下拉在 .page-header .browse-scope-field 里（`.browse-header` 这个类
+  // 在 src 里根本不存在，用它当锚点 = 永远等不到元素）。
+  const scopeTriggers = page.locator(".page-header .browse-scope-field .sel-trigger");
+  await expect(scopeTriggers.nth(1)).toBeEnabled({ timeout: 30_000 });
   const openMenu = async (trigger: import("@playwright/test").Locator) => {
     await trigger.click({ force: true, timeout: 10_000 });
     const m = page.locator(".sel-menu-portal");
@@ -293,9 +296,9 @@ test("L1 连接不可达: 浏览页错误展示与重试按钮", async ({ page }
     await expect(menu).toBeHidden({ timeout: 10_000 });
   };
   // 环境 → 开发（坏连接所在组）
-  await clickOption(await openMenu(page.locator(".browse-header .sel-trigger").nth(1)), "开发");
+  await clickOption(await openMenu(scopeTriggers.nth(1)), "开发");
   // 来源 → 坏连接
-  await clickOption(await openMenu(page.locator(".browse-header .sel-trigger").nth(2)), "L1 坏连接");
+  await clickOption(await openMenu(scopeTriggers.nth(2)), "L1 坏连接");
 
   // 错误卡片：命名空间加载失败走 App 层 .pad-msg.err「无法连接到 {name}」+ 重试/连接管理按钮
   await expect(page.locator(".pad-msg.err").filter({ hasText: "无法连接到 L1 坏连接" }).first()).toBeVisible({ timeout: 30_000 });
