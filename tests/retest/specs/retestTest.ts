@@ -1,5 +1,6 @@
 import { test as base } from "@playwright/test";
 import { loadRetestState, type RetestState } from "../state";
+import { sweepRetestStrays } from "../strays";
 
 // 注意：Playwright 1.61.1 中，依赖 `page` 的自定义 fixture 会导致该页面的
 // addInitScript 不生效（Wails bridge 注入失败）。因此 retest fixture 仅提供
@@ -8,10 +9,27 @@ interface RetestFixtures {
   retest: RetestState;
 }
 
-export const test = base.extend<RetestFixtures>({
+interface RetestWorkerFixtures {
+  /** 残留清扫（worker 作用域 + auto）：见 ../strays.ts 的立轮理由。 */
+  retestSweep: void;
+}
+
+export const test = base.extend<RetestFixtures, RetestWorkerFixtures>({
   retest: async ({}, use) => {
     use(loadRetestState());
   },
+  // 起跑前先扫一次：上一批崩在中间留下的 `retest-*` 不能污染本批第一条条数断言；
+  // 收工后再扫一次：这一批红掉的用例没跑完自己的收尾，兜底得在它之后、而不是靠它自己。
+  // worker 作用域 + auto = 每条用例都会带上这道清扫，且失败路径同样执行 teardown
+  // （Playwright 的 globalTeardown 只在正常结束时跑，恰恰漏掉最需要它的场景）。
+  retestSweep: [
+    async ({}, use) => {
+      await sweepRetestStrays("worker-start");
+      await use();
+      await sweepRetestStrays("worker-end");
+    },
+    { scope: "worker", auto: true },
+  ],
 });
 
 export { expect } from "@playwright/test";
