@@ -119,10 +119,15 @@ function contextOf(sel: string): string {
 }
 
 const DIM = "0.28";
-/** 静止底色与禁用态的契约值 */
-const BASE_OPACITY = "0.46";
-/** 灰态取值：出现这些值的声明不算「点亮」 */
-const DIM_VALUES = new Set(["var(--text-dim)", "rgba(255, 255, 255, 0.04)", DIM, BASE_OPACITY]);
+/**
+ * 静止底色与禁用态的契约值。
+ * 轮44 R94：0.46 把 #a0a0a0 合成成 #626264，在 --bg3 上实测 2.25:1，可用控件进不了禁用豁免
+ * ⇒ 静止档抬到 0.8、基色改 --text-dim-raised（合成 #a7a7a7 → 5.71:1）。
+ * 0.28 仍严格低于静止档，禁用态照旧被压住。
+ */
+const BASE_OPACITY = "0.8";
+/** 灰态取值：出现这些值的声明不算「点亮」（--text-dim-raised 仍是灰阶令牌，不是高亮色） */
+const DIM_VALUES = new Set(["var(--text-dim)", "var(--text-dim-raised)", "rgba(255, 255, 255, 0.04)", DIM, BASE_OPACITY]);
 
 /** 会把箭头「点亮」的声明：透明度高于静止档，或文字/描边换成非灰 token */
 function brightenProps(decls: Record<string, string>): string[] {
@@ -213,7 +218,7 @@ describe("点不动的合并箭头靠特异度保持禁用态（轮27 F-9）", (
     );
   });
 
-  it("静止档 0.46 也要被禁用态严格压过，不留顺序决胜", () => {
+  it("静止档 0.8 也要被禁用态严格压过，不留顺序决胜", () => {
     const base = RULES.filter((r) => r.decls.opacity === BASE_OPACITY);
     expect(base, "静止底色规则应恰好一条").toHaveLength(1);
     for (const sel of base[0].selectors) {
