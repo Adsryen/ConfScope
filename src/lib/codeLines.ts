@@ -251,6 +251,31 @@ export function markHighlightedHtml(html: string, hits: CodeHit[]): string {
 }
 
 /**
+ * 单行正文的搜索标记：给「每行一个 DOM 节点」的视图用（目前唯一消费方是 UnifiedDiff）。
+ *
+ * 为什么不复用整篇管线：UnifiedDiff 把每行单独交给 highlightLine 产 HTML，
+ * 一整篇 `highlightCode` 的结果没法按行切回去（hljs 的跨行 token 会把标签撕开），
+ * 而 markHighlightedHtml 的偏移口径是「它拿到的那一份 HTML 的解码文本流」。
+ * 于是把 findCodeHits 的输入也换成同一行文本 —— 两边都从 0 起，偏移天然自洽，
+ * 含 `&` `<` `'` 与字面 `&amp;` 的行实测「剥标签+反转义」逐字等于原行。
+ *
+ * 代价必须说清楚：`data-hit` 因此只是**行内下标**，跨行会重号。这条路径没有
+ * 「当前命中 / 跳到第 N 处」语义（那些靠 currentHitSelector 在全篇里找唯一编号），
+ * 所以本函数所在视图不许借用那套定位——tests/ux/diffSearchMarksReuseSharedLayer.test.ts 钉住。
+ *
+ * 匹配口径固定中性（大小写不敏感子串）：这是页面级正文搜索词唯一的口径，与
+ * CodeView / CodeEditor 里查找栏未打开时的 NEUTRAL_MATCH_OPTIONS 一致。在这里放开
+ * 区分大小写 / 全词，就等于让「左侧列表命中数」和「正文标红」重新分叉。
+ */
+export function markLineSearchHits(html: string, line: string, term: string): { html: string; isHit: boolean } {
+  const needle = term.trim();
+  if (!needle) return { html, isHit: false };
+  const hits = findCodeHits(line, needle);
+  if (!hits.length) return { html, isHit: false };
+  return { html: markHighlightedHtml(html, hits), isHit: true };
+}
+
+/**
  * 反转 highlight.js 在文本节点里可能产出的实体：&amp; &lt; &gt; &quot; &#39;
  * 以及 &#xHH;/&#DDD; 数字实体。highlight.js 会按语言把 " 转成 &quot;、
  * 把 ' 转成 &#x27;（TEXT 只转 & < >），若只反转 & < > 就会让解码后的文本长度

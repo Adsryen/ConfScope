@@ -2214,6 +2214,17 @@ textarea {
   overflow-wrap: anywhere;
   font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
+/* 轮41：历史变更默认视图（UnifiedDiff）里的正文搜索命中。
+   词仍是 .search-hit 的红底，但 diff 行有自己的语义色（add 绿 / del 红 0.16），
+   底色压不住就看不见命中词 ⇒ 与 .code-area .search-hit 取同一档 0.28。
+   命中行指示只许走行号变红，不许叠行背景：那会把「这行是新增的」和「这行有命中」
+   挤进同一个通道（R41-3，与 .code-ln.is-hit 同口径）。 */
+.udiff-text .search-hit {
+  background: rgba(244, 71, 71, 0.28);
+}
+.udiff-gutter.is-hit {
+  color: var(--red-h);
+}
 .udiff-row.add {
   background: var(--diff-add-bg);
 }
