@@ -66,6 +66,23 @@ async function runBillingApply(page: import("@playwright/test").Page): Promise<v
   expect(after.trim(), "B 侧 billing 未被覆写为 A 侧全文（apply 未落库）").toBe(before.trim());
 }
 
+/**
+ * 轮询读 B 侧 svc-billing.yaml，直到 predicate 命中（或耗尽次数返回最后一次读数）。
+ *
+ * 动机（轮40 实测）：Nacos v1 单节点写后读有秒级最终一致性窗口，同文件的 runBillingApply 早就用
+ * 同款轮询兜底，唯独 S8b 的回读只读一次 —— 于是「回退有没有真的还原」被读成了「Nacos 缓存刷没刷新」。
+ * 单独 12.6s 跑 S8b 全绿、并进整批跑就红，差的就是这一口气。
+ */
+async function waitBillingOnB(predicate: (content: string) => boolean, tries = 30): Promise<string> {
+  let last = "";
+  for (let i = 0; i < tries; i++) {
+    last = await fetchNacosContent(BASE_B, NS_B, "svc-billing.yaml", GROUP);
+    if (predicate(last)) return last;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return last;
+}
+
 // S8: 浏览页历史版本 tab → 查看版本 → 回滚被「直接写入禁用」拦截，Nacos 零变化。
 test("S8 浏览页历史版本: 查看版本+回滚被直接写入禁用拦截且Nacos零变化", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
@@ -145,12 +162,20 @@ test("S8b 操作历史回退计划: 生成(快照来源)→执行→B侧回读�
     console.log(`[S8b][page-console][${msg.type()}] ${msg.text()}`);
   });
   await republishRetestData();
+  // 回退目标 = 回退计划自动快照的 B 侧内容，而那份快照是在 apply 那一刻由应用自己读的。
+  // 旧写法把「republish 之后 B 一定是 prod 变体」当成常量写死（cycle: daily）：整批串行跑时
+  // 上一个用例刚把 B 覆写过，republish 的写还没刷新，应用快照拿到的就是上一份内容，
+  // 于是回退“成功”了、回读却仍是旧值 —— 断言在猜内容而不是在量内容。
+  // 这里先把基线读实（轮询到 prod 变体落地），后面所有断言都以这份实测内容为期望值。
+  const expected = await waitBillingOnB((c) => c.includes("cycle: daily"));
+  expect(expected, "republish 后 B 侧没回到 prod 变体，S8b 的基线不成立").toContain("cycle: daily");
   await bootstrap(page);
 
   await runBillingApply(page);
-  // 记录 apply 后 B 侧内容（回退目标 = apply 前的 B 侧内容，即 republish 基线）
+  // apply 是文档级覆写（A 全文 → B）：B 必须换成 dev 变体，且与回退目标不同，否则本用例无意义
   const afterApply = await fetchNacosContent(BASE_B, NS_B, "svc-billing.yaml", GROUP);
   expect(afterApply).toContain("cycle: hourly");
+  expect(afterApply.trim()).not.toBe(expected.trim());
 
   // 注意：此处【故意不】再手动改 B 侧——外部漂移会使回退计划 stale 检查失败
   // （plan 新鲜度指纹基于生成时内容），那属于 D6 已覆盖的「stale 拦截」路径。
@@ -201,14 +226,13 @@ test("S8b 操作历史回退计划: 生成(快照来源)→执行→B侧回读�
       );
     });
 
-  // 回读断言：B 侧被还原为回退计划生成时的自动快照内容（republish 基线的 prod 变体）。
-  // 注意：runBillingApply 是文档级覆写（A 全文 → B），而回退计划快照的是 apply 前 B 侧
-  // （prod 变体 cycle: daily），两者必须不同，否则本用例无意义。
-  const restored = await fetchNacosContent(BASE_B, NS_B, "svc-billing.yaml", GROUP);
+  // 回读断言：B 侧被还原成「回退计划生成时那份自动快照」的内容 —— 期望值就是上面实测到的基线。
+  // 轮询兜最终一致性窗口；超时后仍用最后一次读数报错，便于区分「没还原」和「没刷新」。
+  const restored = await waitBillingOnB((c) => c.trim() === expected.trim());
+  expect(restored, "回退执行后 B 侧未还原为回退前的基线内容").toContain("cycle: daily");
+  expect(restored.trim()).toBe(expected.trim());
   expect(restored).not.toContain("s8b-drift");
-  // apply 前 B 侧是 prod 变体（cycle: daily），回退后必须还原为它
-  expect(restored).toContain("cycle: daily");
-  expect(restored).not.toBe(afterApply);
+  expect(restored.trim()).not.toBe(afterApply.trim());
   await page.screenshot({ path: "results/s8b-rollback-plan-executed.png", fullPage: true });
 });
 
