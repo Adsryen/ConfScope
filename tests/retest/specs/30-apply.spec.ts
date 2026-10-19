@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
 import { loadRetestState } from "../state";
 import { republishRetestData } from "../bridge/republishData";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, planRows } from "./planExit";
 
 /** republish 后轮询确认 Nacos B 的 svc-gateway.yaml 恢复为生产基线（publish 异步落库，偶尔返回后尚未可查）。 */
 async function republishAndVerifyBaseline() {
@@ -202,8 +203,9 @@ test("T-AP-02 批量变更计划: 13 项匹配 + parse_error 阻断守卫 + 执�
   console.log(`[T-AP-02] 任务状态=${taskStatus} 提示=${execNotice?.slice(0, 200)}`);
   expect(taskStatus).toContain("成功");
   expect(execNotice).toMatch(/变更执行完成|已应用 11/);
-  // 阻断项未执行的提示
-  expect(execNotice).toContain("已阻断");
+  // 阻断项未执行的提示。文案事实源：apply.executionSucceededWithBlocked
+  // （80c3c38 把整句收进 i18n 后是「另有 N 项被阻断，未执行」，此前断言写死的「已阻断」再没匹配上过）
+  expect(execNotice).toMatch(/2 项被阻断/);
   await page.screenshot({ path: "results/ap02-batch-executed.png", fullPage: true });
   mark("批量执行完成");
 
@@ -222,7 +224,7 @@ test("T-AP-02 批量变更计划: 13 项匹配 + parse_error 阻断守卫 + 执�
 });
 
 // T-AP-03: 浏览页直接发布被阻断（安全模型：只能走 ApplyPlan）
-test("T-AP-03 浏览页直接发布被阻断且 Nacos 不变", async ({ page, retest }) => {
+test("T-AP-03 浏览页保存走变更计划、未确认执行前 Nacos 不变", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
 
   await page.goto("/");
@@ -239,8 +241,8 @@ test("T-AP-03 浏览页直接发布被阻断且 Nacos 不变", async ({ page, re
   await editor.click();
   await page.keyboard.press("Control+a");
   // 关键：编辑对象是 JSON 格式（svc-pay.json），若填入纯文本会被 validateConfig 判为
-  // 「JSON 解析失败」而止步于格式校验，根本走不到直接发布守卫。必须填入合法 JSON，
-  // 才能触发 directWriteRequiresApplyPlan 安全守卫（本测试真正要验证的）。
+  // 「JSON 解析失败」而止步于格式校验，根本走不到写入这一步。必须填入合法 JSON，
+  // 才能验证「保存不直写、必须先成计划」这条守卫（本测试真正要验证的）。
   await editor.evaluate((el) => {
     const input = el as HTMLTextAreaElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.bind(input);
@@ -248,46 +250,25 @@ test("T-AP-03 浏览页直接发布被阻断且 Nacos 不变", async ({ page, re
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
-  // 保存/发布
-  const saveBtn = page.getByRole("button", { name: /保存|发布/ }).first();
-  if (await saveBtn.count()) {
-    await saveBtn.click();
-    await page.waitForTimeout(1500);
-  }
-  // 直接写入守卫错误展示在编辑器错误行（.test-msg.err），消息中心记未读徽标
-  const editorErr = (await page.locator(".test-msg.err, .inline-error").allInnerTexts()).filter((t) => t.length > 0);
-  const toast = await page.locator(".toaster .toast").allInnerTexts();
-  console.log(`[T-AP-03] editorErr = ${JSON.stringify(editorErr)} toast = ${JSON.stringify(toast)}`);
+  // 保存 = 生成变更计划（轮42 前的形态是「点保存 → 必然抛直接写入已禁用」，
+  // 本用例锁的意图没变：浏览页的保存不能绕过计划确认直接改写 Nacos）。
+  const saveBtn = page.getByRole("button", { name: /生成变更计划/ }).first();
+  await expect(saveBtn).toBeVisible({ timeout: 15_000 });
+  await saveBtn.click();
+  await page.waitForTimeout(1500);
 
-  // 直接发布必须失败；错误详情记录在消息中心。
-  // headless 下 mouseenter/mouseleave 不可靠（click 触发 focus+blur 会立即 scheduleClose），
-  // 因此用原生 DOM click 打开面板；面板未展开时读按钮徽标作为未读错误存在的证据。
-  const msgBtn = page.locator(".message-center-btn");
-  const badgeCount = await msgBtn.locator(".message-badge").count();
-  const msgBadge = badgeCount > 0 ? await msgBtn.locator(".message-badge").first().textContent() : null;
-  await msgBtn.evaluate((el) => (el as HTMLButtonElement).click());
-  let msgPanel = await page
-    .locator(".message-panel")
-    .innerText()
-    .catch(() => "");
-  if (!msgPanel) {
-    await msgBtn.evaluate((el) => (el as HTMLButtonElement).click());
-    await msgBtn.evaluate((el) => (el as HTMLButtonElement).click());
-    msgPanel = await page
-      .locator(".message-panel")
-      .innerText()
-      .catch(() => "");
-  }
-  console.log(`[T-AP-03] 消息中心徽标=${msgBadge} 面板=${msgPanel.slice(0, 600)}`);
+  // 守卫仍在：保存只落到变更计划——一条覆盖项，挂在正在编辑的那个配置上
+  const rows = await planRows(page);
+  console.log(`[T-AP-03] 计划项=${JSON.stringify(rows)}`);
+  expect(rows.length, "就地编辑没有只生成一条计划").toBe(1);
+  expect(rows[0].dataId, "计划挂在了别的配置上").toBe("svc-pay.json");
+  expect(rows[0].action, "编辑保存的计划动作不是覆盖").toBe("overwrite");
+  // 不许再出现「点了才报错」的直写失败呈现（旧形态的错误行 / 必然失败的重试）
+  await expectNoDisabledWriteError(page);
+  await backToBrowseFromPlan(page);
   await page.screenshot({ path: "results/ap03-direct-publish.png", fullPage: true });
-  // 守卫生效的证据（任一命中）：编辑器错误行 / toast / 消息中心面板 / 未读徽标
-  const evidence = [...editorErr, ...toast, msgPanel, String(msgBadge ?? "")].join("\n");
-  expect(evidence).toMatch(/变更计划|直接配置写入已禁用|失败/);
-  if (msgPanel || msgBadge) {
-    expect(msgPanel || String(msgBadge)).toMatch(/变更计划|直接配置写入已禁用|阻断/);
-  }
 
-  // Nacos 内容不变：守卫阻止了写入，A 侧 svc-pay.json 不应包含本次注入的标记
+  // Nacos 内容不变：未确认执行前守卫阻止了写入，A 侧 svc-pay.json 不应包含本次注入的标记
   const after = await fetchNacosContent(BASE_A, NS_A, "svc-pay.json", GROUP);
   expect(after).not.toContain("direct publish attempt");
 });

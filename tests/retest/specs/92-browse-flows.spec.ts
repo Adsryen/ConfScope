@@ -2,6 +2,7 @@ import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { expectNoDisabledWriteError, expectRollbackPlanRow } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -15,8 +16,8 @@ async function bootstrap(page: import("@playwright/test").Page) {
   await dismissStartupDialog(page);
 }
 
-// A8: 配置浏览 → 历史变更 tab：版本列表 → 查看旧版本内容 → 回滚二次确认 → 被「直接写入已禁用」拦截
-test("A8 历史变更tab: 版本查看 + 回滚被禁用拦截", async ({ page, retest }) => {
+// A8: 配置浏览 → 历史变更 tab：版本列表 → 查看旧版本内容 → 回滚二次确认 → 生成回滚计划（不直写）
+test("A8 历史变更tab: 版本查看 + 回滚生成变更计划", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
@@ -38,13 +39,15 @@ test("A8 历史变更tab: 版本查看 + 回滚被禁用拦截", async ({ page, 
   await historyItems.first().locator(".history-item-main").click();
   await expect(page.locator(".history-detail .content-box, .history-detail .pad-msg").first()).toBeVisible({ timeout: 15_000 });
 
-  // 回滚：第一次点击进入二次确认态，第二次执行 → 被禁用拦截
-  const rbBtn = page.getByRole("button", { name: /回滚/ }).last();
+  // 回滚：第一次点击只进入二次确认态（文案自证「这是计划不是直写」），第二次生成计划
+  const rbBtn = page.getByRole("button", { name: /生成回滚计划/ }).last();
   await rbBtn.click();
-  await expect(page.getByText("确认回滚").first()).toBeVisible({ timeout: 5_000 });
+  await expect(rbBtn).toHaveText(/确认生成回滚计划/, { timeout: 5_000 });
   await rbBtn.click();
-  await expect(page.getByText("直接配置写入已禁用").first()).toBeVisible({ timeout: 15_000 });
-  await page.screenshot({ path: "results/a8-history-rollback-blocked.png", fullPage: true });
+  // 计划项必须落在正在看的那个配置上（1 项、同 dataId），否则回滚出路挂错了位置
+  console.log(`[A8] 回滚计划动作=${await expectRollbackPlanRow(page, "svc-gateway.yaml")}`);
+  await expectNoDisabledWriteError(page);
+  await page.screenshot({ path: "results/a8-history-rollback-plan.png", fullPage: true });
 });
 
 // A9: 内容搜索 → 勾选多个命中 → 批量替换面板 → 目标环境弹框 → 生成变更计划入口

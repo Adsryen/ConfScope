@@ -1,7 +1,7 @@
 // S 组补充场景（批次 8 差集分析）：操作历史 / 审计日志页 / 配置浏览历史版本 tab。
-// S8   配置浏览「历史变更」tab → 历史版本列表 → 查看版本 → 回滚（被「直接写入禁用」拦截，
-//      Nacos 内容零变化 + 操作历史出现失败 rollback 记录）——浏览页回滚成功路径按产品安全
-//      设计不存在（必须走变更计划），本用例锁死该契约。
+// S8   配置浏览「历史变更」tab → 历史版本列表 → 查看版本 → 回滚生成变更计划，
+//      Nacos 内容零变化——浏览页回滚成功路径按产品安全设计不存在（必须走变更计划确认），
+//      本用例锁死该契约。轮42 起入口不再「点了才报错」，所以不再期待失败 rollback 记录。
 // S8b  操作历史「生成回退计划」→ 计划页工作区成功（local 快照来源）→ 执行 → B 侧回读 =
 //      执行前内容（回退真实还原，Nacos 回读断言）。
 // S4   审计日志页 UI：会话列表渲染 → 类型筛选 → 展开事件链 details → 复制按钮。
@@ -11,6 +11,7 @@ import { installRetestBridge } from "../bridge/installRetestBridge";
 import { onBridgeLog } from "../bridge/retestBinding";
 import { republishRetestData, publishNacosContent } from "../bridge/republishData";
 import { navigate, dismissStartupDialog } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectRollbackPlanRow } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -83,8 +84,8 @@ async function waitBillingOnB(predicate: (content: string) => boolean, tries = 3
   return last;
 }
 
-// S8: 浏览页历史版本 tab → 查看版本 → 回滚被「直接写入禁用」拦截，Nacos 零变化。
-test("S8 浏览页历史版本: 查看版本+回滚被直接写入禁用拦截且Nacos零变化", async ({ page, retest }) => {
+// S8: 浏览页历史版本 tab → 查看版本 → 回滚只生成变更计划（不直写），Nacos 零变化。
+test("S8 浏览页历史版本: 查看版本+回滚生成变更计划且Nacos零变化", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
@@ -131,23 +132,23 @@ test("S8 浏览页历史版本: 查看版本+回滚被直接写入禁用拦截�
     expect(latestViewText).not.toContain("s8-history-marker");
   }
 
-  // 回滚：第一次点进入确认态（onBlur 会重置，需 force click + 短等待），第二次点击执行
-  // → 被「直接写入已禁用」拦截；错误提示落在 .history-view .err（与 50-history 用例同款契约）
+  // 回滚：第一次点进入二次确认态（onBlur 会重置，需 force click + 短等待），
+  // 第二次点击生成回滚计划（轮42 的出路）；确认执行前 Nacos 一个字都不该变。
   const rbBtn = page.locator(".history-detail button", { hasText: "回滚" }).first();
   await expect(rbBtn).toBeVisible({ timeout: 10_000 });
   await rbBtn.click({ force: true });
   await page.waitForTimeout(300);
-  await expect(rbBtn).toHaveText(/确认回滚/, { timeout: 5_000 });
+  await expect(rbBtn).toHaveText(/确认生成回滚计划/, { timeout: 5_000 });
   await rbBtn.click({ force: true });
-  await page.waitForTimeout(800);
-  const errorText = await page.locator(".history-view .err, .history-view .pad-msg.err").allInnerTexts();
-  expect(errorText.join("\n")).toMatch(/直接配置写入已禁用|直接写入已禁用|配置回滚失败/);
+  console.log(`[S8] 回滚计划动作=${await expectRollbackPlanRow(page, "svc-billing.yaml")}`);
+  await expectNoDisabledWriteError(page);
+  await backToBrowseFromPlan(page);
 
   // Nacos 零变化：当前内容仍是 real（无 marker）
   const now = await fetchNacosContent(BASE_A, NS_A, "svc-billing.yaml", GROUP);
   expect(now).toBe(real);
   expect(now).not.toContain("s8-history-marker");
-  await page.screenshot({ path: "results/s8-browse-history-rollback-blocked.png", fullPage: true });
+  await page.screenshot({ path: "results/s8-browse-history-rollback-plan.png", fullPage: true });
 });
 
 // S8b: 操作历史「生成回退计划」成功路径 + 执行 → B 侧还原为执行前内容。

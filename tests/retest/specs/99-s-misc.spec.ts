@@ -1,7 +1,7 @@
 // S 组补充场景（批次 9 差集分析）：边缘交互 + 设置/备份辅助路径。
 // S12  侧边栏收起/展开：toggle → 收起 → 导航仍可用 → 展开（sidebarCollapsed）
 // S13  对比页来源面板折叠/展开：收起来源 → 摘要条 → 展开来源 → 字段可操作（sourcesCollapsed）
-// S16  配置浏览新建配置「直接写入禁用」契约：发布被拦截且 Nacos 未新增（A7 延伸，锁死开关语义）
+// S16  配置浏览新建配置「写入只能走计划」契约：生成新增计划且 Nacos 未新增（A7 延伸，锁死开关语义）
 // S5   设置/SSH 隧道档案 CRUD：新建（必填校验+保存落盘）→ 测试 SSH（成功+失败路径）→ 编辑 → 删除
 // S6   备份快照「与云端对比」：快照条目 → 跳转对比页（快照来源 + autoCompare）→ 对比面板出现
 // S7   备份快照 WebDAV 同步：填地址 → 测试 → 上传当前快照 → 刷新远端列表 → 导入远端快照包
@@ -9,6 +9,7 @@ import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, ensureSourcesPanelExpanded } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectPlanItem } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -84,9 +85,9 @@ test("S13 对比页来源面板折叠/展开: 收起→摘要条→展开→字�
   await page.screenshot({ path: "results/s13-sources-collapse.png", fullPage: true });
 });
 
-// S16: 配置浏览新建配置 → 发布被「直接写入禁用」拦截且 Nacos 未新增
+// S16: 配置浏览新建配置 → 生成「新增」计划，Nacos 未新增
 // （产品契约：浏览页发布必须走变更计划；本用例锁死该开关语义，防止回归成静默放行）
-test("S16 新建配置: 发布被直接写入禁用拦截且 Nacos 未新增", async ({ page, retest }) => {
+test("S16 新建配置: 生成新增计划且 Nacos 未新增", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
@@ -99,9 +100,14 @@ test("S16 新建配置: 发布被直接写入禁用拦截且 Nacos 未新增", a
   const dataId = "ux99-new-check.properties";
   await page.getByPlaceholder("请输入 Data ID").fill(dataId);
   await page.locator(".modal .code-editor-ta, .modal textarea").first().fill("a=1\n# ux99 new config\n");
-  await page.getByRole("button", { name: "发布" }).click();
-  await expect(page.getByText("直接配置写入已禁用").first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
+  // 出路的证据：进入计划页的「新增」项，而不是弹框里一句必然失败的禁用错误
+  await expectPlanItem(page, "create");
+  await expectNoDisabledWriteError(page);
+  await backToBrowseFromPlan(page);
   await page.keyboard.press("Escape");
+  // 带着草稿关闭会先问「放弃未发布的内容？」，一并确认掉，别把草稿漏给下一条用例
+  await page.getByRole("button", { name: /放弃/ }).first().click().catch(() => undefined);
   await page.waitForTimeout(300);
 
   // Nacos 侧未新增（404）
@@ -109,7 +115,7 @@ test("S16 新建配置: 发布被直接写入禁用拦截且 Nacos 未新增", a
     `${BASE_A}/v1/cs/configs?dataId=${encodeURIComponent(dataId)}&group=${encodeURIComponent(GROUP)}&tenant=${encodeURIComponent(NS_A)}`
   );
   expect(res.status).not.toBe(200);
-  await page.screenshot({ path: "results/s16-new-config-blocked.png", fullPage: true });
+  await page.screenshot({ path: "results/s16-new-config-plan.png", fullPage: true });
 });
 
 // S5: SSH 隧道档案 CRUD + 测试 SSH（成功/失败）

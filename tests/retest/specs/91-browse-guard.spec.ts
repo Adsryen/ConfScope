@@ -2,6 +2,7 @@ import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectPlanItem } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -45,8 +46,8 @@ async function openBrowseDetail(page: import("@playwright/test").Page, dataId: s
   await expect(page.locator(".fmt-bar").first()).toBeVisible({ timeout: 15_000 });
 }
 
-// A6: 删除配置 → 输入 dataId 确认 → 被「直接写入已禁用」拦截（弹框内错误 + 消息中心），Nacos 未删
-test("A6 删除配置: 输入确认后仍被禁用拦截且 Nacos 未删", async ({ page, retest }) => {
+// A6: 删除配置 → 输入 dataId 确认 → 生成「删除」计划（轮42：确认按钮就叫它做的事），Nacos 未删
+test("A6 删除配置: 输入确认后生成删除计划且 Nacos 未删", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
 
@@ -58,26 +59,28 @@ test("A6 删除配置: 输入确认后仍被禁用拦截且 Nacos 未删", async
   await page.getByRole("button", { name: "删除" }).click();
   // 删除确认弹框：必须输入 dataId 完全一致才能启用确认按钮
   await expect(page.getByRole("heading", { name: "删除配置" })).toBeVisible({ timeout: 10_000 });
-  const confirmBtn = page.getByRole("button", { name: "删除", exact: true }).last();
+  // 确认按钮文案必须说实话：它生成删除计划，不是当场删
+  const confirmBtn = page.getByRole("button", { name: /生成删除计划/ }).last();
   expect(await confirmBtn.isDisabled()).toBeTruthy();
   await page.locator(".del-body input").fill("svc-monitor.properties");
   await expect(confirmBtn).toBeEnabled();
   await confirmBtn.click();
 
-  // 拦截：弹框内展示「直接配置写入已禁用」错误
-  await expect(page.locator(".del-body").getByText("直接配置写入已禁用").first()).toBeVisible({ timeout: 15_000 });
-  // 取消关闭弹框
-  await page.getByRole("button", { name: "取消" }).last().click();
+  // 拦截：删除动作被挡在计划确认之后 —— 证据是进入计划页的「删除」项，而不是弹框里的禁用错误
+  await expectPlanItem(page, "delete");
+  await expectNoDisabledWriteError(page);
+  // 回浏览页：计划已生成，确认弹框应随之关闭（不能留着让用户以为还要再点一次）
+  await backToBrowseFromPlan(page);
   await expect(page.getByRole("heading", { name: "删除配置" })).toBeHidden({ timeout: 5_000 });
 
   // Nacos 侧未被删除
   const text = await fetchNacosContent(BASE_A, NS_A, "svc-monitor.properties", "DEFAULT_GROUP");
   expect(text.length).toBeGreaterThan(0);
-  await page.screenshot({ path: "results/a6-delete-blocked.png", fullPage: true });
+  await page.screenshot({ path: "results/a6-delete-plan.png", fullPage: true });
 });
 
-// A7: 新建配置 → 空 dataId 校验 + 填写完整后发布被「直接写入已禁用」拦截，Nacos 未新增
-test("A7 新建配置: 必填校验 + 发布被禁用拦截且 Nacos 未新增", async ({ page, retest }) => {
+// A7: 新建配置 → 空 dataId 校验 + 填写完整后生成「新增」计划（不直写），Nacos 未新增
+test("A7 新建配置: 必填校验 + 生成新增计划且 Nacos 未新增", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
 
@@ -88,8 +91,8 @@ test("A7 新建配置: 必填校验 + 发布被禁用拦截且 Nacos 未新增",
   await page.getByRole("button", { name: "新建配置" }).click();
   await expect(page.getByRole("heading", { name: "新建配置" })).toBeVisible({ timeout: 10_000 });
 
-  // 空 dataId → 必填校验
-  await page.getByRole("button", { name: "发布" }).click();
+  // 空 dataId → 必填校验（生成计划也不能绕过必填）
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
   await expect(page.getByText("dataId").filter({ hasText: /必填|不能为空|请输入/ }).first()).toBeVisible({ timeout: 5_000 }).catch(async () => {
     // 文案兜底：任意错误提示出现即可
     await expect(page.locator(".modal .test-msg.err, .modal .inline-error").first()).toBeVisible({ timeout: 5_000 });
@@ -98,10 +101,13 @@ test("A7 新建配置: 必填校验 + 发布被禁用拦截且 Nacos 未新增",
   // 填写完整表单
   await page.getByPlaceholder("请输入 Data ID").fill("ux91-new.properties");
   await page.locator(".modal .code-editor-ta, .modal textarea").first().fill("a=1\n# ux91 new config\n");
-  await page.getByRole("button", { name: "发布" }).click();
-  await expect(page.getByText("直接配置写入已禁用").first()).toBeVisible({ timeout: 15_000 });
-  // 关闭弹框
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
+  await expectPlanItem(page, "create");
+  await expectNoDisabledWriteError(page);
+  await backToBrowseFromPlan(page);
+  // 关闭弹框：带着草稿关闭会先问「放弃未发布的内容？」，一并确认掉，别把草稿漏给下一条用例
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /放弃/ }).first().click().catch(() => undefined);
   await page.waitForTimeout(300);
 
   // Nacos 侧未新增（404）
@@ -109,7 +115,7 @@ test("A7 新建配置: 必填校验 + 发布被禁用拦截且 Nacos 未新增",
     `${BASE_A}/v1/cs/configs?dataId=ux91-new.properties&group=${encodeURIComponent(GROUP)}&tenant=${encodeURIComponent(NS_A)}`
   );
   expect(res.status).not.toBe(200);
-  await page.screenshot({ path: "results/a7-new-blocked.png", fullPage: true });
+  await page.screenshot({ path: "results/a7-new-plan.png", fullPage: true });
 });
 
 // A12: 刷新列表按钮 → 列表重新加载且计数稳定

@@ -2,6 +2,7 @@ import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectPlanItem } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -63,12 +64,14 @@ test("UX-01 第四步计划页: 未执行时明确 dry-run 提示且右侧未被
 });
 
 /**
- * UX-02: 配置浏览 → 编辑 → 保存发布。
- * 当前产品决策：直接写入已禁用（必须走变更计划），但编辑流必须完整可用：
- * 1) YAML 配置编辑并保存 → 校验通过 → 被「直接写入已禁用」拦截 + 提示引导走变更计划
- * 2) 格式校验不通过的内容 → 被格式校验拦截（不进入写入路径）
+ * UX-02: 配置浏览 → 编辑 → 保存。
+ * 当前产品决策：直接写入已禁用，「保存」= 生成变更计划（轮42 起入口自己就说清楚），
+ * 但编辑流必须完整可用：
+ * 1) 合法内容 → 进入变更计划页（覆盖 1 项），未确认执行前 Nacos 不变，草稿不丢
+ * 2) 格式校验不通过的内容 → 被格式校验拦截（连计划都不生成）
+ * 3) 编辑工具栏必须**预告**「保存会生成变更计划」，而不是点下去才报错
  */
-test("UX-02 配置浏览编辑: 编辑流可用，直接写入被明确拦截", async ({ page, retest }) => {
+test("UX-02 配置浏览编辑: 编辑流可用，保存走变更计划且不直写", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
 
@@ -85,31 +88,38 @@ test("UX-02 配置浏览编辑: 编辑流可用，直接写入被明确拦截", 
   const ta = page.locator(".code-editor-ta").first();
   await expect(ta).toBeVisible({ timeout: 10_000 });
 
-  // 场景 A: 合法 properties 追加 → 校验通过，进入写入路径，被「直接写入已禁用」拦截
+  // 预告：编辑工具栏里必须先看到「保存会生成变更计划」这条可见说明，不是点了才知道
+  await expect(page.locator(".fmt-write-hint").filter({ visible: true }).first()).toContainText("变更计划", { timeout: 10_000 });
+
+  // 场景 A: 合法 properties 追加 → 校验通过 → 生成「覆盖」计划，Nacos 仍不变
   await ta.click();
   await ta.press("End");
   await ta.press("\n");
   await ta.type("# ux02-a: 合法注释");
-  await page.getByRole("button", { name: "保存发布" }).click();
-  await expect(page.getByText("直接配置写入已禁用").first()).toBeVisible({ timeout: 15_000 });
-  // 编辑态保留（保存失败不丢失草稿）
-  await expect(ta).toBeVisible();
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
+  await expectPlanItem(page, "overwrite");
+  await expectNoDisabledWriteError(page);
+  // 回到浏览页：编辑态与草稿必须还在（生成计划不是写入成功，不该把用户的工作丢掉）
+  await backToBrowseFromPlan(page);
+  await expect(ta).toBeVisible({ timeout: 15_000 });
   const draftText = await ta.inputValue();
   expect(draftText).toContain("# ux02-a: 合法注释");
 
-  // 场景 B: 重复 key → 格式校验拦截，提示校验未通过，不进入写入路径
+  // 场景 B: 重复 key → 格式校验拦截，提示校验未通过，连计划都不生成
   await ta.click();
   await ta.press("End");
   await ta.type("\nspring.datasource.url=jdbc:mysql://localhost:3306/ux02\nspring.datasource.url=jdbc:mysql://localhost:3306/ux02-b");
-  await page.getByRole("button", { name: "保存发布" }).click();
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
   await expect(page.getByRole("heading", { name: "格式校验未通过" })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "确定" }).click();
 
-  // 取消编辑，内容恢复为原始值（未落库）
+  // 取消编辑：草稿非空 ⇒ 必须先问「放弃未保存的修改?」，确认后才退出编辑态（轮7 的脏草稿守卫）
   await page.getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("heading", { name: /放弃未保存的修改/ })).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: "放弃并切换" }).click();
   await expect(ta).toBeHidden({ timeout: 5_000 });
   const nacosText = await fetchNacosContent(BASE_A, NS_A, "svc-pay.properties", GROUP);
   expect(nacosText).not.toContain("ux02");
 
-  await page.screenshot({ path: "results/ux02-browse-edit-blocked.png", fullPage: true });
+  await page.screenshot({ path: "results/ux02-browse-edit-plan.png", fullPage: true });
 });

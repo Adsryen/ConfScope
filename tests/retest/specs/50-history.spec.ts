@@ -2,6 +2,7 @@ import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { loadRetestState } from "../state";
 import { navigate, dismissStartupDialog } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectRollbackPlanRow } from "./planExit";
 
 const state = loadRetestState();
 const A = state.nacos.a;
@@ -11,8 +12,8 @@ const GROUP = "RETEST-PROD";
 // 1) 播种一条真实「更新」历史（svc-data.yaml）→ 历史列表出现
 // 2) 点击某版本 → 右侧显示相对上一版 diff
 // 3) 勾选 2 个版本 → 两版本互相对比
-// 4) 回滚守卫：按当前安全模型，历史回滚一律被阻断（必须走 ApplyPlan），
-//    点击回滚后 Nacos 内容不被改写
+// 4) 回滚守卫：按当前安全模型，历史回滚不直写（必须走 ApplyPlan 确认执行）——
+//    点击回滚 = 生成一条回滚计划，Nacos 内容不被改写
 test("T-HIS-01 历史变更: 列表/查看/对比/回滚守卫", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
 
@@ -81,13 +82,15 @@ test("T-HIS-01 历史变更: 列表/查看/对比/回滚守卫", async ({ page, 
   await expect(rbBtn).toBeVisible({ timeout: 10_000 });
   await rbBtn.click({ force: true });
   await page.waitForTimeout(300);
-  await expect(rbBtn).toHaveText(/确认回滚/, { timeout: 5_000 });
+  await expect(rbBtn).toHaveText(/确认生成回滚计划/, { timeout: 5_000 });
   await rbBtn.click({ force: true });
-  await page.waitForTimeout(800);
-  let errorText = await page.locator(".history-view .err, .history-view .pad-msg.err").allInnerTexts();
-  console.log(`[T-HIS-01] 回滚反馈 = ${JSON.stringify(errorText)}`);
-  expect(errorText.join("\n")).toMatch(/直接配置写入已禁用|配置回滚失败/);
-  // 守卫执行后 rbConfirm 已重置、error 已显示，重新点击该版本确保 detail 处于查看态
+  // 守卫生效的新证据（轮42）：落到变更计划，而不是「点了才报错」
+  console.log(`[T-HIS-01] 回滚计划动作=${await expectRollbackPlanRow(page, "svc-data.yaml")}`);
+  await expectNoDisabledWriteError(page);
+  const beforeRollback = await fetchNacosContent(A.baseUrl, A.namespace, "svc-data.yaml", GROUP);
+  await backToBrowseFromPlan(page);
+  expect(await fetchNacosContent(A.baseUrl, A.namespace, "svc-data.yaml", GROUP), "只生成回滚计划就改写了 Nacos").toBe(beforeRollback);
+  // 回浏览页后重新点击该版本，确保 detail 处于查看态，继续双版本对比
   await first.click({ position: { x: 40, y: 15 } });
   await page.waitForTimeout(300);
 

@@ -48,11 +48,7 @@ const BASELINE: Record<string, string[]> = {
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportCurrentList") } aria-',
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportSourceFilesToDirector',
     '<button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading} title={snapshotSaving ?',
-    '<button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving} title={t("config.saveShortcutHint")}>',
     '<button className="btn btn-ghost btn-sm" onClick={() => selected && openConfig(selected)} title={t("config.refreshContent")} disabled={contentLoading}',
-  ],
-  "src/components/ConfigEditor.tsx": [
-    '<button className="btn btn-primary" onClick={save} disabled={saving} title={t("config.saveShortcutHint")}>',
   ],
   "src/components/CopyButton.tsx": [
     '<button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} title={t("common.copyToClipboard")}>',
@@ -64,7 +60,6 @@ const BASELINE: Record<string, string[]> = {
     '<button type="button" className="btn btn-ghost btn-sm" onClick={() => doMatch()} disabled={matchLoading} title={t("diff.refreshMatch")} >',
   ],
   "src/components/HistoryView.tsx": [
-    '<button className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`} onClick={rollback} onBlur={() => setRbConfirm(false)} disabled={rollingBack',
   ],
   "src/components/MessageCenter.tsx": [
     '<button className="message-icon-btn" onClick={clearErrors} disabled={items.length === 0} title={t("messageCenter.clear")} aria-label={t("messageCenter',

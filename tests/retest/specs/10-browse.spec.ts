@@ -1,6 +1,7 @@
 import { test, expect, fetchNacosContent } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { navigate, dismissStartupDialog } from "./ui";
+import { backToBrowseFromPlan, expectNoDisabledWriteError, expectPlanItem } from "./planExit";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -167,16 +168,17 @@ test("T-BR-05 浏览: 新建配置落到默认 group 并可删除", async ({ pag
   // 填点内容（YAML）
   const ta = page.locator(".code-editor-ta").first();
   if (await ta.count()) await ta.fill("retest:\n  note: browse-tmp\n");
-  await page.getByRole("button", { name: "发布" }).last().click();
-  // 安全守卫: 直接写入被阻断, 必须走配置变更计划(与 T-AP-01 一致)。
-  // 断言守卫错误出现(证明守卫生效), 关闭弹窗, 再走"进入配置变更计划"路径验证落库。
-  const guardErr = page.locator(".modal").getByText("直接配置写入已禁用").first();
-  await expect(guardErr).toBeVisible({ timeout: 10_000 });
-  console.log("[T-BR-05] 守卫拦截直接写入 ✓");
-  // 关闭新建弹窗
+  await page.getByRole("button", { name: /生成变更计划/ }).last().click();
+  // 安全守卫: 写入被挡在计划确认之后(与 T-AP-01 同意图)。轮42 起新建入口不再「点了才报错」，
+  // 而是直接生成一条「新增」计划——守卫生效的证据换成「进入计划页 + 没有任何失败呈现」。
+  await expectPlanItem(page, "create");
+  await expectNoDisabledWriteError(page);
+  console.log("[T-BR-05] 新建入口生成新增计划、未直写 ✓");
+  await page.screenshot({ path: "results/br05-guard.png", fullPage: true });
+  // 回浏览页（草稿弹窗按计划入口的设计保留着，便于继续编辑），关闭新建弹窗
+  await backToBrowseFromPlan(page);
   await page.locator(".modal button", { hasText: /取消|×/ }).first().click().catch(() => undefined);
   await page.waitForTimeout(500);
-  await page.screenshot({ path: "results/br05-guard.png", fullPage: true });
   // 核心断言: 浏览页"发布/新建"入口受守卫保护(不直接写 Nacos),
   // 完整写入链路见 30-apply(T-AP-01/02)的变更计划路径。
   // 这里验证: 点击发布后 Nacos 侧该 dataId 仍不存在(守卫阻止落库)。
