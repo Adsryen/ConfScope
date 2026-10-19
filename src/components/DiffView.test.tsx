@@ -8,6 +8,7 @@ import type { Connection } from "../store/connections";
 import DiffView from "./DiffView";
 import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
+import { publishConfigChange } from "../lib/configChangeBus";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
@@ -1608,4 +1609,82 @@ describe("DiffView 滚轮兜底：chrome 条滚同一列正文（轮33 F-34）",
       expect(event.defaultPrevented).toBe(true);
     });
   }
+});
+
+// ── 轮43 / 写后失效：本页保活，计划执行改的是服务端 ─────────────────────────
+// 对比是重操作，也不该被后台通知打断，所以这里只标记过期 + 给一键重比。
+// 断言锁的是「提示在不在、点重比之后清没清」，不锁可改的用户文案。
+describe("DiffView 写后失效", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([]);
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+  });
+
+  function renderSingleFileCompare() {
+    localStorage.setItem("locale", "zh-CN");
+    return render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+          }}
+        />
+      </I18nProvider>
+    );
+  }
+
+  const staleBanner = () => document.querySelector(".diff-result-stale");
+
+  it("加载并对比后先立住基线：没有过期提示", async () => {
+    renderSingleFileCompare();
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    await waitFor(() => expect(document.querySelector(".diff-stats")).toBeInTheDocument());
+    expect(staleBanner()).toBeNull();
+  });
+
+  it("改动落在任一侧后出现过期的可见提示，一键重比即清除", async () => {
+    renderSingleFileCompare();
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    await waitFor(() => expect(document.querySelector(".diff-stats")).toBeInTheDocument());
+
+    await act(async () => {
+      publishConfigChange({ connectionId: "right-nacos", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+    await waitFor(() => expect(staleBanner()).not.toBeNull());
+
+    apiMocks.getConfig.mockImplementation(async () => "server:\n  port: 9090");
+    fireEvent.click(within(staleBanner() as HTMLElement).getByRole("button", { name: "重新对比" }));
+    await waitFor(() => expect(staleBanner()).toBeNull());
+    expect(apiMocks.getConfig).toHaveBeenCalled();
+  });
+
+  it("与本页两侧无关的写入不产生提示", async () => {
+    renderSingleFileCompare();
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    await waitFor(() => expect(document.querySelector(".diff-stats")).toBeInTheDocument());
+
+    await act(async () => {
+      publishConfigChange({ connectionId: "unrelated-conn", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+      publishConfigChange({ connectionId: "left-nacos", namespace: "other-tenant", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+    expect(staleBanner()).toBeNull();
+  });
 });

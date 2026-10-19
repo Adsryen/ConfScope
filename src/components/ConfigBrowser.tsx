@@ -37,6 +37,13 @@ import HistoryView from "./HistoryView";
 import Pager from "./Pager";
 import Select from "./Select";
 import { errorText } from "../lib/errorText";
+import {
+  changeTouchesConfig,
+  changeTouchesNamespace,
+  subscribeConfigChanges,
+  type ConfigChangeNotice,
+} from "../lib/configChangeBus";
+import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   conn: Connection;
@@ -150,6 +157,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
+  // 写后失效：选中项被计划删除/移走时清空选中，并在空态给出可见说明（不静默变空）
+  const [removedByPlan, setRemovedByPlan] = useState<{ dataId: string; group: string } | null>(null);
   // 编辑态命令式入口：查找栏、以及校验错误「跳到第 N 行」的落点（R22 / R28）
   const editorRef = useRef<CodeEditorHandle>(null);
   /**
@@ -160,6 +169,12 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
    */
   const browserRootRef = useRef<HTMLDivElement>(null);
   const itemsScrollRef = useRef<HTMLDivElement>(null);
+  // 写后失效要用「重取后服务端到底还有哪些配置」来判断选中项是否真被删掉，
+  // 而这些值是取数函数在 await 之后才落进 state 的（闭包里读到的是上一轮的），故另存镜像。
+  const itemsRef = useRef<ConfigItem[]>([]);
+  const contentScopeItemsRef = useRef<ConfigItem[]>([]);
+  const lastReloadOk = useRef(false);
+  const pendingStaleRef = useRef<ConfigChangeNotice[]>([]);
   useWheelColumnResolver(browserRootRef);
   // 列表行高不固定（摘要会换行），所以不给 rowHeight：deltaMode=1（Linux 上 WebKitGTK 常见）
   // 按 wheelScroll 的默认基数换算，宁可一格少滚一点，也不要按一个猜不准的行高把列表甩出半屏。
@@ -244,6 +259,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setContentSearchProgress({ loaded: 0, total: 0, failed: 0 });
     setContentSearchError(null);
     setSelectedContentKeys(new Set());
+    contentScopeItemsRef.current = [];
     setShowReplace(false);
     setShowTargetPicker(false);
   };
@@ -258,6 +274,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
     const my = ++contentSearchReqId.current;
     const group = groupFilter.trim();
+    lastReloadOk.current = false;
     setContentSearching(true);
     setContentTerm(query);
     setContentResults([]);
@@ -277,6 +294,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         if (my !== contentSearchReqId.current) return;
         allItems.push(...nextPage.pageItems);
       }
+      contentScopeItemsRef.current = allItems;
       setContentSearchProgress({ loaded: 0, total: allItems.length, failed: 0 });
 
       const loaded = await mapWithConcurrency(allItems, CONTENT_SEARCH_CONCURRENCY, async (item) => {
@@ -299,6 +317,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       const documents = loaded.flatMap((result) => (result.document ? [{ item: result.item, document: result.document }] : []));
       const results = searchConfigContent(documents, query);
       setContentResults(results);
+      lastReloadOk.current = true;
       setSelectedContentKeys(new Set(results.map((result) => configResultKey(result.item))));
       setContentSearchProgress({ loaded: allItems.length, total: allItems.length, failed: failures.length });
       if (failures.length) {
@@ -324,6 +343,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const fetchList = async (term: string, page: number, groupFilter = selectedGroup) => {
     const my = ++listReqId.current;
     const group = groupFilter.trim();
+    lastReloadOk.current = false;
     setListLoading(true);
     setListError(null);
     setAppliedTerm(term);
@@ -333,14 +353,17 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       const dataId = term.trim() ? `*${term.trim()}*` : "";
       const res = await listConfigs(conn, tenant, dataId, group, page, PAGE_SIZE);
       if (my !== listReqId.current) return;
+      itemsRef.current = res.pageItems;
       setItems(res.pageItems);
       rememberGroups(res.pageItems, group);
       setTotal(res.totalCount);
       setPages(Math.max(res.pagesAvailable || 1, 1));
+      lastReloadOk.current = true;
     } catch (e) {
       if (my !== listReqId.current) return;
       const message = errorText(e);
       setListError(message);
+      itemsRef.current = [];
       setItems([]);
       setTotal(0);
       setPages(1);
@@ -355,6 +378,18 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     } finally {
       if (my === listReqId.current) setListLoading(false);
     }
+  };
+
+  /**
+   * 按当前搜索态重取——刷新按钮与写后失效共用这一个出口，
+   * 免得「内容搜索模式下刷新该做什么」在两处各写一遍然后漂移。
+   * 返回值 = 这次重取有没有真把数据取回来（取回来失败时不要顺手清掉用户的选中态）。
+   */
+  const reloadList = async (): Promise<boolean> => {
+    lastReloadOk.current = false;
+    if (searchMode === "content") await searchAllContent(search, selectedGroup);
+    else await fetchList(appliedTerm, pageNo, selectedGroup);
+    return lastReloadOk.current;
   };
 
   // 输入即搜:防抖自动搜索(无需「搜索」按钮)
@@ -524,6 +559,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const openConfig = async (item: ConfigItem) => {
     const my = ++reqId.current;
     setSelected(item); // 立即高亮，与异步内容加载解耦；切换配置保持当前标签页
+    setRemovedByPlan(null);
     setContentLoading(true);
     setContentError(null);
     setContent("");
@@ -559,6 +595,64 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setSaveError(null);
     setShowDelete(false);
   }, [selected?.dataId, selected?.group]);
+
+  /**
+   * 写后失效（轮43）。本页被 App.tsx 的 `.browse-cache` 保活：切去其他模式只是 display:none，
+   * 不卸载也不重新取数，而全站唯一的写路径（变更计划执行器）在另一棵子树里改的是服务端。
+   * 结果就是界面刚提示「变更执行完成」，切回来正文/列表还是执行前那一刻——
+   * 用户只能理解成「没写进去」，于是重复生成计划、重复执行。
+   *
+   * 处置：在前台立刻按当前搜索态重取一次；被隐藏时只欠一笔通知，等切回前台合并补做，
+   * 隐藏期不发请求（保住保活的收益，也与 display:none 下 scrollIntoView 会被 Chromium
+   * 丢弃那条实测口径一致）。重取一律复用 reloadList / openConfig，不新造第二套取数逻辑。
+   */
+  const flushStale = async (notices: ConfigChangeNotice[]) => {
+    setRemovedByPlan(null);
+    const target = selected;
+    const reloaded = await reloadList();
+    if (!target || !reloaded) return; // 列表没取回来就别动用户的选中态
+    // 只重取「确实被这次写入碰过」的那一份：其余正文没变，草稿与编辑态原样留着。
+    const touched = notices.some((notice) =>
+      changeTouchesConfig(notice, { connectionId: conn.id, namespace: tenant, dataId: target.dataId, group: target.group })
+    );
+    if (!touched) return;
+    // 内容搜索态下命中集是按搜索词过滤的，判「还在不在」要用那次枚举到的全集。
+    const pool = searchMode === "content" ? contentScopeItemsRef.current : itemsRef.current;
+    if (pool.some((item) => configResultKey(item) === configResultKey(target))) {
+      void openConfig(target); // 正文改由服务端真值重新填，dirty 会随之重算
+      return;
+    }
+    setSelected(null);
+    setContent("");
+    setMetadata(null);
+    setEditing(false);
+    setRemovedByPlan({ dataId: target.dataId, group: target.group });
+  };
+  // flushStale 每轮渲染都是新闭包（要读最新的搜索态/选中项），用 ref 拿最新那份再调。
+  const flushStaleRef = useRef(flushStale);
+  useEffect(() => {
+    flushStaleRef.current = flushStale;
+  });
+  const flushPendingStale = () => {
+    const notices = pendingStaleRef.current;
+    if (!notices.length) return;
+    pendingStaleRef.current = [];
+    void flushStaleRef.current(notices);
+  };
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) flushPendingStale(); // 切回前台补做隐藏期间欠下的刷新
+  }, [active]);
+  useEffect(() => {
+    const unsubscribe = subscribeConfigChanges((notice) => {
+      if (!changeTouchesNamespace(notice, conn.id, tenant)) return;
+      pendingStaleRef.current.push(notice);
+      if (activeRef.current) flushPendingStale();
+    });
+    return unsubscribe;
+    // 只按连接/命名空间注册一次：App 给本页的 key 就是这两者，切过去本来就重挂载。
+  }, [conn.id, tenant]);
 
   const startEdit = () => {
     setDraft(content);
@@ -1002,14 +1096,21 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 }
               }}
             />
+            {/*
+              * 刷新按钮不做 disabled。轮43 起它同时是「写后失效」的重取出口，
+              * 取数层自己已经会抢占：fetchList / searchAllContent 各自记 req-id，
+              * 旧请求回来发现编号不是自己的就丢弃，连点不会把旧数据盖到新数据上。
+              * 而 disabled 的原生按钮上 Blink 连 title 都不弹（轮26 F-1 实测取证），
+              * 这颗图标按钮的名字只有 title / aria-label 一条渠道，
+              * 挂 disabled 换来的只是「忙时悬停没提示」，等于把提示写成了哑巴。
+              */}
             <button
               className="btn btn-ghost btn-sm browser-icon-btn"
-              onClick={() =>
-                searchMode === "content" ? searchAllContent(search, selectedGroup) : fetchList(appliedTerm, pageNo, selectedGroup)
-              }
+              onClick={() => {
+                void reloadList();
+              }}
               title={t("config.refresh")}
               aria-label={t("config.refresh")}
-              disabled={listLoading}
             >
               <BrowserToolIcon name="refresh" />
             </button>
@@ -1195,7 +1296,22 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
       <div className="browser-detail">
         {!selected ? (
-          <div className="pad-msg big">{t("config.selectHint")}</div>
+          removedByPlan ? (
+            <div className="pad-msg big browser-detail-notice" {...statusMessageProps("info")}>
+              <div>{t("config.removedByPlan", { dataId: removedByPlan.dataId, group: removedByPlan.group })}</div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  void reloadList();
+                }}
+              >
+                {t("config.refresh")}
+              </button>
+            </div>
+          ) : (
+            <div className="pad-msg big">{t("config.selectHint")}</div>
+          )
         ) : (
           <>
             <div className="detail-header">
@@ -1333,16 +1449,6 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           active={active}
           onStartApply={onStartApply}
           onClose={() => setShowNew(false)}
-          onSaved={(dataId, group) => {
-            const nextGroup = group.trim() || "DEFAULT_GROUP";
-            setShowNew(false);
-            setTab("content");
-            setSearch("");
-            setSelectedGroup(nextGroup);
-            rememberGroups([], nextGroup);
-            fetchList("", 1, nextGroup);
-            openConfig({ dataId, group: nextGroup, content: "", configType: "" });
-          }}
         />
       )}
 

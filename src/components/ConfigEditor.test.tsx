@@ -33,12 +33,10 @@ const conn: Connection = {
 
 function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}, locale = "zh-CN") {
   const onClose = vi.fn();
-  const onSaved = vi.fn();
   const onStartApply = vi.fn();
   localStorage.setItem("locale", locale);
   return {
     onClose,
-    onSaved,
     onStartApply,
     ...render(
       <I18nProvider>
@@ -46,7 +44,6 @@ function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}, l
           conn={conn}
           namespace="public"
           onClose={onClose}
-          onSaved={onSaved}
           onStartApply={onStartApply}
           {...props}
         />
@@ -126,7 +123,7 @@ describe("ConfigEditor", () => {
   // 轮42 / 方案 D：新建弹层的「发布」按钮改叫「生成变更计划」，走的也是那条唯一 sanctioned 链路。
   // 关键在于**不再产生假失败**：用户没做错事，操作历史里不该出现 result:"failure" 的新建记录。
   it("hands the new-config draft to a change plan instead of faking a failed publish", async () => {
-    const { onSaved, onStartApply } = renderEditor({}, "en-US");
+    const { onStartApply } = renderEditor({}, "en-US");
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: " app.yaml " } });
     fireEvent.change(fieldByLabel("Group"), { target: { value: " " } });
@@ -149,7 +146,6 @@ describe("ConfigEditor", () => {
     expect(payload.items[0].sourceRef).toEqual(payload.items[0].targetRef);
 
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(onSaved).not.toHaveBeenCalled();
     expect(loadOperationHistory()).toEqual([]);
     expect(latestError()).toBeUndefined();
   });

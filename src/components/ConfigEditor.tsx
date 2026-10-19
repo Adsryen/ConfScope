@@ -20,7 +20,6 @@ interface Props {
   conn: Connection;
   namespace: string;
   onClose: () => void;
-  onSaved: (dataId: string, group: string) => void;
   /**
    * 交出「生成变更计划」的出路（轮42）。直写已被 API 层硬禁用，
    * 新建弹层不再假装发布，而是把填好的正文物成成计划里的新增项。

@@ -23,6 +23,7 @@ import { detectFormat, nacosType, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 import { translate } from "../locales";
 import { errorText } from "./errorText";
+import { normalizeNamespace, type ConfigChangeNotice, type ConfigChangeRef } from "./configChangeBus";
 
 const PROTECTED_TARGET_MARKERS = ["uat", "prod", "production", "生产", "真实", "线上"] as const;
 const DOCUMENT_KEY = "__document";
@@ -37,6 +38,13 @@ export interface ExecuteApplyPlanDeps {
   createBackupSnapshot: (configs: ApplyBackupConfig[]) => Promise<{ id: string; name: string }>;
   recordOperation: (record: Omit<OperationRecord, "id" | "timestamp">) => OperationRecord;
   taskManager: TaskManager;
+  /**
+   * 真实写入（非 dry-run）结束后的失效广播：只要有一条 item 落成功就发，
+   * 全部成功与逐项失败两条出口都发（部分写入同样是「服务端数据变了」）。
+   * 由调用方接到 configChangeBus —— 保活视图（配置浏览 / 配置对比）靠它感知真值已变，
+   * 否则界面刚提示「变更执行完成」，切回去看到的还是执行前那一份。
+   */
+  onConfigsChanged?: (notice: ConfigChangeNotice) => void;
 }
 
 export interface ApplyItemWriteResult {
@@ -434,6 +442,22 @@ export async function executeApplyPlan(
   }
 
   const taskId = createTask(workingPlan, deps, options.onTaskCreated);
+  // 本轮真正落成功的写入位置（按命名空间分组成多条 notice 广播）；dry-run 恒空。
+  const writtenRefs: { namespace: string; dataId: string; group: string }[] = [];
+  const notifyConfigsChanged = () => {
+    if (!deps.onConfigsChanged || !writtenRefs.length) return;
+    const grouped = new Map<string, ConfigChangeRef[]>();
+    for (const ref of writtenRefs) {
+      const namespace = normalizeNamespace(ref.namespace);
+      const bucket = grouped.get(namespace);
+      if (bucket) bucket.push({ dataId: ref.dataId, group: ref.group });
+      else grouped.set(namespace, [{ dataId: ref.dataId, group: ref.group }]);
+    }
+    writtenRefs.length = 0;
+    for (const [namespace, refs] of grouped) {
+      deps.onConfigsChanged({ connectionId: workingPlan.target.connectionId, namespace, refs });
+    }
+  };
   const sourceConnection = findConnection(deps, workingPlan.source.connectionId);
   if (typeof sourceConnection === "string") return recordFailure(workingPlan, deps, taskId, sourceConnection, emptyBackup(), !options.dryRun);
   const targetConnection = findConnection(deps, workingPlan.target.connectionId);
@@ -522,16 +546,21 @@ export async function executeApplyPlan(
             // 会话记录失败不阻断执行
           }
         }
+        if (!itemError) writtenRefs.push({ namespace: ref.namespace, dataId: ref.dataId, group: ref.group });
         if (itemError) throw new Error(itemError);
       }
     } catch (error) {
+      // 部分写入：失败项之前落成功的那些已经改过服务端了，同样要广播失效
+      notifyConfigsChanged();
       return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup);
     }
 
     const history = deps.recordOperation(safety.historyInput);
     deps.taskManager.completeTask(taskId, true);
+    notifyConfigsChanged();
     return { ok: true, taskId, historyId: history.id };
   } catch (error) {
+    notifyConfigsChanged();
     return recordFailure(workingPlan, deps, taskId, errorText(error), emptyBackup(), !options.dryRun);
   }
 }

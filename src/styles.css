@@ -1676,6 +1676,19 @@ textarea {
   text-align: center;
 }
 
+/* 写后失效说明（轮43 AC3）：选中项被变更计划删除后，详情区不再挂已删配置的正文，
+   改成一句能看见、能听见的说明 + 重取按钮。它和 `.pad-msg big` 的常驻占位不是一类东西
+   （占位不随请求替换、也不该被读屏反复念），所以自己一个类名，守卫才能把两者分开钉。
+   这里把正文从 --text-dim 抬回 --text：占位的灰度是给"没内容"用的，
+   而这条是"内容刚被改掉"的结果，得按正常正文的分量显示；限制行宽免得
+   dataId + group 连成一排在宽详情区里拉成一条看不完的横带。
+   选择器带上 .pad-msg 是为了靠特异度赢，不靠谁写在后面。 */
+.pad-msg.browser-detail-notice {
+  align-self: center;
+  max-width: 520px;
+  color: var(--text);
+}
+
 /* 应用计划草稿生成中（R6 / D7）：原先只有静止文案，看起来像渲染已结束；
    低幅度透明度脉冲表示"仍在进行"，并在减弱动效偏好下关闭 */
 .apply-draft-loading {
@@ -7471,6 +7484,33 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* 写后过期横幅（轮43）：宿主是整块结果区顶部，语义是「这份结果别信了」，
+   不是一条逐行警告——所以与 .diff-warning 同色系但换了形状（虚线框 + 说明与「重新对比」
+   同行），保证它在一片实线警告里仍然读得出是状态而非数据。
+   带 .diff-warnings 前缀靠特异度决胜，不赌文档顺序（口径见 classOverridesResolveBySpecificity）。 */
+.diff-warnings.diff-result-stale {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px dashed rgba(245, 158, 11, 0.45);
+  border-radius: 6px;
+}
+
+.diff-warnings.diff-result-stale .diff-warning {
+  flex: 1 1 220px;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.diff-warnings.diff-result-stale .field-error-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .apply-parse-warning {

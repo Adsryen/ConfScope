@@ -44,7 +44,6 @@ const BASELINE: Record<string, string[]> = {
     '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(1)} disabled={!hits.length} title={t("',
   ],
   "src/components/ConfigBrowser.tsx": [
-    '<button className="btn btn-ghost btn-sm browser-icon-btn" onClick={() => searchMode === "content" ? searchAllContent(search, selectedGroup) : fetchLis',
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportCurrentList") } aria-',
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportSourceFilesToDirector',
     '<button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading} title={snapshotSaving ?',

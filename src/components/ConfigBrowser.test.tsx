@@ -16,6 +16,7 @@ import ErrorDialog from "./ErrorDialog";
 import MessageCenter from "./MessageCenter";
 import { getTaskManager } from "../lib/taskmanager";
 import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
+import { publishConfigChange, type ConfigChangeNotice } from "../lib/configChangeBus";
 
 const apiMocks = vi.hoisted(() => ({
   listConfigs: vi.fn(),
@@ -106,12 +107,22 @@ function renderBrowser(
   locale = "zh-CN",
   browserConn: Connection = conn,
   tenant = "public",
-  options: { connections?: Connection[]; onStartApply?: (payload: import("../lib/applyEntry").ApplyEntryPayload) => void } = {}
+  options: {
+    connections?: Connection[];
+    onStartApply?: (payload: import("../lib/applyEntry").ApplyEntryPayload) => void;
+    active?: boolean;
+  } = {}
 ) {
   localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
-      <ConfigBrowser conn={browserConn} tenant={tenant} connections={options.connections} onStartApply={options.onStartApply} />
+      <ConfigBrowser
+        conn={browserConn}
+        tenant={tenant}
+        connections={options.connections}
+        onStartApply={options.onStartApply}
+        active={options.active}
+      />
       <MessageCenter />
       <ErrorDialog />
     </I18nProvider>
@@ -1711,5 +1722,129 @@ describe("ConfigBrowser 滚轮兜底：chrome 条滚同一列正文（轮33 F-34
     // 同一块上的普通一格仍然要接管（否则「放手」就成了「不接」）
     expect(wheelOn(count, 424, 242).defaultPrevented).toBe(true);
     expect(items.scrollTop).toBe(120);
+  });
+});
+
+// ── 轮43 / 写后失效 ─────────────────────────────────────────────────────────
+// 配置浏览被 App.tsx 的 .browse-cache 保活：切走只是 display:none，不重新取数；
+// 而全站唯一的写路径（变更计划执行器）在另一棵子树里改的是服务端。
+// 这几条锁的是「什么时候发请求、什么时候不该发」，不锁用户文案字面量。
+describe("ConfigBrowser 写后失效", () => {
+  const change = (overrides: Partial<ConfigChangeNotice> = {}): ConfigChangeNotice => ({
+    connectionId: "dev",
+    namespace: "public",
+    refs: [{ dataId: "app.json", group: "DEFAULT_GROUP" }],
+    ...overrides,
+  });
+
+  // 本组挂在主 describe 外面，拿不到它那份统一的 mock 装配，这里自带一份最小 setup。
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.getConfigDocument.mockReset();
+    apiMocks.deleteConfig.mockReset();
+    apiMocks.publishConfig.mockReset();
+    clearTasks();
+    apiMocks.listConfigs.mockResolvedValue(configPage());
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8080}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
+  });
+
+  it("前台收到写入通知后重取列表，并把选中项的正文换成服务端真值", async () => {
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains('"port"', "8080");
+
+    apiMocks.listConfigs.mockClear();
+    apiMocks.getConfigDocument.mockClear();
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":9090}}',
+      format: "json",
+      version: "v2",
+      source: "nacos",
+      updateTime: "",
+    });
+
+    await act(async () => {
+      publishConfigChange(change());
+    });
+
+    await waitFor(() => expect(apiMocks.listConfigs).toHaveBeenCalledTimes(1));
+    expect(apiMocks.getConfigDocument).toHaveBeenCalledWith(conn, "public", "app.json", "DEFAULT_GROUP");
+    await expectCodeContains("9090");
+  });
+
+  it("通知没碰上选中项时不重读正文，草稿与编辑态原样留着", async () => {
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: "draft-here" } });
+    apiMocks.getConfigDocument.mockClear();
+
+    await act(async () => {
+      publishConfigChange(change({ refs: [{ dataId: "other.yaml", group: "DEFAULT_GROUP" }] }));
+    });
+
+    await waitFor(() => expect(document.querySelector("textarea")).toHaveValue("draft-here"));
+    expect(apiMocks.getConfigDocument).not.toHaveBeenCalled();
+  });
+
+  it("被保活隐藏时一次请求都不发，切回前台才补做", async () => {
+    const view = render(
+      <I18nProvider>
+        <ConfigBrowser conn={conn} tenant="public" active={false} />
+      </I18nProvider>
+    );
+    await waitFor(() => expect(apiMocks.listConfigs).toHaveBeenCalled());
+    apiMocks.listConfigs.mockClear();
+
+    await act(async () => {
+      publishConfigChange(change());
+    });
+    expect(apiMocks.listConfigs).not.toHaveBeenCalled();
+
+    view.rerender(
+      <I18nProvider>
+        <ConfigBrowser conn={conn} tenant="public" active />
+      </I18nProvider>
+    );
+    await waitFor(() => expect(apiMocks.listConfigs).toHaveBeenCalledTimes(1));
+  });
+
+  it("选中项被计划删掉时清空选中并给出可见说明，不再挂着已删配置的操作", async () => {
+    renderBrowser();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+
+    apiMocks.listConfigs.mockResolvedValue(configPage([]));
+
+    await act(async () => {
+      publishConfigChange(change());
+    });
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument());
+    const status = document.querySelector(".browser-detail [role='status']");
+    expect(status?.textContent).toContain("app.json");
+    expect(screen.queryByText("app.json")).not.toBeInTheDocument();
+  });
+
+  it("其他连接 / 其他命名空间的写入通知与本页无关，不多发一次请求", async () => {
+    renderBrowser();
+    await waitFor(() => expect(apiMocks.listConfigs).toHaveBeenCalledTimes(1));
+    apiMocks.listConfigs.mockClear();
+
+    await act(async () => {
+      publishConfigChange(change({ connectionId: "other-conn" }));
+      publishConfigChange(change({ namespace: "retest-qa" }));
+    });
+
+    expect(apiMocks.listConfigs).not.toHaveBeenCalled();
   });
 });

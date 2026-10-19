@@ -18,6 +18,7 @@ import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
+import { publishConfigChange } from "../lib/configChangeBus";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
@@ -845,6 +846,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           },
           recordOperation,
           taskManager,
+          // 写后失效广播（轮43）：执行器是唯一 sanctioned 写入者，发布点收敛在这里，
+          // 保活的配置浏览 / 配置对比页各自订阅重取，不再让用户看到执行前的旧正文。
+          onConfigsChanged: publishConfigChange,
         },
         {
           selectedItemIds,

@@ -37,6 +37,7 @@ import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+import { changeTouchesNamespace, subscribeConfigChanges } from "../lib/configChangeBus";
 
 type DiffMode = "text" | "key" | "lines";
 
@@ -729,6 +730,9 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [mergePreviews, setMergePreviews] = useState<Record<string, MergePreviewText>>({});
   const [mergeSelectionScope, setMergeSelectionScope] = useState<MergeSelectionScope>("block");
   const [notice, setNotice] = useState<string | null>(null);
+  // 写后失效：计划执行改的是服务端，而本页被 `.diff-apply-cache` 保活，切回来时面板里的
+  // 差异统计仍是执行前那一刻。对比是重操作、也不该被自动打断，所以只标记过期 + 给一键重比。
+  const [resultStale, setResultStale] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
   const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
@@ -948,7 +952,19 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
 
   const needMatch = !left.dataId.trim() || !right.dataId.trim();
 
+  useEffect(() => {
+    const unsubscribe = subscribeConfigChanges((change) => {
+      if (
+        changeTouchesNamespace(change, left.connId, left.tenant) ||
+        changeTouchesNamespace(change, right.connId, right.tenant)
+      )
+        setResultStale(true);
+    });
+    return unsubscribe;
+  }, [left.connId, left.tenant, right.connId, right.tenant]);
+
   const doMatch = async () => {
+    setResultStale(false);
     setMatchLoading(true);
     setError(null);
     setNotice(null);
@@ -1090,6 +1106,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   };
 
   const loadBoth = async () => {
+    setResultStale(false);
     if (needMatch) {
       await doMatch();
       return;
@@ -1188,6 +1205,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   }, [left, pendingAutoCompare, right]);
 
   const loadBatch = async () => {
+    setResultStale(false);
     if (!matchResults) return;
     const toCompare = matchResults.filter((item) => selectedIds.has(item.dataId));
     if (toCompare.length === 0) return;
@@ -1904,6 +1922,22 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
           </div>
 
           <div className={`diff-result${showingBatchDiff ? " diff-result-batch" : ""}`} ref={resultsRef}>
+            {resultStale && (leftLoaded || rightLoaded || batchResults.length > 0 || (matchResults?.length ?? 0) > 0) && (
+              <div className="diff-warnings diff-result-stale" role="status" aria-live="polite">
+                <div className="diff-warning">{t("diff.resultStale")}</div>
+                <div className="field-error-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={retryCurrentCompare}
+                    disabled={loading || matchLoading || batchLoading}
+                  >
+                    {t("diff.retryCompare")}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {matchResults && matchResults.length > 0 && batchResults.length === 0 && (
               <div className="match-list">
                 <div className="match-list-head">

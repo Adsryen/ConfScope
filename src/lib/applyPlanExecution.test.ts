@@ -828,3 +828,103 @@ describe("content-replace 风格计划（source override + 原文基线指纹）
     expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
   });
 });
+
+// 轮43：配置浏览 / 配置对比页是保活的，它们唯一能知道「服务端真值变了」的通道就是这条广播。
+// 发布点必须钉在执行器里（全站唯一 sanctioned 写入者），所以这几条锁的是发布时机而不是文案。
+describe("executeApplyPlan 写后失效广播", () => {
+  it("dry-run 不广播（一条都没写，视图不该白重取一次）", async () => {
+    const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    const runDeps = {
+      ...deps({ "conn-dev:changed.yaml": doc("new"), "conn-prod:changed.yaml": doc("old") }),
+      onConfigsChanged: vi.fn(),
+    };
+
+    const result = await executeApplyPlan(plan, runDeps, { dryRun: true });
+
+    expect(result.ok).toBe(true);
+    expect(runDeps.onConfigsChanged).not.toHaveBeenCalled();
+  });
+
+  it("执行成功时按命名空间广播真正写过的 ref，跳过项不算", async () => {
+    const plan = applyPlan([
+      { ref: ref("created.yaml"), sourceValue: documentValue("new file"), targetValue: absentValue() },
+      { ref: ref("removed.yaml"), sourceValue: absentValue(), targetValue: documentValue("old removed") },
+      { ref: ref("same.yaml"), sourceValue: documentValue("same"), targetValue: documentValue("same") },
+    ]);
+    const runDeps = {
+      ...deps({
+        "conn-dev:created.yaml": doc("new file"),
+        "conn-prod:created.yaml": null,
+        "conn-dev:removed.yaml": null,
+        "conn-prod:removed.yaml": doc("old removed"),
+        "conn-dev:same.yaml": doc("same"),
+        "conn-prod:same.yaml": doc("same"),
+      }),
+      onConfigsChanged: vi.fn(),
+    };
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(true);
+    expect(runDeps.onConfigsChanged).toHaveBeenCalledTimes(1);
+    const notice = runDeps.onConfigsChanged.mock.calls[0][0];
+    expect(notice.connectionId).toBe("conn-prod");
+    expect(notice.namespace).toBe("public");
+    expect(notice.refs.map((item: { dataId: string }) => item.dataId).sort()).toEqual(["created.yaml", "removed.yaml"]);
+  });
+
+  it("逐项失败也广播，且只带失败之前写成功的那几条", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const base = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a1"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+    const runDeps = {
+      ...base,
+      publishConfig: vi.fn(async (_conn: Connection, _namespace: string, dataId: string) => {
+        if (dataId === "b.yaml") throw new Error("publish denied: b.yaml");
+      }),
+      onConfigsChanged: vi.fn(),
+    };
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    expect(runDeps.onConfigsChanged).toHaveBeenCalledTimes(1);
+    expect(runDeps.onConfigsChanged.mock.calls[0][0].refs).toEqual([{ dataId: "a.yaml", group: "DEFAULT_GROUP" }]);
+  });
+
+  it("空命名空间归一成 public，否则视图会认为这次写入与己无关", async () => {
+    const plan = applyPlan([
+      {
+        ref: { ...ref("orphan.yaml"), namespace: "" },
+        sourceValue: documentValue("new"),
+        targetValue: documentValue("old"),
+      },
+    ]);
+    const runDeps = {
+      ...deps({ "conn-dev:orphan.yaml": doc("new"), "conn-prod:orphan.yaml": doc("old") }),
+      onConfigsChanged: vi.fn(),
+    };
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(true);
+    expect(runDeps.onConfigsChanged).toHaveBeenCalledTimes(1);
+    expect(runDeps.onConfigsChanged.mock.calls[0][0].namespace).toBe("public");
+  });
+
+  it("没接 onConfigsChanged 时照旧执行成功（回调是可选依赖）", async () => {
+    const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    const runDeps = deps({ "conn-dev:changed.yaml": doc("new"), "conn-prod:changed.yaml": doc("old") });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+  });
+});
