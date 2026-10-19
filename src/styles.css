@@ -2073,6 +2073,18 @@ textarea {
 .fmt-spacer {
   flex: 1;
 }
+/* 编辑态工具条里的机制说明（轮42）：直写在 API 层是硬禁用，「保存」的真实动作是生成变更计划。
+   这条理由必须落在可见文案上——disabled 控件上的 title 在 Blink 里一个像素都不弹（轮26 F-1 取证），
+   把它塞进 tooltip 等于没写。空间不够时省略号收尾，全文在 title 里兜住（R35）。 */
+.fmt-write-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--text-dim);
+}
 .config-meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -8046,6 +8058,7 @@ button.diff-workflow-step-btn:hover {
 /* 配置浏览与连接树：条目摘要、目标范围、元数据值、三层节点名 */
 .browser-item-summary,
 .browser-target-scope,
+.fmt-write-hint,
 .config-meta-value,
 .conn-group-name,
 .conn-env-name,

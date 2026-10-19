@@ -10,7 +10,8 @@ import {
   searchConfigContent,
   type ContentSearchResult,
 } from "../lib/configContentSearch";
-import { detectFormat, Format, FORMATS, nacosType } from "../lib/format";
+import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
+import { detectFormat, Format, FORMATS } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfigIssues } from "../lib/validate";
@@ -58,10 +59,6 @@ type ConfigMetadata = Pick<ConfigDocument, "version" | "source" | "updateTime">;
 
 function configResultKey(item: Pick<ConfigItem, "dataId" | "group">): string {
   return `${item.group}\u0000${item.dataId}`;
-}
-
-function isWritableTarget(conn: Connection): boolean {
-  return conn.sourceType !== "local-snapshot" && !conn.readonly && (conn.provider ?? "nacos") === "nacos";
 }
 
 function isSandboxEnvironment(conn: Connection): boolean {
@@ -144,7 +141,6 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   // 编辑 / 新建 / 删除
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -174,7 +170,12 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const visibleItems = isContentSearchActive ? contentResults.map((result) => result.item) : items;
   const selectedContentResults = contentResults.filter((result) => selectedContentKeys.has(configResultKey(result.item)));
   const replaceImpact = replacementImpact(selectedContentResults, replaceFindText, replaceText);
-  const canStartReplacement = Boolean(onStartApply) && isWritableTarget(conn);
+  /**
+   * 这个连接能不能作为变更计划的目标。轮42 起它还决定「编辑 / 删除 / 新建配置」三个入口出不出：
+   * 只读连接与本地快照挂着「点了永远不可能成功」的写入口，比少一个按钮更糟（R42-8）。
+   */
+  const canWrite = isWritableConfigTarget(conn);
+  const canStartReplacement = Boolean(onStartApply) && canWrite;
   const connectionName = conn.name || connectionDisplayLabel(conn);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
@@ -183,7 +184,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       connections
         .filter(
           (candidate) =>
-            connectionProjectName(candidate) === connectionProjectName(conn) && isWritableTarget(candidate)
+            connectionProjectName(candidate) === connectionProjectName(conn) && isWritableConfigTarget(candidate)
         )
         .sort(
           (left, right) =>
@@ -609,44 +610,42 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     onStartApply(entry);
   };
 
-  const saveEdit = async () => {
+  /**
+   * 「保存」= 把编辑区里的草稿物化成变更计划（轮42 / 方案 D）。
+   *
+   * 这里不再假装能直写：直写在 API 层是硬禁用（fd074a8），以前点一下必然失败，
+   * 还要往操作历史里塞一条 `result:"failure"` 的假记录，把「你没做错」渲染成「你失败了」。
+   * 现在按钮说的就是它做的事，走的也是全站唯一那条 sanctioned 写入链路：
+   * dry-run → 确认 → 执行（执行器自己记操作历史，所以这里一条都不记）。
+   */
+  const saveAsPlan = () => {
     if (!selected) return;
     const problems = validateConfigIssues(draft, fmt);
     if (problems.length) {
-      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止保存
+      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止生成计划
       return;
     }
-    setSaving(true);
     setSaveError(null);
-    const configType = nacosType(fmt);
-    const message = t("api.directWriteRequiresApplyPlan");
-    recordOperation({
-      type: "publish",
-      result: "failure",
-      connectionId: conn.id,
-      connectionName,
-      namespace: namespaceLabel,
+    if (draft === content) {
+      // 与线上正文一致：计划里只会有一个 skip 项，生成出来没有任何可执行内容，别浪费这一步。
+      setSaveError(t("config.noChangeToPlan"));
+      return;
+    }
+    const entry = buildDirectWriteExitEntry({
+      conn,
+      namespace: tenant,
       group: selected.group,
       dataId: selected.dataId,
-      content: draft,
-      previousContent: content,
-      beforeContent: content,
-      afterContent: draft,
-      configType,
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: message,
+      format: fmt,
+      desiredContent: draft,
+      intent: "edit",
     });
-    setSaveError(message);
-    reportError({
-      title: t("config.publishConfigFailed"),
-      source: `${sourceLabel} / ${selected.group} / ${selected.dataId}`,
-      message,
-      detail: message,
-      actionLabel: t("config.retryPublish"),
-      onAction: () => saveEdit(),
-    });
-    setSaving(false);
+    if (!entry || !onStartApply) {
+      setSaveError(t("config.planRouteUnavailable"));
+      return;
+    }
+    onStartApply(entry);
+    toast(t("config.planCreated"));
   };
 
   /**
@@ -695,26 +694,25 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setShowDelete(false);
   }, [active]);
 
-  // 实际删除（由确认弹框调用，失败时抛出供弹框展示）。
-  const doDelete = async () => {
+  /**
+   * 「删除」= 生成一条删除计划（由确认弹框调用，抛错交给弹框呈现）。
+   * 期望内容是「不存在」，计划页把它渲染成删除项，真正删的动作仍在执行器那侧。
+   */
+  const deleteAsPlan = async () => {
     if (!selected) return;
-    const message = t("api.directWriteRequiresApplyPlan");
-    recordOperation({
-      type: "delete",
-      result: "failure",
-      connectionId: conn.id,
-      connectionName,
-      namespace: namespaceLabel,
+    const entry = buildDirectWriteExitEntry({
+      conn,
+      namespace: tenant,
       group: selected.group,
       dataId: selected.dataId,
-      previousContent: content,
-      beforeContent: content,
-      configType: selected.configType || nacosType(fmt),
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: message,
+      format: fmt,
+      desiredContent: null,
+      intent: "delete",
     });
-    throw new Error(message);
+    if (!entry || !onStartApply) throw new Error(t("config.planRouteUnavailable"));
+    onStartApply(entry);
+    setShowDelete(false);
+    toast(t("config.planCreated"));
   };
 
   const createSnapshot = async () => {
@@ -1015,7 +1013,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
             >
               <BrowserToolIcon name="refresh" />
             </button>
-            {!isLocalSnapshot && (
+            {canWrite && (
               <button
                 className="btn btn-primary btn-sm browser-icon-btn"
                 onClick={() => setShowNew(true)}
@@ -1238,13 +1236,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         options={FORMATS.map((f) => ({ value: f, label: f }))}
                         onChange={(v) => setFmt(v as Format)}
                       />
-                      {saveError && <InlineError message={saveError} onRetry={saveEdit} />}
+                      <span className="fmt-write-hint" title={t("config.directWriteDisabledHint")}>
+                        {t("config.directWriteDisabledHint")}
+                      </span>
+                      {saveError && <InlineError message={saveError} />}
                       <span className="fmt-spacer" />
                       <button className="btn btn-ghost btn-sm" onClick={cancelEditing}>
                         {t("common.cancel")}
                       </button>
-                      <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={saving} title={t("config.saveShortcutHint")}>
-                        {saving ? t("config.publishing") : t("config.savePublish")}
+                      <button className="btn btn-primary btn-sm" onClick={saveAsPlan} title={t("config.saveShortcutHint")}>
+                        {t("config.saveAsPlan")}
                       </button>
                     </div>
                     <div className="editor-host grow">
@@ -1256,7 +1257,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         ariaLabel={t("config.contentLabel")}
                         active={active}
                         searchTerm={isContentSearchActive ? contentTerm : undefined}
-                        onSave={saveEdit}
+                        onSave={saveAsPlan}
                       />
                     </div>
                   </>
@@ -1281,7 +1282,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       </button>
                       <CopyButton text={content} />
                       <span className="fmt-spacer" />
-                      {!isLocalSnapshot && (
+                      {canWrite && (
                         <>
                           <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={contentLoading}>
                             {t("common.edit")}
@@ -1318,7 +1319,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 currentContent={content}
                 format={fmt}
                 searchTerm={isContentSearchActive ? contentTerm : undefined}
-                onRolledBack={() => selected && openConfig(selected)}
+                onStartApply={onStartApply}
               />
             )}
           </>
@@ -1330,6 +1331,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           conn={conn}
           namespace={tenant}
           active={active}
+          onStartApply={onStartApply}
           onClose={() => setShowNew(false)}
           onSaved={(dataId, group) => {
             const nextGroup = group.trim() || "DEFAULT_GROUP";
@@ -1345,7 +1347,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       )}
 
       {showDelete && selected && (
-        <DeleteConfirm name={selected.dataId} group={selected.group} onCancel={() => setShowDelete(false)} onConfirm={doDelete} />
+        <DeleteConfirm
+          name={selected.dataId}
+          group={selected.group}
+          onCancel={() => setShowDelete(false)}
+          onConfirm={deleteAsPlan}
+          confirmLabel={t("config.deleteAsPlan")}
+          busyLabel={t("config.generatingPlan")}
+          failureTitle={t("config.planFailed")}
+          retryLabel={t("common.retry")}
+        />
       )}
 
       {showReplace && (

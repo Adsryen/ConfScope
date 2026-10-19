@@ -1,14 +1,15 @@
 import { useId, useRef, useState } from "react";
-import { Connection, connectionDisplayLabel } from "../store/connections";
+import { Connection } from "../store/connections";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
-import { Format, FORMATS, nacosType } from "../lib/format";
-import { reportError } from "../lib/errorCenter";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
+import { Format, FORMATS } from "../lib/format";
+import { buildDirectWriteExitEntry } from "../lib/directWriteExit";
+import { toast } from "../lib/toast";
 import { validateConfigIssues } from "../lib/validate";
 import { statusMessageProps } from "../lib/statusSemantics";
 import { useTranslation } from "../i18n";
-import { recordOperation } from "../store/operationHistory";
 import AlertModal, { type AlertItem } from "./AlertModal";
 import ConfirmModal from "./ConfirmModal";
 import CodeEditor, { type CodeEditorHandle } from "./CodeEditor";
@@ -20,12 +21,18 @@ interface Props {
   namespace: string;
   onClose: () => void;
   onSaved: (dataId: string, group: string) => void;
+  /**
+   * 交出「生成变更计划」的出路（轮42）。直写已被 API 层硬禁用，
+   * 新建弹层不再假装发布，而是把填好的正文物成成计划里的新增项。
+   * 缺省时按钮仍在工作，但会明确告知当前页面打不开计划页。
+   */
+  onStartApply?: (payload: ApplyEntryPayload) => void;
   /** 宿主页面被保活隐藏时传 false：不响应 Esc，避免其他模式的按键关掉隐藏的新建草稿。 */
   active?: boolean;
 }
 
 /** 新建配置：填写 dataId / group / 格式 / 内容并发布到 Nacos。 */
-export default function ConfigEditor({ conn, namespace, onClose, active = true }: Props) {
+export default function ConfigEditor({ conn, namespace, onClose, active = true, onStartApply }: Props) {
   const { t } = useTranslation();
   const [dataId, setDataId] = useState("");
   // 默认 group 跟随连接配置（留空/DEFAULT_GROUP → DEFAULT_GROUP）
@@ -35,7 +42,6 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   });
   const [fmt, setFmt] = useState<Format>("YAML");
   const [content, setContent] = useState("");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
   const editorRef = useRef<CodeEditorHandle>(null);
@@ -43,8 +49,6 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   // group/fmt 的改动不算——那是下拉一拨就有的动作，拦住只会被用户当成「怎么关不掉了」。
   const initialRef = useRef({ dataId, content });
   const [askDiscard, setAskDiscard] = useState(false);
-  const connectionName = conn.name || connectionDisplayLabel(conn);
-  const namespaceLabel = namespace || "public";
 
   const isDirty = () => dataId !== initialRef.current.dataId || content !== initialRef.current.content;
   // 四处出口（Esc / 点遮罩 / × / 底部「取消」）都必须走这里，不许再留直连 onClose 的旁路：
@@ -65,47 +69,43 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
   useDialogFocus({ active, containerRef: modalRef });
   const overlayDismiss = useOverlayDismiss(attemptClose);
 
-  const save = () => {
+  /**
+   * 「发布」按钮的真实动作：把手填的正文物化成新增变更计划（轮42 / 方案 D）。
+   *
+   * 三条设计：
+   * 1. **不记失败操作历史**——用户没做错任何事，假失败记录会把操作历史页变成噪音场；
+   *    真正落库时执行器自己记。
+   * 2. **不关弹层**——计划页接管屏幕后这里被保活隐藏，草稿留着，
+   *    用户从计划页返回时还能接着改（关掉就等于丢了半屏 YAML）。
+   * 3. dataId 撞上已存在的配置时，计划页会如实渲染成「覆盖」而不是「新增」，
+   *    比直写更诚实——它拿的是执行那一刻的线上现值做基线。
+   */
+  const generatePlan = () => {
     if (!dataId.trim()) {
       setError(t("config.dataIdRequired"));
       return;
     }
     const problems = validateConfigIssues(content, fmt);
     if (problems.length) {
-      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止发布
+      setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止生成计划
       return;
     }
-    setSaving(true);
     setError(null);
-    const targetDataId = dataId.trim();
-    const targetGroup = group.trim() || "DEFAULT_GROUP";
-    const configType = nacosType(fmt);
-    const message = t("api.directWriteRequiresApplyPlan");
-    recordOperation({
-      type: "publish",
-      result: "failure",
-      connectionId: conn.id,
-      connectionName,
-      namespace: namespaceLabel,
-      group: targetGroup,
-      dataId: targetDataId,
-      content,
-      afterContent: content,
-      configType,
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: message,
+    const entry = buildDirectWriteExitEntry({
+      conn,
+      namespace,
+      group: group.trim() || "DEFAULT_GROUP",
+      dataId: dataId.trim(),
+      format: fmt,
+      desiredContent: content,
+      intent: "create",
     });
-    setError(message);
-    reportError({
-      title: t("config.createConfigFailed"),
-      source: `${connectionName} / ${namespaceLabel} / ${targetGroup} / ${targetDataId}`,
-      message,
-      detail: message,
-      actionLabel: t("config.retryPublish"),
-      onAction: () => save(),
-    });
-    setSaving(false);
+    if (!entry || !onStartApply) {
+      setError(t("config.planRouteUnavailable"));
+      return;
+    }
+    onStartApply(entry);
+    toast(t("config.planCreated"));
   };
 
   return (
@@ -177,7 +177,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
                 onChange={setContent}
                 format={fmt}
                 placeholder={t("config.contentPlaceholder")}
-                onSave={save}
+                onSave={generatePlan}
                 ariaLabel={t("config.contentLabel")}
                 active={active}
               />
@@ -194,8 +194,8 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true }
           <button className="btn btn-ghost" onClick={attemptClose}>
             {t("common.cancel")}
           </button>
-          <button className="btn btn-primary" onClick={save} disabled={saving} title={t("config.saveShortcutHint")}>
-            {saving ? t("config.publishing") : t("config.publish")}
+          <button className="btn btn-primary" onClick={generatePlan} title={t("config.saveShortcutHint")}>
+            {t("config.saveAsPlan")}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import type { Connection } from "../store/connections";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { loadOperationHistory } from "../store/operationHistory";
 import HistoryView from "./HistoryView";
 
@@ -57,10 +58,10 @@ const historyItems = [
 ];
 
 function renderHistory(props: Partial<Parameters<typeof HistoryView>[0]> = {}, locale = "zh-CN") {
-  const onRolledBack = vi.fn();
+  const onStartApply = vi.fn();
   localStorage.setItem("locale", locale);
   return {
-    onRolledBack,
+    onStartApply,
     ...render(
       <I18nProvider>
         <HistoryView
@@ -70,7 +71,7 @@ function renderHistory(props: Partial<Parameters<typeof HistoryView>[0]> = {}, l
           group="DEFAULT_GROUP"
           currentContent="server:\n  port: 9090"
           format="YAML"
-          onRolledBack={onRolledBack}
+          onStartApply={onStartApply}
           {...props}
         />
       </I18nProvider>
@@ -226,51 +227,72 @@ describe("HistoryView", () => {
     expect(document.querySelector(".diff-panel")).toHaveTextContent("9090");
   });
 
-  it("blocks direct history rollback before it can reach the API", async () => {
-    const { onRolledBack } = renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
+  // 轮42 / 方案 D：回滚入口不再是「点了必失败 + 记一条假失败」，而是生成回滚变更计划。
+  it("第一下只进入就地二次确认，不生成计划也不写操作历史", async () => {
+    const { onStartApply } = renderHistory({ currentContent: "server:\n  port: 1000" });
 
     fireEvent.click(await screen.findByText("nid 2"));
-    await screen.findByText(/Changes vs previous nid 1/);
-    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
+    await screen.findByText(/相对上一版 nid 1/);
+    fireEvent.click(screen.getByRole("button", { name: "生成回滚计划" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认生成回滚计划" })).toBeInTheDocument();
+    expect(onStartApply).not.toHaveBeenCalled();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(onRolledBack).not.toHaveBeenCalled();
-    expect(toast).not.toHaveBeenCalledWith("Rolled back to version 2");
-    expect(apiMocks.listHistory).toHaveBeenCalledTimes(1);
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "rollback",
-      result: "failure",
-      dataId: "app.yaml",
-      beforeContent: "server:\n  port: 1000",
-      afterContent: "server:\n  port: 9090",
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      resourceId: "2",
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    expect(loadOperationHistory()).toEqual([]);
   });
 
-  it("records direct history rollback blocks", async () => {
-    renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
+  it("hands the selected version to a rollback change plan without faking a failure", async () => {
+    const { onStartApply } = renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
 
     fireEvent.click(await screen.findByText("nid 2"));
     await screen.findByText(/Changes vs previous nid 1/);
-    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback plan" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0] as ApplyEntryPayload;
+    expect(payload).toMatchObject({ sourceType: "rollback", scope: "config" });
+    expect(payload.origin?.returnMode).toBe("browse");
+    expect(payload.items[0]).toMatchObject({ dataId: "app.yaml", group: "DEFAULT_GROUP", key: "__document" });
+    // 来源值 = 该历史版本的正文；回滚不该把「当前线上内容」当成期望值
+    expect(payload.items[0].sourceValueOverride?.content).toBe("server:\n  port: 9090");
+
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "rollback",
-      result: "failure",
-      dataId: "app.yaml",
-      beforeContent: "server:\n  port: 1000",
-      afterContent: "server:\n  port: 9090",
-      rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
+    // 用户没做错事：既没有假失败记录，也不该有失败弹层/消息中心条目
+    expect(loadOperationHistory()).toEqual([]);
+    expect(latestError()).toBeUndefined();
+    expect(toast).toHaveBeenCalledWith("Change plan created. Review and confirm it on the plan page.");
+    expect(apiMocks.listHistory).toHaveBeenCalledTimes(1); // 不重新拉版本列表
+  });
+
+  it("只读连接不再挂着一个永远点不通的回滚按钮（R42-8）", async () => {
+    renderHistory({ conn: { ...conn, readonly: true } });
+
+    fireEvent.click(await screen.findByText("nid 2"));
+    await screen.findByText(/相对上一版 nid 1/);
+    expect(screen.queryByRole("button", { name: /回滚计划/ })).not.toBeInTheDocument();
+  });
+
+  it("读不到版本正文时仍是真错误：消息中心的重试直接重跑，不再退回二次确认", async () => {
+    apiMocks.getHistoryDetail.mockImplementation(
+      async (_conn: Connection, _tenant: string, _dataId: string, _group: string, nid: string) => {
+        if (nid === "2") throw new Error("detail denied");
+        return detail("1", "server:\n  port: 8080");
+      }
+    );
+    const { onStartApply } = renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
+
+    fireEvent.click(await screen.findByText("nid 2"));
+    fireEvent.click(await screen.findByRole("button", { name: "Generate rollback plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback plan" }));
+
+    expect(await screen.findByText("detail denied")).toBeInTheDocument();
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
+    expect(latestError()).toMatchObject({
+      title: "Failed to load history content",
+      message: "detail denied",
+      actionLabel: "Retry",
     });
   });
 
@@ -297,22 +319,6 @@ describe("HistoryView", () => {
     });
   });
 
-  it("reports direct rollback blocks with localized message-center actions", async () => {
-    renderHistory({ currentContent: "server:\n  port: 1000" }, "en-US");
-
-    fireEvent.click(await screen.findByText("nid 2"));
-    await screen.findByText(/Changes vs previous nid 1/);
-    fireEvent.click(screen.getByRole("button", { name: "Rollback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm rollback?" }));
-
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
-    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(latestError()).toMatchObject({
-      title: "Failed to rollback config",
-      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-      actionLabel: "Retry Rollback",
-    });
-  });
   it("原始内容切换按钮的按下态与视图一致（R69）", async () => {
     renderHistory();
     fireEvent.click(await screen.findByText("nid 2"));

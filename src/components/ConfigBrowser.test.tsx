@@ -9,6 +9,7 @@ import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCen
 import type { ConfigItem } from "../api/nacos";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { EscapePriority, useEscape } from "../lib/useEscape";
 import ConfigBrowser from "./ConfigBrowser";
 import ErrorDialog from "./ErrorDialog";
@@ -457,81 +458,74 @@ describe("ConfigBrowser", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     fireEvent.change(document.querySelector("textarea")!, { target: { value: '{"server":' } });
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
     expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
-  it("blocks edited content direct publish before it can reach the API", async () => {
-    apiMocks.getConfigDocument
-      .mockResolvedValueOnce({
-        content: '{"server":{"port":8080}}',
-        format: "json",
-        version: "",
-        source: "nacos",
-        updateTime: "",
-      })
-      .mockResolvedValueOnce({
-        content: '{"server":{"port":9090}}',
-        format: "json",
-        version: "",
-        source: "nacos",
-        updateTime: "",
-      });
-    renderBrowser("en-US");
+  // ── 轮42 / 方案 D：编辑态「保存」的真实动作是生成变更计划 ──────────────────
+  // 改前真机取证（任务线 PRD）：点「保存发布」必定拿到一句「直接配置写入已禁用…」，
+  // 同时往操作历史里记一条 result:"failure"。用户没做错任何事却被渲染成「你失败了」，
+  // 而且四处入口没有任何出路。现在按钮说的就是它做的事。
+  it("把改过的正文交给变更计划，而不是记一条必然失败的假记录", async () => {
+    const onStartApply = vi.fn();
+    renderBrowser("zh-CN", conn, "public", { onStartApply });
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(document.querySelector("textarea")!, {
-      target: { value: '{"server":{"port":9090}}' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: '{"server":{"port":9090}}' } });
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
-    expect(
-      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0] as ApplyEntryPayload;
+    expect(payload).toMatchObject({ sourceType: "manual", scope: "config" });
+    expect(payload.origin?.returnMode).toBe("browse");
+    expect(payload.items[0]).toMatchObject({ dataId: "app.json", group: "DEFAULT_GROUP", key: "__document" });
+    expect(payload.items[0].sourceValueOverride?.content).toBe('{"server":{"port":9090}}');
+    // 同一位置：来源=期望正文、目标=线上现值，freshness 基线仍由计划页实时读取
+    expect(payload.items[0].sourceRef).toEqual(payload.items[0].targetRef);
+
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(apiMocks.getConfigDocument).toHaveBeenCalledTimes(1);
-
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "failure",
-      dataId: "app.json",
-      beforeContent: '{"server":{"port":8080}}',
-      afterContent: '{"server":{"port":9090}}',
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    expect(loadOperationHistory()).toEqual([]);
+    expect(latestError()).toBeUndefined();
+    // 编辑态不丢：从计划页返回时草稿还在原地
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
   });
 
-  it("records direct publish blocks with the attempted content", async () => {
+  it("正文与线上一致时不给一个空跑的计划，并如实说明原因", async () => {
+    await enterEditMode('{"server":{"port":8080}}'); // 与线上一字不差
+
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
+
+    expect(await screen.findByText("正文与线上版本一致，无需生成变更计划")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
+  });
+
+  it("宿主没给计划出路时如实告知，不再伪装成发布失败", async () => {
+    await enterEditMode(); // renderBrowser 默认不传 onStartApply
+
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
+
+    expect(await screen.findByText("当前页面无法打开变更计划")).toBeInTheDocument();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
+    expect(latestError()).toBeUndefined();
+  });
+
+  it("禁用理由写在看得见的文案上，而不是 disabled 按钮的 title 里", async () => {
     renderBrowser("en-US");
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(document.querySelector("textarea")!, {
-      target: { value: '{"server":{"port":9090}}' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
 
     expect(
-      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
+      await screen.findByText("Direct writes are disabled: saving generates a change plan that must be confirmed before it runs.")
     ).toBeInTheDocument();
-    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "failure",
-      dataId: "app.json",
-      beforeContent: '{"server":{"port":8080}}',
-      afterContent: '{"server":{"port":9090}}',
-      rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    expect(screen.getByRole("button", { name: "Generate change plan" })).toBeInTheDocument();
   });
 
   it("opens and cancels the delete confirmation", async () => {
@@ -550,29 +544,27 @@ describe("ConfigBrowser", () => {
     expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
   });
 
-  it("blocks direct delete before it can reach the API", async () => {
-    renderBrowser("en-US");
+  it("删除确认交出删除计划：期望内容是「不存在」，不写操作历史", async () => {
+    const onStartApply = vi.fn();
+    renderBrowser("zh-CN", conn, "public", { onStartApply });
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    const dialog = screen.getByText("Delete Configuration").closest(".modal") as HTMLElement;
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    const dialog = screen.getByText("删除配置").closest(".modal") as HTMLElement;
+    // 按钮文案跟着 onConfirm 的真实动作走：这里生成的是计划，不是删除
+    expect(within(dialog).getByRole("button", { name: "生成删除计划" })).toBeInTheDocument();
     fireEvent.change(within(dialog).getByPlaceholderText("app.json"), { target: { value: "app.json" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "生成删除计划" }));
 
-    expect(
-      await within(dialog).findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
-    ).toBeInTheDocument();
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0] as ApplyEntryPayload;
+    expect(payload).toMatchObject({ sourceType: "manual", scope: "config" });
+    expect(payload.items[0].sourceValueOverride?.exists).toBe(false);
+
     expect(apiMocks.deleteConfig).not.toHaveBeenCalled();
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "delete",
-      result: "failure",
-      dataId: "app.json",
-      beforeContent: '{"server":{"port":8080}}',
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    expect(loadOperationHistory()).toEqual([]);
+    expect(screen.queryByText("删除配置")).not.toBeInTheDocument();
   });
 
   it("records current list export as not rollbackable", async () => {
@@ -753,26 +745,17 @@ describe("ConfigBrowser", () => {
     });
   });
 
-  it("reports direct publish blocks with localized message-center actions", async () => {
-    renderBrowser("en-US");
+  // R42-8：只读/快照连接挂着「点了永远不可能成功」的写入口，比少一个按钮更糟。
+  it("只读连接不再提供编辑、删除与新建入口，历史仍可读", async () => {
+    renderBrowser("zh-CN", { ...conn, readonly: true });
     fireEvent.click(await screen.findByText("app.json"));
     await expectCodeContains('"server"', '"port"', "8080");
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(document.querySelector("textarea")!, {
-      target: { value: '{"server":{"port":9090}}' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save & Publish" }));
-
-    expect(
-      await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")
-    ).toBeInTheDocument();
-    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(latestError()).toMatchObject({
-      title: "Failed to publish config",
-      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-      actionLabel: "Retry Publish",
-    });
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建配置" })).not.toBeInTheDocument();
+    // 读操作不受禁用影响
+    expect(screen.getByRole("button", { name: "历史变更" })).toBeInTheDocument();
   });
 
   it("creates a snapshot from the current config page and records a backup task", async () => {
@@ -922,7 +905,7 @@ describe("ConfigBrowser", () => {
 
   it("keeps the validation alert above the editing guard when Escape is pressed", async () => {
     await enterEditMode('{"server":');
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
     expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
 
     // 校验提示打开时 Esc 只关提示，不应连带退出编辑态
@@ -938,7 +921,7 @@ describe("ConfigBrowser", () => {
   it("校验错误带「跳到第 N 行」：点一下就把选区落到出错行（R28）", async () => {
     const broken = '{\n  "a": 1\n  "b": 2\n}';
     await enterEditMode(broken);
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
     const jump = await screen.findByRole("button", { name: /跳到第 \d+ 行/ });
     fireEvent.click(jump);
@@ -1171,7 +1154,7 @@ describe("ConfigBrowser", () => {
     await expectCodeContains('"server"', '"port"', "8080");
     await shell.openEditorWithDraft('{"server":');
 
-    fireEvent.click(screen.getByRole("button", { name: "保存发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
     expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
 
     shell.setActive(false);

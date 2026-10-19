@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { clickOverlay, fireEvent, render, screen } from "../test/react";
+import { clickOverlay, fireEvent, render, screen, waitFor } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory } from "../store/operationHistory";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
 import ConfigEditor from "./ConfigEditor";
 
 const apiMocks = vi.hoisted(() => ({
@@ -33,10 +34,12 @@ const conn: Connection = {
 function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}, locale = "zh-CN") {
   const onClose = vi.fn();
   const onSaved = vi.fn();
+  const onStartApply = vi.fn();
   localStorage.setItem("locale", locale);
   return {
     onClose,
     onSaved,
+    onStartApply,
     ...render(
       <I18nProvider>
         <ConfigEditor
@@ -44,6 +47,7 @@ function renderEditor(props: Partial<Parameters<typeof ConfigEditor>[0]> = {}, l
           namespace="public"
           onClose={onClose}
           onSaved={onSaved}
+          onStartApply={onStartApply}
           {...props}
         />
       </I18nProvider>
@@ -76,10 +80,10 @@ describe("ConfigEditor", () => {
     apiMocks.publishConfig.mockResolvedValue(undefined);
   });
 
-  it("requires a dataId before publishing", () => {
+  it("requires a dataId before generating the plan", () => {
     renderEditor();
 
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
     expect(screen.getByText("Data ID 不能为空")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
@@ -91,7 +95,7 @@ describe("ConfigEditor", () => {
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), { target: { value: content } });
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
     const jump = await screen.findByRole("button", { name: /跳到第 \d+ 行/ });
     fireEvent.click(jump);
@@ -106,79 +110,88 @@ describe("ConfigEditor", () => {
     expect(document.activeElement).toBe(ta); // 焦点回到编辑区，可以直接改
   });
 
-  it("blocks publish when the content fails format validation", async () => {
+  it("blocks plan generation when the content fails format validation", async () => {
     renderEditor();
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), {
       target: { value: "server:\n  port: 8080\n  port: 9090" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
     expect(await screen.findByText("格式校验未通过")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
-  it("blocks direct publish before it can reach the API", async () => {
-    const { onSaved } = renderEditor({}, "en-US");
+  // 轮42 / 方案 D：新建弹层的「发布」按钮改叫「生成变更计划」，走的也是那条唯一 sanctioned 链路。
+  // 关键在于**不再产生假失败**：用户没做错事，操作历史里不该出现 result:"failure" 的新建记录。
+  it("hands the new-config draft to a change plan instead of faking a failed publish", async () => {
+    const { onSaved, onStartApply } = renderEditor({}, "en-US");
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: " app.yaml " } });
     fireEvent.change(fieldByLabel("Group"), { target: { value: " " } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate change plan" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0] as ApplyEntryPayload;
+    expect(payload).toMatchObject({ sourceType: "manual", scope: "config" });
+    expect(payload.origin?.returnMode).toBe("browse");
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      dataId: "app.yaml",
+      group: "DEFAULT_GROUP",
+      key: "__document",
+    });
+    // 草稿就是计划的来源值：正文与线上现值不一致时才会生成覆盖/新增项
+    expect(payload.items[0].sourceValueOverride?.content).toBe("server:\n  port: 8080");
+    expect(payload.items[0].sourceValueOverride?.exists).toBe(true);
+    expect(payload.items[0].sourceRef).toEqual(payload.items[0].targetRef);
+
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "failure",
-      dataId: "app.yaml",
-      afterContent: "server:\n  port: 8080",
-      rollbackable: false,
-      rollbackReason: "operationHistory.rollbackOnlySuccess",
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    expect(loadOperationHistory()).toEqual([]);
+    expect(latestError()).toBeUndefined();
   });
 
-  it("shows the direct publish block without closing the editor", async () => {
-    const { onSaved } = renderEditor({}, "en-US");
+  it("keeps the draft open after generating the plan so the user can still edit it", async () => {
+    const { onClose, onStartApply } = renderEditor();
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy Error" })).toBeInTheDocument();
-    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(onSaved).not.toHaveBeenCalled();
-    expect(screen.getByText("New Configuration")).toBeInTheDocument();
-    expect(loadOperationHistory()[0]).toMatchObject({
-      type: "publish",
-      result: "failure",
-      dataId: "app.yaml",
-      afterContent: "server:\n  port: 8080",
-      rollbackable: false,
-      error: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-    });
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("新建配置")).toBeInTheDocument();
+    expect(editorTextarea().value).toBe("server:\n  port: 8080");
   });
 
-  it("reports direct publish blocks with localized message-center actions", async () => {
-    renderEditor({}, "en-US");
+  it("tells the user the plan route is unavailable instead of pretending a publish failed", async () => {
+    const { onStartApply } = renderEditor({ onStartApply: undefined });
 
     fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
     fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
 
-    expect(await screen.findByText("Direct config writes are disabled. Generate and execute a configuration change plan instead.")).toBeInTheDocument();
+    expect(await screen.findByText("当前页面无法打开变更计划")).toBeInTheDocument();
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
-    expect(latestError()).toMatchObject({
-      title: "Failed to create config",
-      message: "Direct config writes are disabled. Generate and execute a configuration change plan instead.",
-      actionLabel: "Retry Publish",
-    });
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
   });
+
+  it("只读连接不给新建弹层留出路：同样如实告知，不写操作历史", async () => {
+    const { onStartApply } = renderEditor({ conn: { ...conn, readonly: true } });
+
+    fireEvent.change(fieldByLabel("Data ID"), { target: { value: "app.yaml" } });
+    fireEvent.change(editorTextarea(), { target: { value: "server:\n  port: 8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "生成变更计划" }));
+
+    expect(await screen.findByText("当前页面无法打开变更计划")).toBeInTheDocument();
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
+  });
+
 
   // ---- 波13 / 轮5 R36：新建配置是「手写 YAML 的唯一落点」，关掉它不能再不问一句 ----
 

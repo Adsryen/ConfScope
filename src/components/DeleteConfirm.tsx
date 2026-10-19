@@ -14,10 +14,31 @@ interface Props {
   group: string;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
+  /**
+   * 四个动作文案（确认按钮 / 进行中 / 失败标题 / 重试）由宿主按「onConfirm 到底做了什么」传入。
+   *
+   * 为什么要留口子：本组件的防误删结构（输入完整 dataId 才能按）与弹层语义是通用的，
+   * 但直写被砍掉之后，宿主给它的 onConfirm 已经不是「删」而是「生成删除计划」——
+   * 写死「删除」就会把按钮和「删除中…」一起说谎（轮42）。缺省值保持原样，
+   * 让其它宿主与既有测试不必跟着改。
+   */
+  confirmLabel?: string;
+  busyLabel?: string;
+  failureTitle?: string;
+  retryLabel?: string;
 }
 
 /** 删除确认弹框：必须输入 dataId 完全一致才能删除,防误删。 */
-export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Props) {
+export default function DeleteConfirm({
+  name,
+  group,
+  onCancel,
+  onConfirm,
+  confirmLabel,
+  busyLabel,
+  failureTitle,
+  retryLabel,
+}: Props) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,11 +66,11 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
       const message = errorText(e);
       setError(message);
       reportError({
-        title: t("config.deleteConfigFailed"),
+        title: failureTitle ?? t("config.deleteConfigFailed"),
         source: `${group} / ${name}`,
         message,
         detail: message,
-        actionLabel: t("config.retryDelete"),
+        actionLabel: retryLabel ?? t("config.retryDelete"),
         onAction: () => confirm(),
       });
       setBusy(false);
@@ -111,7 +132,7 @@ export default function DeleteConfirm({ name, group, onCancel, onConfirm }: Prop
             {t('common.cancel')}
           </button>
           <button className="btn btn-danger" onClick={confirm} disabled={!match || busy}>
-            {busy ? t('config.deleting') : t('common.delete')}
+            {busy ? (busyLabel ?? t("config.deleting")) : (confirmLabel ?? t("common.delete"))}
           </button>
         </div>
       </div>

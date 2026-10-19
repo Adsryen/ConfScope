@@ -6,11 +6,13 @@ import {
   HistoryItem,
   listHistory,
 } from "../api/nacos";
-import { Format, nacosType } from "../lib/format";
+import type { ApplyEntryPayload } from "../lib/applyEntry";
+import { Format } from "../lib/format";
+import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
 import { busyProps } from "../lib/busyRegion";
 import { reportError } from "../lib/errorCenter";
+import { toast } from "../lib/toast";
 import { useTranslation } from "../i18n";
-import { recordOperation } from "../store/operationHistory";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
@@ -27,10 +29,16 @@ interface Props {
   group: string;
   /** 当前线上内容，作为「与最新版对比」的右侧基准。 */
   currentContent: string;
-  /** 配置格式，用于原始内容的语法高亮与回滚发布时的 type。 */
+  /** 配置格式：用于原始内容的语法高亮，也写进回滚计划项，让计划页按同一格式解析与比对。 */
   format: Format;
-  /** 回滚成功后通知父级刷新当前内容。 */
-  onRolledBack: () => void;
+  /**
+   * 交出「生成回滚变更计划」的出路（轮42）。
+   *
+   * 这里曾经是一个 `onRolledBack`：直写在 API 层被硬禁用后，回滚永远走不到成功分支，
+   * 那个回调一行代码都没调用过，却挂着「将此版本内容重新发布为最新版」的按钮标题说谎。
+   * 现在换成真正的出路：把该版本的正文物成成计划的来源值，交给计划流程 dry-run→确认→执行。
+   */
+  onStartApply?: (payload: ApplyEntryPayload) => void;
   /** 宿主页面被保活隐藏时传 false：本页的 CodeView 不再劫持全局 Ctrl+F。 */
   active?: boolean;
   /**
@@ -64,6 +72,7 @@ export default function HistoryView({
   format,
   active = true,
   searchTerm,
+  onStartApply,
 }: Props) {
   const { t } = useTranslation();
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -81,12 +90,14 @@ export default function HistoryView({
   const deferredViewing = useDeferredValue(viewing);
   // 单版本查看时：默认高亮「相对上一版的变更」，可切到原始内容
   const [rawView, setRawView] = useState(false);
-  // 回滚：二次确认 + 进行中
+  // 回滚：二次确认 + 生成计划中
   const [rbConfirm, setRbConfirm] = useState(false);
-  const [rollingBack, setRollingBack] = useState(false);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
 
   const histReqId = useRef(0);
   const sourceLabel = `${connectionDisplayLabel(conn)} / ${tenant || "public"} / ${group} / ${dataId}`;
+  // 只读连接与本地快照没有可写的计划目标：不出「生成回滚计划」这颗永远走不通的按钮（R42-8）。
+  const canRollback = isWritableConfigTarget(conn);
 
   const loadHistory = (page: number) => {
     const my = ++histReqId.current;
@@ -167,83 +178,62 @@ export default function HistoryView({
       .filter((i) => Number(i.id) < Number(nid))
       .sort((a, b) => Number(b.id) - Number(a.id))[0];
 
-  // 回滚：把选中版本的内容重新发布为最新版（Nacos 无专用回滚接口）。
+  /**
+   * 回滚 = 生成「把这个版本的内容变回去」的变更计划（轮42 / 方案 D）。
+   * Nacos 没有专用回滚接口，直写又已被硬禁用，所以唯一的出路就是计划：
+   * 来源值 = 该历史版本正文，目标 = 线上现值，计划页会渲染成一条覆盖项。
+   * 两步就地确认保留（点第一下只改文案，不误触）；执行侧仍要 dry-run + 勾选确认。
+   */
+  /**
+   * 真正干活的一段：读版本正文 → 物化计划 → 交给计划流程。
+   * 独立出来是为了让消息中心那条「重试」能直接重跑它：
+   * 用户在就地确认上已经点过第二下了，重试不该把他退回第一步重新确认。
+   */
+  const generateRollbackPlan = async (targetVersion: string) => {
+    setGeneratingPlan(true);
+    setError(null);
+    try {
+      const text = await ensureContent(targetVersion);
+      const entry = buildDirectWriteExitEntry({
+        conn,
+        namespace: tenant,
+        group,
+        dataId,
+        format,
+        desiredContent: text,
+        intent: "rollback",
+      });
+      if (!entry || !onStartApply) {
+        setError(t("config.planRouteUnavailable"));
+        return;
+      }
+      onStartApply(entry);
+      toast(t("config.planCreated"));
+    } catch (e) {
+      // 读不到版本正文是真错误：它可能只是网络抖一下，重试有意义。
+      const message = errorText(e);
+      setError(message);
+      reportError({
+        title: t("history.contentLoadFailed"),
+        source: sourceLabel,
+        message,
+        detail: message,
+        actionLabel: t("common.retry"),
+        onAction: () => generateRollbackPlan(targetVersion),
+      });
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
+
   const rollback = async () => {
     if (!viewing) return;
     if (!rbConfirm) {
       setRbConfirm(true);
       return;
     }
-    setRollingBack(true);
-    setError(null);
-    const targetVersion = viewing;
-    let targetContent = "";
-    try {
-      const text = await ensureContent(targetVersion);
-      targetContent = text;
-      const configType = nacosType(format);
-      const message = t("api.directWriteRequiresApplyPlan");
-      recordOperation({
-        type: "rollback",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName: conn.name || connectionDisplayLabel(conn),
-        namespace: tenant || "public",
-        group,
-        dataId,
-        content: text,
-        previousContent: currentContent,
-        beforeContent: currentContent,
-        afterContent: text,
-        configType,
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-        resourceId: targetVersion,
-        error: message,
-      });
-      setError(message);
-      setRbConfirm(false);
-      reportError({
-        title: t("history.rollbackConfigFailed"),
-        source: sourceLabel,
-        message,
-        detail: message,
-        actionLabel: t("history.retryRollback"),
-        onAction: () => rollback(),
-      });
-    } catch (e) {
-      const message = errorText(e);
-      recordOperation({
-        type: "rollback",
-        result: "failure",
-        connectionId: conn.id,
-        connectionName: conn.name || connectionDisplayLabel(conn),
-        namespace: tenant || "public",
-        group,
-        dataId,
-        content: targetContent || undefined,
-        previousContent: currentContent,
-        beforeContent: currentContent,
-        afterContent: targetContent || undefined,
-        configType: nacosType(format),
-        rollbackable: false,
-        rollbackReason: "operationHistory.rollbackOnlySuccess",
-        resourceId: targetVersion,
-        error: message,
-      });
-      setError(message);
-      setRbConfirm(false);
-      reportError({
-        title: t("history.rollbackConfigFailed"),
-        source: sourceLabel,
-        message,
-        detail: message,
-        actionLabel: t("history.retryRollback"),
-        onAction: () => rollback(),
-      });
-    } finally {
-      setRollingBack(false);
-    }
+    setRbConfirm(false);
+    await generateRollbackPlan(viewing);
   };
 
   const view = (nid: string) => {
@@ -383,15 +373,20 @@ export default function HistoryView({
                       {rawView ? t('history.highlightChanges') : t('history.rawContent')}
                     </button>
                     <CopyButton text={contents[viewing] ?? ""} label={t('history.copyVersion')} />
-                    <button
-                      className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
-                      onClick={rollback}
-                      onBlur={() => setRbConfirm(false)}
-                      disabled={rollingBack}
-                      title={t('history.rollbackHint')}
-                    >
-                      {rollingBack ? t('history.rollingBack') : rbConfirm ? t('history.confirmRollback') : t('history.rollback')}
-                    </button>
+                    {canRollback && (
+                      <button
+                        className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
+                        onClick={rollback}
+                        onBlur={() => setRbConfirm(false)}
+                        disabled={generatingPlan}
+                      >
+                        {generatingPlan
+                          ? t("config.generatingPlan")
+                          : rbConfirm
+                            ? t("history.confirmRollbackAsPlan")
+                            : t("history.rollbackAsPlan")}
+                      </button>
+                    )}
                   </span>
                 </div>
                 {!ready ? (
