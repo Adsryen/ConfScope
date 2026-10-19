@@ -112,6 +112,83 @@ function findInput(container: HTMLElement) {
   return container.querySelector(".code-find-input") as HTMLInputElement | null;
 }
 
+/**
+ * 轮39 R39-1 / R39-3 / R39-4：编辑态的查找快捷键焦点上下文。
+ *
+ * 旧写法在这里另起一套 `mine / fallback`，还用「DOM 里有没有 .code-view」猜浏览态会不会抢。
+ * 被保活隐藏的 CodeView（active=false）根本不挂监听，却照样被算成会抢 —— 编辑态跟着让位，
+ * 两边都不接管。取证见 `10-19-ui-ux-39-find-key-ownership/prd.md`。
+ */
+describe("CodeEditor 查找快捷键的焦点上下文（轮39）", () => {
+  it("焦点停在页面按钮上时 Ctrl+F 接管（真机：此前只有 textarea 与 body 两种上下文能用）", async () => {
+    const { container } = renderEditor(
+      <>
+        <button data-testid="tool" type="button">
+          ⟳
+        </button>
+        <Harness />
+      </>
+    );
+    const tool = screen.getByTestId("tool") as HTMLElement;
+    tool.focus();
+    expect(document.activeElement).toBe(tool);
+
+    fireEvent.keyDown(tool, { key: "f", ctrlKey: true });
+
+    await waitFor(() => expect(container.querySelector(".code-editor .code-find-input")).not.toBeNull());
+  });
+
+  it("页面里只有被保活隐藏的浏览态视图时，编辑态不再被「有个 .code-view」这条猜测挡掉", async () => {
+    const { container } = renderEditor(
+      <>
+        <CodeView code="a\nb" format="TEXT" active={false} />
+        <Harness />
+      </>
+    );
+    // 隐藏视图不再认领（注册表随监听同生同灭），所以文档序第一个认领者是编辑态自己
+    expect(container.querySelectorAll("[data-find-key-owner]")).toHaveLength(1);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+
+    await waitFor(() => expect(container.querySelector(".code-editor .code-find-input")).not.toBeNull());
+  });
+
+  it("一页多个编辑器时只许一个接管：焦点在谁身上就谁开栏", async () => {
+    const { container } = renderEditor(
+      <>
+        <Harness />
+        <Harness />
+      </>
+    );
+    const areas = container.querySelectorAll("textarea");
+    expect(areas).toHaveLength(2);
+    (areas[1] as HTMLElement).focus();
+
+    fireEvent.keyDown(areas[1], { key: "f", ctrlKey: true });
+
+    await waitFor(() => expect(container.querySelectorAll(".code-find-input")).toHaveLength(1));
+    const editors = container.querySelectorAll(".code-editor");
+    expect(editors[0].querySelector(".code-find-input"), "焦点不在它身上却也弹了栏").toBeNull();
+    expect(editors[1].querySelector(".code-find-input")).not.toBeNull();
+  });
+
+  it("焦点在外部输入框里时编辑态仍然让位（既有口径，本轮不放宽）", async () => {
+    const { container } = renderEditor(
+      <>
+        <input data-testid="ext" type="text" />
+        <Harness />
+      </>
+    );
+    const ext = screen.getByTestId("ext") as HTMLInputElement;
+    ext.focus();
+
+    fireEvent.keyDown(ext, { key: "f", ctrlKey: true });
+
+    await new Promise((r) => setTimeout(r, 60));
+    expect(container.querySelector(".code-find-input")).toBeNull();
+  });
+});
+
 describe("CodeEditor 行号槽（R22-1）", () => {
   it("行号数量与 textarea 的行数逐一对应，末尾换行也占一行", () => {
     const { container } = renderEditor(<MultiHarness />);

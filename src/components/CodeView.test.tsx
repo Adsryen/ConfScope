@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { StrictMode } from "react";
+import { StrictMode, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes } from "react";
 import { act, fireEvent, render, screen, settleFindInputCommit, waitFor } from "../test/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FIND_INPUT_DEFER_MIN_LINES } from "../lib/findInput";
@@ -277,6 +277,111 @@ describe("CodeView Ctrl+F 查找", () => {
     expect(container.querySelector(".code-find-open")).toBeNull();
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     expect(container.querySelector(".code-find-input")).toBeNull();
+  });
+});
+
+/**
+ * 轮39 R39-1 / R39-4：查找快捷键的焦点上下文。
+ *
+ * 真机取证的原始缺陷（`10-19-ui-ux-39-find-key-ownership/prd.md` 取证表 1/2/3）：
+ * 在左侧列表点一条配置后 `document.activeElement` 停在 `DIV.browser-item` 上，
+ * 此时按 Ctrl+F 查找栏根本不出现——「选中文件 → Ctrl+F」这个最自然的手顺是死的。
+ * 旧判定只放行「事件源在本视图内」和「焦点在 body」，把不可编辑焦点一律当成别人持有。
+ */
+describe("CodeView 查找快捷键的焦点上下文（轮39）", () => {
+  /** 视图外的兄弟控件（模拟左侧列表项 / 侧边导航 / 下拉触发器 / 列表搜索框）。 */
+  function renderWithSibling(tag: string, props: Record<string, string | number | boolean> = {}) {
+    localStorage.setItem("locale", "zh-CN");
+    // 标签按真实 DOM 给：input / button 是空元素，塞 children 会被 React 直接拒掉
+    const node =
+      tag === "input" ? (
+        <input data-testid="sibling" {...(props as InputHTMLAttributes<HTMLInputElement>)} />
+      ) : tag === "button" ? (
+        <button data-testid="sibling" {...(props as ButtonHTMLAttributes<HTMLButtonElement>)} />
+      ) : (
+        <div data-testid="sibling" {...(props as HTMLAttributes<HTMLDivElement>)}>
+          svc-gateway.yaml
+        </div>
+      );
+    const view = render(
+      <I18nProvider>
+        {node}
+        <CodeView code={MULTI} format="Properties" />
+      </I18nProvider>
+    );
+    const sibling = screen.getByTestId("sibling") as HTMLElement;
+    sibling.focus();
+    // 焦点真落得上才算数：不可聚焦的元素 focus() 是空操作，那样测的是别的上下文
+    expect(document.activeElement).toBe(sibling);
+    return { ...view, sibling };
+  }
+
+  it.each([
+    ["左侧配置列表项", "div", { className: "browser-item active", tabIndex: -1 }],
+    ["侧边导航项", "div", { className: "side-nav-item active", tabIndex: -1 }],
+    ["格式下拉的触发按钮", "button", { className: "sel-trigger", type: "button" }],
+    ["工具栏按钮", "button", { className: "btn btn-ghost btn-sm", type: "button" }],
+  ])("焦点停在不可编辑的 %s 上时 Ctrl+F 必须接管（真机：此前是死键）", async (_label, tag, props) => {
+    const { container, sibling } = renderWithSibling(tag, props as Record<string, string | number | boolean>);
+    fireEvent.keyDown(sibling, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+  });
+
+  it("焦点在只读输入框里时也接管：那种框落不下光标，不该造出死键", async () => {
+    const { container, sibling } = renderWithSibling("input", { className: "search-input", readOnly: true });
+    fireEvent.keyDown(sibling, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelector(".code-find-input")).not.toBeNull());
+  });
+
+  it("焦点在可编辑输入框里时仍然让位（取证 #7 既有口径，本轮不放宽）", async () => {
+    const { container, sibling } = renderWithSibling("input", { className: "search-input wide", type: "text" });
+    fireEvent.keyDown(sibling, { key: "f", ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(container.querySelector(".code-find-input")).toBeNull();
+  });
+
+  it("一页两个浏览态视图时只许一个接管，且接管的是文档序第一个", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const { container } = render(
+      <I18nProvider>
+        <CodeView code={MULTI} format="TEXT" />
+        <CodeView code={"other\nfile"} format="TEXT" />
+      </I18nProvider>
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelectorAll(".code-find-input")).toHaveLength(1));
+    const views = container.querySelectorAll(".code-view");
+    expect(views[0].querySelector(".code-find-input")).not.toBeNull();
+    expect(views[1].querySelector(".code-find-input")).toBeNull();
+  });
+
+  it("被保活隐藏的视图不再认领 Ctrl+F：注册表与监听同生同灭", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const { container } = render(
+      <I18nProvider>
+        <CodeView code={MULTI} format="TEXT" active={false} />
+        <CodeView code={"other\nfile"} format="TEXT" active />
+      </I18nProvider>
+    );
+    const views = container.querySelectorAll(".code-view");
+    expect(views[0].hasAttribute("data-find-key-owner")).toBe(false);
+    expect(views[1].hasAttribute("data-find-key-owner")).toBe(true);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(container.querySelectorAll(".code-find-input")).toHaveLength(1));
+    expect(views[1].querySelector(".code-find-input")).not.toBeNull();
+  });
+
+  it("卸载视图时摘掉认领标记，别让幽灵视图挡住在世视图的快捷键", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const { container, unmount } = render(
+      <I18nProvider>
+        <CodeView code={MULTI} format="TEXT" />
+      </I18nProvider>
+    );
+    const view = container.querySelector(".code-view") as HTMLElement;
+    expect(view.hasAttribute("data-find-key-owner")).toBe(true);
+    unmount();
+    expect(document.querySelectorAll("[data-find-key-owner]")).toHaveLength(0);
   });
 });
 

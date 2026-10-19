@@ -32,6 +32,7 @@ import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
 import { useTranslation } from "../i18n";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
+import { FIND_KEY_OWNER_ATTR, takesFindKeyOwnership } from "../lib/findKeyOwnership";
 import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
@@ -482,10 +483,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
     return rows;
   }, [hitLineArray, pinnedLine, visibleRange]);
 
-  // Ctrl+F / Cmd+F / F3：编辑态必须自己接管。浏览态 CodeView 的监听在焦点落到
-  // textarea 这类可编辑控件时故意不接管（不抢输入框的查找），所以光脚按 Ctrl+F 以前是死键。
+  // Ctrl+F / Cmd+F / F3：所有权判定与浏览态共用 ../lib/findKeyOwnership（轮39 R39-3）。
+  // 旧写法在这里另起一套 `mine / fallback`，还用「DOM 里有没有 .code-view」猜浏览态会不会抢——
+  // 被保活隐藏的 CodeView 根本不挂监听，却照样被算成会抢，于是编辑态跟着让位，两边都是死键。
   useEffect(() => {
     if (!enableFind || !active) return;
+    const root = rootRef.current;
+    // 注册表与监听同生同灭（与 CodeView 同一口径）
+    root?.setAttribute(FIND_KEY_OWNER_ATTR, "1");
     const handler = (e: KeyboardEvent) => {
       // 组合态期间不劫持 Ctrl+F / F3：此刻按键属于输入法候选，不该被查找栏抢走
       if (isImeComposing(e)) return;
@@ -496,17 +501,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       // F3 只有在查找栏已打开时才导航，否则把系统原生行为留给调用方
       if (isF3 && !findOpen) return;
 
-      const root = rootRef.current;
-      const target = e.target as EventTarget | null;
-      const inRoot = !!root && target instanceof Node && root.contains(target);
-      const focused = document.activeElement as HTMLElement | null;
-      const onBody = !focused || focused === document.body || focused === document.documentElement;
-      // 焦点在本编辑器内 → 接管；焦点在别处的输入框 → 让给它。
-      const mine = inRoot || focused === taRef.current;
-      // 没有焦点时也要能按出来，但页面里存在浏览态 CodeView（它自己监听 Ctrl+F）就不抢，
-      // 避免同一快捷键被两个视图同时接管。
-      const fallback = onBody && !document.querySelector(".code-view");
-      if (!mine && !fallback) return;
+      if (!takesFindKeyOwnership({ target: e.target, root: rootRef.current })) return;
 
       e.preventDefault();
       if (isF3) {
@@ -516,7 +511,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
       openFind();
     };
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    return () => {
+      root?.removeAttribute(FIND_KEY_OWNER_ATTR);
+      window.removeEventListener("keydown", handler, true);
+    };
   }, [active, enableFind, findOpen, navigate, openFind]);
 
   const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

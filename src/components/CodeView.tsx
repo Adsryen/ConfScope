@@ -20,6 +20,7 @@ import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, selectionTextWithin } from "../lib/findSelection";
+import { FIND_KEY_OWNER_ATTR, takesFindKeyOwnership } from "../lib/findKeyOwnership";
 import { useDebouncedFindTerm } from "../lib/findInput";
 import { measureFindBarHeight, padTopForFindBar, revealMarkHorizontally } from "../lib/codeScroll";
 import type { MatchOptions } from "../lib/textMatch";
@@ -339,33 +340,26 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
     return () => ro.disconnect();
   }, [syncScroll]);
 
-  // Ctrl+F / Cmd+F / F3：仅在焦点落在本视图、或没有任何输入框持有焦点时接管，
-  // 绝不从其他输入框（如配置列表搜索框）抢走原生查找。
+  // Ctrl+F / Cmd+F / F3：所有权判定收在 ../lib/findKeyOwnership（轮39 R39-3），浏览态与编辑态共用一份。
+  // 口径：本视图内的按键、以及「页面里根本没有文本光标」时接管（含焦点停在列表项 / 导航项 /
+  // 按钮 / 下拉触发器上）；焦点落在输入框里时绝不从它手上抢走原生查找。
   useEffect(() => {
     // 视图被保活隐藏时不挂全局监听：避免隐藏的查找栏抢走 Ctrl+F / F3
     if (!enableFind || !active) return;
-    const takesThisView = (target: EventTarget | null): boolean => {
-      const root = rootRef.current;
-      // 事件源在本视图内（含查找输入框）→ 接管；Node 判定避免 window/document 触发 contains 抛错
-      if (root && target instanceof Node && root.contains(target)) return true;
-      const active = document.activeElement as HTMLElement | null;
-      const editable = !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
-      // 焦点在别处的可编辑控件上 → 让给它，不劫持
-      if (editable) return false;
-      // 没有焦点 / 焦点在 body → 视为针对当前文件
-      return !active || active === document.body || active === document.documentElement;
-    };
+    const root = rootRef.current;
+    // 注册表与监听同生同灭：摘掉属性就等于「本视图不再认领 Ctrl+F」，
+    // 兄弟视图据此（而不是按 .code-view 类名猜）决定该不该让位。
+    root?.setAttribute(FIND_KEY_OWNER_ATTR, "1");
     const handler = (e: KeyboardEvent) => {
       // 组合态期间不劫持 Ctrl+F / F3：此刻按键属于输入法候选，不该被查找栏抢走
       if (isImeComposing(e)) return;
-      const target = e.target as EventTarget | null;
       const key = e.key;
       const isFindKey = (e.ctrlKey || e.metaKey) && (key === "f" || key === "F");
       const isF3 = key === "F3";
       if (!isFindKey && !isF3) return;
       // F3 只有在查找栏已打开时才导航，否则把浏览器原生查找/其它行为留给系统
       if (isF3 && !findOpen) return;
-      if (!takesThisView(target)) return;
+      if (!takesFindKeyOwnership({ target: e.target, root: rootRef.current })) return;
       e.preventDefault();
       if (isF3) {
         navigate(e.shiftKey ? -1 : 1);
@@ -374,7 +368,10 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
       openFind();
     };
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    return () => {
+      root?.removeAttribute(FIND_KEY_OWNER_ATTR);
+      window.removeEventListener("keydown", handler, true);
+    };
   }, [active, enableFind, findOpen, navigate, openFind]);
 
   /**
