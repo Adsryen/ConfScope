@@ -2,7 +2,7 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from "vitest";
-import { highlightCode } from "./highlight";
+import { escapeHtml, highlightCode, highlightLine } from "./highlight";
 import {
   activeLineOf,
   buildMinimapRows,
@@ -16,6 +16,7 @@ import {
   hitLinesInRange,
   lineOffsets,
   markHighlightedHtml,
+  markLineSearchHits,
   normalizeLineEndings,
   splitLines,
   MAX_CODE_HITS,
@@ -450,5 +451,71 @@ describe("findCodeHits 命中上限（轮28 F-10）", () => {
     expect(findCodeHits(many, "   ")).toEqual([]);
     expect(findCodeHits(many, "zzz")).toEqual([]);
     expect(isHitScanCapped(findCodeHits(many, "zzz"))).toBe(false);
+  });
+});
+
+describe("markLineSearchHits（轮41：逐行视图复用同一套标记层）", () => {
+  // UnifiedDiff 每行单独产 HTML（highlightLine 或 escapeHtml），偏移只能在这一行自己的文本流上算。
+  // 这几条断言钉的是「复用之后文本契约不破」：剥标签 + 反转义必须逐字等于原行。
+  const lines: Array<[string, Parameters<typeof highlightCode>[1]]> = [
+    ['  url: "http://a.com?x=1&y=2" # enabled', "YAML"],
+    ["  key: it's enabled & <b>", "YAML"],
+    ['{"enabled":true,"html":"<i>&amp;</i>"}', "JSON"],
+    ["plain enabled & <tag>", "TEXT"],
+    ["&amp; 字面实体也在 enabled 这行", "YAML"],
+  ];
+
+  function lineBase(line: string, fmt: Parameters<typeof highlightCode>[1]): string {
+    return fmt === "TEXT" ? escapeHtml(line) : highlightLine(line, fmt);
+  }
+
+  it("标完后剥标签逐字等于原行，且命中真的被 <mark> 包住", () => {
+    for (const [line, fmt] of lines) {
+      const { html, isHit } = markLineSearchHits(lineBase(line, fmt), line, "enabled");
+      expect(isHit, `该行应有命中：${line}`).toBe(true);
+      expect(textContent(html), `文本契约被破坏：${line}`).toBe(line);
+      expect(html).toContain('class="search-hit"');
+    }
+  });
+
+  it("无词 / 纯空白词 / 词不在本行 ⇒ 原样返回且 isHit=false", () => {
+    for (const term of ["", "   ", "zzz-not-here"]) {
+      for (const [line, fmt] of lines) {
+        const base = lineBase(line, fmt);
+        const { html, isHit } = markLineSearchHits(base, line, term);
+        expect(isHit, `词「${term}」不该判成命中`).toBe(false);
+        expect(html).toBe(base);
+      }
+    }
+  });
+
+  it("口径固定中性：大小写不敏感的子串照标（与外部搜索词一致）", () => {
+    const line = "Enabled: true";
+    const { html, isHit } = markLineSearchHits(escapeHtml(line), line, "enabled");
+    expect(isHit).toBe(true);
+    expect(textContent(html)).toBe(line);
+    expect(html).toContain(">Enabled</mark>");
+  });
+
+  it("一行多处全部标出；data-hit 只是行内下标（跨行重号是既定口径）", () => {
+    const a = "enabled enabled";
+    const b = "enabled";
+    const markedA = markLineSearchHits(escapeHtml(a), a, "enabled");
+    const markedB = markLineSearchHits(escapeHtml(b), b, "enabled");
+    expect((markedA.html.match(/<mark /g) ?? []).length).toBe(2);
+    expect((markedA.html.match(/data-hit="0"/g) ?? []).length).toBe(1);
+    expect((markedA.html.match(/data-hit="1"/g) ?? []).length).toBe(1);
+    // 下一行的第一处又回到 0 ⇒ 这条路径拿 data-hit 当全局编号就会跳错位置（守卫测试钉住）
+    expect(markedB.html).toContain('data-hit="0"');
+  });
+
+  it("跨语法 token 的命中也能标（与整篇管线同一能力）", () => {
+    // properties 把 server.port=8080 拆成 attr + string 两个 token，搜 port=8080 会跨过去，
+    // 这正是「在原文上匹配、在 HTML 上切分」这套口径存在的理由（整篇管线同款能力）。
+    const line = "server.port=8080";
+    const { html, isHit } = markLineSearchHits(highlightLine(line, "Properties"), line, "port=8080");
+    expect(isHit).toBe(true);
+    expect(textContent(html)).toBe(line);
+    expect(html.match(/<mark /g)?.length).toBeGreaterThan(1);
   });
 });

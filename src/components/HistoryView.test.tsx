@@ -365,4 +365,31 @@ describe("HistoryView", () => {
     expect(document.querySelectorAll(".code-area mark.search-hit").length).toBe(0);
     expect(document.querySelectorAll(".code-lines .code-line.is-hit").length).toBe(0);
   });
+
+  // 轮41 R41-1 / R41-4：默认视图（高亮变更）也必须吃到页面搜索词。
+  // `rawView` 初值是 false ⇒ 用户点完历史版本看到的**第一屏**就是 UnifiedDiff，
+  // 轮40 只接了「原始内容」那条分支，等于把词递到门口却没进屋（真机取证见轮41 PRD）。
+  it("默认的高亮变更视图跟随页面搜索词标红，行号进命中态（轮41 R41-1）", async () => {
+    renderHistory({ searchTerm: "port" });
+    fireEvent.click(await screen.findByText("nid 2"));
+
+    await waitFor(() =>
+      expect(document.querySelectorAll(".diff-panel .udiff-text mark.search-hit").length).toBeGreaterThan(0)
+    );
+    // 命中落在 "  port: 8080"（del）与 "  port: 9090"（add）这一对上，ctx 行 "server:" 没词
+    expect(document.querySelectorAll(".diff-panel .udiff-gutter.is-hit").length).toBe(2);
+    // 没点「原始内容」：停在默认视图，取证前提才成立
+    expect(document.querySelector(".code-area")).toBeNull();
+  });
+
+  it("不传词时默认的高亮变更视图一处都不标（轮41 R41-4）", async () => {
+    renderHistory();
+    fireEvent.click(await screen.findByText("nid 2"));
+    await waitFor(() => expect(document.querySelector(".diff-panel")).toBeTruthy());
+
+    const texts = Array.from(document.querySelectorAll(".udiff-text")).map((el) => el.textContent ?? "");
+    expect(texts.some((line) => line.includes("port"))).toBe(true);
+    expect(document.querySelectorAll(".diff-panel mark.search-hit").length).toBe(0);
+    expect(document.querySelectorAll(".udiff-gutter.is-hit").length).toBe(0);
+  });
 });
