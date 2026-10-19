@@ -57,7 +57,9 @@ export function createRetestStorageSeed(state: RetestState): BrowserStorageSeed[
         // 两侧 namespace 不同（dev/qa），必须分开记录，DiffView 恢复时才不会跨连接错配
         diffLeft: { tenant: state.nacos.a.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
         diffRight: { tenant: state.nacos.b.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
-        diffAutoCompare: true,
+        // 轮45 R02：这里不再写 diffAutoCompare。启动要不要自动比，由 App 从
+        // 「mode:"diff" + 左右来源齐全」推导（见 src/App.tsx 的 initialDiffParams），
+        // 那个键一旦进存储就没人负责清掉，会让每次加载都白比一轮。
       }),
     },
     {

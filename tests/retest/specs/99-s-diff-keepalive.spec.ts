@@ -82,8 +82,9 @@ async function settleBrowse(page: Page_): Promise<void> {
 /**
  * 把启动页钉回「配置浏览」。
  *
- * retest 种子的 cs.ui 里 mode 写死 "diff"、diffAutoCompare 写死 true（bridge/storageSeed.ts:50-61，
- * 别的 spec 要靠它直接从对比页起步），而桥的 init script 每次加载都重新覆写种子——
+ * retest 种子的 cs.ui 里 mode 写死 "diff"、左右来源齐全（bridge/storageSeed.ts:49-64，别的 spec
+ * 要靠它直接从对比页起步；轮45 R02 起「要不要自动比」由这两个条件推导，不再存标志位），
+ * 而桥的 init script 每次加载都重新覆写种子——
  * 于是 DK-02 想测的「新会话没进过对比页」在默认种子上根本不成立：首屏就挂在对比页上
  * （真机第一轮 count=1 就是这么红的，不是上一批把 mode 存脏了）。
  *
@@ -95,7 +96,6 @@ async function pinStartupToBrowse(page: Page_): Promise<void> {
     try {
       const ui = JSON.parse(window.localStorage.getItem("cs.ui") || "{}") as Record<string, unknown>;
       ui.mode = "browse";
-      ui.diffAutoCompare = false;
       window.localStorage.setItem("cs.ui", JSON.stringify(ui));
     } catch {
       window.localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse" }));
