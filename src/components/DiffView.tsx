@@ -50,6 +50,15 @@ interface DiffJumpParams {
 }
 
 interface Props {
+  /**
+   * 本页是不是真的可见（轮44 保活改造）。
+   * App 的 `.diff-apply-cache` 现在切走只 hidden、不卸载，所以「看不见」和「没挂载」
+   * 第一次不再是同一件事：隐藏期不许取数、不许报错弹 toast、不许抢焦点——
+   * 常驻挂载不能变成后台轮询，这是 R2 的口径。缺省 true，非保活宿主按原语义渲染。
+   * 因此可见性翻转本身不重取：隐藏期漏下的取数在切回可见时合并补做一次（见 SourcePicker
+   * 的 pendingFetchRef），绕一趟浏览页回来仍是 0 次请求。
+   */
+  active?: boolean;
   connections: Connection[];
   onConnectionsChange?: (connections: Connection[]) => void;
   initialParams?: DiffJumpParams | null;
@@ -387,6 +396,7 @@ function initialDiffStateFromPreferences(connections: Connection[]): InitialDiff
 
 function SourcePicker({
   title,
+  active = true,
   connections,
   projectConnections,
   source,
@@ -396,6 +406,8 @@ function SourcePicker({
   sortNamespaces,
 }: {
   title: string;
+  /** 宿主对比页是否可见：隐藏期两侧来源面板都不取数（见 Props.active 的口径）。 */
+  active?: boolean;
   connections: Connection[];
   projectConnections: Connection[];
   source: Source;
@@ -417,6 +429,24 @@ function SourcePicker({
   const [cfgLoaded, setCfgLoaded] = useState(0);
   const [cfgGaps, setCfgGaps] = useState<string[]>([]);
   const onLoadErrorRef = useRef(onLoadError);
+  /**
+   * 隐藏期欠下的取数（轮44 R2）：与浏览页 `.browse-cache` 的 `pendingStaleRef` 同一套契约——
+   * 看不见时只记一笔账、不发请求，切回可见时合并补做。
+   *
+   * `active` 绝不能进下面两个 effect 的依赖：可见性一翻转就重取 = 每绕一趟浏览页都要把两侧
+   * 命名空间与 dataId 候选重新打一遍（DK-01 实测 4 次请求），而这正是本轮要消灭的东西。
+   * 反过来只 `return` 不记账也不行：隐藏期连接被编辑过（`conn` 换了对象）就再没人补这一取，
+   * 切回来挂的是上一个连接的候选列表。
+   */
+  const activeRef = useRef(active);
+  const pendingFetchRef = useRef(false);
+  useEffect(() => {
+    activeRef.current = active;
+    if (!active || !pendingFetchRef.current) return;
+    pendingFetchRef.current = false;
+    setNsReload((value) => value + 1);
+    setCfgReload((value) => value + 1);
+  }, [active]);
 
   const conn = connections.find((item) => item.id === source.connId);
   const isLocalSnapshot = conn?.sourceType === "local-snapshot";
@@ -433,6 +463,10 @@ function SourcePicker({
 
   useEffect(() => {
     if (!conn) return;
+    if (!activeRef.current) {
+      pendingFetchRef.current = true;
+      return;
+    }
     let alive = true;
     setNsLoading(true);
     setNsError(null);
@@ -465,10 +499,15 @@ function SourcePicker({
     return () => {
       alive = false;
     };
+  // active 不入依赖：隐藏期的依赖变化由 pendingFetchRef 记账，切回可见时补做（见上方注释）
   }, [conn, nsReload, source.connId, t, title]);
 
   useEffect(() => {
     if (!conn) return;
+    if (!activeRef.current) {
+      pendingFetchRef.current = true;
+      return;
+    }
     let alive = true;
     setCfgLoading(true);
     setCfgError(null);
@@ -699,7 +738,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed }: Props) {
+export default function DiffView({ active = true, connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const initialDiffStateRef = useRef<InitialDiffState | null>(null);
@@ -735,6 +774,8 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   const [resultStale, setResultStale] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
   const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
+  /** 已经应用过的跳转参数（按对象引用）。见下面「处理从 AuditView 跳转过来的预填参数」的注释。 */
+  const appliedJumpParamsRef = useRef<DiffJumpParams | null>(null);
   const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
   /**
    * 滚轮兜底（轮33 F-34）：根取 `.diff-workspace` 而不是 `.diff-view`——`.page-header` 就在
@@ -846,6 +887,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
   // 处理从 AuditView 跳转过来的预填参数
   useEffect(() => {
     if (!initialParams) return;
+    // 同一份跳转参数只应用一次（轮44 R90：实测这个 effect 不幂等）。App 水合主数据文件会把
+    // `connections` 换成新数组，而 `initialParams` 要等 onInitialParamsConsumed 落回 App 才变 null——
+    // 这一帧的间隔里本 effect 会重跑，重跑有两条副作用：再收起一次来源面板（用户刚展开又自己折回去）
+    // + 再排一次自动对比（多付一趟取数）。jsdom 回归见 DiffView.test.tsx「启动自动对比的幂等」：
+    // 换 connections 引用、同一份 params，getConfig 必须仍是 2 次（加守卫前实测 4 次）。
+    if (appliedJumpParamsRef.current === initialParams) return;
+    appliedJumpParamsRef.current = initialParams;
     const leftConn = connections.find((c) => c.id === initialParams.leftConnId);
     const rightConn = connections.find((c) => c.id === initialParams.rightConnId);
     if (!leftConn || !rightConn) {
@@ -1659,10 +1707,13 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
     }
   }, []);
   useEffect(() => {
-    if (!focusStep) return;
+    // `!active` 这支是常驻挂载换来的新风险：计划页「返回」若把 focusStep 递给看不见的对比页，
+    // focusWorkflowStep 就在隐藏子树里找元素抢焦点。App 侧已经只在 diff 是回程目标时才递，
+    // 这里再兜一道，两个闸门任一个被改回都不会漏。
+    if (!focusStep || !active) return;
     focusWorkflowStep(focusStep);
     onFocusStepConsumed?.();
-  }, [focusStep, focusWorkflowStep, onFocusStepConsumed]);
+  }, [active, focusStep, focusWorkflowStep, onFocusStepConsumed]);
   if (connections.length === 0) {
     return <div className="pad-msg big">{t("diff.noConnection")}</div>;
   }
@@ -1721,6 +1772,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
             <div className="diff-sources" ref={sourcesRef} aria-hidden={sourcesCollapsed}>
               <SourcePicker
                 title={t("diff.sourceA")}
+                active={active}
                 connections={connections}
                 projectConnections={projectConnections}
                 source={left}
@@ -1751,6 +1803,7 @@ export default function DiffView({ connections, onConnectionsChange, initialPara
               </button>
               <SourcePicker
                 title={t("diff.sourceB")}
+                active={active}
                 connections={connections}
                 projectConnections={projectConnections}
                 source={right}

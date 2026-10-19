@@ -1688,3 +1688,252 @@ describe("DiffView 写后失效", () => {
     expect(staleBanner()).toBeNull();
   });
 });
+
+describe("DiffView 保活可见性闸门（轮44 AC3：看不见 ≠ 没挂载）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 }]);
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+  });
+
+  /**
+   * 轮44 把对比页从「切走即卸载」改成「首次可见才挂载、之后只 hidden」。
+   * 换来的代价必须被证明兜住了：隐藏期不取数、不消费聚焦提示——
+   * 否则常驻挂载就悄悄退化成了后台轮询（R2 口径）。
+   * 这里用微任务/宏任务各排空一次来确认「0 次调用」不是断言时机太早。
+   */
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  it("active={false} 时两侧来源面板都不取数，翻为可见后补齐", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const view = render(
+      <I18nProvider>
+        <DiffView active={false} connections={[nacosConn]} />
+      </I18nProvider>
+    );
+
+    await settle();
+    expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
+    expect(apiMocks.listAllConfigs).not.toHaveBeenCalled();
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView active connections={[nacosConn]} />
+      </I18nProvider>
+    );
+    // 左右两个 SourcePicker 各自补齐命名空间与候选列表（单连接夹具 → 两侧同一个连接）
+    await waitFor(() => expect(apiMocks.listNamespaces.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(apiMocks.listAllConfigs.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(apiMocks.listNamespaces).toHaveBeenCalledWith(nacosConn);
+  });
+
+  it("隐藏期更换连接不产生任何取数，切回时按最新连接补齐", async () => {
+    const nextConn: Connection = {
+      ...nacosConn,
+      id: "qa-nacos",
+      name: "qa",
+      environmentName: "测试",
+      baseUrl: "http://qa.example.com/nacos",
+      defaultNamespace: "qa-tenant",
+    };
+    localStorage.setItem("locale", "zh-CN");
+    const view = render(
+      <I18nProvider>
+        <DiffView active={false} connections={[nacosConn]} />
+      </I18nProvider>
+    );
+
+    await settle();
+    expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
+
+    // 隐藏期依赖变了（连接列表被别处编辑）：不能替看不见的页面去发请求
+    view.rerender(
+      <I18nProvider>
+        <DiffView active={false} connections={[nextConn]} />
+      </I18nProvider>
+    );
+    await settle();
+    expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
+    expect(apiMocks.listAllConfigs).not.toHaveBeenCalled();
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView active connections={[nextConn]} />
+      </I18nProvider>
+    );
+    await waitFor(() => expect(apiMocks.listNamespaces).toHaveBeenCalledWith(nextConn));
+    await waitFor(() => {
+      const conns = apiMocks.listAllConfigs.mock.calls.map((call) => (call[0] as Connection).id);
+      expect(conns.includes("qa-nacos")).toBe(true);
+    });
+    // 补齐用的是切回那一刻的最新连接，不是隐藏前那个
+    expect(apiMocks.listNamespaces.mock.calls.map((call) => (call[0] as Connection).id)).not.toContain("dev-nacos");
+  });
+
+  it("隐藏期不消费 focusStep，切回时才消费并聚焦", async () => {
+    const onFocusStepConsumed = vi.fn();
+    localStorage.setItem("locale", "zh-CN");
+    const view = render(
+      <I18nProvider>
+        <DiffView active={false} connections={[nacosConn]} focusStep="choose" onFocusStepConsumed={onFocusStepConsumed} />
+      </I18nProvider>
+    );
+
+    await settle();
+    expect(onFocusStepConsumed).not.toHaveBeenCalled();
+    // 隐藏子树里不该被抢焦点/加闪烁
+    expect(document.querySelector(".workflow-flash")).toBeNull();
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView active connections={[nacosConn]} focusStep="choose" onFocusStepConsumed={onFocusStepConsumed} />
+      </I18nProvider>
+    );
+    await waitFor(() => expect(onFocusStepConsumed).toHaveBeenCalledTimes(1));
+    expect(document.querySelector(".diff-sources")).toHaveClass("workflow-flash");
+  });
+
+  /**
+   * 这一条是本轮契约的核心，也是 DK-01 的单测化：
+   * 「切走即卸载」时 visible 翻转等于 mount/unmount，重新挂载必然重取；改成常驻挂载后
+   * 翻转只是 hidden 变了，若图省事把 `active` 塞进取数 effect 的依赖，用户每绕一趟浏览页
+   * 都要把左右两侧的命名空间和 dataId 候选重新打一遍（真机实测 4 次请求）。
+   * 依赖没变 → 一次都不许多发。
+   */
+  it("可见性来回翻转本身不重取：依赖没变就不许多发一次请求", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const view = render(
+      <I18nProvider>
+        <DiffView active connections={[nacosConn]} />
+      </I18nProvider>
+    );
+
+    // 先证明首屏真的取过数，否则后面的「计数没涨」是假绿
+    await waitFor(() => expect(apiMocks.listNamespaces.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(apiMocks.listAllConfigs.mock.calls.length).toBeGreaterThanOrEqual(2));
+    const nsCalls = apiMocks.listNamespaces.mock.calls.length;
+    const cfgCalls = apiMocks.listAllConfigs.mock.calls.length;
+
+    // 去浏览页看一眼再回来：两次翻转都不该产生新的取数
+    view.rerender(
+      <I18nProvider>
+        <DiffView active={false} connections={[nacosConn]} />
+      </I18nProvider>
+    );
+    await settle();
+    expect(apiMocks.listNamespaces.mock.calls.length).toBe(nsCalls);
+    expect(apiMocks.listAllConfigs.mock.calls.length).toBe(cfgCalls);
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView active connections={[nacosConn]} />
+      </I18nProvider>
+    );
+    await settle();
+    await settle();
+    expect(apiMocks.listNamespaces.mock.calls.length, "切回可见时重取了命名空间：active 被塞回了依赖").toBe(nsCalls);
+    expect(apiMocks.listAllConfigs.mock.calls.length, "切回可见时重取了 dataId 候选：active 被塞回了依赖").toBe(cfgCalls);
+  });
+
+  /**
+   * 隐藏期攒下的多笔变化必须合并成一次补做，而不是按笔补做——
+   * 这是 pendingFetchRef 是「一笔布尔账」而不是队列的原因（与浏览页 pendingStaleRef 同构）。
+   */
+  it("隐藏期攒了几笔依赖变化，切回也只合并补做一轮", async () => {
+    localStorage.setItem("locale", "zh-CN");
+    const editedConn: Connection = { ...nacosConn, defaultNamespace: "another-tenant" };
+    const editedAgain: Connection = { ...nacosConn, defaultNamespace: "third-tenant" };
+    const view = render(
+      <I18nProvider>
+        <DiffView active={false} connections={[nacosConn]} />
+      </I18nProvider>
+    );
+
+    await settle();
+    expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
+
+    view.rerender(<I18nProvider><DiffView active={false} connections={[editedConn]} /></I18nProvider>);
+    await settle();
+    view.rerender(<I18nProvider><DiffView active={false} connections={[editedAgain]} /></I18nProvider>);
+    await settle();
+    expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
+    expect(apiMocks.listAllConfigs).not.toHaveBeenCalled();
+
+    view.rerender(<I18nProvider><DiffView active connections={[editedAgain]} /></I18nProvider>);
+    await waitFor(() => expect(apiMocks.listNamespaces).toHaveBeenCalledWith(editedAgain));
+    await settle();
+    await settle();
+    // 左右两个面板各补一次；隐藏期那两笔变化不再各自补一趟
+    expect(apiMocks.listNamespaces.mock.calls.length).toBe(2);
+    expect(apiMocks.listAllConfigs.mock.calls.length).toBe(2);
+  });
+});
+
+describe("DiffView 启动自动对比的幂等（轮44 R90：一次进入只比一轮）", () => {
+  /**
+   * 「应用跳转参数」的 effect 不幂等：App 水合主数据文件后 `connections` 换成新数组，
+   * 而 `initialParams` 还是同一个对象（App 的 setDiffInitialParams(null) 尚未落到这一帧），
+   * 于是 effect 重跑一遍：再收起面板 + 再排一次自动对比（实测 getConfig 2 → 4）。
+   * 代价不只是多一轮请求——收起晚于用户的展开操作，来源面板会在「刚展开」之后自己折回去。
+   * 轮44 真机 S13 那条红另有其因（测试侧 force 点击把来源边条点成了加载条的「加载并对比」，
+   * 见 tests/retest/specs/ui.ts 的 clickSourcesToggle 注释），本用例只钉产品侧这条幂等契约。
+   */
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("locale", "zh-CN");
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 }]);
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "RETEST-PROD", content: "", configType: "yaml" }],
+    });
+  });
+
+  it("connections 引用变化不得让同一份跳转参数再自动对比一次", async () => {
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => `${dataId}=1\n`);
+    const params = {
+      leftConnId: "dev-nacos",
+      rightConnId: "prod-nacos",
+      left: { tenant: "dev-tenant", group: "RETEST-PROD", dataId: "app.yaml" },
+      right: { tenant: "prod-tenant", group: "RETEST-PROD", dataId: "app.yaml" },
+      autoCompare: true,
+    };
+    const view = render(
+      <I18nProvider>
+        <DiffView connections={[nacosConn, prodConn]} initialParams={params} />
+      </I18nProvider>
+    );
+    await waitFor(() => expect(apiMocks.getConfig).toHaveBeenCalled());
+    await waitFor(() => expect(document.querySelector(".diff-row")).not.toBeNull());
+    const firstRound = apiMocks.getConfig.mock.calls.length;
+    expect(firstRound).toBe(2);
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView connections={[{ ...nacosConn }, prodConn]} initialParams={params} />
+      </I18nProvider>
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(apiMocks.getConfig.mock.calls.length, "同一份跳转参数触发了第二趟自动对比").toBe(firstRound);
+  });
+});

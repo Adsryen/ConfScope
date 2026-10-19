@@ -28,6 +28,7 @@ import ApplyPlanView from "./components/ApplyPlanView";
 import type { WorkflowStepId } from "./components/DiffWorkflowCard";
 import { reportError, reportMessage } from "./lib/errorCenter";
 import { closeAllPopovers } from "./lib/popoverBus";
+import { useMountOnceVisible } from "./lib/keepAlive";
 import { useBlockNativeSaveShortcut } from "./lib/saveShortcut";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
@@ -485,6 +486,14 @@ export default function App() {
 
   const applyReturnTarget = pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse";
 
+  // 配置对比保活范围（轮44 R1 / D3）：与 .browse-cache 同构——第一次进对比页才挂载，
+  // 之后切到任何模式都只是 hidden，刚跑完的差异结果、来源选择、滚动位置都留在内存里。
+  // 改造前它只在 diff↔apply 之间活着（渲染条件写在下面的模式分支里），绕一下配置浏览再回来
+  // 结果就没了：探针实测可见 .diff-row 60 → 0，还白付 8 次取数（整棵子树重新挂载重新拉）。
+  // 常驻挂载的代价由 DiffView 的 active 闸门挡住：隐藏期不取数、不报错、不聚焦。
+  const diffVisible = mode === "diff" || (mode === "apply" && applyReturnTarget === "diff");
+  const diffMounted = useMountOnceVisible(diffVisible);
+
   const closeStartupDialog = () => {
     if (!startupDialog || !appVersion) return;
     updateStartupSettings({
@@ -622,6 +631,7 @@ export default function App() {
 
   const diffPage = (
     <DiffView
+      active={mode === "diff"}
       connections={diffConnections}
       onConnectionsChange={setConnections}
       initialParams={diffInitialParams}
@@ -631,24 +641,6 @@ export default function App() {
       onFocusStepConsumed={() => setDiffFocusStep(null)}
     />
   );
-  const diffApplyRoute = (
-    <div className="diff-apply-route">
-      <div className="diff-apply-cache" hidden={mode === "apply"}>
-        {diffPage}
-      </div>
-      {mode === "apply" && (
-        <ApplyPlanView
-          entry={pendingApplyEntry}
-          connections={diffConnections}
-          onBack={(focusStep) => {
-            setDiffFocusStep(focusStep ?? null);
-            setMode(applyReturnTarget);
-          }}
-        />
-      )}
-    </div>
-  );
-
   return (
     // 全局关掉拼写检查：HTML 的 spellcheck 会向后代继承，配置正文、dataId、IP、
     // 密钥这类内容不该被红线标成「拼写错误」；个别输入框另有显式声明兜底（守卫见 tests/ux）。
@@ -705,6 +697,14 @@ export default function App() {
               {browsePage}
             </div>
           )}
+          {/* 配置对比保活层（轮44）：hidden 条件与浏览页同形。apply 态即使回程目标是 diff
+              也必须藏着，否则计划页和看不见的对比页同时占一份布局。和浏览页一样用 hidden
+              属性而不是临时 class：子树里的 fixed 弹层跟着消失，Tab 也不会穿过隐藏内容。 */}
+          {connections.length > 0 && diffMounted && (
+            <div className="diff-apply-cache" hidden={mode !== "diff"}>
+              {diffPage}
+            </div>
+          )}
           {mode === "connections" ? (
             <ConnectionManager
               embedded
@@ -734,10 +734,17 @@ export default function App() {
             <SettingsView />
           ) : mode === "about" ? (
             <About embedded />
-          ) : mode === "diff" || (mode === "apply" && applyReturnTarget === "diff") ? (
-            diffApplyRoute
           ) : mode === "apply" ? (
-            <ApplyPlanView entry={pendingApplyEntry} connections={diffConnections} onBack={() => setMode(applyReturnTarget)} />
+            <ApplyPlanView
+              entry={pendingApplyEntry}
+              connections={diffConnections}
+              onBack={(focusStep) => {
+                // 只有回程目标是 diff 才递聚焦步：对比页现在常驻挂载，focusStep 落到
+                // 看不见的那一棵 = 替别的页面抢焦点（DiffView 里另有 active 闸门兜底）。
+                if (applyReturnTarget === "diff") setDiffFocusStep(focusStep ?? null);
+                setMode(applyReturnTarget);
+              }}
+            />
           ) : connections.length === 0 ? (
             <div className="pad-msg big">
               {t("app.noConnection")}
