@@ -16,11 +16,12 @@
  * 分工（不要在真机里重复单测已经钉死的东西）：
  *  判据本身（哪些组合算刷新键）由 src/lib/reloadShortcut.test.ts 钉；
  *  接线在不在由 tests/ux/nativeReloadShortcutWiring.test.ts 钉；
- *  存储侧不变量由 tests/ux/diffSourcesPersistOnceOnly.test.ts 钉。这里补的是真机那四段：
+ *  存储侧不变量由 tests/ux/diffSourcesSingleSourceOfTruth.test.ts 钉。这里补的是真机那四段：
  *  NS-01 四种刷新组合逐一被吞，且内存现场（搜索词 + 命中条数 + 打开的正文 + 行号）一格没动；
  *  NS-02 Ctrl+Alt+R 留给宿主，不许拦（这是开发者手敲重载的唯一逃生门）；
  *  NS-03 裸 r 仍是打字——把"为了拦刷新把输入框打死"这种修法挡在真机上；
- *  SA-01 启动自动比照常发生（行为等价），但跑完之后的任何一次持久化都不许把 diffAutoCompare 写回来。
+ *  SA-01 启动自动比照常发生（行为等价），且 diff 来源只剩 cs.diffViewPreferences 一处：
+ *       cs.ui 里不许再出现 diff 一族键，绕一趟浏览页也不许把 prefs 里那一对抹掉。
  */
 import { expect, type Page } from "@playwright/test";
 import { test } from "./retestTest";
@@ -128,6 +129,18 @@ async function readUiState(page: Page): Promise<Record<string, unknown>> {
   return page.evaluate(() => JSON.parse(window.localStorage.getItem("cs.ui") || "{}") as Record<string, unknown>);
 }
 
+/** 对比页两侧来源的唯一事实源（轮46 R01）：真机侧要盯的就是这一份，不再盯 cs.ui 的镜像。 */
+async function readDiffPrefs(page: Page): Promise<Record<string, any>> {
+  return page.evaluate(
+    () => JSON.parse(window.localStorage.getItem("cs.diffViewPreferences") || "{}") as Record<string, any>
+  );
+}
+
+/** cs.ui 里残留的 diff 一族键名（轮46 之后必须恒为空数组）。 */
+function diffKeysIn(ui: Record<string, unknown>): string[] {
+  return Object.keys(ui).filter((key) => key.startsWith("diff"));
+}
+
 test("NS-01 F5/Ctrl+R/Ctrl+Shift+R/Ctrl+F5 全部被接管，内存现场一格没动", async ({ page, retest }) => {
   test.setTimeout(240_000);
   await installRetestBridge(page, retest);
@@ -194,28 +207,32 @@ test("NS-03 搜索框里的裸 r 仍是打字，兜底不许贪到无修饰符�
   await page.screenshot({ path: "results/ns03-plain-r-types.png", fullPage: true });
 });
 
-test("SA-01 启动自动比照常跑，但 cs.ui 里再也查不到 diffAutoCompare", async ({ page, retest }) => {
+test("SA-01 启动自动比照常跑，且 diff 来源只剩 cs.diffViewPreferences 一处", async ({ page, retest }) => {
   test.setTimeout(240_000);
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
 
-  // 行为等价：种子里 mode=diff + 左右来源齐全 ⇒ 不需要存储里的标志也该自己比出一屏差异
-  // （旧口径靠 diffAutoCompare:true 这个常驻标志，代价是探针 A2 量到的"每次加载白比一轮 + 4.6s"）
+  // 行为等价：种子里 mode=diff + prefs 那一对齐全 ⇒ 不需要任何存储标志也该自己比出一屏差异。
+  // 轮46 之前这条链上还挂着一份 cs.ui 镜像（只有跳转才更新，所以常年是旧的）：
+  // 探针实测重启 656ms 后旧的镜像赢下界面，又被保存 effect 抄回 prefs，用户真正比过的那一对永久丢失。
   await expect(page.locator(".diff-panel .diff-row").filter({ visible: true }).first()).toBeVisible({ timeout: T });
   await expect(page.locator(".side-nav-item.active"), "启动页应当还停在配置对比").toContainText("配置对比");
 
   const ui0 = await readUiState(page);
   expect(ui0.mode, "种子态被改掉了，后面的断言就是在测别的现场").toBe("diff");
-  expect(ui0).not.toHaveProperty("diffAutoCompare");
-  expect(ui0.diffLeftConnId, "持久化该留的东西（比的是哪两个来源）不能一起删了").toBe("retest-a");
-  expect(ui0.diffRightConnId).toBe("retest-b");
+  expect(diffKeysIn(ui0), "cs.ui 不许再留 diff 一族键（镜像只有一个主人）").toEqual([]);
+
+  const prefs0 = await readDiffPrefs(page);
+  expect(prefs0.left?.connId, "比的是哪两个来源必须留在 prefs 里").toBe("retest-a");
+  expect(prefs0.right?.connId).toBe("retest-b");
+  expect(prefs0.left?.dataId).toBe("svc-gateway.yaml");
 
   // 回声室的复发方式是"再来一处把它写回去"：折叠侧栏 + 绕一趟浏览页，
-  // 这两个动作各自都会重跑持久化 effect，标志一次都不许冒出来。
+  // 这两个动作各自都会重跑持久化 effect，diff 一族键一次都不许冒出来。
   await page.locator(".sidebar-toggle").click();
   await page.waitForTimeout(400);
-  expect(await readUiState(page)).not.toHaveProperty("diffAutoCompare");
+  expect(diffKeysIn(await readUiState(page))).toEqual([]);
   // 再点开：侧栏收起时导航项只剩图标，navigate() 按文案点不动
   await page.locator(".sidebar-toggle").click();
   await page.waitForTimeout(400);
@@ -226,9 +243,13 @@ test("SA-01 启动自动比照常跑，但 cs.ui 里再也查不到 diffAutoComp
   await page.waitForTimeout(1_200);
 
   const ui1 = await readUiState(page);
-  expect(ui1).not.toHaveProperty("diffAutoCompare");
+  expect(diffKeysIn(ui1), "绕一趟浏览页又把镜像写回来了").toEqual([]);
   expect(ui1.mode).toBe("diff");
-  expect(ui1.diffLeftConnId).toBe("retest-a");
-  console.log("[SA-01] 沉降后 cs.ui =", JSON.stringify(ui1));
-  await page.screenshot({ path: "results/sa01-transient-intent.png", fullPage: true });
+  // 轮45 量到的是「切走一次 spread 变 {} ⇒ 那一对被抹了」；轮46 把 App 这个写侧整个删掉后，
+  // 判据变成：App 的任何导航都不许动 prefs 一个字节，来源由 prefs 自己保住。
+  expect(await readDiffPrefs(page)).toEqual(prefs0);
+  // 对比页被保活，绕回来不重新挂载 ⇒ 不该替用户重放第二轮自动对比（真机口径，单测见轮44 R90 那组）
+  await expect(page.locator(".diff-panel .diff-row").filter({ visible: true }).first()).toBeVisible({ timeout: T });
+  console.log("[SA-01] 沉降后 cs.ui =", JSON.stringify(ui1), "prefs =", JSON.stringify(await readDiffPrefs(page)));
+  await page.screenshot({ path: "results/sa01-single-source.png", fullPage: true });
 });

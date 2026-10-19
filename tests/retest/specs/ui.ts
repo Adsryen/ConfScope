@@ -123,7 +123,8 @@ export async function ensureSourcesPanelExpanded(page: Page): Promise<void> {
    * 轮44 R90：「展开」在这里不是一个动作，而是一个收敛过程。
    * 来源面板有两条自动收起的路径（启动自动对比成功、智能匹配成功，见 DiffView 的
    * setSourcesCollapsed），它们都可能在「刚点完展开」之后才落地：retest 种子的 cs.ui 是
-   * mode:"diff" + 左右来源齐全（轮45 R02 起自动比由这两条推导，不再存标志位），每次加载都会自动比一轮，慢机上这一轮要 400ms+，
+   * mode:"diff"，左右来源齐全地住在 cs.diffViewPreferences 里（轮46 R01 起只有一个主人；
+   * 「这一次要不要自动比」= 启动就落在对比页 + 这一对齐全，不再存标志位），每次加载都会自动比一轮，慢机上这一轮要 400ms+，
    * 实测把 S13 打成 22s 红（展开→被收起→断言 not.toHaveClass(/collapsed/) 一直不满足）。
    * 所以点开后必须再观察一个窗口，确认它仍然是开的才算数；被自动收起了就再点一次。
    */

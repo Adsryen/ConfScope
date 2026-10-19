@@ -52,14 +52,35 @@ export function createRetestStorageSeed(state: RetestState): BrowserStorageSeed[
         connId: "retest-a",
         mode: "diff",
         sidebarCollapsed: false,
-        diffLeftConnId: "retest-a",
-        diffRightConnId: "retest-b",
-        // 两侧 namespace 不同（dev/qa），必须分开记录，DiffView 恢复时才不会跨连接错配
-        diffLeft: { tenant: state.nacos.a.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
-        diffRight: { tenant: state.nacos.b.namespace, dataId: "svc-gateway.yaml", group: "RETEST-PROD" },
-        // 轮45 R02：这里不再写 diffAutoCompare。启动要不要自动比，由 App 从
-        // 「mode:"diff" + 左右来源齐全」推导（见 src/App.tsx 的 initialDiffParams），
-        // 那个键一旦进存储就没人负责清掉，会让每次加载都白比一轮。
+        // 轮46 R01：这里不再写 diffLeft* / diffRight*。上一轮比的是哪一对只有一个主人
+        // （下面的 cs.diffViewPreferences），种子造第二份就等于在测一个产品里不存在的状态。
+        // 轮45 R02 的口径继续成立：「这一次要比」是一次性意图，谁都不许把它写进存储。
+      }),
+    },
+    {
+      // 对比页两侧来源（含各自的 namespace/group/dataId）：DiffView 挂载时自己恢复这一份，
+      // 并在「上一轮退出时停在对比页 + 这一对齐全」时直接把上一对比出来（见 src/App.tsx 的
+      // autoCompareOnRestore 与 src/components/DiffView.tsx 的恢复 effect）。
+      // 两侧 namespace 不同（dev/sandbox），必须分开记录，恢复时才不会跨连接错配；
+      // usesDefaultNamespace:true 让 tenant 跟随连接当前默认值，种子改命名空间时不用同步两处。
+      key: "cs.diffViewPreferences",
+      value: JSON.stringify({
+        selectedProject: "Retest Project",
+        left: {
+          connId: "retest-a",
+          tenant: state.nacos.a.namespace,
+          dataId: "svc-gateway.yaml",
+          group: "RETEST-PROD",
+          usesDefaultNamespace: true,
+        },
+        right: {
+          connId: "retest-b",
+          tenant: state.nacos.b.namespace,
+          dataId: "svc-gateway.yaml",
+          group: "RETEST-PROD",
+          usesDefaultNamespace: true,
+        },
+        mode: "text",
       }),
     },
     {
