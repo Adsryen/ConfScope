@@ -30,6 +30,7 @@ import { reportError, reportMessage } from "./lib/errorCenter";
 import { closeAllPopovers } from "./lib/popoverBus";
 import { useMountOnceVisible } from "./lib/keepAlive";
 import { useBlockNativeSaveShortcut } from "./lib/saveShortcut";
+import { useBlockNativeReloadShortcut } from "./lib/reloadShortcut";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
@@ -88,7 +89,10 @@ interface UIState {
   diffRightConnId?: string;
   diffLeft?: { tenant?: string; dataId?: string; group?: string };
   diffRight?: { tenant?: string; dataId?: string; group?: string };
-  diffAutoCompare?: boolean;
+  // 轮45 R02：这里刻意没有 diffAutoCompare。
+  // 「这一次要比」是一次性意图，不是状态：写进 cs.ui 后，持久化 effect 下一轮会把刚写进去的 true
+  // 再读回来（loadUI 每次渲染重读），而全仓没有任何一处把它清成 false —— 于是每次启动都先自动比一轮。
+  // 现在它只活在 DiffJumpParams 里，启动时由「上次停在对比页 + 左右来源齐全」推导。
 }
 
 const UI_KEY = "cs.ui";
@@ -162,6 +166,10 @@ export default function App() {
   // Ctrl/Cmd+S 不该被 webview 的原生「保存网页」对话框接走（R47）：
   // 编辑区里由 CodeEditor 的 onSave 接管，其余位置由这条兜底统一吞掉。
   useBlockNativeSaveShortcut();
+  // F5 / Ctrl+R 不该被 webview 的原生重载接走（轮45 R01）：这是桌面应用，整页刷新会把
+  // 只活在内存里的现场一次清空（实测：浏览页的搜索词与 2 条结果、打开的详情，刷新后 0 命中），
+  // 而应用本身没有「刷新」这个动作——真要重载走工具栏/菜单，或带 Alt 的组合（判据放行）。
+  useBlockNativeReloadShortcut();
   const [connections, setConnections] = useState<Connection[]>(loadConnections());
   const ui0 = loadUI();
   const [activeConnId, setActiveConnId] = useState<string>(preferredConnection(connections, ui0)?.id ?? "");
@@ -172,7 +180,9 @@ export default function App() {
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
   const knownMode = isNavigableMode(ui0.mode) ? ui0.mode : "browse";
   const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
-  // 启动时若上次停在 diff 页且记录了左右来源, 恢复为预填参数(含自动对比)
+  // 启动时若上次停在 diff 页且记录了左右来源, 恢复为预填参数(含自动对比)。
+  // 轮45 R02：autoCompare 改由现场推导而不是从 cs.ui 读回来 —— 用户可见语义没变
+  // （回到上次比的那一对并直接比出来），但它不再是一个擦不掉的常驻标志。
   const initialDiffParams: DiffJumpParams | null =
     initialMode === "diff" && ui0.diffLeftConnId && ui0.diffRightConnId
       ? {
@@ -180,7 +190,7 @@ export default function App() {
           rightConnId: ui0.diffRightConnId,
           left: ui0.diffLeft,
           right: ui0.diffRight,
-          autoCompare: ui0.diffAutoCompare,
+          autoCompare: true,
         }
       : null;
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -272,7 +282,6 @@ export default function App() {
                 dataId: diffJumpPersist.right?.dataId ?? "",
                 group: diffJumpPersist.right?.group ?? "",
               },
-              diffAutoCompare: diffJumpPersist.autoCompare,
             }
           : {}),
       })
@@ -466,16 +475,22 @@ export default function App() {
     recordSnapshotCompare("success");
   };
 
-  // diff 页的左右来源: 有跳转参数用跳转的, 否则沿用上次持久化的
+  // diff 页要记进 cs.ui 的只有「比的是哪两个来源」: 有跳转参数用跳转的, 否则沿用上次持久化的。
+  // 轮45 R02：这里不再带 autoCompare —— 跳转参数里那份是一次性的，由 DiffView 消费掉就结束，
+  // 把它抄进持久化块就等于给「永远要比」开了一条自我复活的回路。
+  // 轮45 R03：回落不再以「此刻停在 diff 页」为条件。真机 SA-01 与 jsdom 同一条读数：跳转参数被对比页
+  // 消费掉之后绕一趟配置浏览，这里的 spread 变成 {} ⇒ diffLeft* 整组从 cs.ui 消失，切回来只能从已被
+  // 抹空的存储读到 ""，「记住我上次比的那一对」当场失效（对比页自己因为保活还认得那两个来源，
+  // 界面上看不出来，下次启动才露馅）。记不记这一对与在哪一页无关：留着它没有任何副作用，
+  // 启动要不要自动比另由 initialMode + 来源齐全决定（见上面 initialDiffParams）。
   const diffJumpPersist =
     diffInitialParams ??
-    (mode === "diff"
+    (ui0.diffLeftConnId
       ? {
-          leftConnId: ui0.diffLeftConnId ?? "",
+          leftConnId: ui0.diffLeftConnId,
           rightConnId: ui0.diffRightConnId ?? "",
           left: ui0.diffLeft,
           right: ui0.diffRight,
-          autoCompare: ui0.diffAutoCompare,
         }
       : null);
 

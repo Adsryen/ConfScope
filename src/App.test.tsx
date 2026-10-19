@@ -262,10 +262,12 @@ vi.mock("./components/DiffView", () => ({
     connections,
     initialParams,
     onStartApply,
+    onInitialParamsConsumed,
   }: {
     connections: Connection[];
     initialParams: DiffJumpParams | null;
     onStartApply?: (payload: ApplyEntryPayload) => void;
+    onInitialParamsConsumed?: () => void;
   }) {
     viewMocks.diffProps.push({ connections, initialParams });
     const [compareCount, setCompareCount] = useState(0);
@@ -274,6 +276,9 @@ vi.mock("./components/DiffView", () => ({
         Diff View
         <button type="button" onClick={() => setCompareCount((count) => count + 1)}>
           Mock diff compare
+        </button>
+        <button type="button" onClick={() => onInitialParamsConsumed?.()}>
+          Mock consume jump params
         </button>
         <span data-testid="diff-state">{compareCount}</span>
         <button type="button" onClick={() => onStartApply?.(viewMocks.makeApplyPayload("diff"))}>
@@ -928,5 +933,137 @@ describe("App", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // 轮45 R02：对比页的「一次性比一次」意图不许进持久化。
+  // 改前实测：第一条绿、第二条红（`cs.ui.diffAutoCompare` 在消费后仍是 true），
+  // 因为持久化 effect 每轮都把自己上一轮写进去的 true 再读回来，而全仓没人负责清掉它。
+  it("停在对比页且左右来源齐全时，启动自带一次自动对比意图", async () => {
+    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
+    localStorage.setItem(
+      "cs.ui",
+      JSON.stringify({
+        mode: "diff",
+        connId: "conn-1",
+        diffLeftConnId: "conn-1",
+        diffRightConnId: "conn-2",
+        diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
+        diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("diff-view");
+    // 意图由现场推导出来，不来自存储里的任何标志
+    expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toMatchObject({
+      leftConnId: "conn-1",
+      rightConnId: "conn-2",
+      autoCompare: true,
+    });
+  });
+
+  it("启动恢复的自动对比是一次性意图，消费后不许留在 cs.ui 里", async () => {
+    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
+    localStorage.setItem(
+      "cs.ui",
+      JSON.stringify({
+        mode: "diff",
+        connId: "conn-1",
+        diffLeftConnId: "conn-1",
+        diffRightConnId: "conn-2",
+        diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
+        diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
+        // 老用户数据里就有这个键（它跟着主数据文档走）：新口径下必须被忽略而不是继续回声
+        diffAutoCompare: true,
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("diff-view");
+    expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams?.autoCompare).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
+    await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
+
+    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
+    expect(ui).not.toHaveProperty("diffAutoCompare");
+    expect(ui).toMatchObject({
+      mode: "diff",
+      diffLeftConnId: "conn-1",
+      diffRightConnId: "conn-2",
+      diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
+    });
+  });
+
+  it("跳转来源被消费后，cs.ui 记的仍是那两个来源", async () => {
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock compare snapshot" }));
+    await screen.findByTestId("diff-view");
+    const jumped = viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams;
+    expect(jumped).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
+    await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
+
+    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
+    expect(ui.diffLeftConnId).toBe(jumped!.leftConnId);
+    expect(ui.diffRightConnId).toBe(jumped!.rightConnId);
+    expect(ui.diffLeft).toMatchObject({ dataId: "app.yaml", group: "DEFAULT_GROUP" });
+    expect(ui).not.toHaveProperty("diffAutoCompare");
+  });
+
+  it("绕出对比页再回来，cs.ui 记的那一对来源不许被一起擦掉", async () => {
+    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
+    localStorage.setItem(
+      "cs.ui",
+      JSON.stringify({
+        mode: "diff",
+        connId: "conn-1",
+        diffLeftConnId: "conn-1",
+        diffRightConnId: "conn-2",
+        diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
+        diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("diff-view");
+    // 先让对比页把跳转参数消费掉（真机里 DiffView 挂载即消费）：
+    // 不消费的话下面走的还是 diffInitialParams 那条分支，测不到"绕一趟就擦掉"。
+    fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
+    await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Config Browser" }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).toBe("browse"));
+    fireEvent.click(within(nav).getByRole("button", { name: "Config Compare" }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).toBe("diff"));
+
+    // 真机 SA-01 量到的就是这里：切走那一次 spread 成 {} 把来源抹了，切回来只能从已被抹空的存储里读到 ""，
+    // 于是「记住我上次比的那一对」在一次绕道之后就没了——对比页自己还留着来源（保活），存储侧却已经不认。
+    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
+    expect(ui.diffLeftConnId, "离开对比页把上次比的那一对擦掉了").toBe("conn-1");
+    expect(ui.diffRightConnId).toBe("conn-2");
+    expect(ui.diffLeft).toMatchObject({ dataId: "a.yaml", group: "G" });
+    expect(ui).not.toHaveProperty("diffAutoCompare");
   });
 });

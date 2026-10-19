@@ -8,14 +8,8 @@
 import { useEffect } from "react";
 import { isImeComposing } from "./useEscape";
 
-/** 判据需要的最小按键信号：原生 KeyboardEvent 与 React 合成事件都能直接塞进来。 */
-export interface ShortcutKeyEvent {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  altKey: boolean;
-  shiftKey?: boolean;
-}
+// 判据需要的最小按键信号与刷新兜底共用一份（轮45 R01 抽到 shortcutKey.ts）。
+import type { ShortcutKeyEvent } from "./shortcutKey";
 
 /**
  * 「保存」快捷键 = Ctrl+S（Windows/Linux）或 Cmd+S（macOS）。
