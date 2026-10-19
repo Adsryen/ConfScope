@@ -25,6 +25,7 @@ const viewMocks = vi.hoisted(() => ({
   diffProps: [] as Array<{
     connections: Connection[];
     initialParams: DiffJumpParams | null;
+    autoCompareOnRestore?: boolean;
   }>,
   applyProps: [] as Array<{
     entry: ApplyEntryPayload | null;
@@ -263,13 +264,15 @@ vi.mock("./components/DiffView", () => ({
     initialParams,
     onStartApply,
     onInitialParamsConsumed,
+    autoCompareOnRestore,
   }: {
     connections: Connection[];
     initialParams: DiffJumpParams | null;
     onStartApply?: (payload: ApplyEntryPayload) => void;
     onInitialParamsConsumed?: () => void;
+    autoCompareOnRestore?: boolean;
   }) {
-    viewMocks.diffProps.push({ connections, initialParams });
+    viewMocks.diffProps.push({ connections, initialParams, autoCompareOnRestore });
     const [compareCount, setCompareCount] = useState(0);
     return (
       <div data-testid="diff-view">
@@ -935,50 +938,26 @@ describe("App", () => {
     }
   });
 
-  // 轮45 R02：对比页的「一次性比一次」意图不许进持久化。
-  // 改前实测：第一条绿、第二条红（`cs.ui.diffAutoCompare` 在消费后仍是 true），
-  // 因为持久化 effect 每轮都把自己上一轮写进去的 true 再读回来，而全仓没人负责清掉它。
-  it("停在对比页且左右来源齐全时，启动自带一次自动对比意图", async () => {
+  // 轮46 R01：「比的是哪一对」只有一个主人 —— cs.diffViewPreferences（DiffView 每次改动都写、
+  // 挂载时自己恢复），cs.ui 不再存 diffLeft*/diffRight* 那份镜像。
+  // 探针实测过双写的代价：镜像只在 App 跳转时更新，于是它常年是旧的；重启时旧的赢下界面，
+  // 还会被 DiffView 的保存 effect 抄回 prefs —— 手工改出来那对 billing 比完后 prefs 记的确实是
+  // billing，重启 656ms 后 DOM 回到种子对、prefs 自己也被回写成种子对，用户真正比过的那一对永久丢失。
+  const diffKeysInUI = () => Object.keys(JSON.parse(localStorage.getItem("cs.ui") || "{}")).filter((key) => key.startsWith("diff"));
+
+  it("启动停在对比页：挂载即比的意图交给 DiffView，cs.ui 里不再留任何 diff 键", async () => {
     localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
     localStorage.setItem(
       "cs.ui",
       JSON.stringify({
         mode: "diff",
         connId: "conn-1",
+        // 老用户数据里还留着这些键（它们跟着主数据文档走）：新口径下读侧直接忽略，
+        // 不迁移、不报错，整对象回写时自然带走。
         diffLeftConnId: "conn-1",
         diffRightConnId: "conn-2",
         diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
         diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
-      })
-    );
-
-    render(
-      <I18nProvider>
-        <App />
-      </I18nProvider>
-    );
-
-    await screen.findByTestId("diff-view");
-    // 意图由现场推导出来，不来自存储里的任何标志
-    expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toMatchObject({
-      leftConnId: "conn-1",
-      rightConnId: "conn-2",
-      autoCompare: true,
-    });
-  });
-
-  it("启动恢复的自动对比是一次性意图，消费后不许留在 cs.ui 里", async () => {
-    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
-    localStorage.setItem(
-      "cs.ui",
-      JSON.stringify({
-        mode: "diff",
-        connId: "conn-1",
-        diffLeftConnId: "conn-1",
-        diffRightConnId: "conn-2",
-        diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
-        diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
-        // 老用户数据里就有这个键（它跟着主数据文档走）：新口径下必须被忽略而不是继续回声
         diffAutoCompare: true,
       })
     );
@@ -990,22 +969,47 @@ describe("App", () => {
     );
 
     await screen.findByTestId("diff-view");
-    expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams?.autoCompare).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
-    await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
-
-    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
-    expect(ui).not.toHaveProperty("diffAutoCompare");
-    expect(ui).toMatchObject({
-      mode: "diff",
-      diffLeftConnId: "conn-1",
-      diffRightConnId: "conn-2",
-      diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
-    });
+    const lastProps = viewMocks.diffProps[viewMocks.diffProps.length - 1];
+    // 「上一轮退出时停在对比页」是一次性意图，只以 props 传给 DiffView；
+    // 要不要真比由 DiffView 结合 prefs 里那一对齐不齐自己判定（轮46 R02）。
+    expect(lastProps.autoCompareOnRestore).toBe(true);
+    // 启动恢复不再走跳转参数那条路，所以这里不该有任何预填参数
+    expect(lastProps.initialParams).toBeNull();
+    await waitFor(() => expect(diffKeysInUI()).toEqual([]));
+    expect(JSON.parse(localStorage.getItem("cs.ui") || "{}")).toMatchObject({ mode: "diff", connId: "conn-1" });
   });
 
-  it("跳转来源被消费后，cs.ui 记的仍是那两个来源", async () => {
+  it("本会话中途点进对比页：不点亮挂载即比的意图（它只代表上一轮退出时停在哪个页面）", async () => {
+    localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
+    localStorage.setItem(
+      "cs.ui",
+      JSON.stringify({
+        mode: "browse",
+        connId: "conn-1",
+        // 齐全的来源照旧存着：中途点进对比页只是去查看，不该替用户重放上一轮的对比
+        diffLeftConnId: "conn-1",
+        diffRightConnId: "conn-2",
+      })
+    );
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Config Compare" }));
+    await screen.findByTestId("diff-view");
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).toBe("diff"));
+
+    // 轮45 的教训：ui0 = loadUI() 每次渲染都重读存储，意图若从「当前 mode」现取，
+    // 本会话中途的每次挂载都会点亮它 ⇒ 对比页每次回来白比一轮（回声室）。
+    expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].autoCompareOnRestore).toBe(false);
+    expect(diffKeysInUI()).toEqual([]);
+  });
+
+  it("跳转来源被消费后：意图随 props 一起消失，cs.ui 不再留一份会过期的镜像", async () => {
     render(
       <I18nProvider>
         <App />
@@ -1016,30 +1020,25 @@ describe("App", () => {
     await screen.findByTestId("diff-view");
     const jumped = viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams;
     expect(jumped).not.toBeNull();
+    expect(jumped?.leftConnId).toBeTruthy();
+    expect(jumped?.rightConnId).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
     await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
-
-    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
-    expect(ui.diffLeftConnId).toBe(jumped!.leftConnId);
-    expect(ui.diffRightConnId).toBe(jumped!.rightConnId);
-    expect(ui.diffLeft).toMatchObject({ dataId: "app.yaml", group: "DEFAULT_GROUP" });
-    expect(ui).not.toHaveProperty("diffAutoCompare");
+    // 「这一次要比」消费完就没了，不会留在存储里等下次挂载复燃（轮45 R02 口径不变）
+    expect(diffKeysInUI()).toEqual([]);
   });
 
-  it("绕出对比页再回来，cs.ui 记的那一对来源不许被一起擦掉", async () => {
+  it("绕出对比页再回来：App 不碰 prefs，那一对来源由 prefs 自己保住", async () => {
     localStorage.setItem("cs.connections", JSON.stringify([sourceConnection, { ...sourceConnection, id: "conn-2", name: "prod" }]));
-    localStorage.setItem(
-      "cs.ui",
-      JSON.stringify({
-        mode: "diff",
-        connId: "conn-1",
-        diffLeftConnId: "conn-1",
-        diffRightConnId: "conn-2",
-        diffLeft: { tenant: "public", dataId: "a.yaml", group: "G" },
-        diffRight: { tenant: "prod", dataId: "a.yaml", group: "G" },
-      })
-    );
+    const prefs = {
+      selectedProject: "Order",
+      left: { connId: "conn-1", tenant: "public", dataId: "a.yaml", group: "G", usesDefaultNamespace: false },
+      right: { connId: "conn-2", tenant: "prod", dataId: "a.yaml", group: "G", usesDefaultNamespace: false },
+      mode: "text",
+    };
+    localStorage.setItem("cs.diffViewPreferences", JSON.stringify(prefs));
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "diff", connId: "conn-1" }));
 
     render(
       <I18nProvider>
@@ -1048,22 +1047,17 @@ describe("App", () => {
     );
 
     await screen.findByTestId("diff-view");
-    // 先让对比页把跳转参数消费掉（真机里 DiffView 挂载即消费）：
-    // 不消费的话下面走的还是 diffInitialParams 那条分支，测不到"绕一趟就擦掉"。
-    fireEvent.click(screen.getByRole("button", { name: "Mock consume jump params" }));
-    await waitFor(() => expect(viewMocks.diffProps[viewMocks.diffProps.length - 1].initialParams).toBeNull());
+    const prefsBefore = localStorage.getItem("cs.diffViewPreferences");
     const nav = await screen.findByRole("navigation", { name: "Main navigation" });
     fireEvent.click(within(nav).getByRole("button", { name: "Config Browser" }));
     await waitFor(() => expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).toBe("browse"));
     fireEvent.click(within(nav).getByRole("button", { name: "Config Compare" }));
     await waitFor(() => expect(JSON.parse(localStorage.getItem("cs.ui") || "{}").mode).toBe("diff"));
 
-    // 真机 SA-01 量到的就是这里：切走那一次 spread 成 {} 把来源抹了，切回来只能从已被抹空的存储里读到 ""，
-    // 于是「记住我上次比的那一对」在一次绕道之后就没了——对比页自己还留着来源（保活），存储侧却已经不认。
-    const ui = JSON.parse(localStorage.getItem("cs.ui") || "{}");
-    expect(ui.diffLeftConnId, "离开对比页把上次比的那一对擦掉了").toBe("conn-1");
-    expect(ui.diffRightConnId).toBe("conn-2");
-    expect(ui.diffLeft).toMatchObject({ dataId: "a.yaml", group: "G" });
-    expect(ui).not.toHaveProperty("diffAutoCompare");
+    // 轮45 的这条守卫测的是「切走那一次 spread 成 {} 把来源抹了」。轮46 把 App 这个写侧整个删掉后，
+    // 判据变成两条：cs.ui 里根本没有可被抹掉的 diff 键，且 App 的任何导航都不许动 prefs 一个字节。
+    expect(diffKeysInUI()).toEqual([]);
+    expect(localStorage.getItem("cs.diffViewPreferences")).toBe(prefsBefore);
   });
+
 });

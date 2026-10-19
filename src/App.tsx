@@ -85,14 +85,12 @@ interface UIState {
   browseProject?: string;
   browseEnvironment?: string;
   browseSourceId?: string;
-  diffLeftConnId?: string;
-  diffRightConnId?: string;
-  diffLeft?: { tenant?: string; dataId?: string; group?: string };
-  diffRight?: { tenant?: string; dataId?: string; group?: string };
-  // 轮45 R02：这里刻意没有 diffAutoCompare。
-  // 「这一次要比」是一次性意图，不是状态：写进 cs.ui 后，持久化 effect 下一轮会把刚写进去的 true
-  // 再读回来（loadUI 每次渲染重读），而全仓没有任何一处把它清成 false —— 于是每次启动都先自动比一轮。
-  // 现在它只活在 DiffJumpParams 里，启动时由「上次停在对比页 + 左右来源齐全」推导。
+  // 轮45 R02：这里刻意没有 diffAutoCompare —— 「这一次要比」是一次性意图，不是状态。
+  // 轮46 R01：这里也刻意没有 diffLeft*/diffRight* —— 「比的是哪一对」是状态，它唯一的主人是
+  // cs.diffViewPreferences（DiffView 每次改动都写、挂载时自己恢复）。
+  // 探针实测过双写代价：cs.ui 那份镜像只有发生过跳转才更新，于是它常年是旧的；重启时旧的赢下界面，
+  // 还会被 DiffView 的保存 effect 抄回 prefs ⇒ 用户真正比过的那一对一次重启就永久丢失。
+  // 读侧删键 = 忽略老数据里的这些键，不迁移、不报错，下次整对象回写自然带走。
 }
 
 const UI_KEY = "cs.ui";
@@ -180,20 +178,11 @@ export default function App() {
   const [tenantFollowsDefault, setTenantFollowsDefault] = useState(true);
   const knownMode = isNavigableMode(ui0.mode) ? ui0.mode : "browse";
   const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
-  // 启动时若上次停在 diff 页且记录了左右来源, 恢复为预填参数(含自动对比)。
-  // 轮45 R02：autoCompare 改由现场推导而不是从 cs.ui 读回来 —— 用户可见语义没变
-  // （回到上次比的那一对并直接比出来），但它不再是一个擦不掉的常驻标志。
-  const initialDiffParams: DiffJumpParams | null =
-    initialMode === "diff" && ui0.diffLeftConnId && ui0.diffRightConnId
-      ? {
-          leftConnId: ui0.diffLeftConnId,
-          rightConnId: ui0.diffRightConnId,
-          left: ui0.diffLeft,
-          right: ui0.diffRight,
-          autoCompare: true,
-        }
-      : null;
   const [mode, setMode] = useState<Mode>(initialMode);
+  // 轮46 R02：「上一轮退出时停在对比页」是一次性意图，交给 DiffView 结合 prefs 里那一对决定要不要直接比出来。
+  // 必须用 useState 初值取一次：ui0 = loadUI() 每次渲染都重读存储，直接把 mode === "diff" 传下去会
+  // 让「本会话中途点进对比页」也点亮它，退化成轮45 刚清掉的那种回声室（每次挂载白比一轮）。
+  const [autoCompareOnRestore] = useState(() => initialMode === "diff");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
   const [appVersion, setAppVersion] = useState("");
@@ -203,8 +192,9 @@ export default function App() {
   const [diffFocusStep, setDiffFocusStep] = useState<WorkflowStepId | null>(null);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
-  // 跨视图导航参数（AuditView → DiffView）
-  const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(initialDiffParams);
+  // 跨视图导航参数（BackupView / AuditView → DiffView）。轮46：只由跳转设置，
+  // 启动恢复不再走这条路（来源与「要不要比」都由 DiffView 从 prefs 自己判定）。
+  const [diffInitialParams, setDiffInitialParams] = useState<DiffJumpParams | null>(null);
 
   const activeConn = connections.find((c) => c.id === activeConnId) ?? null;
   const diffConnections = useMemo(
@@ -268,25 +258,9 @@ export default function App() {
         browseProject: activeConnection ? connectionProjectName(activeConnection) : "",
         browseEnvironment: activeConnection ? connectionEnvironmentName(activeConnection) : "",
         browseSourceId: activeConnection?.id ?? "",
-        ...(diffJumpPersist
-          ? {
-              diffLeftConnId: diffJumpPersist.leftConnId,
-              diffRightConnId: diffJumpPersist.rightConnId,
-              diffLeft: {
-                tenant: diffJumpPersist.left?.tenant ?? "",
-                dataId: diffJumpPersist.left?.dataId ?? "",
-                group: diffJumpPersist.left?.group ?? "",
-              },
-              diffRight: {
-                tenant: diffJumpPersist.right?.tenant ?? "",
-                dataId: diffJumpPersist.right?.dataId ?? "",
-                group: diffJumpPersist.right?.group ?? "",
-              },
-            }
-          : {}),
       })
     );
-  }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed, diffInitialParams]);
+  }, [activeConnId, connections, mode, pendingApplyEntry, sidebarCollapsed]);
 
   // 模式切换即收起所有自绘下拉/候选弹层：它们的菜单 portal 到 document.body，
   // 不在被保活隐藏的页面子树里，光给容器加 hidden 关不掉（见 lib/popoverBus）。
@@ -475,25 +449,6 @@ export default function App() {
     recordSnapshotCompare("success");
   };
 
-  // diff 页要记进 cs.ui 的只有「比的是哪两个来源」: 有跳转参数用跳转的, 否则沿用上次持久化的。
-  // 轮45 R02：这里不再带 autoCompare —— 跳转参数里那份是一次性的，由 DiffView 消费掉就结束，
-  // 把它抄进持久化块就等于给「永远要比」开了一条自我复活的回路。
-  // 轮45 R03：回落不再以「此刻停在 diff 页」为条件。真机 SA-01 与 jsdom 同一条读数：跳转参数被对比页
-  // 消费掉之后绕一趟配置浏览，这里的 spread 变成 {} ⇒ diffLeft* 整组从 cs.ui 消失，切回来只能从已被
-  // 抹空的存储读到 ""，「记住我上次比的那一对」当场失效（对比页自己因为保活还认得那两个来源，
-  // 界面上看不出来，下次启动才露馅）。记不记这一对与在哪一页无关：留着它没有任何副作用，
-  // 启动要不要自动比另由 initialMode + 来源齐全决定（见上面 initialDiffParams）。
-  const diffJumpPersist =
-    diffInitialParams ??
-    (ui0.diffLeftConnId
-      ? {
-          leftConnId: ui0.diffLeftConnId,
-          rightConnId: ui0.diffRightConnId ?? "",
-          left: ui0.diffLeft,
-          right: ui0.diffRight,
-        }
-      : null);
-
   const startApply = (payload: ApplyEntryPayload) => {
     setPendingApplyEntry(payload);
     setMode("apply");
@@ -654,6 +609,7 @@ export default function App() {
       onStartApply={startApply}
       focusStep={diffFocusStep}
       onFocusStepConsumed={() => setDiffFocusStep(null)}
+      autoCompareOnRestore={autoCompareOnRestore}
     />
   );
   return (

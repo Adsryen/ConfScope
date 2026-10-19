@@ -18,20 +18,10 @@ import Select from "./Select";
 import { errorText } from "../lib/errorText";
 import { useScrollResetRef } from "../lib/useScrollResetOnContentChange";
 import { statusMessageProps } from "../lib/statusSemantics";
+import type { DiffJumpParams } from "../lib/diffJump";
 
-export interface DiffJumpSideParams {
-  tenant?: string;
-  dataId?: string;
-  group?: string;
-}
-
-export interface DiffJumpParams {
-  leftConnId: string;
-  rightConnId: string;
-  left?: DiffJumpSideParams | null;
-  right?: DiffJumpSideParams | null;
-  autoCompare?: boolean;
-}
+// 轮46 R04：跳转参数的契约收在 src/lib/diffJump.ts 一份，这里只转出给既有引用方（App 从这里导入）。
+export type { DiffJumpParams, DiffJumpSideParams } from "../lib/diffJump";
 
 interface Props {
   connections: Connection[];

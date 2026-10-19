@@ -1937,3 +1937,130 @@ describe("DiffView 启动自动对比的幂等（轮44 R90：一次进入只比�
     expect(apiMocks.getConfig.mock.calls.length, "同一份跳转参数触发了第二趟自动对比").toBe(firstRound);
   });
 });
+
+describe("DiffView 重启恢复即比（轮46 R01/R02：来源只有一个事实源）", () => {
+  /**
+   * 「上一轮退出时停在对比页」由 App 用 mount-only 的一次性意图传下来（autoCompareOnRestore），
+   * 要比哪一对只有 cs.diffViewPreferences 说了算 —— 轮46 之前还有一份 cs.ui 镜像，
+   * 镜像只在跳转时更新所以常年是旧的，重启时旧的赢下界面又被保存 effect 抄回 prefs，
+   * 用户真正比过的那一对一次重启就永久丢失（探针实测 656ms 后 DOM 与 prefs 双双回到种子对）。
+   * 这一组用例钉住新契约的四个边界：齐就比、意图没点亮不比、缺一侧 dataId 不比、只 arm 一次。
+   */
+  const completePrefs = {
+    selectedProject: "订单系统",
+    left: { connId: "dev-nacos", tenant: "dev-tenant", dataId: "app.yaml", group: "RETEST-PROD", usesDefaultNamespace: false },
+    right: { connId: "prod-nacos", tenant: "prod-tenant", dataId: "app.yaml", group: "RETEST-PROD", usesDefaultNamespace: false },
+    mode: "text",
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("locale", "zh-CN");
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([
+      { namespace: "dev-tenant", namespaceShowName: "开发命名空间", configCount: 1, kind: 0 },
+      { namespace: "prod-tenant", namespaceShowName: "生产命名空间", configCount: 1, kind: 0 },
+    ]);
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "RETEST-PROD", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) => `${dataId}=1\n`);
+  });
+
+  function renderRestored(autoCompareOnRestore: boolean, connections: Connection[] = [nacosConn, prodConn]) {
+    return render(
+      <I18nProvider>
+        <DiffView connections={connections} autoCompareOnRestore={autoCompareOnRestore} />
+      </I18nProvider>
+    );
+  }
+
+  it("意图点亮且 prefs 两侧齐全：挂载即把上一对比出来，恰两趟取数", async () => {
+    localStorage.setItem("cs.diffViewPreferences", JSON.stringify(completePrefs));
+    renderRestored(true);
+
+    await waitFor(() => expect(document.querySelector(".diff-row")).not.toBeNull());
+    expect(apiMocks.getConfig.mock.calls.length, "恢复即比不该比完再来一轮").toBe(2);
+    // 比的就是 prefs 里那一对（没有镜像可拿，也没有跳转参数可拿）
+    const compared = apiMocks.getConfig.mock.calls.map((call) => `${call[0]!.id}/${call[2]}`);
+    expect(compared.sort()).toEqual(["dev-nacos/app.yaml", "prod-nacos/app.yaml"]);
+  });
+
+  it("意图没点亮（本会话中途进对比页）：pref 再齐也只预填不重放", async () => {
+    localStorage.setItem("cs.diffViewPreferences", JSON.stringify(completePrefs));
+    renderRestored(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(apiMocks.getConfig, "中途挂载不得替用户重放上一轮的对比").not.toHaveBeenCalled();
+    expect(document.querySelector(".diff-row")).toBeNull();
+  });
+
+  it("prefs 少一侧 dataId：宁可不比，也不在启动时替用户按下智能匹配", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({ ...completePrefs, right: { ...completePrefs.right, dataId: "" } })
+    );
+    renderRestored(true);
+
+    // dataId 为空的 loadBoth 走的是整命名空间扫描的智能匹配：白付一趟全量列表 + 多份审计，
+    // 比出来还是空正文配报错，所以这一对在这里必须被判定为「不齐」。
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(apiMocks.getConfig).not.toHaveBeenCalled();
+    expect(document.querySelector(".diff-row")).toBeNull();
+  });
+
+  it("同一实例只 arm 一次：后续渲染换掉 connections 引用不得再排第二轮", async () => {
+    localStorage.setItem("cs.diffViewPreferences", JSON.stringify(completePrefs));
+    const view = renderRestored(true);
+
+    await waitFor(() => expect(document.querySelector(".diff-row")).not.toBeNull());
+    const firstRound = apiMocks.getConfig.mock.calls.length;
+    expect(firstRound).toBe(2);
+
+    view.rerender(
+      <I18nProvider>
+        <DiffView connections={[{ ...nacosConn }, prodConn]} autoCompareOnRestore />
+      </I18nProvider>
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(apiMocks.getConfig.mock.calls.length, "恢复路径触发了第二趟自动对比").toBe(firstRound);
+  });
+
+  it("prefs 指向已被删掉的连接：回退到默认现场后两侧不齐，一次取数都不发", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({ ...completePrefs, right: { ...completePrefs.right, connId: "gone-nacos" } })
+    );
+    renderRestored(true);
+
+    // sourceFromPreference 找不到连接时整体回退 emptySource(firstId)，dataId 为空 ⇒ 不齐。
+    // 这时页面上应该老老实实停在「未对比」，让用户自己重新选一侧，而不是拿同一个连接跟自己比。
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(apiMocks.getConfig).not.toHaveBeenCalled();
+    expect(document.querySelector(".diff-row")).toBeNull();
+  });
+
+  it("跟随默认命名空间时，快照用的是连接的当前默认值而不是 prefs 里的旧串", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        ...completePrefs,
+        left: { ...completePrefs.left, usesDefaultNamespace: true, tenant: "stale-tenant" },
+      })
+    );
+    renderRestored(true);
+
+    await waitFor(() => expect(document.querySelector(".diff-row")).not.toBeNull());
+    const leftCall = apiMocks.getConfig.mock.calls.find((call) => call[0]!.id === "dev-nacos");
+    // 挂载那一刻现场已经和连接对齐（snapshotOf 取的是这份现场），所以旧串不会被拿去取数，
+    // 也就不会出现「快照按旧租户、现场按新租户 ⇒ 就绪判定永不成立 ⇒ 该比的没比」这种死锁。
+    expect(leftCall?.[1]).toBe("dev-tenant");
+  });
+});

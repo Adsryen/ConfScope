@@ -18,6 +18,7 @@ import {
 } from "../store/connections";
 import { loadSettings } from "../store/settings";
 import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
+import { isCompleteDiffSourcePair, type DiffJumpParams } from "../lib/diffJump";
 import { useTranslation } from "../i18n";
 import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import { exportDiff, type DiffItem } from "../lib/export";
@@ -41,14 +42,6 @@ import { changeTouchesNamespace, subscribeConfigChanges } from "../lib/configCha
 
 type DiffMode = "text" | "key" | "lines";
 
-interface DiffJumpParams {
-  leftConnId: string;
-  rightConnId: string;
-  left?: { tenant?: string; dataId?: string; group?: string } | null;
-  right?: { tenant?: string; dataId?: string; group?: string } | null;
-  autoCompare?: boolean;
-}
-
 interface Props {
   /**
    * 本页是不是真的可见（轮44 保活改造）。
@@ -67,6 +60,25 @@ interface Props {
   /** 从变更计划页回退时的聚焦提示（stepper 导航） */
   focusStep?: WorkflowStepId | null;
   onFocusStepConsumed?: () => void;
+  /**
+   * 本次会话「退出时停在对比页」的一次性意图（轮46 R02）。App 只在首帧取一次值传下来，
+   * 本组件挂载时用它 + prefs 里那一对是否齐全，决定要不要直接把上一对比出来。
+   * 意图只活在 props 里，绝不进存储（轮45 R02 的口径）。
+   */
+  autoCompareOnRestore?: boolean;
+}
+
+/** 自动对比的现场快照：arm 时把「要拿哪一对去比」逐字段钉下来，ready 判定只比这份快照。 */
+interface AutoCompareSnapshot {
+  left: { connId: string; tenant: string; dataId: string; group: string };
+  right: { connId: string; tenant: string; dataId: string; group: string };
+}
+
+function autoCompareSnapshotOf(left: Source, right: Source): AutoCompareSnapshot {
+  return {
+    left: { connId: left.connId, tenant: left.tenant, dataId: left.dataId, group: left.group },
+    right: { connId: right.connId, tenant: right.tenant, dataId: right.dataId, group: right.group },
+  };
 }
 
 interface Source {
@@ -738,7 +750,7 @@ function SourcePicker({
   );
 }
 
-export default function DiffView({ active = true, connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed }: Props) {
+export default function DiffView({ active = true, connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed, autoCompareOnRestore = false }: Props) {
   const { t } = useTranslation();
   const settings = loadSettings();
   const initialDiffStateRef = useRef<InitialDiffState | null>(null);
@@ -773,10 +785,11 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   // 差异统计仍是执行前那一刻。对比是重操作、也不该被自动打断，所以只标记过期 + 给一键重比。
   const [resultStale, setResultStale] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
-  const [pendingAutoCompare, setPendingAutoCompare] = useState<DiffJumpParams | null>(null);
+  const [pendingAutoCompare, setPendingAutoCompare] = useState<AutoCompareSnapshot | null>(null);
+  // 恢复路径只在本组件挂载时决定一次（轮46）：prop 后续再怎么变都不该重新点亮自动比。
+  const restoreCheckedRef = useRef(false);
   /** 已经应用过的跳转参数（按对象引用）。见下面「处理从 AuditView 跳转过来的预填参数」的注释。 */
   const appliedJumpParamsRef = useRef<DiffJumpParams | null>(null);
-  const leftConnFor = useCallback((connId: string) => connections.find((item) => item.id === connId), [connections]);
   /**
    * 滚轮兜底（轮33 F-34）：根取 `.diff-workspace` 而不是 `.diff-view`——`.page-header` 就在
    * DiffView 自己的 return 里、语义上「不属于任何一列」，本轮按 PRD 划入禁区不接。
@@ -907,24 +920,43 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     // 未指定的一侧回退到该连接配置的默认 namespace（而非用对侧的 namespace，
     // 否则会在右连接上查到空列表，group 下拉与 dataId 候选全空）。
     const prefGroup = (side?: { group?: string } | null) => (side?.group ?? "").trim() || "DEFAULT_GROUP";
-    setLeft({
+    const nextLeft: Source = {
       connId: initialParams.leftConnId,
       tenant: initialParams.left?.tenant ?? leftConn.defaultNamespace ?? "",
       dataId: initialParams.left?.dataId ?? "",
       group: prefGroup(initialParams.left),
       usesDefaultNamespace: false,
-    });
-    setRight({
+    };
+    const nextRight: Source = {
       connId: initialParams.rightConnId,
       tenant: initialParams.right?.tenant ?? rightConn.defaultNamespace ?? "",
       dataId: initialParams.right?.dataId ?? "",
       group: prefGroup(initialParams.right),
       usesDefaultNamespace: false,
-    });
+    };
+    setLeft(nextLeft);
+    setRight(nextRight);
     setSourcesCollapsed(true);
-    if (initialParams.autoCompare) setPendingAutoCompare(initialParams);
+    // 跳转带 autoCompare 时照单排比，不套「齐全」谓词：两侧 dataId 为空在跳转语义里是
+    // 「跳过去跑智能匹配」（loadBoth 的 needMatch 分支），是有意为之，不是缺参数。
+    if (initialParams.autoCompare) setPendingAutoCompare(autoCompareSnapshotOf(nextLeft, nextRight));
     onInitialParamsConsumed?.();
   }, [initialParams, connections, onInitialParamsConsumed]);
+
+  // 轮46 R02：重启恢复。上一轮退出时停在对比页，且 prefs 里那一对两侧 connId/dataId 都齐，
+  // 就把这一对自动比出来 —— 这一对现在只有 cs.diffViewPreferences 一个事实源，
+  // 不再有一份 cs.ui 镜像来把它盖掉（轮46 探针实测：旧镜像赢下界面后还会被保存 effect 抄回 prefs，
+  // 用户真正比过的那一对一次重启就永久丢失）。
+  // 不齐就不许比：dataId 为空的 loadBoth 走的是整命名空间扫描的智能匹配，绝不该在启动时替用户按下。
+  useEffect(() => {
+    if (restoreCheckedRef.current) return;
+    restoreCheckedRef.current = true;
+    if (!autoCompareOnRestore) return;
+    const restored = initialDiffStateRef.current;
+    if (!restored) return;
+    if (!isCompleteDiffSourcePair(restored.left, restored.right)) return;
+    setPendingAutoCompare(autoCompareSnapshotOf(restored.left, restored.right));
+  }, [autoCompareOnRestore]);
 
   const updateLeft = (source: Source) => {
     setLeft(source);
@@ -1228,19 +1260,11 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   useEffect(() => {
     if (!pendingAutoCompare) return;
-    const wantLeft = {
-      tenant: pendingAutoCompare.left?.tenant ?? leftConnFor(pendingAutoCompare.leftConnId)?.defaultNamespace ?? "",
-      group: (pendingAutoCompare.left?.group ?? "").trim() || "DEFAULT_GROUP",
-      dataId: pendingAutoCompare.left?.dataId ?? "",
-    };
-    const wantRight = {
-      tenant: pendingAutoCompare.right?.tenant ?? leftConnFor(pendingAutoCompare.rightConnId)?.defaultNamespace ?? "",
-      group: (pendingAutoCompare.right?.group ?? "").trim() || "DEFAULT_GROUP",
-      dataId: pendingAutoCompare.right?.dataId ?? "",
-    };
+    const wantLeft = pendingAutoCompare.left;
+    const wantRight = pendingAutoCompare.right;
     const ready =
-      left.connId === pendingAutoCompare.leftConnId &&
-      right.connId === pendingAutoCompare.rightConnId &&
+      left.connId === wantLeft.connId &&
+      right.connId === wantRight.connId &&
       left.tenant === wantLeft.tenant &&
       right.tenant === wantRight.tenant &&
       left.group === wantLeft.group &&
