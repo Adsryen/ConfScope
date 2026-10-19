@@ -325,4 +325,44 @@ describe("HistoryView", () => {
     const back = await screen.findByRole("button", { name: "高亮变更" });
     expect(back).toHaveAttribute("aria-pressed", "false");
   });
+
+  // 轮40 R40-1 / R40-3：页面级正文搜索词必须跟到「历史变更」的原文视图。
+  // 缺陷长什么样（真机取证见 .trellis/tasks/10-19-ui-ux-40/prd.md）：浏览 tab 与编辑 tab 都传了词，
+  // 唯独 HistoryView 的 Props 里没有 searchTerm，于是同一份内容切个 tab 红字全消失、Ctrl+F 变空串。
+  // CodeView 那套（标红 / 命中行 / 定位 / 预填 / 缩略图红条）早就在，缺的只是这根 prop 线。
+  it("传入页面搜索词时，「原始内容」正文出现标红与命中行（轮40 R40-1）", async () => {
+    renderHistory({ searchTerm: "port" });
+    fireEvent.click(await screen.findByText("nid 2"));
+    fireEvent.click(await screen.findByRole("button", { name: "原始内容" }));
+
+    await waitFor(() => expect(document.querySelectorAll(".code-area mark.search-hit").length).toBeGreaterThan(0));
+    // 命中行底色层与行号层由同一份 hitSet 驱动：词到位就得跟着到位
+    expect(document.querySelectorAll(".code-lines .code-line.is-hit").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".code-gutter .code-ln.is-hit").length).toBeGreaterThan(0);
+  });
+
+  it("传入页面搜索词时，「原始内容」里按 Ctrl+F 预填该词而不是空串（轮40 R40-1）", async () => {
+    renderHistory({ searchTerm: "port" });
+    fireEvent.click(await screen.findByText("nid 2"));
+    fireEvent.click(await screen.findByRole("button", { name: "原始内容" }));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => {
+      const input = document.querySelector(".code-find-input") as HTMLInputElement | null;
+      expect(input?.value).toBe("port");
+    });
+  });
+
+  it("不传页面搜索词时，「原始内容」一处都不标（轮40 R40-3）", async () => {
+    renderHistory();
+    fireEvent.click(await screen.findByText("nid 2"));
+    fireEvent.click(await screen.findByRole("button", { name: "原始内容" }));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+
+    // 内容里本来就有 "port"，没有词就必须一个命中都不画（防止把 dataId 搜索串误当正文词）
+    expect((document.querySelector(".code-area") as HTMLElement).textContent).toContain("port");
+    expect(document.querySelectorAll(".code-area mark.search-hit").length).toBe(0);
+    expect(document.querySelectorAll(".code-lines .code-line.is-hit").length).toBe(0);
+  });
 });

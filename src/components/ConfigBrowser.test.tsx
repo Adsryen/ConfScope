@@ -22,6 +22,8 @@ const apiMocks = vi.hoisted(() => ({
   getConfigDocument: vi.fn(),
   publishConfig: vi.fn(),
   deleteConfig: vi.fn(),
+  listHistory: vi.fn(),
+  getHistoryDetail: vi.fn(),
 }));
 
 const snapshotMocks = vi.hoisted(() => ({
@@ -42,6 +44,8 @@ vi.mock("../api/nacos", async () => {
     getConfigDocument: apiMocks.getConfigDocument,
     publishConfig: apiMocks.publishConfig,
     deleteConfig: apiMocks.deleteConfig,
+    listHistory: apiMocks.listHistory,
+    getHistoryDetail: apiMocks.getHistoryDetail,
   };
 });
 
@@ -161,6 +165,8 @@ describe("ConfigBrowser", () => {
     apiMocks.getConfigDocument.mockReset();
     apiMocks.publishConfig.mockReset();
     apiMocks.deleteConfig.mockReset();
+    apiMocks.listHistory.mockReset();
+    apiMocks.getHistoryDetail.mockReset();
     snapshotMocks.createSnapshotFromConfigs.mockReset();
     appApiMocks.selectConfigSourceExportDirectory.mockReset();
     appApiMocks.exportConfigSourceFiles.mockReset();
@@ -946,6 +952,110 @@ describe("ConfigBrowser", () => {
     const start = rows.slice(0, line - 1).reduce((acc, row) => acc + row.length + 1, 0);
     expect(ta.selectionStart).toBe(start);
     expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe(rows[line - 1]);
+  });
+
+  // ── 轮40 R40-1 / R40-5：页面级正文搜索词要跟随到「历史变更」的原文视图 ──
+  // 缺陷长什么样（真机取证见 .trellis/tasks/10-19-ui-ux-40/prd.md）：同一个配置的三个内容视图里，
+  // 浏览 tab（ConfigBrowser:1307）与编辑 tab（:1258）都传了 searchTerm，唯独 HistoryView 的 Props
+  // 没有这个字段 —— 内容搜索点开配置后切到「历史变更」看原始内容，标红、命中行底色、行号命中态、
+  // 缩略图红条、Ctrl+F 预填一起消失（真机读数：正文 mark.search-hit 从 1 掉到 0，预填从 cycle 掉到空串，
+  // 而那块 .code-area 的 textContent 里确实含 cycle: ⇒ 不是「这版内容没这个词」）。
+  // 这是**接线级**断言：HistoryView.test.tsx 那三条只钉「收到词就得标」，词传没传只能在这里钉。
+  function mockHistoryForBrowser() {
+    apiMocks.listHistory.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { id: "2", dataId: "app.yaml", group: "DEFAULT_GROUP", opType: "U", lastModifiedTime: "2026-06-27 10:00:00" },
+        { id: "1", dataId: "app.yaml", group: "DEFAULT_GROUP", opType: "I", lastModifiedTime: "2026-06-26 10:00:00" },
+      ],
+    });
+    apiMocks.getHistoryDetail.mockImplementation(
+      async (_conn: Connection, _tenant: string, _dataId: string, _group: string, nid: string) => ({
+        id: nid,
+        dataId: "app.yaml",
+        group: "DEFAULT_GROUP",
+        content: nid === "2" ? "server:\n  port: 9090\n" : "server:\n  port: 8080\n",
+        opType: nid === "1" ? "I" : "U",
+        createdTime: "2026-06-27 10:00:00",
+        lastModifiedTime: "2026-06-27 10:00:00",
+      })
+    );
+  }
+
+  /** 内容搜索态：切「按内容搜索」→ 输入词 → 防抖 → 打开配置。 */
+  async function searchContentAndOpen(term: string) {
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    fireEvent.change(document.querySelector(".browser-search input") as HTMLInputElement, { target: { value: term } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    fireEvent.click(await screen.findByText("app.yaml"));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+  }
+
+  /** 切到「历史变更」→ 选一个版本 → 看原始内容。 */
+  async function openHistoryRawView() {
+    fireEvent.click(await screen.findByRole("button", { name: "历史变更" }));
+    fireEvent.click(await screen.findByText("nid 2"));
+    fireEvent.click(await screen.findByRole("button", { name: "原始内容" }));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+  }
+
+  it("内容搜索词跟随到「历史变更」的原始内容视图（轮40 R40-1）", async () => {
+    apiMocks.listConfigs.mockResolvedValue(configPage([{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }]));
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: "server:\n  port: 8080\n",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    });
+    mockHistoryForBrowser();
+    renderBrowser("zh-CN");
+
+    await searchContentAndOpen("port");
+    // 浏览 tab 先确认词到位（基线），再切历史 tab
+    expect(document.querySelectorAll(".code-area mark.search-hit").length).toBeGreaterThan(0);
+
+    await openHistoryRawView();
+    expect(document.querySelectorAll(".code-area mark.search-hit").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".code-lines .code-line.is-hit").length).toBeGreaterThan(0);
+
+    // 同一块视图的 Ctrl+F 预填该词，而不是空串
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => {
+      const input = document.querySelector(".code-find-input") as HTMLInputElement | null;
+      expect(input?.value).toBe("port");
+    });
+  });
+
+  it("按 dataId 搜索时，「历史变更」的原始内容一处都不标（轮40 R40-3）", async () => {
+    apiMocks.listConfigs.mockResolvedValue(configPage([{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }]));
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: "server:\n  port: 8080\n",
+      format: "yaml",
+      version: "v1",
+      source: "nacos",
+      updateTime: "2026-08-11T00:00:00Z",
+    });
+    mockHistoryForBrowser();
+    renderBrowser("zh-CN");
+
+    // 默认就是「按 dataId」模式：输入的是 dataId 串，不是正文词
+    fireEvent.change(document.querySelector(".browser-search input") as HTMLInputElement, { target: { value: "app" } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    fireEvent.click(await screen.findByText("app.yaml"));
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+    expect(document.querySelectorAll(".code-area mark.search-hit").length).toBe(0);
+
+    await openHistoryRawView();
+    // 版本内容里就有 "port"，没有正文词时一个命中都不许画
+    expect((document.querySelector(".code-area") as HTMLElement).textContent).toContain("port");
+    expect(document.querySelectorAll(".code-area mark.search-hit").length).toBe(0);
   });
 
   // ── 保活隐藏（R8 / D3）：整页只是 hidden，不卸载 ──
