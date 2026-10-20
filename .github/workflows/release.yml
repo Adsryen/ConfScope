@@ -261,6 +261,10 @@ jobs:
     outputs:
       manifest: ${{ steps.manifest.outputs.json }}
     steps:
+      # CHANGELOG 是发行说明的事实源，所以取产物之前先把 tag 自身的内容检出
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -270,10 +274,16 @@ jobs:
         id: manifest
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES=$(gh release view "${GITHUB_REF_NAME}" --json body -q .body 2>/dev/null || echo "")
-          if [ -z "$NOTES" ]; then
-            NOTES="发行版 ${VERSION}"
-          fi
+          # 发行说明取自 CHANGELOG 的对应段落（轮52）。原先这里读 gh release view 的正文，
+          # 但 release 作业 needs 本作业——读的时候 Release 还没被创建，
+          # 2>/dev/null || echo "" 把失败咽掉，于是 notes 恒为占位文案：
+          # 线上 v1.9.1 的 update.json 实测就是 "发行版 1.9.1"。而关于页的更新面板与
+          # 后台检查通知都把这段文字直接摆给用户看，等于每次升级只给用户一行空话。
+          # 现在抽不到段落就非 0 退出：宁可发版构建红，也不再发一行空话。
+          node --version
+          NOTES="$(node scripts/extract-release-notes.mjs "${VERSION}")"
+          echo "release notes for ${VERSION} (${#NOTES} chars):"
+          echo "${NOTES}"
 
           # Windows
           WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe" | awk '{print $1}')
