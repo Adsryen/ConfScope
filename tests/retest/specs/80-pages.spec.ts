@@ -212,10 +212,17 @@ test("T-PG-05 设置页: 开发者清理缓存（localStorage + audit-trail）",
   console.log(`[T-PG-05] 清理后残留 cs.* = ${JSON.stringify(csKeys)}`);
   expect(csKeys).not.toContain("cs.retest.probe");
 
-  // audit-trail.jsonl 被 truncate 为空（web 手动桥经 vite 中间件 /__retest_audit_clear 真实落盘；
-  // 原生则走 Go ClearAuditTrail truncate，由 Go 单测 TestClearTruncatesTrail 覆盖）
-  const text = readFileSync(RETEST_AUDIT_FILE, "utf8").trim();
-  expect(text).toBe("");
+  // audit-trail.jsonl 里的历史被 truncate 掉（web 手动桥经 vite 中间件 /__retest_audit_clear 真实落盘；
+  // 原生则走 Go ClearAuditTrail truncate，由 Go 单测 TestClearTruncatesTrail 覆盖）。
+  // 判据钉「种下去的探针行必须消失」，不是「文件为空」：审计文件是追加式的，
+  // 清理后应用照常记录新事件才是正确行为。真机全量实测到竞争窗口（workers:1 也躲不开）：
+  // 本页挂载时 autoCompareOnRestore 比了一轮（轮46 的一次性意图 + 种子带的 prefs），
+  // 它的 compare_result / session_end 两条 POST 恰好在 truncate 之后才落到中间件——
+  // truncate 本身是好的（探针行没了），是旧断言把「清理后没人再写盘」当成了合同。
+  // 变异自检：truncate 中间件失效 ⇒ 探针行残留 ⇒ 判红。
+  const text = readFileSync(RETEST_AUDIT_FILE, "utf8");
+  console.log(`[T-PG-05] 清理后审计文件残留 ${text.split("\n").filter((l) => l.trim()).length} 行（晚到的本页会话事件允许存在）`);
+  expect(text).not.toContain("cleanup-probe");
 
   await page.screenshot({ path: "results/pg05-clear-cache.png", fullPage: true });
 });
