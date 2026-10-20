@@ -192,11 +192,11 @@ const entryPayload: ApplyEntryPayload = {
   origin: { mode: "diff", returnMode: "diff" },
 };
 
-function endpoint(connectionId: string, label: string): BuildApplyPlanInput["source"] {
+function endpoint(connectionId: string, label: string, provider: Connection["provider"] = "nacos"): BuildApplyPlanInput["source"] {
   return {
     envId: connectionId,
     label,
-    provider: "nacos",
+    provider,
     connectionId,
     connectionName: label,
     namespace: "public",
@@ -213,13 +213,16 @@ function value(valueText: string, exists = true): BuildApplyPlanInput["items"][n
   };
 }
 
-function makePlan(items: BuildApplyPlanInput["items"], options: { targetId?: string; targetLabel?: string } = {}): ApplyPlan {
+function makePlan(
+  items: BuildApplyPlanInput["items"],
+  options: { targetId?: string; targetLabel?: string; targetProvider?: Connection["provider"] } = {}
+): ApplyPlan {
   return buildApplyPlan({
     id: "plan-preview-1",
     createdAt: "2026-07-06T00:00:00.000Z",
     scope: "batch",
     source: endpoint("conn-dev", "Dev / public"),
-    target: endpoint(options.targetId ?? "conn-prod", options.targetLabel ?? "Prod / public"),
+    target: endpoint(options.targetId ?? "conn-prod", options.targetLabel ?? "Prod / public", options.targetProvider ?? "nacos"),
     inputSummary: {
       sourceType: "diff",
       scope: "batch",
@@ -556,6 +559,47 @@ describe("ApplyPlanView", () => {
         namespace: "public",
         namespaceId: "public",
       }),
+      backupConfigs
+    );
+  });
+
+  // R55-D2：以前这里无条件写死 nacos，Apollo/Consul 计划的备份元数据全被标错，
+  // 快照列表与恢复入口都认不出它到底是哪个中心的现场。
+  it("backs up under the plan target provider instead of a hardcoded nacos", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-apollo",
+      targetLabel: "Apollo / default",
+      targetProvider: "apollo",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+    const executionDeps = executionMocks.executeApplyPlan.mock.calls[0][1];
+    const backupConfigs = [
+      {
+        namespace: "default",
+        group: "DEFAULT_GROUP",
+        dataId: "application",
+        content: "server.port=9090",
+        configType: "properties",
+        updateTime: "2026-07-06T00:00:00.000Z",
+      },
+    ];
+    await executionDeps.createBackupSnapshot(backupConfigs);
+
+    expect(snapshotMocks.createSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "apollo", connectionId: "conn-apollo" }),
       backupConfigs
     );
   });
@@ -910,7 +954,11 @@ describe("ApplyPlanView", () => {
 
     const succeededReason = "This plan already ran successfully; generate a new plan to run again.";
     expect(await screen.findByText(succeededReason)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dry-run check" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
+    // 执行成功后只读预演照样能跑（R55-D3）：dry-run 按钮可用且守卫不带原因，
+    // 「已执行过」只挡真正会落笔的执行按钮。
+    const dryRunButton = screen.getByRole("button", { name: "Dry-run check" });
+    expect(dryRunButton).toBeEnabled();
+    expect(dryRunButton.closest(".btn-guard")).not.toHaveAttribute("title");
     expect(screen.getByRole("button", { name: "Execute change" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
   });
 

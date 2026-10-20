@@ -23,6 +23,7 @@ import {
   type ApplyTargetBeforeSnapshot,
 } from "./applyExecutionSafety";
 import { detectFormat, nacosType, type Format } from "./format";
+import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "./concurrency";
 import { normalizeConfig } from "./normalize";
 import { translate } from "../locales";
 import { errorText } from "./errorText";
@@ -297,38 +298,42 @@ function executableItems(plan: ApplyPlan): ApplyPlanItem[] {
   return plan.items.filter((item) => item.action !== "skip" && item.action !== "parse_error");
 }
 
+/**
+ * 新鲜度快照：每项两端各读一次现值（R55-D1 起按 BATCH_READ_CONCURRENCY 并发）。
+ *
+ * 顺序不能乱——快照数组要按项配对写进审计与比对，mapWithConcurrency 按下标回填，
+ * 与入参同序，所以展开成两项一组再 flat 一次即可。
+ */
 async function freshnessSnapshots(
   plan: ApplyPlan,
   sourceConnection: Connection,
   targetConnection: Connection,
   deps: ExecuteApplyPlanDeps
 ): Promise<ApplyPlanFreshnessSnapshot[]> {
-  const snapshots: ApplyPlanFreshnessSnapshot[] = [];
-  for (const item of plan.items) {
+  const perItem = await mapWithConcurrency(plan.items, BATCH_READ_CONCURRENCY, async (item) => {
     const [sourceValue, targetValue] = await Promise.all([
       readCurrentValue(item, sourceConnection, "source", deps),
       readCurrentValue(item, targetConnection, "target", deps),
     ]);
-    snapshots.push({
-      itemId: item.id,
-      side: "source",
-      fingerprint: sourceValue.fingerprint ?? fingerprintApplyPlanValue(sourceRef(item), sourceValue),
-    });
-    snapshots.push({
-      itemId: item.id,
-      side: "target",
-      fingerprint: targetValue.fingerprint ?? fingerprintApplyPlanValue(targetRef(item), targetValue),
-    });
-  }
-  return snapshots;
+    return [
+      {
+        itemId: item.id,
+        side: "source" as const,
+        fingerprint: sourceValue.fingerprint ?? fingerprintApplyPlanValue(sourceRef(item), sourceValue),
+      },
+      {
+        itemId: item.id,
+        side: "target" as const,
+        fingerprint: targetValue.fingerprint ?? fingerprintApplyPlanValue(targetRef(item), targetValue),
+      },
+    ];
+  });
+  return perItem.flat();
 }
 
+/** 写前快照：只给真正会落笔的项建（skip / parse_error 不参与），同样按并发口径拉取。 */
 async function beforeSnapshots(plan: ApplyPlan, targetConnection: Connection, deps: ExecuteApplyPlanDeps): Promise<ApplyTargetBeforeSnapshot[]> {
-  const snapshots: ApplyTargetBeforeSnapshot[] = [];
-  for (const item of executableItems(plan)) {
-    snapshots.push(await readBeforeSnapshot(item, targetConnection, deps));
-  }
-  return snapshots;
+  return mapWithConcurrency(executableItems(plan), BATCH_READ_CONCURRENCY, (item) => readBeforeSnapshot(item, targetConnection, deps));
 }
 
 interface PlannedWrite {

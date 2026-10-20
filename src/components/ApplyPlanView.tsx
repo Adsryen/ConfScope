@@ -412,7 +412,9 @@ function ConfirmationPanel({
   const requiredText = applyConfirmationText(plan);
   const ready = protectedTarget ? confirmationText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
-  const dryRunDisabled = anyRunning || executionSucceeded || selectedCount === 0;
+  // 只读预演不受「这个计划已经成功执行过一次」的限制：写完想再干跑一次核对目标现状，
+  // 是执行之后最自然的下一步，把它灰掉等于逼用户重新生成一份计划（R55-D3）。
+  const dryRunDisabled = anyRunning || selectedCount === 0;
   // 执行守卫基于「已勾选且可执行」的项：存在 blocked 项本身不再全局禁用按钮，
   // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
   const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
@@ -422,7 +424,7 @@ function ConfirmationPanel({
   // 浏览器根本不出 tooltip（与 ConnectionManager 的端口守卫同一写法）。
   const blockers: Array<{ id: string; label: string; alsoDryRun: boolean }> = [];
   if (anyRunning) blockers.push({ id: "running", label: t("apply.blockRunning"), alsoDryRun: true });
-  if (executionSucceeded) blockers.push({ id: "succeeded", label: t("apply.blockSucceeded"), alsoDryRun: true });
+  if (executionSucceeded) blockers.push({ id: "succeeded", label: t("apply.blockSucceeded"), alsoDryRun: false });
   if (selectedCount === 0) blockers.push({ id: "noSelection", label: t("apply.blockNoSelection"), alsoDryRun: true });
   if (selectedHasBlocked) blockers.push({ id: "hasBlocked", label: t("apply.blockHasBlocked"), alsoDryRun: false });
   if (!ready) {
@@ -901,7 +903,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
           createBackupSnapshot: async (configs) => {
             const snapshot = await createSnapshot(
               {
-                provider: "nacos",
+                // 备份元数据的 provider 必须跟着计划目标端走：写 Apollo/Consul 的这趟，
+                // 快照被标成 nacos 之后，从快照页根本认不出它是哪个中心的备份（R55-D2）。
+                provider: plan.target.provider,
                 connectionId: plan.target.connectionId,
                 connectionName: targetConnection?.name ?? plan.target.connectionName,
                 namespace: plan.target.namespace || "public",

@@ -1917,14 +1917,23 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                   className="btn btn-ghost btn-sm result-action result-action-export"
                   title={t("diff.exportDiff")}
                   onClick={() => {
-                    const diffs: DiffItem[] = batchResults.map((item) => ({
-                      dataId: item.dataId,
-                      group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
-                      namespace: left.tenant || "",
-                      leftValue: item.leftText,
-                      rightValue: item.rightText,
-                      diffType: item.leftText === item.rightText ? ("modified" as const) : ("modified" as const),
-                    }));
+                    // 分类口径与文件列表的逐文件统计一致：单侧文件按新增/删除记，
+                    // 三项统计全 0 的按未变更记（R55-D4）。以前三元两个分支都写死
+                    // "modified"，导出的报告里永远「全部已变更」，跟页面显示的 +0/−0/~0 打架。
+                    const diffs: DiffItem[] = batchResults.map((item) => {
+                      const stats = batchResultStats(item.leftText, item.rightText);
+                      const identical = stats.added === 0 && stats.removed === 0 && stats.modified === 0;
+                      const diffType: DiffItem["diffType"] =
+                        item.presence === "left-only" ? "added" : item.presence === "right-only" ? "deleted" : identical ? "unchanged" : "modified";
+                      return {
+                        dataId: item.dataId,
+                        group: item.leftLabel.split("/")[1] || "DEFAULT_GROUP",
+                        namespace: left.tenant || "",
+                        leftValue: item.leftText,
+                        rightValue: item.rightText,
+                        diffType,
+                      };
+                    });
                     exportDiff(diffs, "json");
                   }}
                 >

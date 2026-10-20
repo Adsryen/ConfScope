@@ -83,10 +83,15 @@ export async function createSnapshotFromConfigs(
     content: string;
     configType: string;
     updateTime: string;
-  }>
+  }>,
+  /**
+   * 来源中心类型（R55-D2 同口径）。省略时 Go 侧按 nacos 兜底——
+   * 那就等于把 Apollo/Consul 的快照也标成 nacos，快照列表与恢复入口都认不出来。
+   */
+  provider: SnapshotSource["provider"] = "nacos"
 ): Promise<Snapshot> {
   const source: SnapshotSource = {
-    provider: "nacos",
+    provider,
     connectionId,
     connectionName,
     namespace,

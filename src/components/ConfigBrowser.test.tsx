@@ -800,7 +800,7 @@ describe("ConfigBrowser", () => {
           configType: "yaml",
           updateTime: "",
         },
-      ]);
+      ], "nacos");
     });
 
     const tasks = getTaskManager().listTasks();

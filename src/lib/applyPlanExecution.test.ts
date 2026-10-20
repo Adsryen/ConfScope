@@ -1063,3 +1063,42 @@ describe("executeApplyPlan 写后失效广播", () => {
     expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
   });
 });
+
+// ── 波17：批量读快照的并发口径（R55-D1）──
+
+describe("executeApplyPlan 批读并发", () => {
+  /**
+   * 4 项计划、每项两端各读一次，串行版同时在飞的请求最多 2 个
+   * （一项的 source/target 那一对 Promise.all）；改成共用并发口径后必然交叠。
+   * 这条用例钉的是「不再逐条 await」这个事实本身，不是具体数字。
+   */
+  it("新鲜度与写前两趟批读交叠在飞，不再逐条串行", async () => {
+    const dataIds = ["a.yaml", "b.yaml", "c.yaml", "d.yaml"];
+    const documents: Record<string, ConfigDocument | null> = {};
+    for (const dataId of dataIds) {
+      documents[`conn-dev:${dataId}`] = doc("new");
+      documents[`conn-prod:${dataId}`] = doc("old");
+    }
+    const runDeps = deps(documents);
+    let active = 0;
+    let peak = 0;
+    runDeps.getConfigDocument = vi.fn(async (conn: Connection, _namespace: string, dataId: string, _group: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return documents[`${conn.id}:${dataId}`] ?? doc("unexpected");
+    });
+
+    const result = await executeApplyPlan(
+      applyPlan(dataIds.map((dataId) => ({ ref: ref(dataId), sourceValue: documentValue("new"), targetValue: documentValue("old") }))),
+      runDeps
+    );
+
+    expect(result.ok).toBe(true);
+    expect(peak).toBeGreaterThanOrEqual(4);
+    // 并发回填必须与计划同序：备份快照的顺序决定了历史页「写前现场」的对应关系
+    const configs = runDeps.createBackupSnapshot.mock.calls[0][0] as Array<{ dataId: string }>;
+    expect(configs.map((config) => config.dataId)).toEqual(dataIds);
+  });
+});

@@ -210,11 +210,24 @@ describe("nacos api compatibility bridge", () => {
       source: "nacos",
       updateTime: "2026-07-06T10:00:00Z",
     });
+    // 映射层恒填 srcIp/srcUser/format（历史行的「谁在哪发的」与版本格式要有值可读）：
+    // 服务端没给就是空串，而不是字段消失，UI 侧据此回退当前配置格式。
     await expect(listHistory(conn, "public", "app.yaml", "DEFAULT_GROUP", 1, 20)).resolves.toEqual({
       totalCount: 1,
       pageNumber: 1,
       pagesAvailable: 1,
-      pageItems: [{ id: "h-1", dataId: "app.yaml", group: "DEFAULT_GROUP", opType: "U", lastModifiedTime: "1710000000000" }],
+      pageItems: [
+        {
+          id: "h-1",
+          dataId: "app.yaml",
+          group: "DEFAULT_GROUP",
+          opType: "U",
+          lastModifiedTime: "1710000000000",
+          srcIp: "",
+          srcUser: "",
+          format: "",
+        },
+      ],
     });
     await expect(getHistoryDetail(conn, "public", "app.yaml", "DEFAULT_GROUP", "h-1")).resolves.toEqual({
       id: "h-1",
@@ -224,6 +237,11 @@ describe("nacos api compatibility bridge", () => {
       opType: "U",
       createdTime: "1700000000000",
       lastModifiedTime: "1710000000000",
+      // 与历史列表同一口径：这些字段恒填，缺省给空串（详情比列表多一个 md5 用于回退前校验）
+      srcIp: "",
+      srcUser: "",
+      format: "",
+      md5: "",
     });
 
     expect(goApp.ConfigCenterListConfigs).toHaveBeenCalledWith(expectedProfile(conn), {

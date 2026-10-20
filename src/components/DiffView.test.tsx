@@ -28,6 +28,18 @@ vi.mock("../api/nacos", async () => {
   };
 });
 
+const exportMocks = vi.hoisted(() => ({
+  exportDiff: vi.fn(),
+}));
+
+vi.mock("../lib/export", async () => {
+  const actual = await vi.importActual<typeof import("../lib/export")>("../lib/export");
+  return {
+    ...actual,
+    exportDiff: exportMocks.exportDiff,
+  };
+});
+
 const nacosConn: Connection = {
   id: "dev-nacos",
   name: "dev",
@@ -615,6 +627,74 @@ describe("DiffView", () => {
     expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
     expect(screen.getAllByText("仅左侧存在").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("仅右侧存在").length).toBeGreaterThanOrEqual(1);
+  });
+
+  // R55-D4：导出项的 diffType 以前三元两个分支都写死 "modified"，一致的文件在报告里
+  // 被算成「已变更」——用户拿导出报告去对页面上的逐文件统计，永远对不上。
+  it("导出按页面口径分类：单侧算增删、正文一致算未变更", async () => {
+    localStorage.setItem(
+      "cs.diffViewPreferences",
+      JSON.stringify({
+        selectedProject: "Order",
+        left: { connId: "left-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        right: { connId: "right-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+        mode: "text",
+      })
+    );
+    apiMocks.listConfigs.mockImplementation(async (conn: Connection) => ({
+      totalCount: 3,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems:
+        conn.id === "left-nacos"
+          ? [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "changed.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "left-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ]
+          : [
+              { dataId: "same.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "changed.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+              { dataId: "right-only.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+            ],
+    }));
+    apiMocks.getConfig.mockImplementation(async (conn: Connection, _tenant: string, dataId: string) => {
+      if (dataId === "same.yaml") return "keep: same\n";
+      if (dataId === "changed.yaml") return conn.id === "left-nacos" ? "port: 8080\n" : "port: 9090\n";
+      if (dataId === "left-only.yaml") return "solo: left\n";
+      return "solo: right\n";
+    });
+
+    renderDiff([leftApplyConn, rightApplyConn]);
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（4）" }));
+    expect(await screen.findByText("已生成 4 个文件对比")).toBeInTheDocument();
+
+    // 页面口径：same.yaml 三项统计全 0（一致），changed.yaml 有一行增一行删
+    const nav = document.querySelector(".batch-diff-nav") as HTMLElement;
+    const navItemText = (dataId: string) =>
+      (within(nav).getByRole("button", { name: new RegExp(dataId) }) as HTMLElement).textContent ?? "";
+    const isIdenticalOnPage = (dataId: string) => {
+      const text = navItemText(dataId);
+      return text.includes("0 新增") && text.includes("0 删除") && text.includes("0 修改");
+    };
+    expect(isIdenticalOnPage("same.yaml")).toBe(true);
+    expect(isIdenticalOnPage("changed.yaml")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "导出差异" }));
+
+    expect(exportMocks.exportDiff).toHaveBeenCalledTimes(1);
+    const [diffs, format] = exportMocks.exportDiff.mock.calls[0] as [Array<{ dataId: string; diffType: string }>, string];
+    expect(format).toBe("json");
+    expect(Object.fromEntries(diffs.map((item) => [item.dataId, item.diffType]))).toEqual({
+      "same.yaml": "unchanged",
+      "changed.yaml": "modified",
+      "left-only.yaml": "added",
+      "right-only.yaml": "deleted",
+    });
+    // 导出里的「未变更」条数必须等于页面上统计全 0 的文件数
+    const identicalOnPage = diffs.filter((item) => isIdenticalOnPage(item.dataId)).map((item) => item.dataId);
+    expect(diffs.filter((item) => item.diffType === "unchanged").map((item) => item.dataId)).toEqual(identicalOnPage);
   });
 
   it("only exposes left-to-right merge actions for one-sided files", async () => {

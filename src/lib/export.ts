@@ -3,6 +3,7 @@
 import type { AuditRow } from "./audit";
 import type { EnvSource } from "../components/AuditView";
 import { translate } from "../locales";
+import { effectiveProvider } from "./configCapabilities";
 
 /** 导出选项 */
 export interface ExportOptions {
@@ -37,7 +38,11 @@ export interface DiffItem {
   namespace: string;
   leftValue: string;
   rightValue: string;
-  diffType: "added" | "deleted" | "modified";
+  /**
+   * `unchanged` 是给批量对比导出用的（R55-D4）：两侧正文一致的行以前被强行写成
+   * `modified`，导出的报告里「已变更」计数比页面虚高，拿去对齐反而对不上。
+   */
+  diffType: "added" | "deleted" | "modified" | "unchanged";
 }
 
 /** JSON 导出结构 */
@@ -163,7 +168,9 @@ function auditEnvId(source: EnvSource): string {
 }
 
 function providerOf(source: EnvSource): string {
-  return source.conn.provider ?? (source.conn.sourceType === "local-snapshot" ? "local" : "nacos");
+  // 判定口径归 lib/configCapabilities，别再在这里抄一遍三元——
+  // 两处各写各的，早晚有一处认不出新 provider。
+  return effectiveProvider(source.conn);
 }
 
 function sourceNameOf(source: EnvSource): string {
@@ -486,7 +493,9 @@ export function exportDiff(items: DiffItem[], format: "text" | "json"): void {
             ? "[+]"
             : item.diffType === "deleted"
               ? "[-]"
-              : "[~]";
+              : item.diffType === "unchanged"
+                ? "[=]"
+                : "[~]";
         return `${label} ${item.namespace}/${item.group}/${item.dataId}\n← ${item.leftValue}\n→ ${item.rightValue}`;
       })
       .join("\n\n");

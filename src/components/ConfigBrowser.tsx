@@ -11,7 +11,8 @@ import {
   type ContentSearchResult,
 } from "../lib/configContentSearch";
 import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
-import { supportsConfigHistory } from "../lib/configCapabilities";
+import { effectiveProvider, supportsConfigHistory } from "../lib/configCapabilities";
+import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import { detectFormat, Format, FORMATS } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
@@ -60,7 +61,6 @@ interface Props {
 }
 
 const PAGE_SIZE = 50;
-const CONTENT_SEARCH_CONCURRENCY = 6;
 type Tab = "content" | "history";
 type SearchMode = "dataId" | "content";
 type ConfigMetadata = Pick<ConfigDocument, "version" | "source" | "updateTime">;
@@ -71,20 +71,6 @@ function configResultKey(item: Pick<ConfigItem, "dataId" | "group">): string {
 
 function isSandboxEnvironment(conn: Connection): boolean {
   return /sandbox|沙箱/i.test(`${conn.name} ${conn.environmentName ?? ""} ${conn.sourceName ?? ""} ${(conn.tags ?? []).join(" ")}`);
-}
-
-async function mapWithConcurrency<T, R>(values: T[], limit: number, mapper: (value: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < values.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await mapper(values[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
-  return results;
 }
 
 type BrowserToolIconName = "refresh" | "add" | "download";
@@ -301,7 +287,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       contentScopeItemsRef.current = allItems;
       setContentSearchProgress({ loaded: 0, total: allItems.length, failed: 0 });
 
-      const loaded = await mapWithConcurrency(allItems, CONTENT_SEARCH_CONCURRENCY, async (item) => {
+      const loaded = await mapWithConcurrency(allItems, BATCH_READ_CONCURRENCY, async (item) => {
         try {
           const document = await getConfigDocument(conn, tenant, item.dataId, item.group);
           return { item, document, error: "" };
@@ -856,7 +842,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         throw new Error(lastError || t("config.snapshotNoConfigs"));
       }
 
-      const snapshot = await createSnapshotFromConfigs(conn.id, connectionName, namespace, tenant, configs);
+      const snapshot = await createSnapshotFromConfigs(conn.id, connectionName, namespace, tenant, configs, effectiveProvider(conn));
       recordOperation({
         type: "snapshot",
         result: "success",
