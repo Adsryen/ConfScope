@@ -22,8 +22,11 @@ describe("app api", () => {
     goApp.CheckForUpdates.mockReset();
     goApp.SelectLocalSnapshotDirectory.mockReset();
     goApp.ValidateLocalSnapshotDirectory.mockReset();
+    // 绑定命名空间由 Go 包名决定：77fa451 起是 go.app.App（守卫
+    // tests/ux/wailsBindingNamespaceIsSingleSource）。这里曾一直 stub 旧的 go.main.App，
+    // 于是 wailsjs 生成物取 go.app.App 取到 undefined，用例集体红成「既有基线」。
     vi.stubGlobal("go", {
-      main: {
+      app: {
         App: goApp,
       },
     });
