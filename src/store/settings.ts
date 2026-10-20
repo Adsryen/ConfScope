@@ -30,6 +30,27 @@ export interface AppSettings {
 
 const KEY = "cs.settings";
 
+// 写侧通知（轮47 R47-04）：读方不再靠「每次渲染重读磁盘」碰运气拿最新值。
+// 通知点只有 saveSettings 一个——所有写入方（代理 / 对比 / 更新 / 启动）都汇聚到它，
+// 唯一的例外是「清理缓存」从主数据文件重新水合，那里显式调用 notifySettingsChanged。
+type SettingsListener = () => void;
+
+const settingsListeners = new Set<SettingsListener>();
+
+/** 订阅设置变化，返回取消注册函数。形态照 lib/configChangeBus。 */
+export function subscribeSettings(listener: SettingsListener): () => void {
+  settingsListeners.add(listener);
+  return () => {
+    settingsListeners.delete(listener);
+  };
+}
+
+/** 广播「设置已经变了」。没有订阅者时是 no-op（纯单测环境同样安全）。 */
+export function notifySettingsChanged(): void {
+  // 复制一份再遍历：回调里可能触发重渲染并同步取消注册，直接遍历 Set 会被改坏。
+  for (const listener of [...settingsListeners]) listener();
+}
+
 const defaults: AppSettings = {
   proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
   update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
@@ -50,6 +71,7 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings) {
   localStorage.setItem(KEY, JSON.stringify(normalizeSettings(settings)));
+  notifySettingsChanged();
 }
 
 export function updateProxySettings(proxy: Partial<ProxySettings>) {

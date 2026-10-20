@@ -1,4 +1,5 @@
 import { rehydrateFromAppDataDoc } from "./appDataDoc";
+import { notifySettingsChanged } from "../store/settings";
 // 开发者“清理缓存”：清掉本机应用缓存（localStorage 的 cs.* 键）+ 审计记录
 // （audit-trail.jsonl，经 Go 绑定 ClearAuditTrail）。
 //
@@ -56,5 +57,8 @@ export async function clearAppCache(): Promise<CacheCleanupResult> {
   const auditCleared = await clearAuditTrail();
   // 清理的是缓存：从主数据文件重新水合，保证用户数据不丢
   await rehydrateFromAppDataDoc();
+  // 水合直接写 cs.*，绕过了 saveSettings 的写侧通知 ⇒ 这里补一次，
+  // 否则订阅设置的读方（对比页）会一直拿着清理前的旧值（轮47 R47-04）。
+  notifySettingsChanged();
   return { removedStorageKeys, auditCleared };
 }

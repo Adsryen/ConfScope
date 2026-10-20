@@ -28,6 +28,12 @@ export default function SettingsView() {
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheResult, setCacheResult] = useState<"" | "ok" | "fail">("");
   const [docInfo, setDocInfo] = useState<AppDataDocInfo | null>(null);
+  // 轮47 R47-03：「最后备份」不再在渲染体里读盘。原来那段 IIFE 有两个毛病：
+  // 一是设置页每次重渲染（包括在任意输入框里打字）都要解析整个备份活动列表；
+  // 二是它只在页面恰好重渲染时才变——显示的是渲染时序，不是数据。
+  // 现在由 AppDataBackupPanel 在写完的那一刻上报活动列表（见 onActivitiesChange）。
+  const [backupActivities, setBackupActivities] = useState(() => loadAppDataBackupState().activities);
+  const lastBackupAt = backupActivities.find((item) => item.status === "success")?.createdAt ?? "";
   const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
   const [openFolderBusy, setOpenFolderBusy] = useState(false);
   const [openFolderError, setOpenFolderError] = useState("");
@@ -311,18 +317,15 @@ export default function SettingsView() {
                       {t("settings.dataFileLastSaved")}: {formatDateTime(docInfo.savedAt)}
                     </div>
                   )}
-                  {(() => {
-                    const lastBackupAt = loadAppDataBackupState().activities.find((item) => item.status === "success")?.createdAt ?? "";
-                    return lastBackupAt ? (
-                      <div>
-                        {t("settings.dataFileLastBackup")}: {formatDateTime(lastBackupAt)}
-                      </div>
-                    ) : null;
-                  })()}
+                  {lastBackupAt ? (
+                    <div>
+                      {t("settings.dataFileLastBackup")}: {formatDateTime(lastBackupAt)}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}
-            <AppDataBackupPanel />
+            <AppDataBackupPanel onActivitiesChange={setBackupActivities} />
             <div className="settings-setting-row settings-danger-zone">
               <div>
                 <strong>{t("settings.dangerZone")}</strong>

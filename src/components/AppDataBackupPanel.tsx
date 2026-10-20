@@ -34,6 +34,7 @@ import {
   updateAppDataBackupPasswordSecretRef,
   updateAppDataWebDAVSettings,
   type AppDataBackupActivity,
+  type AppDataBackupState,
   type AppDataWebDAVSettings,
 } from "../store/appDataBackup";
 import { deleteStoredSecret, resolveAppDataBackupPassword, saveAppDataBackupPassword } from "../lib/credentialSecrets";
@@ -42,6 +43,13 @@ import { statusMessageProps } from "../lib/statusSemantics";
 
 interface Props {
   onRestored?: () => void;
+  /**
+   * 活动列表变化时上报（轮47 R47-03）。
+   * 设置页的「最后备份」原来在渲染体里自己 loadAppDataBackupState()：
+   * 它只在设置页恰好重渲染时才更新——反映的是渲染时序，不是数据。
+   * 改成由面板在唯一的状态落地函数里上报，读方拿到的永远是写完的那一刻。
+   */
+  onActivitiesChange?: (activities: AppDataBackupActivity[]) => void;
 }
 
 interface PreviewState {
@@ -115,7 +123,7 @@ function SummaryPreview({ preview }: { preview: PreviewState }) {
   );
 }
 
-export default function AppDataBackupPanel({ onRestored }: Props) {
+export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: Props) {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState(DEFAULT_APP_VERSION);
   const [sourcePlatform, setSourcePlatform] = useState(DEFAULT_PLATFORM);
@@ -149,9 +157,15 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     setStatus(null);
   };
 
+  // 面板内所有「读盘后落地」的唯一出口：设 state 同时把活动列表上报给读方。
+  const applyBackupState = (next: AppDataBackupState) => {
+    setBackupState(next);
+    onActivitiesChange?.(next.activities);
+  };
+
   const refreshState = () => {
     const next = loadAppDataBackupState();
-    setBackupState(next);
+    applyBackupState(next);
     setWebdavDraft(next.webdav);
   };
 
@@ -346,7 +360,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
   const saveWebDAVTarget = () => {
     clearMessages();
     const next = updateAppDataWebDAVSettings(currentWebDAVTarget());
-    setBackupState(next);
+    applyBackupState(next);
     setWebdavDraft(next.webdav);
     setStatus({ ok: true, text: t("appDataBackup.webdavSaved") });
   };
@@ -365,7 +379,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       const pointer = await saveAppDataBackupPassword(savedPasswordDraft);
       const next = updateAppDataBackupPasswordSecretRef(pointer);
-      setBackupState(next);
+      applyBackupState(next);
       setSavedPasswordDraft("");
       setSavedPasswordConfirm("");
       setStatus({ ok: true, text: t("appDataBackup.savedPasswordSaved") });
@@ -385,7 +399,7 @@ export default function AppDataBackupPanel({ onRestored }: Props) {
     try {
       await deleteStoredSecret(pointer);
       const next = updateAppDataBackupPasswordSecretRef();
-      setBackupState(next);
+      applyBackupState(next);
       setStatus({ ok: true, text: t("appDataBackup.savedPasswordCleared") });
     } catch (e) {
       setError(errorText(e));

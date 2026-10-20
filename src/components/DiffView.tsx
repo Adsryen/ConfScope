@@ -16,7 +16,7 @@ import {
   connectionSourceName,
   updateConnection,
 } from "../store/connections";
-import { loadSettings } from "../store/settings";
+import { useSettings } from "../lib/useSettings";
 import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
 import { isCompleteDiffSourcePair, type DiffJumpParams } from "../lib/diffJump";
 import { useTranslation } from "../i18n";
@@ -752,7 +752,7 @@ function SourcePicker({
 
 export default function DiffView({ active = true, connections, onConnectionsChange, initialParams, onInitialParamsConsumed, onStartApply, focusStep, onFocusStepConsumed, autoCompareOnRestore = false }: Props) {
   const { t } = useTranslation();
-  const settings = loadSettings();
+  const settings = useSettings();
   const initialDiffStateRef = useRef<InitialDiffState | null>(null);
   if (!initialDiffStateRef.current) initialDiffStateRef.current = initialDiffStateFromPreferences(connections);
   const [selectedProject, setSelectedProject] = useState(initialDiffStateRef.current.selectedProject);

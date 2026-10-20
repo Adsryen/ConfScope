@@ -406,8 +406,11 @@ function FieldLabel({
 export default function ConnectionManager({ onClose, onChange, embedded = false }: Props) {
   const { t } = useTranslation();
   const defaultNewEnvironment = t("connection.environmentDev");
-  const [list, setList] = useState<Connection[]>(loadConnections());
-  const [sshProfiles, setSSHProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
+  // 轮47 R47-02：惰性初值。原来 useState(loadConnections()) 每次渲染都解析一遍磁盘再丢弃
+  // （实测每轮 5.8 µs，60 条连接时 69.8 µs）——React 只消费首帧返回值，其余全是白读。
+  // 这份列表的重取入口是 refresh()（写侧显式调用），不依赖渲染期读盘。
+  const [list, setList] = useState<Connection[]>(() => loadConnections());
+  const [sshProfiles, setSSHProfiles] = useState<SSHProfile[]>(() => loadSSHProfiles());
   const [draft, setDraft] = useState<Draft>(emptyDraft(defaultNewEnvironment));
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testTrace, setTestTrace] = useState<TestTrace | null>(null);

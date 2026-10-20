@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import AppDataBackupPanel from "./AppDataBackupPanel";
+import type { AppDataBackupActivity } from "../store/appDataBackup";
 
 const appDataBackupApi = vi.hoisted(() => ({
   selectAppDataBackupSaveFile: vi.fn(),
@@ -401,5 +402,30 @@ describe("AppDataBackupPanel", () => {
     );
     expect(JSON.parse(localStorage.getItem("cs.connections") || "[]")[0]).toMatchObject({ id: "remote-restored" });
     expect(onRestored).toHaveBeenCalled();
+  });
+
+  // 轮47 R47-03：面板是备份活动的写侧，设置页的「最后备份」靠这条上报更新。
+  // 少了它，读方就只能在自己的渲染体里读盘——那显示的是渲染时序，不是数据。
+  it("写完一次备份就把活动列表上报给宿主", async () => {
+    const onActivitiesChange = vi.fn();
+    appDataBackupApi.selectAppDataBackupSaveFile.mockResolvedValue("C:\\tmp\\confscope.csbackup");
+    appDataBackupApi.writeAppDataBackupFile.mockResolvedValue({
+      format: "confscope.app-data-backup",
+      schemaVersion: 1,
+      appVersion: "1.4.2",
+      sourcePlatform: "windows",
+      createdAt: "2026-10-20T08:00:00.000Z",
+      size: 120,
+    });
+    renderPanel({ onActivitiesChange });
+
+    fireEvent.change(screen.getByLabelText("Local backup password"), { target: { value: "backup-pass" } });
+    fireEvent.change(screen.getByLabelText("Confirm local backup password"), { target: { value: "backup-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Export encrypted file" }));
+
+    await waitFor(() => expect(onActivitiesChange).toHaveBeenCalled());
+    const lastCall = onActivitiesChange.mock.calls[onActivitiesChange.mock.calls.length - 1];
+    const reported = lastCall?.[0] as AppDataBackupActivity[];
+    expect(reported[0]).toMatchObject({ type: "local_export", status: "success" });
   });
 });

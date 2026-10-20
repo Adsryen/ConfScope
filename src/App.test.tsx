@@ -22,6 +22,8 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 const viewMocks = vi.hoisted(() => ({
+  // 连接管理页删来源走的就是这条通道（先落盘再把剩余列表交给 App），测试用它复现真实顺序
+  connectionManagerOnChange: null as ((conns: Connection[]) => void) | null,
   diffProps: [] as Array<{
     connections: Connection[];
     initialParams: DiffJumpParams | null;
@@ -101,7 +103,12 @@ vi.mock("./lib/toast", () => ({
   subscribe: vi.fn(() => () => undefined),
 }));
 
-vi.mock("./components/ConnectionManager", () => ({ default: () => <div data-testid="connection-manager" /> }));
+vi.mock("./components/ConnectionManager", () => ({
+  default: function MockConnectionManager({ onChange }: { onChange?: (conns: Connection[]) => void }) {
+    viewMocks.connectionManagerOnChange = onChange ?? null;
+    return <div data-testid="connection-manager" />;
+  },
+}));
 vi.mock("./components/ConfigBrowser", async () => {
   const react = await vi.importActual<typeof import("react")>("react");
   return {
@@ -539,6 +546,109 @@ describe("App", () => {
       browseProject: "Billing",
       browseEnvironment: "Production",
       browseSourceId: "conn-billing-prod-private",
+    });
+  });
+
+  // 轮47 R47-01：删掉当前来源后必须停在用户此刻所在的项目/环境里。
+  // 老写法在回落时 loadUI()，读回来的是持久化 effect 刚写的空串回声 ⇒ 三层判据全废，
+  // 选中项跳到列表第 0 条，实测还会跨到另一个环境（开发 → Development）。
+  it("删掉当前来源后落在同环境兄弟上，作用域不跨环境", async () => {
+    const devCloud = sourceConnection; // Order / Development / Cloud
+    const testCloud: Connection = {
+      ...sourceConnection,
+      id: "conn-order-test-cloud",
+      name: "order-test-cloud",
+      environmentName: "Test",
+      sourceName: "Cloud",
+      baseUrl: "http://order-test-cloud.example.com/nacos",
+    };
+    const devPrivate: Connection = {
+      ...sourceConnection,
+      id: "conn-order-dev-private",
+      name: "order-dev-private",
+      environmentName: "Development",
+      sourceName: "Private",
+      baseUrl: "http://order-dev-private.example.com/nacos",
+    };
+    // 列表第 0 条刻意放另一个环境的来源：跨环境回落只有这样才能暴露
+    localStorage.setItem("cs.connections", JSON.stringify([devCloud, testCloud, devPrivate]));
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: devCloud.id }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("config-browser");
+    const lastBrowse = () => viewMocks.browserProps[viewMocks.browserProps.length - 1].conn;
+    expect(lastBrowse().id).toBe(devCloud.id);
+
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Connections" }));
+    fireEvent.click(within(nav).getByRole("button", { name: /Config Browser/ }));
+
+    const remaining = [testCloud, devPrivate];
+    localStorage.setItem("cs.connections", JSON.stringify(remaining));
+    act(() => {
+      const onChange = viewMocks.connectionManagerOnChange;
+      if (!onChange) throw new Error("ConnectionManager 的 onChange 通道没接上");
+      onChange(remaining);
+    });
+
+    await waitFor(() => {
+      expect(lastBrowse().id).toBe(devPrivate.id);
+    });
+    expect(JSON.parse(localStorage.getItem("cs.ui") || "{}")).toMatchObject({
+      connId: devPrivate.id,
+      browseProject: "Order",
+      browseEnvironment: "Development",
+      browseSourceId: devPrivate.id,
+    });
+  });
+
+  it("同项目同环境一条不剩时才回落到列表第 0 条", async () => {
+    const devCloud = sourceConnection; // Order / Development / Cloud
+    const testCloud: Connection = {
+      ...sourceConnection,
+      id: "conn-order-test-cloud",
+      name: "order-test-cloud",
+      environmentName: "Test",
+      sourceName: "Cloud",
+      baseUrl: "http://order-test-cloud.example.com/nacos",
+    };
+    const billingProd: Connection = {
+      ...sourceConnection,
+      id: "conn-billing-prod-private",
+      name: "billing-prod-private",
+      projectName: "Billing",
+      environmentName: "Production",
+      sourceName: "Private",
+      baseUrl: "http://billing.example.com/nacos",
+    };
+    localStorage.setItem("cs.connections", JSON.stringify([devCloud, testCloud, billingProd]));
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: devCloud.id }));
+
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    await screen.findByTestId("config-browser");
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Connections" }));
+
+    const remaining = [testCloud, billingProd];
+    localStorage.setItem("cs.connections", JSON.stringify(remaining));
+    act(() => {
+      const onChange = viewMocks.connectionManagerOnChange;
+      if (!onChange) throw new Error("ConnectionManager 的 onChange 通道没接上");
+      onChange(remaining);
+    });
+
+    await waitFor(() => {
+      expect(viewMocks.browserProps[viewMocks.browserProps.length - 1].conn.id).toBe(testCloud.id);
     });
   });
 

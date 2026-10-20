@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Connection,
   connectionDisplayLabel,
@@ -110,12 +110,30 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort(compareText);
 }
 
-function preferredConnection(connections: Connection[], ui: UIState): Connection | undefined {
-  const sourceId = ui.browseSourceId || ui.connId || "";
-  const direct = connections.find((conn) => conn.id === sourceId);
+/**
+ * 回落判据的最小输入：「此刻在哪个项目 / 环境 / 来源」三格。
+ * 轮47：不再把整个 UIState 传进来——那是存储的形状，含 mode、sidebarCollapsed 这些与回落无关的字段，
+ * 传它等于暗示调用方「去存储里找答案」，而存储恰恰是这里唯一不能读的东西。
+ */
+interface ScopeHint {
+  sourceId: string;
+  project: string;
+  environment: string;
+}
+
+function scopeHintFromUI(ui: UIState): ScopeHint {
+  return {
+    sourceId: ui.browseSourceId || ui.connId || "",
+    project: ui.browseProject ?? "",
+    environment: ui.browseEnvironment ?? "",
+  };
+}
+
+function preferredConnection(connections: Connection[], hint: ScopeHint): Connection | undefined {
+  const direct = connections.find((conn) => conn.id === hint.sourceId);
   if (direct) return direct;
-  const project = ui.browseProject?.trim();
-  const environment = ui.browseEnvironment?.trim();
+  const project = hint.project?.trim();
+  const environment = hint.environment?.trim();
   if (project && environment) {
     return connections.find((conn) => connectionProjectName(conn) === project && connectionEnvironmentName(conn) === environment);
   }
@@ -168,9 +186,11 @@ export default function App() {
   // 只活在内存里的现场一次清空（实测：浏览页的搜索词与 2 条结果、打开的详情，刷新后 0 命中），
   // 而应用本身没有「刷新」这个动作——真要重载走工具栏/菜单，或带 Alt 的组合（判据放行）。
   useBlockNativeReloadShortcut();
-  const [connections, setConnections] = useState<Connection[]>(loadConnections());
-  const ui0 = loadUI();
-  const [activeConnId, setActiveConnId] = useState<string>(preferredConnection(connections, ui0)?.id ?? "");
+  const [connections, setConnections] = useState<Connection[]>(() => loadConnections());
+  // 轮47 R47-02：cs.ui 只在挂载时读一次。渲染体里读存储不是「浪费一次解析」这么简单——
+  // 读回来的到底是用户现场、还是本应用上一帧写进去的回声，代码上无法判定（轮45/轮46 同一个根因）。
+  const [ui0] = useState(() => loadUI());
+  const [activeConnId, setActiveConnId] = useState<string>(() => preferredConnection(connections, scopeHintFromUI(ui0))?.id ?? "");
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
   const [nsLoading, setNsLoading] = useState(false);
   const [nsError, setNsError] = useState<string | null>(null);
@@ -180,10 +200,14 @@ export default function App() {
   const initialMode = connections.length === 0 && (knownMode === "browse" || knownMode === "diff") ? "connections" : knownMode;
   const [mode, setMode] = useState<Mode>(initialMode);
   // 轮46 R02：「上一轮退出时停在对比页」是一次性意图，交给 DiffView 结合 prefs 里那一对决定要不要直接比出来。
-  // 必须用 useState 初值取一次：ui0 = loadUI() 每次渲染都重读存储，直接把 mode === "diff" 传下去会
-  // 让「本会话中途点进对比页」也点亮它，退化成轮45 刚清掉的那种回声室（每次挂载白比一轮）。
+  // 必须用 useState 初值取一次：直接把 initialMode === "diff" 的判断散在渲染里，会把
+  // 「本会话中途点进对比页」也点亮它，退化成轮45 刚清掉的那种回声室（每次挂载白比一轮）。
   const [autoCompareOnRestore] = useState(() => initialMode === "diff");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(!!ui0.sidebarCollapsed);
+  // 轮47 R47-01：回落唯一允许的数据源——React 自己记住的「最后一个有效来源」的作用域，
+  // 初值取挂载快照。删除当前来源的那一帧 activeConn 已经是 null，下面的刷新 effect 不覆盖它，
+  // 于是 ref 里留下的正是刚被删那条的项目/环境 ⇒ 回落在同环境里找兄弟，而不是跳到列表第 0 条。
+  const lastValidScopeRef = useRef<ScopeHint>(scopeHintFromUI(ui0));
   const [runtimeSnapshotConnections, setRuntimeSnapshotConnections] = useState<Connection[]>([]);
   const [appVersion, setAppVersion] = useState("");
   const [startupDialog, setStartupDialog] = useState<StartupDialogKind | null>(null);
@@ -306,12 +330,24 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [t]);
 
+  // 记住此刻所在的作用域。必须声明在下面的回落 effect 之前：回落只认这份内存里的记忆，
+  // 而持久化 effect（也声明在前）在 activeConn 为空时会把 cs.ui 的 browse* 写成空串——
+  // 实测过读它的下场：三层判据全废，选中项跨环境跳到 connections[0]。
+  useEffect(() => {
+    if (!activeConn) return;
+    lastValidScopeRef.current = {
+      sourceId: activeConn.id,
+      project: connectionProjectName(activeConn),
+      environment: connectionEnvironmentName(activeConn),
+    };
+  }, [activeConn]);
+
   // 连接列表变化后，确保 activeConnId 有效
   useEffect(() => {
     if (connections.length === 0) {
       setActiveConnId("");
     } else if (!connections.some((c) => c.id === activeConnId)) {
-      setActiveConnId(preferredConnection(connections, loadUI())?.id ?? connections[0].id);
+      setActiveConnId(preferredConnection(connections, lastValidScopeRef.current)?.id ?? connections[0].id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connections]);
@@ -700,7 +736,7 @@ export default function App() {
           ) : mode === "logviewer" ? (
             <LogViewer />
           ) : mode === "ssh" ? (
-            <SSHManagerView />
+            <SSHManagerView connections={connections} />
           ) : mode === "settings" ? (
             <SettingsView />
           ) : mode === "about" ? (

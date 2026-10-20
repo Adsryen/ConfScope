@@ -5,6 +5,7 @@ import { fireEvent, render, screen, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import SSHManagerView from "./SSHManagerView";
+import { loadConnections } from "../store/connections";
 
 const goApp = vi.hoisted(() => ({
   TestSSHConnection: vi.fn(),
@@ -36,7 +37,7 @@ function renderSSHManager() {
   localStorage.setItem("locale", "zh-CN");
   return render(
     <I18nProvider>
-      <SSHManagerView />
+      <SSHManagerView connections={loadConnections()} />
     </I18nProvider>
   );
 }

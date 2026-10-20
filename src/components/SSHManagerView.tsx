@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { TestSSHConnection } from "../../wailsjs/go/app/App";
 import { useTranslation } from "../i18n";
-import { loadConnections, type SSHConfig } from "../store/connections";
+import type { Connection, SSHConfig } from "../store/connections";
 import {
   deleteSSHProfile,
   listSSHProfileReferences,
@@ -49,16 +49,22 @@ function sshTestKey(config: SSHConfig): string {
   return JSON.stringify(normalizeSSHConfig(config));
 }
 
-export default function SSHManagerView() {
+interface Props {
+  // 轮47 R47-04：连接列表由 App 下发（它本来就持有这份 state）。
+  // 原来这里渲染期 loadConnections()，读到的值与 props 是同一份真值，却依赖
+  // 「全站无 memo + App 每次动作全量重渲染」这个隐含前提——一旦给页面加 memo 当场变陈旧。
+  connections: Connection[];
+}
+
+export default function SSHManagerView({ connections }: Props) {
   const { t } = useTranslation();
-  const [profiles, setProfiles] = useState<SSHProfile[]>(loadSSHProfiles());
+  const [profiles, setProfiles] = useState<SSHProfile[]>(() => loadSSHProfiles());
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [blockedRefs, setBlockedRefs] = useState<string[]>([]);
   const [pendingSaveImpact, setPendingSaveImpact] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
 
-  const connections = loadConnections();
   const referencedProfileIds = new Set(connections.map((conn) => conn.sshProfileId).filter(Boolean));
   const referencedProfiles = profiles.filter((profile) => referencedProfileIds.has(profile.id)).length;
   const inlineSSHCount = connections.filter((conn) => conn.sshConfig && !conn.sshProfileId).length;
