@@ -29,7 +29,7 @@ import {
   type CodeHit,
 } from "../lib/codeLines";
 import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
-import { useTranslation } from "../i18n";
+import FindBar, { FindOpenButton } from "./FindBar";
 import { useRememberedState } from "../lib/viewState";
 import { pickFindTermOnOpen, textareaSelectionText } from "../lib/findSelection";
 import { FIND_KEY_OWNER_ATTR, takesFindKeyOwnership } from "../lib/findKeyOwnership";
@@ -108,7 +108,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
   { value, onChange, format, placeholder, ariaLabel, searchTerm = "", enableFind = true, showMinimap = true, active = true, onSave }: Props,
   ref
 ) {
-  const { t } = useTranslation();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
@@ -625,114 +624,34 @@ const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEditor(
         </div>
       )}
 
-      {enableFind && !findOpen && (
-        <button
-          type="button"
-          className="code-find-open"
-          ref={findOpenBtnRef}
-          onClick={openFind}
-          title={t("config.openFind")}
-          aria-label={t("config.openFind")}
-          aria-keyshortcuts="Control+F"
-        >
-          ⌕
-        </button>
-      )}
+      {/* 条子与浮标不再自带 style：右侧留白的两条变量由根节点 `.code-editor` 下发并继承下来，
+          这里再抄一份就是第二套几何口径（轮48 抽 FindBar 时实测确认过：编辑态的条子右缘本来就
+          让开了缩略图，与浏览态不同——浏览态的条子是 `.code-area` 的兄弟节点，必须自己带变量）。 */}
+      {enableFind && !findOpen && <FindOpenButton onOpen={openFind} btnRef={findOpenBtnRef} />}
 
+      {/* 查找条本体是三个视图共用的一份实现（轮48）：这里只把状态递进去。 */}
       {enableFind && findOpen && (
-        <div className="code-find" ref={findBarRef} role="search">
-          <input
-            ref={findInputRef}
-            className="code-find-input mono"
-            spellCheck={false}
-            type="text"
-            value={findTerm}
-            placeholder={t("config.findPlaceholder")}
-            aria-label={t("config.findPlaceholder")}
-            onChange={(e) => {
-              setFindTerm(e.target.value);
-              commitActiveIdx(0);
-            }}
-            onKeyDown={onFindKeyDown}
-          />
-          {/* 匹配口径开关。onMouseDown preventDefault：按钮默认会夺走焦点，
-              点一下开关就得再点一次输入框才能继续改词；编辑态里更糟——
-              焦点离开 textarea 会让当前选区一起消失。 */}
-          <button
-            type="button"
-            className={`code-find-toggle${caseSensitive ? " is-on" : ""}`}
-            aria-pressed={caseSensitive}
-            aria-label={t("config.findCaseSensitive")}
-            title={t("config.findCaseSensitive")}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setCaseSensitive((v) => !v)}
-          >
-            Aa
-          </button>
-          <button
-            type="button"
-            className={`code-find-toggle${wholeWord ? " is-on" : ""}`}
-            aria-pressed={wholeWord}
-            aria-label={t("config.findWholeWord")}
-            title={t("config.findWholeWord")}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setWholeWord((v) => !v)}
-          >
-            ab|
-          </button>
-          {/* 命中触顶时必须说出来（轮28 F-10）：只写「第 1/5000 处」用户会以为文件里一共就 5000 处。
-              「+」进可见文案，解释挂 title——这是 span，title 正常显示，不受轮26 F-1（disabled 控件的 title 不弹）影响。 */}
-          <span
-            className="code-find-count"
-            aria-live="polite"
-            title={hitsCapped ? t("config.findCountCappedHint", { max: MAX_CODE_HITS }) : undefined}
-          >
-            {hits.length
-              ? hitsCapped
-                ? t("config.findCountCapped", { current: clamp(activeIdx, 0, hits.length - 1) + 1, max: MAX_CODE_HITS })
-                : t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })
-              : effectiveTerm
-                ? t("config.findNone")
-                : t("config.findHint")}
-          </span>
-          {/* ↑↓ 与上面两个开关同一口径（轮32 F-29）：编辑态里代价更高——焦点离开 textarea
-              连当前选区一起消失，接着打字全不见，Ctrl+S 也不再被编辑区接管。
-              下面的 ✕ 不挡：它 onClick 里就是 taRef.focus()，归还焦点靠这次点击。 */}
-          <button
-            type="button"
-            className="code-find-btn"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => navigate(-1)}
-            disabled={!hits.length}
-            title={t("config.findPrevKey")}
-            aria-label={t("config.findPrev")}
-            aria-keyshortcuts="Shift+Enter Shift+F3"
-          >
-            ↑
-          </button>
-          <button
-            type="button"
-            className="code-find-btn"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => navigate(1)}
-            disabled={!hits.length}
-            title={t("config.findNextKey")}
-            aria-label={t("config.findNext")}
-            aria-keyshortcuts="Enter F3"
-          >
-            ↓
-          </button>
-          <button
-            type="button"
-            className="code-find-btn"
-            onClick={closeFind}
-            title={t("config.findCloseKey")}
-            aria-label={t("config.findClose")}
-            aria-keyshortcuts="Escape"
-          >
-            ✕
-          </button>
-        </div>
+        <FindBar
+          term={findTerm}
+          hasTerm={Boolean(effectiveTerm)}
+          hitCount={hits.length}
+          currentHit={activeIdx}
+          capped={hitsCapped}
+          cappedMax={MAX_CODE_HITS}
+          caseSensitive={caseSensitive}
+          wholeWord={wholeWord}
+          onTermChange={(value) => {
+            setFindTerm(value);
+            commitActiveIdx(0);
+          }}
+          onInputKeyDown={onFindKeyDown}
+          onToggleCaseSensitive={() => setCaseSensitive((v) => !v)}
+          onToggleWholeWord={() => setWholeWord((v) => !v)}
+          onNavigate={navigate}
+          onClose={closeFind}
+          barRef={findBarRef}
+          inputRef={findInputRef}
+        />
       )}
     </div>
   );

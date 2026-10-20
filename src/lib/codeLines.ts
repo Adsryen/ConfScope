@@ -196,14 +196,19 @@ export function currentHitSelector(hitIndex: number): string {
  * 且不会再出现历史版本里 &amp;amp; 这样的二次转义。
  * 命中跨越标签边界时，会在两侧各产出一个 <mark>（视觉上仍是连续标红）。
  *
- * 编号就是 hits 里的下标：视图靠它把「当前命中」落到 DOM 类上（见 CURRENT_HIT_CLASS），
+ * 编号默认就是 hits 里的下标：视图靠它把「当前命中」落到 DOM 类上（见 CURRENT_HIT_CLASS），
  * 这样换当前命中时这个函数完全不用重跑。data-hit 是属性，不进 textContent，
  * 「剥离标签后逐字等于原文」这条契约不受影响。
+ *
+ * @param hitIndexBase 编号基址。**只有逐段标记（一段一份 HTML）的调用方需要它**：
+ *   下标在每一段里都从 0 起 ⇒ 跨段重号，`currentHitSelector` 就选不出「第几处」。
+ *   传本段第一处在**全篇**里的编号即可（调用方保证本段编号连续，见 lib/diffFind 的
+ *   marksForRowSide）。默认 0 = 旧行为，`markLineSearchHits` 那条整页搜索词路径逐字不变。
  */
-export function markHighlightedHtml(html: string, hits: CodeHit[]): string {
+export function markHighlightedHtml(html: string, hits: CodeHit[], hitIndexBase = 0): string {
   if (!hits.length) return html;
   const ranges: Array<{ start: number; end: number; hitIndex: number }> = hits
-    .map((hit, hitIndex) => ({ start: hit.offset, end: hit.offset + hit.length, hitIndex }))
+    .map((hit, hitIndex) => ({ start: hit.offset, end: hit.offset + hit.length, hitIndex: hitIndexBase + hitIndex }))
     .sort((a, b) => a.start - b.start);
 
   let out = "";
@@ -272,6 +277,8 @@ export function markLineSearchHits(html: string, line: string, term: string): { 
   if (!needle) return { html, isHit: false };
   const hits = findCodeHits(line, needle);
   if (!hits.length) return { html, isHit: false };
+  // 不传 hitIndexBase：这条路径整页搜索没有「当前命中」，编号只是行内下标，
+  // 跨行重号无害（守卫 diffSearchMarksReuseSharedLayer 钉着它不许借用 current 语义）。
   return { html: markHighlightedHtml(html, hits), isHit: true };
 }
 

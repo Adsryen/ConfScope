@@ -350,6 +350,7 @@ function ItemDetail({
           rightText={valueText(item.afterValue, missingLabel)}
           format={diffFormat}
           hideOnlyChangesToggle
+          enableFind={false}
         />
       </div>
       {parseErrors.map((error, index) => (

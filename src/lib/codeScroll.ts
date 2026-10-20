@@ -77,10 +77,15 @@ export interface MarkRevealGeometry {
   margin: number;
 }
 
-function clampScrollLeft(value: number, maxScrollLeft: number): number {
-  const upper = Math.max(0, maxScrollLeft);
+/** 夹在 [0, max] 内：max 为负（没有溢出）时就只剩 0 这一个合法值。 */
+function clampOffset(value: number, max: number): number {
+  const upper = Math.max(0, max);
   if (value < 0) return 0;
   return value > upper ? upper : value;
+}
+
+function clampScrollLeft(value: number, maxScrollLeft: number): number {
+  return clampOffset(value, maxScrollLeft);
 }
 
 /**
@@ -186,3 +191,110 @@ export function revealMarkHorizontally(
   scroller.scrollLeft = next;
   return true;
 }
+
+/* ── 纵向定位：变高行的那一种（并排差异视图） ───────────────────────── */
+
+/**
+ * 纵向可见性计算所需的全部几何量（都由 DOM 量出，不由调用方换算）。
+ *
+ * 与水平那一份的差别只在"目标块可能比视口还高"：`.diff-row` 的单元格是
+ * `white-space: pre-wrap` + `word-break: break-all`，一行长 JSON 能在视口里占十几行，
+ * 所以居中时必须连目标自身的高度一起算，否则"把顶边送到视口中线"= 内容还是看不见。
+ */
+export interface RowRevealGeometry {
+  /** 目标块顶边在滚动内容坐标系里的 y（px）：rect.top - 容器 rect.top + scrollTop。 */
+  targetTop: number;
+  /** 目标块渲染高度（px）。 */
+  targetHeight: number;
+  /** 滚动容器可视高（px）。 */
+  clientHeight: number;
+  /** 当前垂直偏移（px）。 */
+  scrollTop: number;
+  /** 滚动内容总高（px）。 */
+  scrollHeight: number;
+}
+
+/**
+ * 要让这一块可见，scrollTop 该设成多少；返回 null 表示「别动」。
+ *
+ * 口径与浏览态 `scrollLineIntoView` 一致：**居中**而不是「刚好露出」。理由是跨视图一致性——
+ * 用户在代码视图里 Enter 是居中，切到对比视图 Enter 变成"贴边抖一下"，同一个动作两种手感，
+ * 会被当成其中一个坏了。行比视口高时 `targetTop - (clientHeight - height)/2` 自动变成
+ * `targetTop + (height - clientHeight)/2`，即「让行的中段落在中线」，仍然看得进命中。
+ *
+ * null 的情形：没有纵向溢出（本来就全看得见，动它是无意义抖动）；量不到（非有限数）；
+ * 以及已经在目标位置（差不到 1px，写一次就是一轮重排与一次 scroll 事件）。
+ */
+export function neededScrollTopToCenter(geom: RowRevealGeometry): number | null {
+  const { targetTop, targetHeight, clientHeight, scrollTop, scrollHeight } = geom;
+  if (!Number.isFinite(targetTop) || !Number.isFinite(targetHeight) || targetHeight <= 0) return null;
+  if (!Number.isFinite(clientHeight) || clientHeight <= 0) return null;
+  if (!Number.isFinite(scrollHeight) || !Number.isFinite(scrollTop)) return null;
+  const maxScrollTop = scrollHeight - clientHeight;
+  // 没有纵向溢出：唯一合法值是 0。已经在 0 就别动（返回 null），停在别处（尺寸刚变过）才归位。
+  if (maxScrollTop <= 0) return scrollTop === 0 ? null : 0;
+  const centered = targetTop - (clientHeight - targetHeight) / 2;
+  const next = clampOffset(centered, maxScrollTop);
+  if (Math.abs(next - scrollTop) < 1) return null;
+  return next;
+}
+
+/** 纵向 span 并集：只统计真有高度的元素（jsdom / 隐藏祖先一律量不到）。 */
+function measureVerticalSpan(el: Element): { top: number; bottom: number } | null {
+  const rect = el.getBoundingClientRect();
+  if (!(rect.height > 0) || !Number.isFinite(rect.top)) return null;
+  return { top: rect.top, bottom: rect.bottom };
+}
+
+/** 一组 <mark> 的纵向并集（一个命中跨语法 token 时会被切成相邻几个，同带 data-hit）。 */
+function measureVerticalSpanUnion(list: ArrayLike<Element>): { top: number; bottom: number } | null {
+  let top = Number.POSITIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  let measured = 0;
+  for (const el of Array.from(list)) {
+    const span = measureVerticalSpan(el);
+    if (!span) continue;
+    measured += 1;
+    top = Math.min(top, span.top);
+    bottom = Math.max(bottom, span.bottom);
+  }
+  return measured > 0 ? { top, bottom } : null;
+}
+
+/**
+ * 纵向把「命中所在的那一行」送进视口中线。返回 true 表示真的动过 scrollTop。
+ *
+ * 量的优先级（与水平定位同一口径，浏览器算好的东西不再用公式近似）：
+ * 1. 当前命中的 <mark> 并集 —— 行比视口高时只有命中自己的位置是用户真正要看的；
+ * 2. 整行里有命中的第一处 <mark>（外部搜索词路径：栏没开，不存在 current）；
+ * 3. 都没有就量行本身。
+ *
+ * 只用于**行高不固定**的视图（并排差异）。固定行高的代码视图继续走
+ * `padTop + line * ROW_H` 那条公式：那里行号层 / 命中行层 / 缩略图共用同一个网格，
+ * 改成量 DOM 反而把四条出口拆成两套真相。
+ *
+ * @param scroller 要写 scrollTop 的滚动容器（`.diff-body`）
+ * @param row 命中所在的那一行元素（用 `data-row-index` 找）
+ */
+export function revealRowVertically(scroller: HTMLElement | null, row: Element | null): boolean {
+  if (!scroller || !row) return false;
+  const current = row.querySelectorAll(CURRENT_MARK_SELECTOR);
+  const mark = row.querySelector(ANY_MARK_SELECTOR);
+  const span = (current.length ? measureVerticalSpanUnion(current) : null) ?? (mark ? measureVerticalSpan(mark) : null) ?? measureVerticalSpan(row);
+  if (!span) return false;
+  const scrollerRect = scroller.getBoundingClientRect();
+  if (!Number.isFinite(scrollerRect.top) || scroller.clientHeight <= 0) return false;
+  // clientTop = 容器上边框宽：内容坐标从 padding box 起算，与水平那一份的 clientLeft 同理。
+  const targetTop = span.top - scrollerRect.top + scroller.scrollTop - scroller.clientTop;
+  const next = neededScrollTopToCenter({
+    targetTop,
+    targetHeight: span.bottom - span.top,
+    clientHeight: scroller.clientHeight,
+    scrollTop: scroller.scrollTop,
+    scrollHeight: scroller.scrollHeight,
+  });
+  if (next === null) return false;
+  scroller.scrollTop = next;
+  return true;
+}
+

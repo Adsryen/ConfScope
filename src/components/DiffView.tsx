@@ -2177,6 +2177,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                           leftText={mergePreviewForItem(selectedBatchItem, mergePreviews).leftText}
                           rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
                           format={selectedBatchItem.format}
+                          active={active}
                           warnings={batchWarningsForItem(selectedBatchItem, mergePreviews, t)}
                           onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
                           onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
@@ -2213,6 +2214,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 leftText={leftText}
                 rightText={rightText}
                 format={diffFormat}
+                active={active}
                 warnings={singleWarnings}
               />
             ) : !matchResults && !ready ? (

@@ -2437,6 +2437,8 @@ textarea {
 }
 .code-body:hover .code-find-open,
 .code-editor:hover .code-find-open,
+/* 轮48：并排差异接了同一个条子，浮标的显隐口径也要跟上（三处成对，缺一个就是那个视图盲）。 */
+.diff-panel:hover .code-find-open,
 .code-find-open:focus-visible {
   opacity: 1;
 }
@@ -3569,6 +3571,8 @@ button.diff-workflow-step-btn:hover {
    三条形式都到 (0,3,0)，压得过 .hljs-meta .hljs-string 这类成对选择器，不留顺序决胜。 */
 .code-area .search-hit [class*="hljs-"],
 .udiff-text .search-hit [class*="hljs-"],
+/* 轮48：并排差异的单元格同样是 highlightLine 的产物，命中词里照样会夹着 hljs-* 子元素。 */
+.diff-cell .search-hit [class*="hljs-"],
 .search-hit [class*="hljs-"] [class*="hljs-"] {
   color: inherit;
 }
@@ -3782,6 +3786,43 @@ button.diff-workflow-step-btn:hover {
 }
 .diff-row.modify .diff-cell.right {
   background: var(--diff-add-bg);
+}
+
+/* ── 并排差异的视图内查找（轮48）────────────────────────────────
+   条子与 ⌕ 浮标是三个视图共用的同一份 DOM（src/components/FindBar.tsx），
+   差别只在落位：`.diff-body` 是本面板唯一的滚动容器，浮层挂进它内部的 sticky 锚点。 */
+.diff-find-anchor {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  /* 这条带子开栏时高度 = 净空、关栏时 = 0，两种情况下都不许挡住行上的文字选择与滚轮；
+     条子与按钮自己吃回鼠标（.code-find / .code-find-open 各是一颗直接子元素）。 */
+  pointer-events: none;
+}
+.diff-find-anchor > * {
+  pointer-events: auto;
+}
+/* 命中词的红底：diff 行本身带语义底色（add 绿 / del 红 0.16），0.18 那档压不住，
+   与 .code-area / .udiff-text 取同一档 0.28（R41-3）。 */
+.diff-cell .search-hit {
+  background: rgba(244, 71, 71, 0.28);
+}
+/* 当前命中必须赢过上一条：两条都是 (0,2,0) 时后写的会翻掉前者，
+   所以补一条 (0,3,0)，写法与 .code-area .search-hit.search-hit-current 成对。 */
+.diff-cell .search-hit.search-hit-current {
+  background: var(--red-fill);
+  color: #fff;
+}
+/* 命中指示只许走行号变红。给整行叠背景会把「这行是新增/删除的」和「这行有命中」
+   挤进同一个视觉通道，而 diff 行的语义底色本来就更响（R41-3，与 .code-ln / .udiff-gutter 同口径）。 */
+.diff-gutter.is-hit {
+  color: var(--red-h);
+}
+/* 当前命中那一行的行号：与 .code-ln.is-current 同一对写法；
+   特异性 (0,2,0) 压得过 .diff-gutter 自己的 --bg2 底。 */
+.diff-gutter.is-current {
+  color: var(--text-hi);
+  background: rgba(244, 71, 71, 0.22);
 }
 
 .diff-head.with-merge {
@@ -8228,7 +8269,9 @@ button.diff-workflow-step-btn:hover {
 .audit-detail-value:focus-visible,
 .inline-error-body:focus-visible,
 .update-release-notes:focus-visible,
-.match-side-scroll:focus-visible {
+.match-side-scroll:focus-visible,
+/* 轮48：查找栏关掉后焦点归还给这块正文，它同时是 Tab 可达的滚动区，环必须看得见。 */
+.diff-body:focus-visible {
   outline: 2px solid var(--focus-outline);
   outline-offset: -2px;
 }

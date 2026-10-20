@@ -340,6 +340,7 @@ export default function HistoryView({
               leftText={leftNid ? contents[leftNid] ?? "" : ""}
               rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
               format={format}
+              active={active}
             />
           )
         ) : viewing ? (

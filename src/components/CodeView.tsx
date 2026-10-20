@@ -14,6 +14,7 @@ import {
   splitLines,
 } from "../lib/codeLines";
 import CodeMinimap, { MINIMAP_RESERVED_RIGHT } from "./CodeMinimap";
+import FindBar, { FindOpenButton } from "./FindBar";
 import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import { useTranslation } from "../i18n";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
@@ -555,114 +556,32 @@ export default function CodeView({ code, format, searchTerm, showMinimap = true,
           />
         )}
 
-        {enableFind && !findOpen && (
-          <button
-            type="button"
-            className="code-find-open"
-            ref={findOpenBtnRef}
-            onClick={openFind}
-            title={t("config.openFind")}
-            aria-label={t("config.openFind")}
-            aria-keyshortcuts="Control+F"
-            style={padRightVar}
-          >
-            ⌕
-          </button>
-        )}
+        {enableFind && !findOpen && <FindOpenButton onOpen={openFind} btnRef={findOpenBtnRef} style={padRightVar} />}
 
+        {/* 查找条本体是三个视图共用的一份实现（轮48）：这里只把状态与右侧留白递进去。 */}
         {enableFind && findOpen && (
-          <div className="code-find" ref={findBarRef} role="search" style={padRightVar}>
-            <input
-              ref={findInputRef}
-              className="code-find-input mono"
-              spellCheck={false}
-              type="text"
-              value={findTerm}
-              placeholder={t("config.findPlaceholder")}
-              aria-label={t("config.findPlaceholder")}
-              onChange={(e) => {
-                setFindTerm(e.target.value);
-                setActiveIdx(0);
-              }}
-              onKeyDown={onFindKeyDown}
-            />
-            {/* 匹配口径开关。onMouseDown preventDefault：按钮默认会夺走焦点，
-                点一下开关就得再点一次输入框才能继续改词——查找栏的老毛病，这里挡住。 */}
-            <button
-              type="button"
-              className={`code-find-toggle${caseSensitive ? " is-on" : ""}`}
-              aria-pressed={caseSensitive}
-              aria-label={t("config.findCaseSensitive")}
-              title={t("config.findCaseSensitive")}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setCaseSensitive((v) => !v)}
-            >
-              Aa
-            </button>
-            <button
-              type="button"
-              className={`code-find-toggle${wholeWord ? " is-on" : ""}`}
-              aria-pressed={wholeWord}
-              aria-label={t("config.findWholeWord")}
-              title={t("config.findWholeWord")}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setWholeWord((v) => !v)}
-            >
-              ab|
-            </button>
-            {/* 命中触顶时必须说出来（轮28 F-10）：只写「第 1/5000 处」用户会以为文件里一共就 5000 处。
-                「+」进可见文案，解释挂 title——这是 span，title 正常显示，不受轮26 F-1（disabled 控件的 title 不弹）影响。 */}
-            <span
-              className="code-find-count"
-              aria-live="polite"
-              title={hitsCapped ? t("config.findCountCappedHint", { max: MAX_CODE_HITS }) : undefined}
-            >
-              {hits.length
-                ? hitsCapped
-                  ? t("config.findCountCapped", { current: clamp(activeIdx, 0, hits.length - 1) + 1, max: MAX_CODE_HITS })
-                  : t("config.findCount", { current: clamp(activeIdx, 0, hits.length - 1) + 1, total: hits.length })
-                : effectiveTerm
-                  ? t("config.findNone")
-                  : t("config.findHint")}
-            </span>
-            {/* ↑↓ 与上面两个开关同一口径（轮32 F-29）：点跳转不许把焦点从查找输入框 / textarea 上抢走——
-                抢走之后接着敲的字符哪儿都不去（真机取证见任务目录 research/focus_probe.txt）。
-                下面的 ✕ 反过来：它的语义是「结束查找，把焦点还给正文」，onClick 里那句 focus 依赖这次点击，别照抄。 */}
-            <button
-              type="button"
-              className="code-find-btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => navigate(-1)}
-              disabled={!hits.length}
-              title={t("config.findPrevKey")}
-              aria-label={t("config.findPrev")}
-              aria-keyshortcuts="Shift+Enter Shift+F3"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="code-find-btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => navigate(1)}
-              disabled={!hits.length}
-              title={t("config.findNextKey")}
-              aria-label={t("config.findNext")}
-              aria-keyshortcuts="Enter F3"
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="code-find-btn"
-              onClick={closeFind}
-              title={t("config.findCloseKey")}
-              aria-label={t("config.findClose")}
-              aria-keyshortcuts="Escape"
-            >
-              ✕
-            </button>
-          </div>
+          <FindBar
+            term={findTerm}
+            hasTerm={Boolean(effectiveTerm)}
+            hitCount={hits.length}
+            currentHit={activeIdx}
+            capped={hitsCapped}
+            cappedMax={MAX_CODE_HITS}
+            caseSensitive={caseSensitive}
+            wholeWord={wholeWord}
+            onTermChange={(value) => {
+              setFindTerm(value);
+              setActiveIdx(0);
+            }}
+            onInputKeyDown={onFindKeyDown}
+            onToggleCaseSensitive={() => setCaseSensitive((v) => !v)}
+            onToggleWholeWord={() => setWholeWord((v) => !v)}
+            onNavigate={navigate}
+            onClose={closeFind}
+            barRef={findBarRef}
+            inputRef={findInputRef}
+            style={padRightVar}
+          />
         )}
       </div>
     </div>
