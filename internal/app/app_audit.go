@@ -58,4 +58,3 @@ func (a *App) ClearAuditTrail() error {
 	}
 	return nil
 }
-

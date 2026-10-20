@@ -37,11 +37,11 @@ type Task struct {
 	Name        string     `json:"name"`
 	Type        TaskType   `json:"type"`
 	Status      TaskStatus `json:"status"`
-	Progress    int        `json:"progress"`   // 0-100
-	Total       int        `json:"total"`       // 总数
-	Completed   int        `json:"completed"`   // 已完成数
-	Failed      int        `json:"failed"`      // 失败数
-	Error       string     `json:"error"`       // 错误信息
+	Progress    int        `json:"progress"`  // 0-100
+	Total       int        `json:"total"`     // 总数
+	Completed   int        `json:"completed"` // 已完成数
+	Failed      int        `json:"failed"`    // 失败数
+	Error       string     `json:"error"`     // 错误信息
 	StartTime   time.Time  `json:"startTime"`
 	EndTime     *time.Time `json:"endTime"`
 	ElapsedTime int64      `json:"elapsedTime"` // 耗时(毫秒)
