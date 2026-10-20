@@ -113,6 +113,9 @@ type HistoryItem struct {
 	Ref              ConfigRef `json:"ref"`
 	OpType           string    `json:"opType"`
 	LastModifiedTime string    `json:"lastModifiedTime"`
+	SrcIP            string    `json:"srcIp"`
+	SrcUser          string    `json:"srcUser"`
+	Format           string    `json:"format"`
 }
 
 type HistoryPage struct {
@@ -129,6 +132,10 @@ type HistoryDetail struct {
 	OpType           string    `json:"opType"`
 	CreatedTime      string    `json:"createdTime"`
 	LastModifiedTime string    `json:"lastModifiedTime"`
+	SrcIP            string    `json:"srcIp"`
+	SrcUser          string    `json:"srcUser"`
+	Md5              string    `json:"md5"`
+	Format           string    `json:"format"`
 }
 
 type ConfigProvider interface {

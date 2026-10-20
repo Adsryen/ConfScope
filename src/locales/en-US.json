@@ -1026,6 +1026,8 @@
     "rawContent": "Raw Content",
     "viewMode": "Content view",
     "copyVersion": "Copy Version",
+    "publisher": "Published by",
+    "centerHistoryUnsupported": "This config center has no namespace-wide history list: select the config in Browse and use its History tab.",
     "rollbackToThis": "Rollback to this",
     "selectHint": "Click a version on the left to view, or pick versions to compare",
     "rollbackAsPlan": "Generate rollback plan",

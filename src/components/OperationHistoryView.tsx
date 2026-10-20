@@ -23,6 +23,7 @@ import {
   type ApplyVerification,
 } from "../store/applyVerifications";
 import { getConfigDocument, listHistory } from "../api/nacos";
+import { supportsCenterHistory } from "../lib/configCapabilities";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
@@ -74,6 +75,8 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const [localRecords, setLocalRecords] = useState<OperationRecord[]>([]);
   // 配置中心历史
   const [centerRecords, setCenterRecords] = useState<OperationRecord[]>([]);
+  // R55-E3：能力支持但拉到 0 行时给出的说明（不支持的情形在渲染层直接讲，不走请求）。
+  const [centerEmptyNote, setCenterEmptyNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,17 +95,25 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     setLocalRecords(loadOperationHistory());
   }, []);
 
-  // 从配置中心拉取历史（选择连接时触发）
+  // 从配置中心拉取历史（选择连接时触发）。
+  //
+  // R55-E3（真机取证驱动）：命名空间级「中心历史」在现有 provider 上都是拿不到的——
+  // Nacos v1 空查询恒 0 行且不报错（静默假空，用户以为记录丢了），Apollo/Consul 在
+  // Go 侧返回「当前为只读模式」错误又被逐 ns 的 catch 吞掉。所以按能力闸门收口：
+  // 不支持的连接不发请求，界面直接讲清楚去哪看历史（lib/configCapabilities 是口径源）。
   const fetchCenterHistory = useCallback(
     async (connId: string) => {
       const conn = connections.find((c) => c.id === connId);
       if (!conn) return;
+      setCenterEmptyNote(null);
+      if (!supportsCenterHistory(conn)) return;
 
       setLoading(true);
       setError(null);
       try {
         const records: OperationRecord[] = [];
         const namespaces = [conn.defaultNamespace || ""];
+        let lastError: unknown = null;
         for (const ns of namespaces) {
           try {
             const history = await listHistory(conn, ns, "", "", 1, 50);
@@ -119,18 +130,24 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
                 dataId: item.dataId || "",
               });
             }
-          } catch {
-            // 单个命名空间失败不影响整体
+          } catch (e) {
+            // 单个命名空间失败不影响其余，但总得留个证据：整体 0 行时报告它，
+            // 不能再让失败伪装成「没有记录」。
+            lastError = e;
           }
         }
         setCenterRecords((prev) => [...prev, ...records]);
+        if (records.length === 0) {
+          if (lastError) setError(errorText(lastError));
+          else setCenterEmptyNote(t("history.empty"));
+        }
       } catch (e) {
         setError(errorText(e));
       } finally {
         setLoading(false);
       }
     },
-    [connections]
+    [connections, t]
   );
 
   // 记住的连接筛选要在重新挂载时补拉一次中心历史：否则「筛选还在、列表只剩本地记录」，
@@ -312,6 +329,14 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
     return source && target ? `${source} -> ${target}` : "";
   };
 
+  // 渲染期推导（不占状态，切连接自动跟随）：能力不支持 → 讲清楚去哪看；
+  // 能力支持但拉到 0 行 → 用请求回调里写好的 centerEmptyNote。
+  const selectedCenterConn = filterConnection ? connections.find((c) => c.id === filterConnection) : undefined;
+  const centerNoteText =
+    selectedCenterConn && !supportsCenterHistory(selectedCenterConn)
+      ? t("history.centerHistoryUnsupported")
+      : centerEmptyNote;
+
   return (
     <div className="page-surface data-page history-page" {...busyProps(loading)}>
       <div className="page-header">
@@ -377,6 +402,12 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
       </div>
 
       {error && <InlineError title={t("operationHistory.loadFailed")} message={error} />}
+      {/* R55-E3：不支持中心历史的连接不再被假装拉过；说明用户该去哪看版本历史。 */}
+      {centerNoteText && (
+        <div className="history-center-note" role="note">
+          {centerNoteText}
+        </div>
+      )}
       {loading && (
         <div className="history-loading" role="status" aria-live="polite">
           {t("common.loading")}

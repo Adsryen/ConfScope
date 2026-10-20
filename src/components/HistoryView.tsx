@@ -7,7 +7,7 @@ import {
   listHistory,
 } from "../api/nacos";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
-import { Format } from "../lib/format";
+import { detectFormat, Format } from "../lib/format";
 import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
 import { busyProps } from "../lib/busyRegion";
 import { reportError } from "../lib/errorCenter";
@@ -54,6 +54,15 @@ interface Props {
   searchTerm?: string;
 }
 
+/** 按需拉取并缓存的历史版本正文与该版本自己的元信息。 */
+interface HistoryVersion {
+  content: string;
+  /** 该版本发布时的格式（extInfo.type），服务端没给则空串。 */
+  format: string;
+  srcIp: string;
+  srcUser: string;
+}
+
 const PAGE_SIZE = 50;
 const opLabel = (opType: string, t: (key: string) => string) => {
   if (opType === "I") return t("history.opCreated");
@@ -83,7 +92,8 @@ export default function HistoryView({
   const [error, setError] = useState<string | null>(null);
   // 勾选用于对比的版本 nid（最多两个），以及缓存的版本内容
   const [picked, setPicked] = useState<string[]>([]);
-  const [contents, setContents] = useState<Record<string, string>>({});
+  // 版本正文 + 该版本自己的元信息（正文按需拉取，缓存到这里；undefined = 还没拉过）
+  const [contents, setContents] = useState<Record<string, HistoryVersion>>({});
   const [viewing, setViewing] = useState<string | null>(null);
   // 重内容渲染（diff/高亮）用延迟值：点击后左侧高亮先即时刷新，
   // 右侧重渲染延后，切换时先显示「加载中」，不卡点击反馈。
@@ -142,12 +152,21 @@ export default function HistoryView({
   }, [conn.id, tenant, dataId, group]);
 
   // 拉取某个版本的内容（带缓存）
-  const ensureContent = async (nid: string): Promise<string> => {
-    if (contents[nid] !== undefined) return contents[nid];
+  const ensureVersion = async (nid: string): Promise<HistoryVersion> => {
+    const cached = contents[nid];
+    if (cached !== undefined) return cached;
     const d = await getHistoryDetail(conn, tenant, dataId, group, nid);
-    setContents((c) => ({ ...c, [nid]: d.content }));
-    return d.content;
+    const version: HistoryVersion = {
+      content: d.content,
+      format: d.format ?? "",
+      srcIp: d.srcIp ?? "",
+      srcUser: d.srcUser ?? "",
+    };
+    setContents((c) => ({ ...c, [nid]: version }));
+    return version;
   };
+
+  const ensureContent = async (nid: string): Promise<string> => (await ensureVersion(nid)).content;
 
   const togglePick = async (nid: string) => {
     setError(null);
@@ -170,6 +189,26 @@ export default function HistoryView({
         detail: message,
       });
     }
+  };
+
+  /**
+   * 该版本正文的渲染格式（轮55 R55-E4）。
+   *
+   * 真机取证：Nacos 把发布时的 type 存进历史行的 extInfo（实测 `{"type":"yaml"}`），
+   * 所以历史正文该按**那一版自己**的格式高亮——用当前配置的格式去渲染旧版，
+   * 旧版是 properties、新版已改 yaml 时，整屏高亮是错的。服务端没给则回退当前格式。
+   */
+  const versionFormat = (nid: string | null | undefined): Format => {
+    const version = nid ? contents[nid] : undefined;
+    if (!version?.format) return format;
+    return detectFormat(dataId, version.format, version.content);
+  };
+
+  /** 列表行与详情头的「发布来源」：优先用户名，Nacos 常只回 srcIp。 */
+  const publisherOf = (nid: string | null | undefined): string => {
+    const version = nid ? contents[nid] : undefined;
+    const item = nid ? itemOf(nid) : undefined;
+    return version?.srcUser || item?.srcUser || version?.srcIp || item?.srcIp || "";
   };
 
   // 找某版本的「上一版」：id 比它小、且最大的那个（id 越大越新）。
@@ -310,6 +349,11 @@ export default function HistoryView({
               <div className="history-item-meta">
                 <span className={`op op-${h.opType || "x"}`}>{opLabel(h.opType, t)}</span>
                 <span className="history-item-id mono">nid {h.id}</span>
+                {(h.srcUser || h.srcIp) && (
+                  <span className="history-item-src mono" title={`${t("history.publisher")}: ${h.srcUser || h.srcIp}`}>
+                    {h.srcUser || h.srcIp}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -337,9 +381,9 @@ export default function HistoryView({
                   ? `nid ${rightNid} · ${formatTime(itemOf(rightNid)?.lastModifiedTime ?? "")}`
                   : t('history.currentOnline')
               }
-              leftText={leftNid ? contents[leftNid] ?? "" : ""}
-              rightText={rightNid ? contents[rightNid] ?? "" : currentContent}
-              format={format}
+              leftText={leftNid ? contents[leftNid]?.content ?? "" : ""}
+              rightText={rightNid ? contents[rightNid]?.content ?? "" : currentContent}
+              format={versionFormat(rightNid ?? leftNid)}
               active={active}
             />
           )
@@ -359,6 +403,11 @@ export default function HistoryView({
                 <div className="content-box-head">
                   <span>
                     nid {viewing} · {formatTime(itemOf(viewing)?.lastModifiedTime ?? "")}
+                    {publisherOf(viewing) && (
+                      <span className="history-publisher mono" title={t("history.publisher")}>
+                        {publisherOf(viewing)}
+                      </span>
+                    )}
                     {headPrev ? (
                       <span className="vs-prev"> · {t('history.vsPrev', { nid: headPrev.id })}</span>
                     ) : (
@@ -391,7 +440,7 @@ export default function HistoryView({
                         {t("history.rawContent")}
                       </button>
                     </div>
-                    <CopyButton text={contents[viewing] ?? ""} label={t('history.copyVersion')} />
+                    <CopyButton text={contents[viewing]?.content ?? ""} label={t('history.copyVersion')} />
                     {canRollback && (
                       <button
                         className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
@@ -414,17 +463,17 @@ export default function HistoryView({
                   </div>
                 ) : rawView ? (
                   <CodeView
-                    code={contents[dv!] ?? ""}
-                    format={format}
+                    code={contents[dv!]?.content ?? ""}
+                    format={versionFormat(dv)}
                     active={active}
                     searchTerm={searchTerm}
                     contentKey={`${tenant}::${group}::${dataId}::${dv}`}
                   />
                 ) : (
                   <UnifiedDiff
-                    oldText={prev ? contents[prev.id] ?? "" : ""}
-                    newText={contents[dv!] ?? ""}
-                    format={format}
+                    oldText={prev ? contents[prev.id]?.content ?? "" : ""}
+                    newText={contents[dv!]?.content ?? ""}
+                    format={versionFormat(dv)}
                     searchTerm={searchTerm}
                     active={active}
                   />

@@ -11,6 +11,7 @@ import {
   type ContentSearchResult,
 } from "../lib/configContentSearch";
 import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
+import { supportsConfigHistory } from "../lib/configCapabilities";
 import { detectFormat, Format, FORMATS } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
@@ -181,6 +182,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   useWheelSurface(itemsScrollRef);
   const dirty = editing && draft !== content;
   const isLocalSnapshot = conn.sourceType === "local-snapshot";
+  // 「历史变更」tab 按配置中心能力收口（轮55 R55-E2）：Apollo/Consul 的 ListHistory 在 Go 侧
+  // 直接返回「当前为只读模式」，点进 tab 只会看到一句与历史无关的报错。
+  const canBrowseHistory = supportsConfigHistory(conn);
   const isContentSearchActive = searchMode === "content" && Boolean(contentTerm);
   const visibleItems = isContentSearchActive ? contentResults.map((result) => result.item) : items;
   const selectedContentResults = contentResults.filter((result) => selectedContentKeys.has(configResultKey(result.item)));
@@ -1326,7 +1330,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 <button className={`tab-btn${tab === "content" ? " active" : ""}`} onClick={() => setTab("content")}>
                   {t("config.content")}
                 </button>
-                {!isLocalSnapshot && (
+                {canBrowseHistory && (
                   <button className={`tab-btn${tab === "history" ? " active" : ""}`} onClick={() => setTab("history")}>
                     {t("config.history")}
                   </button>
@@ -1334,7 +1338,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               </div>
             </div>
 
-            {tab === "content" ? (
+            {/* 能力收口后还要防一头：连接在设置里被改成 Apollo 时 tab 状态可能还停在 history，
+                正文面板必须落回 content，不能隔着隐藏 tab 渲染 HistoryView（轮55 R55-E2）。 */}
+            {tab === "content" || !canBrowseHistory ? (
               <div className="content-box" {...busyProps(contentLoading)}>
                 {contentLoading && (
                   <div className="pad-msg" role="status" aria-live="polite">

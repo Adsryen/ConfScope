@@ -101,6 +101,11 @@ export interface HistoryItem {
   ref: ConfigRef;
   opType: string;
   lastModifiedTime: string;
+  /** 发布来源（真机 Nacos 2.5.2 实测列表行带 srcIp，srcUser 常为 null）。 */
+  srcIp?: string;
+  srcUser?: string;
+  /** 该版本自己发布时的格式（来自 extInfo.type），可能缺失。 */
+  format?: string;
   /** nacos 原生平铺形态兜底字段（Wails runtime 序列化 Go 零值字段时 ref.dataId 可能缺失） */
   dataId?: string;
   group?: string;
@@ -120,6 +125,10 @@ export interface HistoryDetail {
   opType: string;
   createdTime: string;
   lastModifiedTime: string;
+  srcIp?: string;
+  srcUser?: string;
+  md5?: string;
+  format?: string;
 }
 
 export function listNamespaces(profile: ConnectionProfile): Promise<Namespace[]> {

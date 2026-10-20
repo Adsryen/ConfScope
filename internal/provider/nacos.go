@@ -151,6 +151,9 @@ func (p *NacosProvider) ListHistory(profile ConnectionProfile, ref ConfigRef, pa
 			Ref:              itemRef,
 			OpType:           item.OpType,
 			LastModifiedTime: item.LastModifiedTime,
+			SrcIP:            item.SrcIP,
+			SrcUser:          item.SrcUser,
+			Format:           item.Format,
 		})
 	}
 	return out, nil
@@ -174,6 +177,10 @@ func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRe
 		OpType:           detail.OpType,
 		CreatedTime:      detail.CreatedTime,
 		LastModifiedTime: detail.LastModifiedTime,
+		SrcIP:            detail.SrcIP,
+		SrcUser:          detail.SrcUser,
+		Md5:              detail.Md5,
+		Format:           detail.Format,
 	}, nil
 }
 

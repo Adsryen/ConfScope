@@ -42,6 +42,14 @@ func s(obj map[string]any, key string) string {
 	return stringValue(obj[key])
 }
 
+// sTrim 读取字符串字段并去掉首尾空白，缺失时返回空字符串。
+//
+// Nacos 历史表的 opType/srcUser 等列是定长 CHAR，真实响应带尾部空格（实测
+// "U         "），不清洗会让上层严格比较全部落空（见 nacos.HistoryItem 注释）。
+func sTrim(obj map[string]any, keys ...string) string {
+	return strings.TrimSpace(sAny(obj, keys...))
+}
+
 // sAny 按顺序读取多个候选字段，返回第一个非空值。
 //
 // 该函数主要用于兼容 v1/v3 字段名差异，例如 group/groupName、tenant/namespaceId。

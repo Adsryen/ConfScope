@@ -30,6 +30,7 @@ import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
 import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
+import { effectiveProvider } from "../lib/configCapabilities";
 import { errorText } from "../lib/errorText";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
@@ -223,6 +224,11 @@ export interface HistoryItem {
   group: string;
   opType: string;
   lastModifiedTime: string;
+  /** 发布来源 IP / 用户（服务端没给则空串；映射层恒填，旧测试夹具可缺省）。 */
+  srcIp?: string;
+  srcUser?: string;
+  /** 该版本发布时的格式（extInfo.type），取不到为空串，UI 回退当前配置格式。 */
+  format?: string;
 }
 
 export interface HistoryPage {
@@ -240,6 +246,10 @@ export interface HistoryDetail {
   opType: string;
   createdTime: string;
   lastModifiedTime: string;
+  srcIp?: string;
+  srcUser?: string;
+  md5?: string;
+  format?: string;
 }
 
 export type ApiVersion = "v1" | "v3";
@@ -345,8 +355,8 @@ async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfil
 }
 
 function providerForConnection(conn: Connection): ProviderType {
-  if (conn.sourceType === "local-snapshot") return "local";
-  return conn.provider ?? "nacos";
+  // 能力口径单一事实源在 lib/configCapabilities（轮55 R55-E2 收口时对齐）。
+  return effectiveProvider(conn);
 }
 
 function toConnectionProfile(conn: Connection, baseUrl: string, accessToken: string, apiVersion: string): ConnectionProfile {
@@ -463,8 +473,13 @@ function fromConfigCenterHistoryPage(page: ConfigCenterHistoryPage): HistoryPage
       id: String(r.id ?? ""),
       dataId,
       group,
-      opType: String(r.opType ?? ""),
+      // 服务端 opType 是定长 CHAR（真机实测 "U         "）。Go 解析层已 TrimSpace，
+      // 这里再兜一次：不经 Go 的 mock/旧桥接数据同样会把徽标文案打回裸字母。
+      opType: String(r.opType ?? "").trim(),
       lastModifiedTime: String(r.lastModifiedTime ?? ""),
+      srcIp: String(r.srcIp ?? "").trim(),
+      srcUser: String(r.srcUser ?? "").trim(),
+      format: String(r.format ?? "").trim(),
     };
   };
   const items: HistoryItem[] = [];
@@ -487,9 +502,13 @@ function fromConfigCenterHistoryDetail(detail: ConfigCenterHistoryDetail): Histo
     dataId: detail.ref.dataId,
     group: detail.ref.group,
     content: detail.content,
-    opType: detail.opType,
+    opType: String(detail.opType ?? "").trim(),
     createdTime: detail.createdTime,
     lastModifiedTime: detail.lastModifiedTime,
+    srcIp: String(detail.srcIp ?? "").trim(),
+    srcUser: String(detail.srcUser ?? "").trim(),
+    md5: String(detail.md5 ?? "").trim(),
+    format: String(detail.format ?? "").trim(),
   };
 }
 

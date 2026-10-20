@@ -6373,6 +6373,14 @@ button.diff-workflow-step-btn:hover {
   font-size: 13px;
 }
 
+/* 中心历史能力说明（轮55 R55-E3）：静默假空改成人话后，用低调说明行承载 */
+.history-center-note {
+  padding: 8px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* 操作列表 */
 .history-list,
 .op-history-list {

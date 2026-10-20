@@ -44,12 +44,18 @@ type ConfigPage struct {
 }
 
 // HistoryItem 是配置历史列表中的单条历史摘要。
+//
+// OpType/SrcUser 在服务端是定长 CHAR 列，解析时必须已去掉尾部空格（nacos.sTrim）：
+// 真实 Nacos 2.5.2 实测返回 "U         "，不清洗会让前端 opType 严格比较全部落空。
 type HistoryItem struct {
 	Id               string `json:"id"`
 	DataId           string `json:"dataId"`
 	Group            string `json:"group"`
 	OpType           string `json:"opType"`
 	LastModifiedTime string `json:"lastModifiedTime"`
+	SrcIP            string `json:"srcIp"`
+	SrcUser          string `json:"srcUser"`
+	Format           string `json:"format"`
 }
 
 // HistoryPage 是配置历史分页结果。
@@ -69,4 +75,8 @@ type HistoryDetail struct {
 	OpType           string `json:"opType"`
 	CreatedTime      string `json:"createdTime"`
 	LastModifiedTime string `json:"lastModifiedTime"`
+	SrcIP            string `json:"srcIp"`
+	SrcUser          string `json:"srcUser"`
+	Md5              string `json:"md5"`
+	Format           string `json:"format"`
 }

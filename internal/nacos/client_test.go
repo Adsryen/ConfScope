@@ -564,3 +564,71 @@ func TestV3EnvelopeBusinessErrorIsReturned(t *testing.T) {
 		t.Fatalf("error = %q, want v3 business error", err.Error())
 	}
 }
+
+// TestHistoryParsesRealNacos252Sample 钉真机取证到的响应形状（2026-10-21，
+// confscope-retest-nacos-a / nacos-server:v2.5.2 / v1/cs/history）。
+// 两处服务端脏数据必须在这一层就清掉，否则全部外溢到 UI：
+//  1. opType 是定长 CHAR，实测 "U         " —— 前端严格比较 opType === "U" 落空，
+//     历史列表的操作类型徽标退化成裸字母「U」（守卫：去掉 sTrim 本用例必红）；
+//  2. srcUser/md5 在列表行里是 JSON null，不能变成字符串 "null"。
+//
+// 同时钉住 extInfo 里的版本自身格式：历史正文要按发布时的格式渲染，
+// 而不是按当前配置的格式渲染。
+func TestHistoryParsesRealNacos252Sample(t *testing.T) {
+	listBody := `{"totalCount":1874,"pageNumber":1,"pagesAvailable":1874,"pageItems":[{"id":"48380","lastId":-1,"dataId":"svc-data.yaml","group":"RETEST-PROD","tenant":"retest-dev","appName":"","md5":null,"content":null,"srcIp":"192.168.176.1","srcUser":null,"opType":"U         ","publishType":"formal","grayName":"","extInfo":"{\"type\":\"yaml\"}","createdTime":"2010-05-05T00:00:00.000+08:00","lastModifiedTime":"2026-10-20T18:12:00.326+08:00","encryptedDataKey":null}]}`
+	detailBody := `{"id":"48380","lastId":-1,"dataId":"svc-data.yaml","group":"RETEST-PROD","tenant":"retest-dev","appName":"","md5":"b5270505f25e2a936b99e8f3bb90f2c6","content":"app:\n  name: data-svc\n","srcIp":"192.168.176.1","srcUser":"nacos","opType":"U         ","publishType":"formal","grayName":"","extInfo":"{\"type\":\"yaml\"}","createdTime":"2010-05-05T00:00:00.000+08:00","lastModifiedTime":"2026-10-20T18:12:00.326+08:00","encryptedDataKey":""}`
+
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("nid") != "" {
+			_, _ = w.Write([]byte(detailBody))
+			return
+		}
+		_, _ = w.Write([]byte(listBody))
+	}))
+
+	page, err := NewClient().HistoryList(server.URL, "", "v1", "retest-dev", "svc-data.yaml", "RETEST-PROD", 1, 50)
+	if err != nil {
+		t.Fatalf("HistoryList returned error: %v", err)
+	}
+	if len(page.PageItems) != 1 {
+		t.Fatalf("page items = %d, want 1", len(page.PageItems))
+	}
+	row := page.PageItems[0]
+	if row.OpType != "U" {
+		t.Fatalf("opType = %q, want trimmed %q", row.OpType, "U")
+	}
+	if row.SrcIP != "192.168.176.1" || row.SrcUser != "" {
+		t.Fatalf("publisher = %+v/%+v, want 192.168.176.1 and empty", row.SrcIP, row.SrcUser)
+	}
+	if row.Format != "yaml" {
+		t.Fatalf("format = %q, want yaml", row.Format)
+	}
+
+	detail, err := NewClient().HistoryDetail(server.URL, "", "v1", "retest-dev", "svc-data.yaml", "RETEST-PROD", "48380")
+	if err != nil {
+		t.Fatalf("HistoryDetail returned error: %v", err)
+	}
+	if detail.OpType != "U" {
+		t.Fatalf("detail opType = %q, want trimmed %q", detail.OpType, "U")
+	}
+	if detail.Content == "" {
+		t.Fatalf("detail content is empty: v1 history detail must carry the version body")
+	}
+	if detail.Md5 != "b5270505f25e2a936b99e8f3bb90f2c6" || detail.Format != "yaml" || detail.SrcUser != "nacos" {
+		t.Fatalf("unexpected detail: %+v", detail)
+	}
+}
+
+// TestHistoryFormatFromExtInfoToleratesGarbage 钉住「服务端没给 extInfo / 给了非 JSON」
+// 时不能报错，只能回退空串（调用方据此退回当前配置格式）。
+func TestHistoryFormatFromExtInfoToleratesGarbage(t *testing.T) {
+	for _, in := range []string{"", "   ", "not-json", "{}", `{"type":"  "}`, `{"type":123}`} {
+		if got := historyFormatFromExtInfo(in); got != "" {
+			t.Fatalf("historyFormatFromExtInfo(%q) = %q, want empty", in, got)
+		}
+	}
+	if got := historyFormatFromExtInfo(`{"type":"properties","other":"x"}`); got != "properties" {
+		t.Fatalf("historyFormatFromExtInfo = %q, want properties", got)
+	}
+}

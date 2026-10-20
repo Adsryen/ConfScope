@@ -1026,6 +1026,8 @@
     "rawContent": "原始内容",
     "viewMode": "正文视图",
     "copyVersion": "复制本版",
+    "publisher": "发布来源",
+    "centerHistoryUnsupported": "该配置中心不提供命名空间级的历史列表：请到配置浏览选中配置后看「历史变更」。",
     "rollbackToThis": "回滚到此版本",
     "selectHint": "点击左侧版本查看内容，或勾选版本进行对比",
     "rollbackAsPlan": "生成回滚计划",
