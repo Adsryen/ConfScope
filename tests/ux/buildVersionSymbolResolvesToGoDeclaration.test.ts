@@ -12,10 +12,14 @@
  *
  * 守卫钉五条：
  * 1. release.yml 必须存在指向 appVersion 的 -X 注入（漏注入直接红）；
+ *    轮52 起预检作业里还有一条「金丝雀注入」——它写死 9.9.9，只为证明 -X 打得中
+ *    internal/app，不参与出包。它必须和同一行的 CONFSCOPE_EXPECT_APP_VERSION 配成
+ *    一对（期望值 != 注入值就不算金丝雀），否则按写死版本号判红；
  * 2. 每个 -X 目标都要用 go.mod 的 module 名解析成真实目录，并在该目录的非测试 .go 里
  *    存在同名包级 var —— 这是唯一能替代「链接器不报错」的检查；
  * 3. 本地构建脚本同样必须注入，且版本取自 git describe（防止「只有 CI 是对的」）；
- * 4. 版本事实源是 tag：CI 从 GITHUB_REF_NAME 推导，脚本里不许写死版本号；
+ * 4. 版本事实源是 tag：CI 从 GITHUB_REF_NAME 推导，脚本里不许写死版本号
+ *    （唯一的例外就是上面那条配对的金丝雀）；
  * 5. 被注入的那个 Go 变量必须是 string 且默认 "dev"（类型错了链接器照样静默）。
  * YAML/shell 注释里引用的历史写法不算代码（先剥注释再抽符号），否则守卫会在解释自己的注释上自红。
  */
@@ -36,7 +40,14 @@ type XSymbol = {
   ident: string;
   raw: string;
   line: number;
+  /** = 号右侧的字面量（去掉外层引号）；合成用例里可以不填。 */
+  value?: string;
+  /** 配对成功的金丝雀注入：值写死，但同一步里 CONFSCOPE_EXPECT_APP_VERSION 期望同一个值。 */
+  canary?: boolean;
 };
+
+const CANARY_ENV = "CONFSCOPE_EXPECT_APP_VERSION";
+const NUMERIC_VERSION = /^\d+\.\d+\.\d+$/;
 
 /** YAML 与 shell/pwsh 的行注释都是 # 起头，stripComments 只认 //，先按行摘掉。 */
 function stripHashComments(raw: string): string {
@@ -54,20 +65,30 @@ function readBuildEntrypoint(rel: string): string {
   return stripComments(raw);
 }
 
-/** 抽出 `-X <importPath>.<Ident>=` 形态的链接器注入目标。 */
-function ldflagsSymbols(rel: string): XSymbol[] {
-  const text = readBuildEntrypoint(rel);
+/** 抽出 `-X <importPath>.<Ident>=<value>` 形态的链接器注入目标（只吃已剥注释的文本）。 */
+function extractSymbols(text: string, rel: string): XSymbol[] {
+  const lines = text.split("\n");
   const out: XSymbol[] = [];
-  for (const match of text.matchAll(/-X\s+([^\s"']+?)\.([A-Za-z_]\w*)\s*=/g)) {
+  for (const match of text.matchAll(/-X\s+([^\s"']+?)\.([A-Za-z_]\w*)\s*=\s*(("[^"\n]*")|([^\s"']+))/g)) {
+    const line = text.slice(0, match.index).split("\n").length;
+    const value = (match[3] ?? "").replace(/^"|"$/g, "");
+    // 金丝雀的判据：同一个 go test 命令里（±2 行，命令行会被反斜杠折行）期望的就是这个值
+    const nearby = lines.slice(Math.max(0, line - 3), line + 2).join("\n");
     out.push({
       file: rel,
       importPath: match[1],
       ident: match[2],
       raw: match[0],
-      line: text.slice(0, match.index).split("\n").length,
+      line,
+      value,
+      canary: NUMERIC_VERSION.test(value) && nearby.includes(`${CANARY_ENV}=${value}`),
     });
   }
   return out;
+}
+
+function ldflagsSymbols(rel: string): XSymbol[] {
+  return extractSymbols(readBuildEntrypoint(rel), rel);
 }
 
 function goModule(): string {
@@ -127,6 +148,18 @@ function versionSymbols(symbols: XSymbol[]): XSymbol[] {
   return symbols.filter((sym) => sym.ident === "appVersion");
 }
 
+/** 真正决定发布产物版本号的那些注入（金丝雀不参与出包，单独看）。 */
+function shippingVersionSymbols(symbols: XSymbol[]): XSymbol[] {
+  return versionSymbols(symbols).filter((sym) => !sym.canary);
+}
+
+/** 写死三段式版本、又没有配对期望值的地方——版本事实源被绕过，全部要红。 */
+function hardcodedVersionProblems(symbols: XSymbol[]): string[] {
+  return versionSymbols(symbols)
+    .filter((sym) => NUMERIC_VERSION.test(sym.value ?? "") && !sym.canary)
+    .map((sym) => `${sym.file}:${sym.line} 把版本号写死成 ${sym.value}，且同一步里没有 ${CANARY_ENV}=${sym.value}（版本事实源只能是 tag）`);
+}
+
 describe("构建期版本注入符号必须打中 Go 声明（轮51）", () => {
   const module = goModule();
   const all = BUILD_ENTRYPOINTS.flatMap((file) => ldflagsSymbols(file));
@@ -141,22 +174,28 @@ describe("构建期版本注入符号必须打中 Go 声明（轮51）", () => {
   });
 
   it("release.yml 确实注入版本号（漏注入 = 线上永远是 dev）", () => {
-    expect(versionSymbols(ldflagsSymbols(RELEASE_WORKFLOW)).length, `${RELEASE_WORKFLOW} 没有注入 appVersion`).toBe(1);
+    expect(shippingVersionSymbols(ldflagsSymbols(RELEASE_WORKFLOW)).length, `${RELEASE_WORKFLOW} 没有注入 appVersion`).toBe(1);
+  });
+
+  it("预检作业的金丝雀注入配对成立（写死值必须同时被期望值钉住）", () => {
+    const canaries = versionSymbols(ldflagsSymbols(RELEASE_WORKFLOW)).filter((sym) => sym.canary);
+    expect(canaries.length, "轮52 加的 Version injection evidence 步骤不见了，注入是否打得中又只能靠肉眼").toBe(1);
+    expect(canaries[0].importPath, "金丝雀必须打中变量真实所在的包").toBe("confscope/internal/app");
   });
 
   it("本地构建脚本也必须注入，且版本来自 git describe（防止只有 CI 是对的）", () => {
     for (const file of [SH_BUILDER, PS1_BUILDER]) {
-      expect(versionSymbols(ldflagsSymbols(file)).length, `${file} 没注入 appVersion`).toBeGreaterThanOrEqual(1);
+      expect(shippingVersionSymbols(ldflagsSymbols(file)).length, `${file} 没注入 appVersion`).toBeGreaterThanOrEqual(1);
       expect(readBuildEntrypoint(file), `${file} 的版本号没走 git describe`).toMatch(/git\s+describe/);
     }
   });
 
   it("CI 版本事实源是 tag，脚本里不许写死版本号", () => {
     expect(readBuildEntrypoint(RELEASE_WORKFLOW)).toMatch(/VERSION="\$\{GITHUB_REF_NAME#v\}"/);
-    for (const file of BUILD_ENTRYPOINTS) {
-      const text = readBuildEntrypoint(file);
-      expect(text, `${file} 里出现了写死的三段式版本号`).not.toMatch(/appVersion=\s*["']?\d+\.\d+\.\d+/);
-    }
+    const problems = BUILD_ENTRYPOINTS.flatMap((file) => hardcodedVersionProblems(ldflagsSymbols(file)));
+    expect(problems, "发布链路上出现了写死的版本号").toEqual([]);
+    // 出包那条注入的实参必须是 tag 推导出来的变量，不能是常量
+    expect(shippingVersionSymbols(ldflagsSymbols(RELEASE_WORKFLOW))[0].value).toMatch(/\$\{?VERSION\}?/);
   });
 
   it("被注入的 Go 变量是 string 且默认 dev（类型错了链接器照样静默）", () => {
@@ -187,6 +226,30 @@ describe("构建期版本注入符号必须打中 Go 声明（轮51）", () => {
 
   it("自检：release.yml 漏掉 -X 注入必须判红", () => {
     expect(versionSymbols(ldflagsSymbols("tests/ux/fixtures/noVersionInject.yml")).length).toBe(0);
+  });
+
+  it("自检：金丝雀的期望值被删掉、或与注入值对不上，都要按写死版本号判红", () => {
+    const text = readBuildEntrypoint(RELEASE_WORKFLOW);
+    expect(hardcodedVersionProblems(ldflagsSymbols(RELEASE_WORKFLOW))).toEqual([]);
+
+    const unpaired = extractSymbols(
+      text.replace(`${CANARY_ENV}=9.9.9 go test`, "go test"),
+      RELEASE_WORKFLOW
+    );
+    expect(hardcodedVersionProblems(unpaired).length, "删掉期望值后这条写死的注入该被当成版本事实源漂移").toBe(1);
+
+    const mismatched = extractSymbols(
+      text.replace(`${CANARY_ENV}=9.9.9 go test`, `${CANARY_ENV}=9.9.8 go test`),
+      RELEASE_WORKFLOW
+    );
+    expect(hardcodedVersionProblems(mismatched).length, "期望值与注入值不一致 ⇒ 金丝雀自证失效").toBe(1);
+
+    const rogue = extractSymbols(
+      text.replace("-X confscope/internal/app.appVersion=${VERSION}", "-X confscope/internal/app.appVersion=1.2.3"),
+      RELEASE_WORKFLOW
+    );
+    expect(hardcodedVersionProblems(rogue).length, "出包那条注入被写死，必须红").toBe(1);
+    expect(shippingVersionSymbols(rogue)[0].value).toBe("1.2.3");
   });
 
   it("YAML 注释里的历史写法不判红（守卫不能在自己解释自己的注释上自红）", () => {
