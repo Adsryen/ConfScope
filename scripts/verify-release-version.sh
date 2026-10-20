@@ -8,6 +8,12 @@
 # 而 parseVersion("dev") 等价 0.0.0 ⇒「检查更新」永远提示有新版本。
 # 这类漂移不会产生任何报错，只能靠可执行证据拦在发版前。
 #
+# 轮52 在这条闸门上补了两件事，因为它们是同一个洞的另一半：
+#   - 发版链路此前一条检查都不跑（vite/esbuild 只剥类型），所以这里跑过的守卫
+#     要在 CI 的 preflight 作业里同样跑一遍（release.yml 里判据由守卫钉住）；
+#   - update.json 的 notes 原先取自「尚未创建的 Release」，线上恒为占位文案，
+#     现在由 scripts/extract-release-notes.mjs 从 CHANGELOG 抽，抽不到就别发。
+#
 # 用法:
 #   scripts/verify-release-version.sh                 # 以 package.json 的版本号自检
 #   scripts/verify-release-version.sh --version 1.9.2 # 显式指定待发布版本
@@ -99,16 +105,30 @@ echo ">> 4) 静态守卫与单测"
 if npx vitest run --reporter=dot \
     tests/ux/buildVersionSymbolResolvesToGoDeclaration.test.ts \
     tests/ux/backgroundUpdateCheckSkipsUnreleasedBuild.test.ts \
+    tests/ux/releaseChainContractStaysAligned.test.ts \
     src/lib/appVersion.test.ts >/dev/null 2>&1; then
-  ok "版本号相关的 3 个测试文件全绿"
+  ok "版本链路与发版契约相关的 4 个测试文件全绿"
 else
-  bad "版本号相关的守卫或单测有红，见上面用例名"
+  bad "版本号或发版契约的守卫/单测有红，见上面用例名"
+fi
+
+echo ">> 5) 发版说明能真的抽出来（update.json 的 notes 是直接给用户看的文字）"
+NOTES_OUT="$(node scripts/extract-release-notes.mjs "$VERSION" 2>/dev/null)" || NOTES_OUT=""
+if [ -n "$NOTES_OUT" ]; then
+  ok "CHANGELOG 的 [$VERSION] 段落抽出 $(printf '%s\n' "$NOTES_OUT" | wc -l) 行发行说明"
+else
+  bad "抽不出 [$VERSION] 的发行说明：CI 出包会在这一步红，别带着占位文案发布"
+fi
+if grep -q -- "extract-release-notes.mjs" .github/workflows/release.yml; then
+  ok "release.yml 的 notes 走 extract-release-notes.mjs（不再读尚未创建的 Release）"
+else
+  bad "release.yml 不再调用 extract-release-notes.mjs：更新说明会退回「发行版 x.y.z」"
 fi
 
 if [ "$SKIP_BUNDLE" -eq 1 ]; then
-  echo ">> 5) 前端构建与生产守卫：已按 --skip-bundle 跳过"
+  echo ">> 6) 前端构建与生产守卫：已按 --skip-bundle 跳过"
 else
-  echo ">> 5) 前端构建与生产守卫（脚手架不得混进产物）"
+  echo ">> 6) 前端构建与生产守卫（脚手架不得混进产物）"
   if pnpm build:web >/dev/null 2>&1 && pnpm check:bundle >/dev/null 2>&1; then
     ok "pnpm build:web + check:bundle 通过"
   else
