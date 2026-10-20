@@ -225,18 +225,69 @@ function docReader(documents: Record<string, ConfigDocument | null>) {
   });
 }
 
+/**
+ * 假 provider：**写入会改内存里的那份文档**，后续读取读到写后的值。
+ *
+ * 轮55 B线之前这套 fixture 的 publishConfig 是个空 mock——写完再读还是旧值，
+ * 这跟真机行为不一样，会把「写后回读验证」的每条正常用例都拖成 drift 退避（1.1 秒）。
+ * 现在直接改传进来的 documents（同一对象引用，批读并发那组用例也靠它拿到写后值），
+ * 想模拟「写了但读不到」的用例再单独覆盖 getConfigDocument。
+ */
+function applyDocWrite(documents: Record<string, ConfigDocument | null>, connId: string, dataId: string, content: string, configType: string) {
+  documents[`${connId}:${dataId}`] = doc(content, configType, "v-after-write");
+}
+
+function applyKeyWrite(documents: Record<string, ConfigDocument | null>, connId: string, dataId: string, key: string, content: string, configType: string) {
+  const current = documents[`${connId}:${dataId}`];
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^\\s*${escapedKey}\\s*[:=]\\s*.*$`, "m");
+  const body = current?.content ?? "";
+  const written = `${key}=${content}`;
+  const next = pattern.test(body) ? body.replace(pattern, written) : `${body}${body && !body.endsWith("\n") ? "\n" : ""}${written}\n`;
+  documents[`${connId}:${dataId}`] = doc(next, current?.format ?? configType, "v-after-write");
+}
+
 function deps(documents: Record<string, ConfigDocument | null>, overrides: { backupReject?: Error; publishReject?: Error } = {}) {
   const manager = taskManager();
   const recordOperation = vi.fn((input: Omit<OperationRecord, "id" | "timestamp">): OperationRecord => {
     return { ...input, id: "history-1", timestamp: "2026-07-06T00:00:00.000Z" };
   });
+  const publishConfigImpl = async (conn: Connection, _namespace: string, dataId: string, _group: string, content: string, configType: string) => {
+    if (overrides.publishReject) throw overrides.publishReject;
+    applyDocWrite(documents, conn.id, dataId, content, configType);
+  };
+  const deleteConfigImpl = async (conn: Connection, _namespace: string, dataId: string) => {
+    documents[`${conn.id}:${dataId}`] = null;
+  };
+  const publishConfigRefImpl = async (
+    conn: Connection,
+    refValue: { dataId: string; key: string },
+    content: string,
+    configType: string
+  ) => {
+    if (refValue.key === "__document") applyDocWrite(documents, conn.id, refValue.dataId, content, configType);
+    else applyKeyWrite(documents, conn.id, refValue.dataId, refValue.key, content, configType);
+  };
+  const deleteConfigRefImpl = async (conn: Connection, refValue: { dataId: string; key: string }) => {
+    if (refValue.key === "__document") {
+      documents[`${conn.id}:${refValue.dataId}`] = null;
+      return;
+    }
+    // key 级删除是「整行没了」，不是「值变空串」——回读要按 exists:false 判确认
+    const current = documents[`${conn.id}:${refValue.dataId}`];
+    const escapedKey = refValue.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const withoutKey = (current?.content ?? "").replace(new RegExp(`^\\s*${escapedKey}\\s*[:=].*\\n?`, "m"), "");
+    documents[`${conn.id}:${refValue.dataId}`] = withoutKey
+      ? doc(withoutKey, current?.format ?? "properties", "v-after-write")
+      : null;
+  };
   return {
     connections: [sourceConnection, targetConnection],
     getConfigDocument: docReader(documents),
-    publishConfig: overrides.publishReject ? vi.fn().mockRejectedValue(overrides.publishReject) : vi.fn().mockResolvedValue(undefined),
-    deleteConfig: vi.fn().mockResolvedValue(undefined),
-    publishConfigRef: vi.fn().mockResolvedValue(undefined),
-    deleteConfigRef: vi.fn().mockResolvedValue(undefined),
+    publishConfig: overrides.publishReject ? vi.fn().mockRejectedValue(overrides.publishReject) : vi.fn(publishConfigImpl),
+    deleteConfig: vi.fn(deleteConfigImpl),
+    publishConfigRef: vi.fn(publishConfigRefImpl),
+    deleteConfigRef: vi.fn(deleteConfigRefImpl),
     createBackupSnapshot: overrides.backupReject
       ? vi.fn().mockRejectedValue(overrides.backupReject)
       : vi.fn().mockResolvedValue({ id: "snap-before-1", name: "prod_before_apply" }),
@@ -329,7 +380,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 3, confirmedCount: 3, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfig).toHaveBeenCalledWith(targetConnection, "public", "changed.yaml", "DEFAULT_GROUP", "next changed", "yaml");
     expect(runDeps.publishConfig).toHaveBeenCalledWith(targetConnection, "public", "created.yaml", "DEFAULT_GROUP", "new file", "yaml");
     expect(runDeps.deleteConfig).toHaveBeenCalledWith(targetConnection, "public", "removed.yaml", "DEFAULT_GROUP");
@@ -357,7 +413,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.taskManager.createTask).toHaveBeenCalledWith(expect.stringContaining("plan-1"), "restore", {
       scope: "Prod / public",
       cancellable: false,
@@ -395,7 +456,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.getConfigDocument).toHaveBeenCalledWith(sourceConnection, "public", "source.yaml", "DEFAULT_GROUP");
     expect(runDeps.publishConfig).toHaveBeenCalledWith(targetConnection, "public", "target.yaml", "DEFAULT_GROUP", "next from source", "yaml");
   });
@@ -490,7 +556,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfigRef).toHaveBeenCalledWith(apolloTarget, targetRef, "enabled", "properties");
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
@@ -582,7 +653,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 3, confirmedCount: 3, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfigRef).toHaveBeenCalledWith(
       consulTarget,
       expect.objectContaining({ dataId: "apps/order/app.yaml", expectedVersion: "42" }),
@@ -706,7 +782,12 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps, { selectedItemIds: [plan.items[0].id] });
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
     expect(runDeps.createBackupSnapshot).toHaveBeenCalledTimes(1);
@@ -779,9 +860,14 @@ describe("executeApplyPlan", () => {
         { dataId: "changed.yaml", fromCall: 99, failFromCall: 3 }
       );
 
-      const result = await executeApplyPlan(plan, runDeps);
+      const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0, 0, 0] });
 
-      expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+      expect(result).toEqual({
+        ok: true,
+        taskId: "task-apply-1",
+        historyId: "history-1",
+        verification: expect.objectContaining({ total: 1, confirmedCount: 0, drifted: [], unreadable: [expect.stringContaining("changed.yaml")] }),
+      });
       expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
     });
 
@@ -790,16 +876,19 @@ describe("executeApplyPlan", () => {
         { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
         { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
       ]);
-      const base = deps({
+      const documents: Record<string, ConfigDocument | null> = {
         "conn-dev:a.yaml": doc("a2"),
         "conn-prod:a.yaml": doc("a1"),
         "conn-dev:b.yaml": doc("b2"),
         "conn-prod:b.yaml": doc("b1"),
-      });
+      };
+      const base = deps(documents);
       const runDeps = {
         ...base,
-        publishConfig: vi.fn(async (_conn: Connection, _namespace: string, dataId: string) => {
+        // 只有 b 被 provider 拒了，a 照常落到假 store 上——不然写后回读会把正常项判成漂移
+        publishConfig: vi.fn(async (conn: Connection, _namespace: string, dataId: string, _group: string, content: string, configType: string) => {
           if (dataId === "b.yaml") throw new Error("publish denied: b.yaml");
+          applyDocWrite(documents, conn.id, dataId, content, configType);
         }),
       };
 
@@ -929,7 +1018,12 @@ describe("content-replace 风格计划（source override + 原文基线指纹）
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfig).toHaveBeenCalledWith(targetConnection, "public", "app.yaml", "DEFAULT_GROUP", REPLACED, "yaml");
     expect(runDeps.createBackupSnapshot).toHaveBeenCalled();
   });
@@ -958,7 +1052,12 @@ describe("content-replace 风格计划（source override + 原文基线指纹）
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
     expect(runDeps.publishConfig).toHaveBeenCalledWith(sourceConnection, "public", "app.yaml", "DEFAULT_GROUP", REPLACED, "yaml");
     expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
   });
@@ -1013,16 +1112,18 @@ describe("executeApplyPlan 写后失效广播", () => {
       { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
       { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
     ]);
-    const base = deps({
+    const documents: Record<string, ConfigDocument | null> = {
       "conn-dev:a.yaml": doc("a2"),
       "conn-prod:a.yaml": doc("a1"),
       "conn-dev:b.yaml": doc("b2"),
       "conn-prod:b.yaml": doc("b1"),
-    });
+    };
+    const base = deps(documents);
     const runDeps = {
       ...base,
-      publishConfig: vi.fn(async (_conn: Connection, _namespace: string, dataId: string) => {
+      publishConfig: vi.fn(async (conn: Connection, _namespace: string, dataId: string, _group: string, content: string, configType: string) => {
         if (dataId === "b.yaml") throw new Error("publish denied: b.yaml");
+        applyDocWrite(documents, conn.id, dataId, content, configType);
       }),
       onConfigsChanged: vi.fn(),
     };
@@ -1060,7 +1161,12 @@ describe("executeApplyPlan 写后失效广播", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+    expect(result).toEqual({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1, drifted: [], unreadable: [] }),
+    });
   });
 });
 
@@ -1100,5 +1206,225 @@ describe("executeApplyPlan 批读并发", () => {
     // 并发回填必须与计划同序：备份快照的顺序决定了历史页「写前现场」的对应关系
     const configs = runDeps.createBackupSnapshot.mock.calls[0][0] as Array<{ dataId: string }>;
     expect(configs.map((config) => config.dataId)).toEqual(dataIds);
+  });
+});
+
+// ── 轮55 B线：写后回读验证（R55-B1）──
+
+describe("executeApplyPlan 写后回读验证", () => {
+  /**
+   * 目标连接上「第 fromCall 次（含）之后」的读取返回另一份内容。
+   * 单项计划下目标读取顺序固定：①批量新鲜度 ②写前备份快照 ③写入前复检 ④起是写后回读。
+   */
+  function depsWithTargetReads(
+    documents: Record<string, ConfigDocument | null>,
+    options: { dataId: string; contentForRead: (targetReads: number) => string | null | undefined; fromCall: number }
+  ) {
+    const runDeps = deps(documents);
+    const original = runDeps.getConfigDocument;
+    let targetReads = 0;
+    runDeps.getConfigDocument = vi.fn(async (conn: Connection, namespace: string, dataId: string, group: string) => {
+      if (conn.id === "conn-prod" && dataId === options.dataId) {
+        targetReads += 1;
+        const override = targetReads >= options.fromCall ? options.contentForRead(targetReads) : undefined;
+        if (override === undefined) return original(conn, namespace, dataId, group);
+        if (override === null) throw new Error(`404 not found: ${conn.id}/${dataId}`);
+        return doc(override, "yaml", `read-${targetReads}`);
+      }
+      return original(conn, namespace, dataId, group);
+    });
+    return runDeps;
+  }
+
+  it("首读还是旧值、二读追上写入值时判 confirmed——默认退避必须真跑满可见窗口", async () => {
+    const plan = applyPlan([{ ref: ref("lagging.yaml"), sourceValue: documentValue("new"), targetValue: absentValue() }]);
+    const documents: Record<string, ConfigDocument | null> = { "conn-dev:lagging.yaml": doc("new") };
+    // 只有回读会打到 conn-prod:第 4 次读（写完第一次）返回旧值，之后返回写后的值
+    const runDeps = depsWithTargetReads(documents, {
+      dataId: "lagging.yaml",
+      fromCall: 4,
+      contentForRead: (targetReads) => (targetReads === 4 ? "not-yet-visible" : "new"),
+    });
+
+    const startedAt = Date.now();
+    const result = await executeApplyPlan(plan, runDeps);
+    const elapsed = Date.now() - startedAt;
+
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    expect(result.verification).toMatchObject({
+      total: 1,
+      confirmedCount: 1,
+      drifted: [],
+      unreadable: [],
+      items: [{ ref: "public/DEFAULT_GROUP/lagging.yaml", verdict: "confirmed" }],
+    });
+    // 真机取证：单节点 loopback 写后可见窗口 54–145ms，所以第二次读要等过退避才可能追上
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+  });
+
+  it("覆盖写后一直读到旧值判 drifted，而不是替用户断言写入成功", async () => {
+    const plan = applyPlan([{ ref: ref("stale.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    const runDeps = depsWithTargetReads(
+      { "conn-dev:stale.yaml": doc("new"), "conn-prod:stale.yaml": doc("old") },
+      { dataId: "stale.yaml", fromCall: 4, contentForRead: () => "old" }
+    );
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0, 0, 0, 0] });
+
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    // 验证不翻转执行结果：写请求已经落库，回读不一致是「要人看一眼」而不是「执行失败」
+    expect(result.historyId).toBe("history-1");
+    expect(result.verification).toMatchObject({
+      total: 1,
+      confirmedCount: 0,
+      drifted: ["public/DEFAULT_GROUP/stale.yaml"],
+      unreadable: [],
+    });
+  });
+
+  it("删除后目标仍读得到就算没删掉（drifted），窗口内消失才算确认", async () => {
+    const plan = applyPlan([{ ref: ref("gone.yaml"), sourceValue: absentValue(), targetValue: documentValue("old") }]);
+    const stillThere = depsWithTargetReads({ "conn-prod:gone.yaml": doc("old") }, {
+      dataId: "gone.yaml",
+      fromCall: 4,
+      contentForRead: () => "old",
+    });
+
+    const drifted = await executeApplyPlan(plan, stillThere, { verifyDelaysMs: [0, 0] });
+    if (!drifted.ok || "dryRun" in drifted) throw new Error("expected execution to succeed");
+    expect(drifted.verification).toMatchObject({ total: 1, confirmedCount: 0, drifted: ["public/DEFAULT_GROUP/gone.yaml"] });
+    expect(stillThere.deleteConfig).toHaveBeenCalledTimes(1);
+
+    const documents: Record<string, ConfigDocument | null> = { "conn-prod:gone.yaml": doc("old") };
+    const confirmedDeps = deps(documents);
+    const original = confirmedDeps.getConfigDocument;
+    let deleteSettled = false;
+    setTimeout(() => {
+      deleteSettled = true;
+    }, 160);
+    confirmedDeps.getConfigDocument = vi.fn(async (conn: Connection, namespace: string, dataId: string, group: string) => {
+      if (conn.id === "conn-prod" && dataId === "gone.yaml" && deleteSettled) throw new Error("404 not found");
+      return original(conn, namespace, dataId, group);
+    });
+
+    const confirmed = await executeApplyPlan(plan, confirmedDeps);
+    if (!confirmed.ok || "dryRun" in confirmed) throw new Error("expected execution to succeed");
+    expect(confirmed.verification).toMatchObject({ total: 1, confirmedCount: 1, drifted: [] });
+  });
+
+  it("回读本身失败时判 unreadable，既不说成功也不说写坏", async () => {
+    const plan = applyPlan([{ ref: ref("noisy.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    const base = deps({ "conn-dev:noisy.yaml": doc("new"), "conn-prod:noisy.yaml": doc("old") });
+    const healthyRead = base.getConfigDocument;
+    let prodReads = 0;
+    base.getConfigDocument = vi.fn(async (conn: Connection, namespace: string, dataId: string, group: string) => {
+      if (conn.id === "conn-prod") {
+        prodReads += 1;
+        // ①批量新鲜度 ②写前快照 ③写前复检都还是好的，从第 4 次（写后回读）起整条读路断了
+        if (prodReads > 3) throw new Error("500 Internal Server Error");
+      }
+      return healthyRead(conn, namespace, dataId, group);
+    });
+
+    const result = await executeApplyPlan(plan, base, { verifyDelaysMs: [0, 0] });
+
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    expect(result.verification).toMatchObject({
+      total: 1,
+      confirmedCount: 0,
+      drifted: [],
+      unreadable: ["public/DEFAULT_GROUP/noisy.yaml"],
+    });
+  });
+
+  it("key 级写入按这一项的回读值确认，不看整篇正文也不看 md5", async () => {
+    const apolloTarget: Connection = { ...targetConnection, id: "apollo-prod", provider: "apollo", apolloEnv: "DEV" };
+    const apolloSource: Connection = { ...sourceConnection, id: "apollo-dev", provider: "apollo", apolloEnv: "DEV" };
+    const keyRef: BuildApplyPlanInput["items"][number]["ref"] = {
+      provider: "apollo",
+      connectionId: "apollo-prod",
+      namespace: "order-service",
+      group: "default",
+      dataId: "application",
+      key: "feature.enabled",
+    };
+    const plan = buildApplyPlan({
+      id: "plan-apollo-verify",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "key",
+      source: planEndpoint(apolloSource, "Apollo Dev / application"),
+      target: planEndpoint(apolloTarget, "Apollo Prod / application"),
+      inputSummary: {
+        sourceType: "audit",
+        scope: "key",
+        sourceLabel: "Apollo Dev / application",
+        targetLabel: "Apollo Prod / application",
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: keyRef,
+          sourceRef: { ...keyRef, connectionId: "apollo-dev" },
+          targetRef: keyRef,
+          sourceValue: { exists: true, value: "enabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+          targetValue: { exists: true, value: "disabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+        },
+      ],
+    });
+    const runDeps = deps({
+      "apollo-dev:application": doc("feature.enabled=enabled", "properties"),
+      "apollo-prod:application": doc("feature.enabled=disabled", "properties"),
+    });
+    runDeps.connections = [apolloSource, apolloTarget];
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    expect(result.verification).toMatchObject({
+      total: 1,
+      confirmedCount: 1,
+      items: [{ ref: "order-service/default/application (feature.enabled)", verdict: "confirmed" }],
+    });
+  });
+
+  it("半截写入：失败项之前落成功的条目照样回读，进度与验证一起给", async () => {
+    const plan = applyPlan([
+      { ref: ref("kept.yaml"), sourceValue: documentValue("kept2"), targetValue: documentValue("kept1") },
+      { ref: ref("broken.yaml"), sourceValue: documentValue("broken2"), targetValue: documentValue("broken1") },
+    ]);
+    const documents: Record<string, ConfigDocument | null> = {
+      "conn-dev:kept.yaml": doc("kept2"),
+      "conn-prod:kept.yaml": doc("kept1"),
+      "conn-dev:broken.yaml": doc("broken2"),
+      "conn-prod:broken.yaml": doc("broken1"),
+    };
+    const base = deps(documents);
+    base.publishConfig = vi.fn(async (conn: Connection, _namespace: string, dataId: string, _group: string, content: string, configType: string) => {
+      if (dataId === "broken.yaml") throw new Error("publish denied: broken.yaml");
+      applyDocWrite(documents, conn.id, dataId, content, configType);
+    });
+
+    const result = await executeApplyPlan(plan, base, { verifyDelaysMs: [0, 0] });
+
+    if (result.ok) throw new Error("expected execution to fail");
+    expect(result.progress).toMatchObject({ completedWrites: 1, totalWrites: 2, failedIndex: 2 });
+    expect(result.verification).toMatchObject({
+      total: 1,
+      confirmedCount: 1,
+      drifted: [],
+      unreadable: [],
+      items: [{ ref: "public/DEFAULT_GROUP/kept.yaml", verdict: "confirmed" }],
+    });
+  });
+
+  it("dry-run 一条都不回读，也不带验证结论", async () => {
+    const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    const runDeps = deps({ "conn-dev:changed.yaml": doc("new"), "conn-prod:changed.yaml": doc("old") });
+
+    const result = await executeApplyPlan(plan, runDeps, { dryRun: true });
+
+    expect("verification" in result).toBe(false);
+    // 目标侧只有批量新鲜度一次读取，没有写前快照、没有复检、没有回读
+    expect(runDeps.getConfigDocument.mock.calls.filter((call: unknown[]) => (call[0] as Connection).id === "conn-prod")).toHaveLength(1);
   });
 });

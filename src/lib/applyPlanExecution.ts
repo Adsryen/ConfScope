@@ -68,12 +68,54 @@ export interface ExecuteApplyPlanOptions {
   onTaskCreated?: (taskId: string) => void;
   /** 逐项写入完成回调（成功或失败即回调；供变更会话记录落盘完整现场）。 */
   onItemResult?: (result: ApplyItemWriteResult) => void;
+  /**
+   * 写后回读的重试节奏（毫秒），默认 WRITE_VERIFY_DELAYS_MS。
+   * 留给测试注入 `[0]` —— 否则每条未确认项要真的等满 1.1 秒退避。
+   */
+  verifyDelaysMs?: number[];
 }
 
 export type ExecuteApplyPlanResult =
-  | { ok: true; taskId: string; historyId: string }
+  | { ok: true; taskId: string; historyId: string; verification?: ApplyWriteVerification }
   | { ok: true; dryRun: true; taskId: string; plannedWrites: number }
-  | { ok: false; taskId?: string; historyId?: string; error: string; progress?: ApplyExecutionProgress };
+  | {
+      ok: false;
+      taskId?: string;
+      historyId?: string;
+      error: string;
+      progress?: ApplyExecutionProgress;
+      /** 半截写入时同样回读（B1）：失败前落成功的那几条到底生效没有，必须能报出来。 */
+      verification?: ApplyWriteVerification;
+    };
+
+/**
+ * 写后回读的三态（R55-B1）。
+ *
+ * `confirmed` 是「回读到了我们写进去的那一份」；`drifted` 是「回读到了，但不是那一份」；
+ * `unreadable` 是「回读这条路本身断了」（非 404 的读取错误），现值未知，
+ * 既不能替用户说「写成功了」，也不能说「写坏了」。
+ */
+export type ApplyWriteVerdict = "confirmed" | "drifted" | "unreadable";
+
+export interface ApplyWriteVerificationItem {
+  /** 人读标签：`命名空间/分组/dataId (+ key)`，不是 itemId 的 `|` 拼接串。 */
+  ref: string;
+  verdict: ApplyWriteVerdict;
+}
+
+export interface ApplyWriteVerification {
+  /** 参与验证的项数 = 真正落笔成功的写入数。 */
+  total: number;
+  confirmedCount: number;
+  /** 回读到了、但不是写进去的那一份。 */
+  drifted: string[];
+  /** 回读这条路本身断了（非 404 的读取错误），现值未知。 */
+  unreadable: string[];
+  /** `drifted + unreadable`，界面用它决定这轮结论该报成功还是报警告。 */
+  unconfirmedCount: number;
+  /** 逐项三态，供会话事件留完整现场（界面只用上面三个汇总）。 */
+  items: ApplyWriteVerificationItem[];
+}
 
 /**
  * 失败时外露的执行进度（R55-A2，轮54 复检）。
@@ -379,7 +421,8 @@ function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
   const writes: PlannedWrite[] = [];
   for (const item of plan.items) {
     const ref = targetRef(item);
-    if (item.blocked || item.action === "parse_error") return translate("apply.blockedItem", { id: item.id });
+    // 阻断项本来就被界面过滤掉了，这条是兜底出路；文案里吐 itemId 的 `|` 拼接串等于没说（R55-B4）
+    if (item.blocked || item.action === "parse_error") return translate("apply.blockedItem", { id: itemRefLabel(ref) });
     if (item.action === "skip") continue;
     if (ref.key !== DOCUMENT_KEY) {
       if (!isProviderKeyWriteSupported(item)) {
@@ -415,6 +458,90 @@ function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
     }
   }
   return writes;
+}
+
+/** 写后可见窗口（真机取证，轮55 B线）：单节点 loopback 也要 54–145ms 才读得到新值。 */
+export const WRITE_VERIFY_DELAYS_MS = [0, 150, 350, 600] as const;
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+/** 落成功、需要回读确认的写入，连同它的人读标签（回读时 ref 已不会再变，先算好）。 */
+interface WrittenWrite {
+  write: PlannedWrite;
+  refLabel: string;
+}
+
+/**
+ * 写入值与回读值是不是同一份（R55-B1）。
+ *
+ * 口径刻意不用 fingerprint：`fingerprintApplyPlanValue` 把 md5 / format / parseStatus
+ * 一起卷了进去，而 `afterValue` 是计划阶段造的、回读值是现读现算的，两边不同源，
+ * 比出来的差异绝大多数是噪声（真机 detail 接口的 md5 在 showAll 下还恒为 null）。
+ * 取证结论是 provider 原样保留正文——CRLF、尾随空格、无尾换行都不改写——所以直接比字符串：
+ * 整篇写入比整篇正文，key 级写入比这一项读回来的值，删除比「读不到了」。
+ */
+function writeMatchesReadBack(write: PlannedWrite, current: ApplyPlanValueInput): boolean {
+  if (write.kind === "delete" || write.kind === "delete_ref") return !current.exists;
+  if (!current.exists) return false;
+  const actual = current.content ?? current.value;
+  if (actual === undefined) return false;
+  return actual === (write.content ?? "");
+}
+
+async function verifyWrittenWrite(
+  item: ApplyPlanItem,
+  write: PlannedWrite,
+  targetConnection: Connection,
+  deps: ExecuteApplyPlanDeps
+): Promise<ApplyWriteVerdict> {
+  let current: ApplyPlanValueInput;
+  try {
+    current = await readCurrentValue(item, targetConnection, "target", deps);
+  } catch {
+    // readCurrentValue 已经把 404 归成「不存在」，走到这儿只剩读取本身失败
+    return "unreadable";
+  }
+  return writeMatchesReadBack(write, current) ? "confirmed" : "drifted";
+}
+
+/**
+ * 写后回读验证（R55-B1）。
+ *
+ * 放在整轮写入之后而不是逐条夹在循环里，有两个原因：
+ * 一是「一失败就停」的循环要保持写入语义干净，回读不能把失败项的序号搅乱；
+ * 二是回读天然适合并发——项与项之间没有依赖，按 BATCH_READ_CONCURRENCY 收口后
+ * 多项的最坏总耗时和单项一样是 1.1 秒，而不是项数的倍数。
+ */
+export async function verifyWrittenWrites(
+  written: WrittenWrite[],
+  targetConnection: Connection,
+  deps: ExecuteApplyPlanDeps,
+  options: ExecuteApplyPlanOptions
+): Promise<ApplyWriteVerification | undefined> {
+  if (!written.length) return undefined;
+  const delays = options.verifyDelaysMs?.length ? options.verifyDelaysMs : [...WRITE_VERIFY_DELAYS_MS];
+  const items = await mapWithConcurrency(written, BATCH_READ_CONCURRENCY, async ({ write, refLabel }) => {
+    let verdict: ApplyWriteVerdict = "unreadable";
+    for (const delay of delays) {
+      await sleep(delay);
+      verdict = await verifyWrittenWrite(write.item, write, targetConnection, deps);
+      if (verdict === "confirmed") break;
+    }
+    return { ref: refLabel, verdict };
+  });
+  const drifted = items.filter((item) => item.verdict === "drifted").map((item) => item.ref);
+  const unreadable = items.filter((item) => item.verdict === "unreadable").map((item) => item.ref);
+  return {
+    total: items.length,
+    confirmedCount: items.filter((item) => item.verdict === "confirmed").length,
+    drifted,
+    unreadable,
+    // 界面判定「这条结论能不能直接往下走」只看这一个数，别再各自把两个数组加一遍
+    unconfirmedCount: drifted.length + unreadable.length,
+    items,
+  };
 }
 
 function emptyBackup(): ApplyBackupSummary {
@@ -467,7 +594,8 @@ function recordFailure(
   error: string,
   backup: ApplyBackupSummary = emptyBackup(),
   recordHistory = true,
-  progress?: ApplyExecutionProgress
+  progress?: ApplyExecutionProgress,
+  verification?: ApplyWriteVerification
 ): ExecuteApplyPlanResult {
   let historyId = "";
   if (recordHistory) {
@@ -482,7 +610,9 @@ function recordFailure(
     historyId = history.id;
   }
   deps.taskManager.completeTask(taskId, false, error);
-  return recordHistory ? { ok: false, taskId, historyId, error, progress } : { ok: false, taskId, error, progress };
+  return recordHistory
+    ? { ok: false, taskId, historyId, error, progress, verification }
+    : { ok: false, taskId, error, progress, verification };
 }
 
 export async function executeApplyPlan(
@@ -550,6 +680,8 @@ export async function executeApplyPlan(
     // 失败项在本次写入序列里的位置与人读标签（R55-A2）：一失败就停，但
     // 「停在哪一条、前面写了几条」必须能报给界面，所以计数声明在 try 外面。
     let processed = 0;
+    // 落成功的写入：整轮跑完后按 BATCH_READ_CONCURRENCY 并发回读确认（R55-B1）
+    const writtenWrites: WrittenWrite[] = [];
     let attemptedIndex = 0;
     let attemptedRefLabel = "";
     let completedWrites = 0;
@@ -621,24 +753,30 @@ export async function executeApplyPlan(
             // 会话记录失败不阻断执行
           }
         }
-        if (!itemError) writtenRefs.push({ namespace: ref.namespace, dataId: ref.dataId, group: ref.group });
+        if (!itemError) {
+          writtenRefs.push({ namespace: ref.namespace, dataId: ref.dataId, group: ref.group });
+          writtenWrites.push({ write, refLabel: itemRefLabel(ref) });
+        }
         if (itemError) throw new Error(itemError);
       }
     } catch (error) {
-      // 部分写入：失败项之前落成功的那些已经改过服务端了，同样要广播失效
+      // 部分写入：失败项之前落成功的那些已经改过服务端了，先回读确认它们到底生效没有，
+      // 再广播失效——回读排在广播之前，免得保活视图在可见窗口里重取到旧值。
+      const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options);
       notifyConfigsChanged();
       return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, true, {
         completedWrites,
         totalWrites: writes.length,
         failedIndex: attemptedIndex,
         failedRef: attemptedRefLabel,
-      });
+      }, verification);
     }
 
+    const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options);
     const history = deps.recordOperation(safety.historyInput);
     deps.taskManager.completeTask(taskId, true);
     notifyConfigsChanged();
-    return { ok: true, taskId, historyId: history.id };
+    return { ok: true, taskId, historyId: history.id, verification };
   } catch (error) {
     notifyConfigsChanged();
     return recordFailure(workingPlan, deps, taskId, errorText(error), emptyBackup(), !options.dryRun);

@@ -248,6 +248,13 @@ export function withEditedAfterValue(item: ApplyPlanItem, content: string): Appl
     blocked = false;
     blockReason = undefined;
   }
+  // 人工编辑可以把内容清空、也可以改出一段纯空白——这条路同样绕不过 Nacos 的
+  // `content is blank`，所以计划阶段的阻断必须在这里补一遍，否则界面上「可执行」
+  // 的计划跑到执行才炸（R55-B4）。
+  if (!blocked && isBlankDocumentWrite(ref, action, afterValue)) {
+    blocked = true;
+    blockReason = BLANK_CONTENT_REASON;
+  }
   return {
     ...item,
     afterValue,
@@ -268,6 +275,29 @@ function classify(source: ApplyPlanValueSnapshot, target: ApplyPlanValueSnapshot
     return { action: "overwrite", blocked: false };
   }
   return { action: "skip", blocked: false };
+}
+
+/** 整篇文档级条目的哨兵 key（界面据此把内部串翻成人读文案）。 */
+export const DOCUMENT_KEY = "__document";
+
+/** 计划阶段拦下「空正文写 Nacos」的阻断码（界面对它有人读文案映射，R55-B4）。 */
+export const BLANK_CONTENT_REASON = "blank_content";
+
+/**
+ * 空正文写 Nacos 一定会被打回来（真机取证：publish content="" → HTTP 400 `content is blank`）。
+ *
+ * 执行是「一失败就停」的批量写入，留到那一刻等于把整批改动劈成半截——前面已经落库，
+ * 后面一条没动。所以在计划阶段就把这一项阻断，让用户改成「删除目标配置」或补一行内容，
+ * 而不是收一条 provider 的 400。
+ * 只对 nacos 整篇写入生效：key 级写入只有 Apollo 支持，Consul/快照本来就能存空值。
+ */
+function isBlankDocumentWrite(ref: ApplyPlanRef, action: ApplyPlanAction, value: ApplyPlanValueSnapshot): boolean {
+  if (ref.provider !== "nacos") return false;
+  if (action !== "create" && action !== "overwrite") return false;
+  if (ref.key !== DOCUMENT_KEY) return false;
+  const content = value.content ?? value.value;
+  if (content === undefined) return false;
+  return content.trim() === "";
 }
 
 function afterValueFor(
@@ -318,6 +348,12 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
     const targetValue = snapshotValue(targetRef, item.targetValue);
     const classified = classify(sourceValue, targetValue, item.intent ?? "sync");
     const afterValue = afterValueFor(targetRef, classified.action, sourceValue, targetValue);
+    let blocked = classified.blocked;
+    let blockReason = classified.blockReason;
+    if (!blocked && isBlankDocumentWrite(targetRef, classified.action, afterValue)) {
+      blocked = true;
+      blockReason = BLANK_CONTENT_REASON;
+    }
     // 指纹基于“值内容快照”重算（与执行时 readCurrentValue 的口径一致），
     // 避免草稿构建与执行之间 updateTime/秒级时间戳漂移导致计划被误判为 stale。
     return {
@@ -329,8 +365,8 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
       targetValue,
       afterValue,
       action: classified.action,
-      blocked: classified.blocked,
-      ...(classified.blockReason ? { blockReason: classified.blockReason } : {}),
+      blocked,
+      ...(blockReason ? { blockReason } : {}),
       sourceFingerprint: item.sourceFingerprint ?? fingerprintApplyPlanValue(sourceRef, sourceValue),
       targetFingerprint: item.targetFingerprint ?? fingerprintApplyPlanValue(targetRef, targetValue),
     };

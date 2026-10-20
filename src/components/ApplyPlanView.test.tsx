@@ -253,6 +253,13 @@ function item(
   };
 }
 
+function stagedEntryPayload(): ApplyEntryPayload {
+  return {
+    ...entryPayload,
+    target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" },
+  };
+}
+
 function renderView(entry: ApplyEntryPayload | null = entryPayload, connections: Connection[] = [sourceConn, targetConn]) {
   const onBack = vi.fn();
   render(
@@ -355,7 +362,9 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("Blocked 1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("changed.key"));
-    expect(screen.getByText("Action: overwrite")).toBeInTheDocument();
+    // R55-B4：动作行以前吐原始枚举码（zh 界面同样泄漏 "动作：overwrite"）
+    expect(screen.getByText("Action: Overwrite")).toBeInTheDocument();
+    expect(screen.queryByText("Action: overwrite")).not.toBeInTheDocument();
     expect(screen.getAllByText("from-source")).toHaveLength(1);
     expect(screen.getAllByText("from-target")).toHaveLength(1);
     expect(screen.queryByText("Source value")).not.toBeInTheDocument();
@@ -363,7 +372,8 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("After value")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("broken.key"));
-    expect(screen.getByText("Block reason: source_parse_error")).toBeInTheDocument();
+    // R55-B4：界面不许再吐 source_parse_error 这种机器码，翻成人话（码本身仍留在计划/审计里供 grep）
+    expect(screen.getByText("Block reason: Source failed to parse and cannot be materialized safely")).toBeInTheDocument();
     expect(screen.getByText("bad properties")).toBeInTheDocument();
   });
 
@@ -1261,5 +1271,139 @@ describe("ApplyPlanView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
     await waitFor(() => expect(storeMocks.saveApplyPlan).toHaveBeenCalled());
     expect(document.querySelector(".apply-edit-panel")).not.toBeInTheDocument();
+  });
+
+  it("blocks an empty-body write to Nacos at plan time with a human reason (R55-B4)", async () => {
+    const plan = makePlan([item("__document", value("", true), value("server.port=8080"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
+    expect(await screen.findByText("Blocked 1")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("app.properties")[0]);
+    expect(screen.getByText(/Nacos rejects blank bodies/)).toBeInTheDocument();
+    // 阻断项不许被勾上去执行
+    expect(document.querySelector(".apply-item-check")).toBeDisabled();
+  });
+
+  it("整篇文档级条目不把内部哨兵 key __document 露到界面上（R55-B4）", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
+    expect(await screen.findByText("Total 1")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("app.properties")[0]);
+
+    expect(screen.getByText("Full document")).toBeInTheDocument();
+    expect(screen.queryByText("__document")).not.toBeInTheDocument();
+    expect(screen.queryByText(/DEFAULT_GROUP \/ __document/)).not.toBeInTheDocument();
+    // 真实 key 仍留在 title 里供排查
+    expect(document.querySelector(".apply-detail-sub")?.getAttribute("title")).toBe("__document");
+  });
+
+  describe("写后回读结论面板（R55-B2）", () => {
+    const stagedEntry = () => ({
+      ...entryPayload,
+      target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" },
+    });
+
+    function stubStagedPlan() {
+      draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+        ok: true,
+        plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+          targetId: "conn-stage",
+          targetLabel: "Staging / public",
+        }),
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+    }
+
+    async function runAndConfirm() {
+      renderView(stagedEntry(), [sourceConn, safeTargetConn]);
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    }
+
+    it("未确认的项按人读标签点出来，提示改成「别急着标记验证通过」", async () => {
+      stubStagedPlan();
+      executionMocks.executeApplyPlan.mockResolvedValue({
+        ok: true,
+        taskId: "task-verify-1",
+        historyId: "history-verify-1",
+        verification: {
+          total: 3,
+          confirmedCount: 1,
+          drifted: ["public/DEFAULT_GROUP/app.properties"],
+          unreadable: ["public/DEFAULT_GROUP/order.yaml (timeout)"],
+          unconfirmedCount: 2,
+          items: [],
+        },
+      });
+      await runAndConfirm();
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+      expect(await screen.findByText("Read-back: 1/3 items match what was written")).toBeInTheDocument();
+      expect(screen.getByText("public/DEFAULT_GROUP/app.properties")).toBeInTheDocument();
+      expect(screen.getByText("public/DEFAULT_GROUP/order.yaml (timeout)")).toBeInTheDocument();
+      expect(screen.getByText(/Do not promote unconfirmed items/)).toBeInTheDocument();
+      expect(document.querySelector(".apply-post-write-verification.is-warning")).toBeInTheDocument();
+    });
+
+    it("全部回读一致时给确认档结论与「可以去标记验证通过」的提示", async () => {
+      stubStagedPlan();
+      executionMocks.executeApplyPlan.mockResolvedValue({
+        ok: true,
+        taskId: "task-verify-2",
+        historyId: "history-verify-2",
+        verification: { total: 2, confirmedCount: 2, drifted: [], unreadable: [], unconfirmedCount: 0, items: [] },
+      });
+      await runAndConfirm();
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+      expect(await screen.findByText("Read-back: 2/2 items match what was written")).toBeInTheDocument();
+      expect(screen.getByText(/Safe to mark the run verified/)).toBeInTheDocument();
+      expect(document.querySelector(".apply-post-write-verification.is-warning")).not.toBeInTheDocument();
+    });
+
+    it("执行成功后再 dry-run：上一轮回读结论不许留在页面上", async () => {
+      stubStagedPlan();
+      executionMocks.executeApplyPlan.mockResolvedValueOnce({
+        ok: true,
+        taskId: "task-verify-3",
+        historyId: "history-verify-3",
+        verification: {
+          total: 1,
+          confirmedCount: 0,
+          drifted: ["public/DEFAULT_GROUP/app.properties"],
+          unreadable: [],
+          unconfirmedCount: 1,
+          items: [],
+        },
+      });
+      await runAndConfirm();
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+      expect(await screen.findByText("Read-back: 0/1 items match what was written")).toBeInTheDocument();
+
+      // 成功之后执行按钮灰掉，只读预演仍然可点（R55-D3）；这一趟没写任何东西，就不该有回读结论
+      executionMocks.executeApplyPlan.mockResolvedValueOnce({ ok: true, dryRun: true, taskId: "task-verify-3b", plannedWrites: 1 });
+      fireEvent.click(screen.getByRole("button", { name: "Dry-run check" }));
+      expect(await screen.findByText(/Dry-run passed/)).toBeInTheDocument();
+      expect(document.querySelector(".apply-post-write-verification")).not.toBeInTheDocument();
+    });
   });
 });

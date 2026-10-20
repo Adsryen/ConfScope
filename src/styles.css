@@ -7831,6 +7831,65 @@ button.diff-workflow-step-btn:hover {
   background: rgba(220, 220, 170, 0.08);
 }
 
+/* 写后回读面板（R55-B2）。基类只管排版，配色全在两条 is-* 分支里各自写全：
+   两条都是 .apply-post-write-verification.is-xxx（特异度 0,2,0），比基类高，
+   不存在「靠文档顺序决胜」的跨类覆盖（tests/ux R83）。 */
+.apply-post-write-verification {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(78, 201, 176, 0.28);
+  border-radius: 4px;
+  background: rgba(78, 201, 176, 0.08);
+  color: var(--green);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.apply-post-write-verification.is-warning {
+  border-color: rgba(220, 220, 170, 0.28);
+  background: rgba(220, 220, 170, 0.08);
+  color: var(--yellow);
+}
+
+.apply-post-write-verification-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.apply-post-write-verification-head strong {
+  color: var(--text-hi);
+  font-size: 13px;
+}
+
+.apply-post-write-verification-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.apply-post-write-verification-label {
+  opacity: 0.85;
+}
+
+.apply-post-write-verification-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+  overflow-wrap: anywhere;
+}
+
+.apply-post-write-verification-hint {
+  margin: 0;
+  color: var(--text);
+}
+
 /* ── 布局收口段（R31 单一事实源）───────────────────────────────────────────────
    这一段是各页面间距/圆角/列宽的最终生效值。波45 已把上方同名规则里被这里静默盖掉的
    重复声明删干净：要改这些属性只认这里，别在原规则里再写一份（改了不生效，

@@ -233,7 +233,7 @@ describe("buildApplyPlan", () => {
   });
 });
 
-import { withEditedAfterValue, type ApplyPlanItem } from "./applyPlan";
+import { BLANK_CONTENT_REASON, withEditedAfterValue, type ApplyPlanItem } from "./applyPlan";
 
 function makeItem(action: ApplyPlanItem["action"], sourceContent: string, targetContent: string): ApplyPlanItem {
   const plan = buildApplyPlan(
@@ -286,5 +286,148 @@ describe("withEditedAfterValue", () => {
     expect(edited.blocked).toBe(false);
     expect(edited.action).toBe("overwrite");
     expect(edited.afterValue.parseError).toBeTruthy();
+  });
+});
+
+
+/**
+ * 整篇文档级写入（key 为 `__document`）：发到服务端的正文是 `content`，
+ * 空正文会被 Nacos 打回 400 `content is blank`，必须在计划阶段就阻断（R55-B4）。
+ */
+function documentValue(
+  exists: boolean,
+  content: string,
+  options: Partial<BuildApplyPlanInput["items"][number]["sourceValue"]> = {}
+): BuildApplyPlanInput["items"][number]["sourceValue"] {
+  return {
+    exists,
+    value: exists ? content : undefined,
+    valueType: exists ? "string" : undefined,
+    format: "TEXT",
+    parseStatus: "ok",
+    content: exists ? content : undefined,
+    ...options,
+  };
+}
+
+/** 整篇文档级、可编辑的 nacos 条目（编辑面板走 withEditedAfterValue 的那条路）。 */
+function editableDocumentItem(sourceContent: string, targetContent: string): ApplyPlanItem {
+  const plan = buildApplyPlan(
+    input([
+      {
+        ref: { ...ref, key: "__document" },
+        sourceValue: documentValue(true, sourceContent),
+        targetValue: documentValue(true, targetContent),
+      },
+    ])
+  );
+  return plan.items[0];
+}
+
+function blankDocumentPlan(
+  options: { provider?: "nacos" | "apollo"; key?: string; targetExists?: boolean; intent?: "sync" | "delete" } = {}
+): ApplyPlan {
+  const provider = options.provider ?? "nacos";
+  return buildApplyPlan(
+    input([
+      {
+        ref: { ...ref, provider, key: options.key ?? "__document" },
+        sourceValue: documentValue(true, "   \n"),
+        targetValue: documentValue(options.targetExists ?? true, "server.port=8080"),
+        ...(options.intent ? { intent: options.intent } : {}),
+      },
+    ])
+  );
+}
+
+describe("buildApplyPlan 空正文写 Nacos 的计划期阻断（R55-B4）", () => {
+  it("整篇覆盖写空正文 → blocked + blank_content，摘要计入 blocked", () => {
+    const plan = blankDocumentPlan();
+    const item = plan.items[0];
+    expect(item.action).toBe("overwrite");
+    expect(item.blocked).toBe(true);
+    expect(item.blockReason).toBe(BLANK_CONTENT_REASON);
+    expect(plan.summary.blocked).toBe(1);
+  });
+
+  it("整篇新建空正文同样阻断（新建也是 publish 空正文，服务端一样打回）", () => {
+    const plan = blankDocumentPlan({ targetExists: false });
+    expect(plan.items[0].action).toBe("create");
+    expect(plan.items[0].blocked).toBe(true);
+    expect(plan.items[0].blockReason).toBe(BLANK_CONTENT_REASON);
+  });
+
+  it("只有 nacos 的整篇写入生效：apollo 允许空正文、key 级写入另有口径", () => {
+    expect(blankDocumentPlan({ provider: "apollo" }).items[0].blocked).toBe(false);
+    expect(blankDocumentPlan({ key: "server.port" }).items[0].blocked).toBe(false);
+  });
+
+  it("非空正文与删除动作不该被误伤", () => {
+    const notBlank = buildApplyPlan(
+      input([
+        {
+          ref: { ...ref, key: "__document" },
+          sourceValue: documentValue(true, "server.port=9090"),
+          targetValue: documentValue(true, "server.port=8080"),
+        },
+      ])
+    );
+    expect(notBlank.items[0].blocked).toBe(false);
+    expect(notBlank.items[0].action).toBe("overwrite");
+
+    const deletePlan = blankDocumentPlan({ intent: "delete" });
+    expect(deletePlan.items[0].action).toBe("delete");
+    expect(deletePlan.items[0].blocked).toBe(false);
+  });
+
+  it("解析失败排在前面时保留原有 blockReason，不被空正文码顶掉", () => {
+    const plan = buildApplyPlan(
+      input([
+        {
+          ref: { ...ref, key: "__document" },
+          sourceValue: documentValue(true, "   "),
+          targetValue: documentValue(true, "server.port=8080", {
+            parseStatus: "error",
+            parseError: "YAML:line 1 unclosed",
+          }),
+        },
+      ])
+    );
+    const item = plan.items[0];
+    expect(item.action).toBe("parse_error");
+    expect(item.blocked).toBe(true);
+    expect(item.blockReason).toBe("target_parse_error");
+  });
+});
+
+describe("withEditedAfterValue 空正文同样阻断（R55-B4）", () => {
+  it("人工把正文清空或只剩空白 → blocked + blank_content", () => {
+    const item = editableDocumentItem("a: 1", "a: 2");
+    expect(item.blocked).toBe(false);
+    expect(withEditedAfterValue(item, "").blocked).toBe(true);
+    expect(withEditedAfterValue(item, "").blockReason).toBe(BLANK_CONTENT_REASON);
+    expect(withEditedAfterValue(item, "  \n ").blockReason).toBe(BLANK_CONTENT_REASON);
+  });
+
+  it("非空正文的编辑不受影响", () => {
+    const edited = withEditedAfterValue(editableDocumentItem("a: 1", "a: 2"), "a: 3");
+    expect(edited.action).toBe("overwrite");
+    expect(edited.blocked).toBe(false);
+    expect(edited.blockReason).toBeUndefined();
+  });
+
+  it("key 级条目（非 __document）编辑成空值不触发该阻断：空值只有 Nacos 整篇正文不接受", () => {
+    const plan = buildApplyPlan(
+      input([
+        {
+          ref: { ...ref, key: "server.port" },
+          sourceValue: value(true, "9090"),
+          targetValue: value(true, "8080"),
+        },
+      ])
+    );
+    const edited = withEditedAfterValue(plan.items[0], "");
+    expect(edited.action).toBe("overwrite");
+    expect(edited.blockReason).not.toBe(BLANK_CONTENT_REASON);
   });
 });

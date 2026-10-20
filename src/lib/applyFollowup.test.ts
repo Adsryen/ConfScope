@@ -249,13 +249,21 @@ describe("apply follow-up entry builders", () => {
       error: "apply_followup_failed",
       detail: translate("apply.followupSameConnection"),
     });
-    await expect(
-      buildPromotionEntryFromVerification(record(), verification(applyPlan), prodConn, deps(applyPlan, vi.fn(async () => document("server:\n  port: 9091"))))
-    ).resolves.toMatchObject({
+    // 沙箱在「标记验证通过」之后又被改过：拦住晋级，并把变化项说成人读标签（R55-B5）
+    const drifted = await buildPromotionEntryFromVerification(
+      record(),
+      verification(applyPlan),
+      prodConn,
+      deps(applyPlan, vi.fn(async () => document("server:\n  port: 9091")))
+    );
+    expect(drifted).toMatchObject({
       ok: false,
       error: "apply_followup_failed",
-      detail: translate("apply.followupVerificationDrift", { items: applyPlan.items[0].id }),
+      detail: translate("apply.followupVerificationDrift", { items: "public/DEFAULT_GROUP/app.yaml" }),
     });
+    if (drifted.ok) throw new Error("expected promotion to be blocked");
+    // 以前这里直接吐 itemId 的 `provider|conn|ns|group|dataId|key` 拼接串
+    expect(drifted.detail).not.toContain("|");
   });
 
   it("captures verification fingerprints from the current sandbox target documents", async () => {

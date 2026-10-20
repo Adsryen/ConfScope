@@ -8,7 +8,10 @@ import {
 } from "../api/nacos";
 import { createSnapshot, getSnapshot } from "../api/snapshot";
 import { useTranslation } from "../i18n";
-import { withEditedAfterValue, type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
+import {
+  DOCUMENT_KEY,
+  withEditedAfterValue,
+  type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
 import { busyProps } from "../lib/busyRegion";
 import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
@@ -20,6 +23,7 @@ import {
   executeApplyPlan,
   isProtectedApplyTarget,
   type ApplyExecutionProgress,
+  type ApplyWriteVerification,
 } from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
@@ -226,8 +230,9 @@ function PlanItemList({
               <span className="mono" title={item.ref.dataId}>
                 {item.ref.dataId}
               </span>
+              {/* 整篇文档级条目不露内部哨兵 key，真值留在 title 里供排查（R55-B4） */}
               <span className="apply-item-key mono" title={item.ref.key}>
-                {item.ref.key}
+                {item.ref.key === DOCUMENT_KEY ? t("apply.documentKey") : item.ref.key}
               </span>
             </span>
             <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
@@ -301,15 +306,15 @@ function ItemDetail({
       <div className="apply-detail-head">
         <div>
           <div className="apply-detail-title mono">{item.ref.dataId}</div>
-          <div className="apply-detail-sub mono">
-            {item.ref.group} / {item.ref.key}
+          <div className="apply-detail-sub mono" title={item.ref.key}>
+            {item.ref.group} / {item.ref.key === DOCUMENT_KEY ? t("apply.documentKey") : item.ref.key}
           </div>
         </div>
         <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
       </div>
       <div className="apply-detail-meta">
-        <span>{t("apply.actionLine", { action: item.action })}</span>
-        {item.blockReason && <span>{t("apply.blockReasonLine", { reason: item.blockReason })}</span>}
+        <span>{t("apply.actionLine", { action: actionLabel(t, item.action) })}</span>
+        {item.blockReason && <span>{t("apply.blockReasonLine", { reason: blockReasonLabel(t, item.blockReason) })}</span>}
         {canEdit && !edit && (
           <button className="btn btn-ghost btn-sm" type="button" onClick={startEdit}>
             {t("apply.editTarget")}
@@ -372,6 +377,79 @@ function ItemDetail({
   );
 }
 
+/**
+ * blockReason 存的是机器码——审计事件与计划文件要能按码 grep，所以不动它；
+ * 但界面上一句「阻塞原因：source_parse_error」等于没解释（R55-B4）。
+ * 认得的码翻成人话，认不出的（旧计划里的自由文本）原样留着，不做静默吞掉。
+ */
+const BLOCK_REASON_KEYS: Record<string, string> = {
+  source_parse_error: "apply.blockReasonSourceParse",
+  target_parse_error: "apply.blockReasonTargetParse",
+  edited_parse_error: "apply.blockReasonEditedParse",
+  blank_content: "apply.blockReasonBlankContent",
+};
+
+function blockReasonLabel(t: (key: string) => string, reason: string): string {
+  const key = BLOCK_REASON_KEYS[reason];
+  return key ? t(key) : reason;
+}
+
+/**
+ * 写后回读面板（R55-B2，轮55 B线）。
+ *
+ * 「服务端返回成功」和「目标上真的是这份值」是两件事：真机取证单节点 loopback 也有
+ * 54–145ms 的可见窗口，多节点更宽。这一版把回读结论摆在执行结果旁边，
+ * 没确认的项点名到人读标签，用户不至于拿着半生效的目标去标记验证通过、晋级生产。
+ */
+function PostWriteVerificationPanel({ verification }: { verification: ApplyWriteVerification }) {
+  const { t } = useTranslation();
+  const warning = verification.unconfirmedCount > 0;
+  return (
+    <div
+      className={`apply-post-write-verification${warning ? " is-warning" : ""}`}
+      {...statusMessageProps(warning ? "info" : "success")}
+    >
+      <div className="apply-post-write-verification-head">
+        <strong>{t("apply.postWriteVerificationTitle")}</strong>
+        <span>
+          {t("apply.postWriteVerificationHeadline", { confirmed: verification.confirmedCount, total: verification.total })}
+        </span>
+      </div>
+      {verification.drifted.length > 0 && (
+        <div className="apply-post-write-verification-group">
+          <span className="apply-post-write-verification-label">
+            {t("apply.postWriteVerificationDrifted", { count: verification.drifted.length })}
+          </span>
+          <ul className="apply-post-write-verification-refs">
+            {verification.drifted.map((ref) => (
+              <li key={`drifted-${ref}`} className="mono">
+                {ref}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {verification.unreadable.length > 0 && (
+        <div className="apply-post-write-verification-group">
+          <span className="apply-post-write-verification-label">
+            {t("apply.postWriteVerificationUnreadable", { count: verification.unreadable.length })}
+          </span>
+          <ul className="apply-post-write-verification-refs">
+            {verification.unreadable.map((ref) => (
+              <li key={`unreadable-${ref}`} className="mono">
+                {ref}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="apply-post-write-verification-hint">
+        {t(warning ? "apply.postWriteVerificationHintWarning" : "apply.postWriteVerificationHintConfirmed")}
+      </p>
+    </div>
+  );
+}
+
 function ConfirmationPanel({
   plan,
   selectedCount,
@@ -385,6 +463,7 @@ function ConfirmationPanel({
   executeNotice,
   executionTask,
   executionSucceeded,
+  writeVerification,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
@@ -403,6 +482,8 @@ function ConfirmationPanel({
   executeNotice: string | null;
   executionTask: Task | null;
   executionSucceeded: boolean;
+  /** 写后回读结论（R55-B2）：dry-run 与没落笔的失败都是 null——没验证过就别装作验证过。 */
+  writeVerification: ApplyWriteVerification | null;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
@@ -500,6 +581,7 @@ function ConfirmationPanel({
         </ul>
       )}
       {executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
+      {writeVerification && <PostWriteVerificationPanel verification={writeVerification} />}
       {executionTask && (
         <div className="apply-task-progress" aria-label={t("apply.taskProgressLabel")}>
           <div className="apply-task-progress-head">
@@ -574,6 +656,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   // 失败时的「已写入几项 / 第几项断的」（R55-A2）：跟着 executeError 一起清，避免留旧数
   const [executeProgress, setExecuteProgress] = useState<ApplyExecutionProgress | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
+  // 写后回读结论（R55-B2）：跟着执行态一起重置，换一次执行不能留着上一轮的结论
+  const [writeVerification, setWriteVerification] = useState<ApplyWriteVerification | null>(null);
   const taskManager = getTaskManager();
   const trackedTaskIdRef = useRef<string | null>(null);
   // 变更会话 id：进入计划时创建，整个组件生命周期内五步事件共用
@@ -699,6 +783,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     setExecuteError(null);
     setExecuteProgress(null);
     setExecuteNotice(null);
+    setWriteVerification(null);
     buildDraft();
   }, [buildDraft]);
 
@@ -866,6 +951,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     setExecuteError(null);
     setExecuteProgress(null);
     setExecuteNotice(null);
+    setWriteVerification(null);
     // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
     const session = applyEntrySessionRef.current ?? createAuditSession("apply");
     auditSessionEvent(session, {
@@ -953,6 +1039,9 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         }
       );
       const resultHistoryId = "historyId" in result ? result.historyId : undefined;
+      // 写后回读结论：成功与「半截写入」两条出口都可能有（dry-run 恒无，没写就不验）
+      const writeVerificationResult = "verification" in result ? result.verification : undefined;
+      setWriteVerification(writeVerificationResult ?? null);
       if (result.taskId) {
         trackedTaskIdRef.current = result.taskId;
         setExecutionTask(taskManager.getTask(result.taskId) ?? null);
@@ -960,7 +1049,15 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       if (!result.ok) {
         setExecuteError(result.error);
         setExecuteProgress(result.progress ?? null);
-        auditSessionEvent(session, { kind: "apply_error", result: "failure", taskId: result.taskId, historyId: resultHistoryId, error: result.error });
+        auditSessionEvent(session, {
+          kind: "apply_error",
+          result: "failure",
+          taskId: result.taskId,
+          historyId: resultHistoryId,
+          error: result.error,
+          // 部分写入时这份结论才是真正要紧的：哪几条落成功且回读一致，才谈得上回退
+          payload: writeVerificationResult ? JSON.stringify({ verification: writeVerificationResult }) : undefined,
+        });
         endAuditSession(session, "failure", result.error);
         return;
       }
@@ -985,6 +1082,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         historyId: resultHistoryId,
         payload: JSON.stringify({
           dryRun,
+          verification: writeVerificationResult ?? null,
           plannedWrites: "dryRun" in result ? result.plannedWrites : undefined,
           selectedCount: selectedItemIds.length,
           items: plan.items
@@ -1132,6 +1230,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
               executeNotice={executeNotice}
               executionTask={executionTask}
               executionSucceeded={executionSucceeded}
+              writeVerification={writeVerification}
               onConfirmedChange={setConfirmed}
               onConfirmationTextChange={setConfirmationText}
               onExecute={() => runPlan(false)}

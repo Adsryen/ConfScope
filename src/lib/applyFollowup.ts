@@ -208,6 +208,15 @@ function valueFromDocument(ref: ApplyPlanRef, document: ConfigDocument): ApplyPl
   return ref.key === DOCUMENT_KEY ? documentValue(ref, document) : keyValue(ref, document);
 }
 
+/**
+ * 人读的项标签：`命名空间/分组/dataId`，key 级再补 `(key)`。
+ * 与执行器 itemRefLabel 同一口径——漂移文案是要给人看的，不是给人解码的。
+ */
+function itemLabel(ref: ApplyPlanRef): string {
+  const base = `${ref.namespace}/${ref.group}/${ref.dataId}`;
+  return ref.key && ref.key !== DOCUMENT_KEY ? `${base} (${ref.key})` : base;
+}
+
 function missingValue(ref: ApplyPlanRef): ApplyPlanValueInput {
   return { exists: false, fingerprint: fingerprintApplyPlanValue(ref, { exists: false }) };
 }
@@ -248,13 +257,17 @@ async function verifySandboxStillMatches(
   );
   const staleItems: string[] = [];
   for (const item of executableItems(plan)) {
+    // R55-B5：以前这里直接 join item.id——`provider|conn|ns|group|dataId|key` 的拼接串
+    // 甩进「沙箱配置在验证后已变化，变化项：…」的句子中间，用户根本读不出是哪一份配置。
+    // itemId 仍然是比对用的键，只有拿去显示的那一层换成人读标签。
+    const label = itemLabel(item.targetRef ?? item.ref);
     const expected = verifiedByItemId.get(item.id);
     const current = currentByItemId.get(item.id);
     if (!expected || !current) {
-      staleItems.push(item.id);
+      staleItems.push(label);
       continue;
     }
-    if (current !== expected) staleItems.push(item.id);
+    if (current !== expected) staleItems.push(label);
   }
   return staleItems.length > 0 ? translate("apply.followupVerificationDrift", { items: staleItems.join(", ") }) : null;
 }
