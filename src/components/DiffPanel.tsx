@@ -59,6 +59,13 @@ interface Props {
   /** 是否启用视图内 Ctrl+F 查找（轮48）。与浏览态 / 编辑态同一个条子、同一对口径开关。 */
   enableFind?: boolean;
   /**
+   * 左侧「按内容搜索」的词（轮55 C线）。
+   *
+   * 语义与 CodeView 的 searchTerm 完全一致：查找栏没开时命中层接这个词，开栏后由栏内的词接管
+   * —— 两边各标各的会让人以为搜索坏了。栏关闭 + 有词 = 整篇标红；清空词 = 标红一起退场。
+   */
+  searchTerm?: string;
+  /**
    * 宿主页面当前是否可见可交互。被保活隐藏的页面里不能再挂全局 Ctrl+F 监听：
    * 隐藏时 document.activeElement 退回 body，本面板会把按键判给自己，劫持前台视图的查找
    * （与 CodeView / CodeEditor 同一口径）。
@@ -166,6 +173,7 @@ export default function DiffPanel({
   onMergeAction,
   warnings,
   enableFind = true,
+  searchTerm,
   active = true,
 }: Props) {
   const { t } = useTranslation();
@@ -218,11 +226,11 @@ export default function DiffPanel({
     [rows]
   );
 
-  // diff 正文没有「外部内容搜索词」那条路径（左右两侧是取来的原文，不参与左侧列表搜索）：
-  // 传空串就等于「栏一关没词」，标红与命中表一起清空。
+  // 批量对比的左右正文现在也参与左侧的跨项内容搜索（轮55 C线）：有词就把整篇标红，
+  // 没词（单文件对比、或词被清空）传空串就等于「栏一关没词」，标红与命中表一起清空。
   const find = useFindLayer({
     rows: findRows,
-    externalTerm: "",
+    externalTerm: searchTerm ?? "",
     active,
     enableFind,
     rootRef,

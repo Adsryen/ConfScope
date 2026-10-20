@@ -3633,6 +3633,14 @@ button.diff-workflow-step-btn:hover {
   color: var(--red-text-raised);
 }
 
+/* 轮55 C线：批量对比左栏的命中片段也整行选中（.batch-diff-nav-item 的 active / hover 底不是中性底），
+   与上面 .browser-item-summary 同一个理由、同一档修法：按族显式列出，特异度 (0,4,0) 稳过
+   .search-hit (0,1,0) 与 .search-hit.search-hit-current (0,2,0)，不赌顺序。 */
+.batch-diff-nav-item.active .batch-diff-nav-snippet .search-hit,
+.batch-diff-nav-item:hover .batch-diff-nav-snippet .search-hit {
+  color: var(--red-text-raised);
+}
+
 .required-mark {
   color: var(--red);
   margin-left: 3px;
@@ -4325,6 +4333,90 @@ button.diff-workflow-step-btn:hover {
   font-size: 11px;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+/* ── 批量对比左栏的跨项内容搜索（轮55 C线）────────────────────────────────
+   搜索框住在文件列表头上，形态对标 VS Code 的 Search 视图：框 → 计数 → 结果列表。
+   新类只写各自该写的东西：输入框的观感沿用 .search-input，覆盖一律走
+   `.batch-diff-search .search-input`（0,2,0）而不是再挂一个同级类，免得和它抢同一个面
+   靠文档顺序决胜（R83）。配色每族自己写全，不做「基础色 + 另一族改色」的同特异度竞争。 */
+.batch-diff-search {
+  flex-shrink: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.batch-diff-search .search-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.batch-diff-search-tools {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.batch-diff-search-status {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+.batch-diff-search-capped {
+  color: var(--yellow);
+}
+.batch-diff-search-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.batch-diff-search-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  cursor: pointer;
+}
+.batch-diff-search-filter input {
+  margin: 0;
+}
+.batch-diff-nav-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.batch-diff-nav-hit-count {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(244, 71, 71, 0.14);
+  color: var(--red-text);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.batch-diff-nav-hit-line {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.batch-diff-nav-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
 }
 .batch-diff-main {
   display: flex;
@@ -8357,6 +8449,8 @@ button.diff-workflow-step-btn:hover {
 .source-note,
 .match-dataid,
 .batch-diff-nav-title,
+/* 轮55 C线：批量对比左栏的命中片段带省略号截断，抄不走就等于只给看不给拿。 */
+.batch-diff-nav-snippet,
 .batch-diff-main-title,
 .batch-diff-main-label,
 .batch-diff-failures-error,

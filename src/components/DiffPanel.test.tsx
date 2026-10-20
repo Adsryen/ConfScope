@@ -235,3 +235,53 @@ describe("DiffPanel 加不进去的箭头要说清为什么（轮27 F-9）", () 
     expect(left.getAttribute("aria-disabled")).toBeNull();
   });
 });
+
+/**
+ * 外部内容搜索词这一条路径（轮55 C线补上）。
+ *
+ * 批量对比左栏的跨项搜索要把词一路传到 diff 里标红，走的是 CodeView 早就定好的那一句话：
+ * 查找栏没开 ⇒ 外部词接管整篇标红；栏一开 ⇒ 栏内的词接管（开栏时拿外部词做种子，
+ * 用户改了就听用户的）；关栏 ⇒ 外部词继续。谁多看一眼都不该以为搜索坏了。
+ */
+describe("DiffPanel 外部内容搜索词（轮55 C线）", () => {
+  const EXTERNAL = {
+    leftLabel: "dev/app.yaml",
+    rightLabel: "prod/app.yaml",
+    // 左 2 处 port + 1 处 keep，右 1 处 port：两侧都要标到，不能只标变更行
+    leftText: "port: 8080\nkeep: 1\nport: 8081",
+    rightText: "port: 9090",
+    format: "TEXT" as const,
+  };
+
+  const hitMarks = () => document.querySelectorAll(".diff-cell mark.search-hit");
+
+  it("没给词时一处都不标，给了词两侧一起标", () => {
+    renderDiffPanel({ ...EXTERNAL });
+    expect(hitMarks()).toHaveLength(0);
+    renderDiffPanel({ ...EXTERNAL, searchTerm: "port" });
+    expect(hitMarks().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("词只命中一侧时另一侧保持干净（A 有 B 没有要看得见）", () => {
+    renderDiffPanel({ ...EXTERNAL, searchTerm: "keep" });
+    const marks = hitMarks();
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toContain("keep");
+  });
+
+  it("开栏用外部词做种子，栏内改词由栏接管，关栏回到外部词", () => {
+    renderDiffPanel({ ...EXTERNAL, searchTerm: "port" });
+    expect(hitMarks().length).toBeGreaterThanOrEqual(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "在此文件查找（Ctrl+F）" }));
+    const bar = screen.getByLabelText("在当前文件查找…") as HTMLInputElement;
+    expect(bar.value).toBe("port");
+
+    fireEvent.change(bar, { target: { value: "keep" } });
+    fireEvent.keyDown(bar, { key: "Enter" });
+    expect(hitMarks()).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭查找" }));
+    expect(hitMarks().length).toBeGreaterThanOrEqual(3);
+  });
+});

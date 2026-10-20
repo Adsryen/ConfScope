@@ -83,8 +83,10 @@ describe("查找词输入延迟单一来源（轮29 F-16）", () => {
       expect(src, `${file} 自己又调了一份 useDebouncedFindTerm（第二套延迟口径）`).not.toMatch(/useDebouncedFindTerm|from "\.\.\/lib\/findInput"/);
       expect(src, `${file} 没把外部搜索词交给共享层（关栏后标红会整片消失）`).toMatch(/externalTerm: [^\n]*,/);
     }
-    // 并排差异没有「外部内容搜索词」那条路径：传空串就等于栏一关没词
-    expect(readScannedSource(DIFF_PANEL), `${DIFF_PANEL} 关栏后仍留着命中词`).toMatch(/externalTerm: "",/);
+    // 轮55 C线：并排差异也有了外部词那条路径（批量对比左栏的跨项内容搜索传下来），
+    // 口径与单列差异完全同一句话——没词就传空串，等于「栏一关没词」
+    expect(readScannedSource(DIFF_PANEL), `${DIFF_PANEL} 的外部词来源变了`).toMatch(/externalTerm: searchTerm \?\? "",/);
+    expect(readScannedSource(DIFF_PANEL), `${DIFF_PANEL} 的外部词入参声明没了（宿主传不进来）`).toMatch(/searchTerm\?: string;/);
     // 单列差异有外部词（浏览态「按内容搜索」传下来），而且必须是不经延迟的那一颗
     expect(readScannedSource(UNIFIED_DIFF), `${UNIFIED_DIFF} 的外部词来源变了`).toMatch(/externalTerm: searchTerm \?\? "",/);
   });

@@ -109,11 +109,15 @@ const rightApplyConn: Connection = {
   defaultNamespace: "shared",
 };
 
-function renderDiff(connections: Connection[], onConnectionsChange?: (connections: Connection[]) => void) {
+function renderDiff(
+  connections: Connection[],
+  onConnectionsChange?: (connections: Connection[]) => void,
+  onStartApply?: (plan: unknown) => void
+) {
   localStorage.setItem("locale", "zh-CN");
   return render(
     <I18nProvider>
-      <DiffView connections={connections} onConnectionsChange={onConnectionsChange} />
+      <DiffView connections={connections} onConnectionsChange={onConnectionsChange} onStartApply={onStartApply} />
     </I18nProvider>
   );
 }
@@ -2223,5 +2227,185 @@ describe("DiffView 重启恢复即比（轮46 R01/R02：来源只有一个事实
     // 挂载那一刻现场已经和连接对齐（snapshotOf 取的是这份现场），所以旧串不会被拿去取数，
     // 也就不会出现「快照按旧租户、现场按新租户 ⇒ 就绪判定永不成立 ⇒ 该比的没比」这种死锁。
     expect(leftCall?.[1]).toBe("dev-tenant");
+  });
+});
+
+/**
+ * 批量对比的跨项内容搜索（轮55 C线）。
+ *
+ * 这一轮要钉的不是「有没有搜索框」，而是四件容易被顺手改坏的事：
+ * 1. 计数说实话——搜的是这批**已加载**的正文，文案要给出命中配置数与处数，没命中也要把词说出来；
+ * 2. A/B 分开计数——「A 有 B 没有」在对比页是决策信息（那个值会被删掉），不能合成一个总数；
+ * 3. 过滤只是看列表的方式，不许动到将要应用的东西（进入变更计划的条数照旧）；
+ * 4. 词要一路传到 diff 里标红，而不是列表说命中了、正文一处都不亮。
+ */
+describe("DiffView 批量对比的跨项内容搜索（轮55 C线）", () => {
+  const PREFS = JSON.stringify({
+    selectedProject: "Order",
+    left: { connId: "left-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+    right: { connId: "right-nacos", tenant: "shared", dataId: "", group: "DEFAULT_GROUP", usesDefaultNamespace: false },
+    mode: "text",
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cs.diffViewPreferences", PREFS);
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([{ namespace: "shared", namespaceShowName: "共享", configCount: 3, kind: 0 }]);
+    const ids = ["app.yaml", "gateway.yaml", "cache.yaml"];
+    apiMocks.listConfigs.mockImplementation(async () => ({
+      totalCount: ids.length,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: ids.map((dataId) => ({ dataId, group: "DEFAULT_GROUP", content: "", configType: "yaml" })),
+    }));
+    apiMocks.getConfig.mockImplementation(async (conn: Connection, _tenant: string, dataId: string) => {
+      if (conn.id === "left-nacos") {
+        if (dataId === "app.yaml") return "port: 8080\ntimeout: 3000\n";
+        if (dataId === "gateway.yaml") return "name: gateway\n";
+        return "ttl: 60\n";
+      }
+      if (dataId === "app.yaml") return "timeout: 9090\n";
+      if (dataId === "gateway.yaml") return "name: gateway\nport: 7070\n";
+      return "ttl: 60\n";
+    });
+  });
+
+  /** 跑到「已生成 N 个文件对比」的批量态（带上进入变更计划的出口，才能验证过滤不动到它）。 */
+  let startApply = vi.fn();
+  async function renderBatch() {
+    startApply = vi.fn();
+    renderDiff([leftApplyConn, rightApplyConn], undefined, startApply);
+    fireEvent.click(await screen.findByRole("button", { name: "加载并对比" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
+    expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
+    return document.querySelector<HTMLElement>(".batch-diff-nav")!;
+  }
+
+  const searchBox = () => screen.getByLabelText("按配置内容搜索这批对比结果") as HTMLInputElement;
+  const navItems = () => document.querySelectorAll(".batch-diff-nav-item");
+  const hitSnippets = () => document.querySelectorAll(".batch-diff-nav-snippet mark.search-hit");
+
+  it("命中词给出计数行、A/B 分开徽标与标红片段", async () => {
+    const nav = await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+
+    expect(await screen.findByText("命中 2 个配置 · 共 2 处")).toBeInTheDocument();
+    // app.yaml：A 有 B 没有（这个值会被删掉）；gateway.yaml：只有 B 有（新增的值）
+    expect(within(nav).getByText("A 1 · B 0")).toBeInTheDocument();
+    expect(within(nav).getByText("A 0 · B 1")).toBeInTheDocument();
+    expect(hitSnippets()).toHaveLength(2);
+    // 没命中的配置不给徽标、不给片段，但也留在列表里（默认不过滤）
+    expect(navItems()).toHaveLength(3);
+    expect(within(nav).getByRole("button", { name: /cache\.yaml/ }).querySelector(".batch-diff-nav-snippet")).toBeNull();
+  });
+
+  it("只看命中项只是看列表的方式，不改动将要应用的东西", async () => {
+    const nav = await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+    await screen.findByText("命中 2 个配置 · 共 2 处");
+
+    const planButton = screen.getByRole("button", { name: "进入配置变更计划（3 个文件）" });
+    fireEvent.click(screen.getByLabelText("只看命中项"));
+    await waitFor(() => expect(navItems()).toHaveLength(2));
+    expect(within(nav).queryByRole("button", { name: /cache\.yaml/ })).toBeNull();
+    // 过滤只改列表：入口按钮仍写着 3 个文件，点下去交给计划页面的也还是 3 个
+    expect(planButton.textContent).toBe("进入配置变更计划（3 个文件）");
+
+    fireEvent.click(screen.getByLabelText("只看命中项"));
+    await waitFor(() => expect(navItems()).toHaveLength(3));
+  });
+
+  it("点命中行换当前项，diff 两侧按同一个词标红", async () => {
+    const nav = await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+    await screen.findByText("命中 2 个配置 · 共 2 处");
+
+    fireEvent.click(within(nav).getByRole("button", { name: /gateway\.yaml/ }));
+
+    const active = document.querySelector(".batch-diff-nav-item.active .batch-diff-nav-title") as HTMLElement;
+    expect(active.textContent).toBe("gateway.yaml");
+    await waitFor(() => expect(document.querySelectorAll(".diff-cell mark.search-hit").length).toBeGreaterThan(0));
+  });
+
+  it("Enter 立刻落地并跳到第一个命中项，不必等防抖", async () => {
+    await renderBatch();
+    const box = searchBox();
+    // 默认当前项是 app.yaml；"name" 只在 gateway.yaml 里命中
+    fireEvent.change(box, { target: { value: "name" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+
+    await waitFor(() =>
+      expect((document.querySelector(".batch-diff-nav-item.active .batch-diff-nav-title") as HTMLElement).textContent).toBe(
+        "gateway.yaml"
+      )
+    );
+    expect(searchBox().value).toBe("name");
+  });
+
+  it("没命中把话说清：搜了几个配置、搜的是什么词，列表不静默变空", async () => {
+    await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "kafka" } });
+
+    expect(await screen.findByText("这 3 个已加载配置的正文里没有「kafka」")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("只看命中项"));
+    await waitFor(() => expect(navItems()).toHaveLength(0));
+    expect(screen.getAllByText("这 3 个已加载配置的正文里没有「kafka」").length).toBeGreaterThan(0);
+  });
+
+  it("Esc 先给差异正文的查找栏，再收跨项搜索（这一层挂 page 档不是 find 档）", async () => {
+    await renderBatch();
+    // 顺序有讲究：先把右侧差异正文的查找栏开起来（内层先登记），再回头往左栏搜索框里打字。
+    // 跨项搜索一旦借 find 档登记，父组件的注册排在子组件之后、同档比注册序，
+    // 外层就会反吃这一键——用户想关查找条，却把整栏搜索词擦了。
+    fireEvent.click(document.querySelector(".batch-diff-main .code-find-open") as HTMLElement);
+    await waitFor(() => expect(document.querySelector(".code-find-input")).not.toBeNull());
+
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+    await screen.findByText("命中 2 个配置 · 共 2 处");
+
+    const findInput = document.querySelector(".code-find-input") as HTMLInputElement;
+    fireEvent.keyDown(findInput, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".code-find-input")).toBeNull());
+    // 内层让位后，跨项搜索的词一处没动
+    expect(searchBox().value).toBe("port");
+
+    // 第二次 Esc 才轮到这一层收跨项搜索
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".batch-diff-search-tools")).toBeNull());
+    expect(searchBox().value).toBe("");
+  });
+
+  it("清空搜索词 ⇒ 搜索态整体退场，徽标与片段一起消失", async () => {
+    await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+    await screen.findByText("命中 2 个配置 · 共 2 处");
+
+    fireEvent.change(searchBox(), { target: { value: "" } });
+    await waitFor(() => expect(document.querySelector(".batch-diff-search-tools")).toBeNull());
+    expect(hitSnippets()).toHaveLength(0);
+    expect(navItems()).toHaveLength(3);
+  });
+
+  it("Esc 清空搜索并把焦点留在框里；新一轮对比完成后搜索态归零", async () => {
+    await renderBatch();
+    fireEvent.change(searchBox(), { target: { value: "port" } });
+    await screen.findByText("命中 2 个配置 · 共 2 处");
+
+    fireEvent.keyDown(searchBox(), { key: "Escape" });
+    expect(searchBox().value).toBe("");
+    expect(document.activeElement).toBe(searchBox());
+    await waitFor(() => expect(document.querySelector(".batch-diff-search-tools")).toBeNull());
+
+    // 重新一批正文：旧的命中词与过滤不再描述眼前的东西，必须一起归零
+    fireEvent.click(screen.getByRole("button", { name: "返回文件选择" }));
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（3）" }));
+    expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
+    expect(searchBox().value).toBe("");
+    expect(document.querySelector(".batch-diff-search-tools")).toBeNull();
   });
 });

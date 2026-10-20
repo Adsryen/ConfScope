@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ConfigItem, getConfig, listAllConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { environmentTone, environmentSortWeight, type EnvironmentTone } from "../lib/envTone";
@@ -38,6 +38,9 @@ import Select from "./Select";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+import { MAX_DIFF_SEARCH_ITEMS, searchDiffContent } from "../lib/diffContentSearch";
+import { highlightSearchTerm } from "../lib/configContentSearch";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { changeTouchesNamespace, subscribeConfigChanges } from "../lib/configChangeBus";
 
 type DiffMode = "text" | "key" | "lines";
@@ -128,6 +131,18 @@ type MergeSelectionDirection = MergeActionDirection;
 type MergeSelectionScope = "row" | "block";
 
 const DOCUMENT_KEY = "__document";
+
+/**
+ * 跨项内容搜索的输入落地延迟（轮55 C线）。
+ *
+ * 为什么不复用 lib/findInput 那套延迟：那套管的是**查找栏自己**那颗词（必须与命中计数、
+ * 定位同帧，且只许三处调用，见 tests/ux/findInputDelaySingleSource）。这里的词是左栏列表的，
+ * 它同时喂「列表命中表」和「右侧 diff 标红」两个消费者，而且两边读的是**同一个已提交值**，
+ * 天然不会分叉，所以只需要把一串按键并成一次全量扫描。
+ * 为什么是 150ms 而不是配置浏览那颗 400ms：那边每按一键要扇出上百次取正文的网络请求，
+ * 这边扫的是已经在内存里的正文，等 400ms 会被读成「打了字没反应」。
+ */
+const CONTENT_SEARCH_DEBOUNCE_MS = 150;
 
 function sortedLinesDoc(content: string): string {
   return content
@@ -780,6 +795,15 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   const [mergeSelections, setMergeSelections] = useState<Record<string, MergeSelectionDirection>>({});
   const [mergePreviews, setMergePreviews] = useState<Record<string, MergePreviewText>>({});
   const [mergeSelectionScope, setMergeSelectionScope] = useState<MergeSelectionScope>("block");
+  /**
+   * 跨项内容搜索（轮55 C线）：input 是框里的即时值，term 是落进命中层的那一颗。
+   * 分两颗是因为扫描要吃整批正文（不能每键一次），而 diff 标红必须与列表同一帧说同一句话。
+   */
+  const [contentSearchInput, setContentSearchInput] = useState("");
+  const [contentSearchTerm, setContentSearchTerm] = useState("");
+  const [onlyHitItems, setOnlyHitItems] = useState(false);
+  const contentSearchTimer = useRef<number | undefined>(undefined);
+  const contentSearchInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // 写后失效：计划执行改的是服务端，而本页被 `.diff-apply-cache` 保活，切回来时面板里的
   // 差异统计仍是执行前那一刻。对比是重操作、也不该被自动打断，所以只标记过期 + 给一键重比。
@@ -834,6 +858,82 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     });
   }, [activeProject, connections, left, mode, right]);
 
+  /**
+   * 搜索作用域 = 这批**已加载**的对比正文（原样取左右正文，不掺合并预览草稿）：
+   * 草稿是「还没决定的事」，命中数不能建立在用户随时会撤的改动上。
+   */
+  const batchSearchItems = useMemo(
+    () => batchResults.map((item) => ({ dataId: item.dataId, leftText: item.leftText, rightText: item.rightText })),
+    [batchResults]
+  );
+  const diffSearch = useMemo(() => searchDiffContent(batchSearchItems, contentSearchTerm), [batchSearchItems, contentSearchTerm]);
+  const diffSearchHitsById = useMemo(() => new Map(diffSearch.hits.map((hit) => [hit.dataId, hit])), [diffSearch]);
+  const isContentSearchActive = Boolean(diffSearch.term);
+  const visibleBatchResults =
+    isContentSearchActive && onlyHitItems
+      ? batchResults.filter((item) => diffSearchHitsById.has(item.dataId))
+      : batchResults;
+
+  /**
+   * 清空跨项内容搜索（词、过滤、待落地的定时器一起归零）。
+   *
+   * 收成一个动作而不是「顺手 setState 两下」：定时器留着的话，用户清完 150ms 后
+   * 旧词会把列表重新打回过滤态——与配置浏览 clearSearchTerms 钉过的同款坑。
+   */
+  const clearContentSearch = useCallback(() => {
+    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
+    contentSearchTimer.current = undefined;
+    setContentSearchInput("");
+    setContentSearchTerm("");
+    setOnlyHitItems(false);
+  }, []);
+
+  const onContentSearchChange = (value: string) => {
+    setContentSearchInput(value);
+    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
+    contentSearchTimer.current = window.setTimeout(() => {
+      contentSearchTimer.current = undefined;
+      setContentSearchTerm(value.trim());
+    }, CONTENT_SEARCH_DEBOUNCE_MS);
+  };
+
+  /**
+   * Esc 收起跨项内容搜索：清空词与过滤，焦点留在框里继续打。
+   *
+   * 走 useEscape 而不是 onKeyDown 里判 key === "Escape"（轮16 R61 的口径，守卫
+   * tests/ux/transientEditorsOwnEscape 钉死）：分派器挂在 window 捕获阶段并 stopPropagation，
+   * 裸分支在任意一层注册时都是死代码。
+   * 档位选 page 而不是 find 是有意的：find 档专门给「宿主弹层内部的瞬时查找层」，
+   * 而这一层和右侧 diff 的查找栏同为页面内层——父组件的注册在子组件之后生效，
+   * 同档比注册序，页面层反而会把子层查找栏的 Esc 抢走。挂 page 后差异正文的
+   * 查找栏（find=15）永远优先，关完它才轮到这一层收搜索框。
+   */
+  const closeContentSearch = useCallback(() => {
+    clearContentSearch();
+    contentSearchInputRef.current?.focus();
+  }, [clearContentSearch]);
+  // 框里没字就没什么可收的；页面被保活隐藏时（active=false）绝不参与分派。
+  useEscape(active && Boolean(contentSearchInput), closeContentSearch, EscapePriority.page);
+
+  /** Enter = 立刻落地并跳到第一个命中项（Esc 不在此处，见上面 closeContentSearch）。 */
+  const onContentSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    // 输入法组合态：回车还在选候选词，不能当成「提交搜索」
+    if (isImeComposing(event)) return;
+    if (event.key === "Enter") {
+      const term = event.currentTarget.value.trim();
+      if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
+      contentSearchTimer.current = undefined;
+      setContentSearchTerm(term);
+      // 不等这一帧之后的 memo：直接用同一个词现算一次，否则 Enter 会按旧词的命中表跳。
+      const first = searchDiffContent(batchSearchItems, term).hits[0];
+      if (first) setSelectedBatchDataId(first.dataId);
+    }
+  };
+
+  useEffect(() => () => {
+    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
+  }, []);
+
   const resetComparisonState = useCallback(() => {
     setMatchResults(null);
     setBatchResults([]);
@@ -848,7 +948,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setLeftFailed(false);
     setRightFailed(false);
     setNotice(null);
-  }, []);
+    clearContentSearch();
+  }, [clearContentSearch]);
 
   useEffect(() => {
     if (batchResults.length === 0) {
@@ -1432,6 +1533,9 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     endAuditSession(session, failCount === total ? "failure" : "success", failCount > 0 ? failedItems.map((f) => `${f.dataId}: ${f.error}`).join("; ") : undefined);
 
     setBatchResults(results);
+    // 换了一批正文，旧的命中词与「只看命中项」就不再描述眼前的东西了：
+    // 留着会让新列表看起来「少了几项」，而用户要找的那句话可能压根不在这一批里。
+    clearContentSearch();
     setFailedItems(failedItems);
     if (failedItems.length > 0) {
       setNotice(t("diff.batchFailedNotice", { count: failedItems.length }));
@@ -1519,6 +1623,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   const returnToMatchList = () => {
     setBatchResults([]);
     setSelectedBatchDataId(null);
+    clearContentSearch();
     setFailedItems([]);
     setBatchOnlyChanges(new Set());
     setMergeSelections({});
@@ -2143,10 +2248,60 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 <div className="batch-diff-layout">
                   <aside className="batch-diff-nav" aria-label={t("diff.batchFileList")}>
                     <div className="batch-diff-nav-head">{t("diff.batchFileList")}</div>
+                    <div className="batch-diff-search">
+                      <input
+                        type="text"
+                        className="search-input"
+                        placeholder={t("diff.contentSearchPlaceholder")}
+                        aria-label={t("diff.contentSearchAriaLabel")}
+                        ref={contentSearchInputRef}
+                        value={contentSearchInput}
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        onChange={(event) => onContentSearchChange(event.target.value)}
+                        onKeyDown={onContentSearchKeyDown}
+                      />
+                    </div>
+                    {isContentSearchActive && (
+                      <div className="batch-diff-search-tools">
+                        <div className="batch-diff-search-status" {...statusMessageProps("info")}>
+                          {diffSearch.matchedItemCount > 0 ? (
+                            <span>
+                              {t("diff.contentSearchCount", { items: diffSearch.matchedItemCount, matches: diffSearch.listedMatches })}
+                            </span>
+                          ) : (
+                            <span>{t("diff.contentSearchEmpty", { term: diffSearch.term, scope: diffSearch.scopeItems })}</span>
+                          )}
+                          {diffSearch.capped && (
+                            <span className="batch-diff-search-capped">
+                              {t("diff.contentSearchCapped", { max: MAX_DIFF_SEARCH_ITEMS, scope: diffSearch.scopeItems })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="batch-diff-search-actions">
+                          <label className="batch-diff-search-filter">
+                            <input
+                              type="checkbox"
+                              checked={onlyHitItems}
+                              onChange={(event) => setOnlyHitItems(event.target.checked)}
+                            />
+                            <span>{t("diff.contentSearchOnlyHits")}</span>
+                          </label>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={clearContentSearch}>
+                            {t("diff.contentSearchClear")}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="batch-diff-nav-scroll" ref={batchNavScrollRef}>
-                      {batchResults.map((item) => {
+                      {visibleBatchResults.map((item) => {
                         const stats = batchResultStatsMap[item.dataId] ?? batchResultStats(item.leftText, item.rightText);
                         const active = item.dataId === selectedBatchItem?.dataId;
+                        const hit = isContentSearchActive ? diffSearchHitsById.get(item.dataId) : undefined;
+                        // 片段取「先有命中的那一侧」：A 侧没有就是 B 侧新增的值，左右任一命中都该看得见
+                        const hitSnippet = hit ? hit.left.snippet || hit.right.snippet : "";
+                        const hitLine = hit ? hit.left.line || hit.right.line : 0;
                         return (
                           <button
                             type="button"
@@ -2168,6 +2323,29 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                             <div className="batch-diff-nav-meta">
                               <span className={`batch-diff-presence ${item.presence}`}>{matchPresenceLabel(item.presence)}</span>
                             </div>
+                            {hit && (
+                              <div className="batch-diff-nav-hit">
+                                <span
+                                  className="batch-diff-nav-hit-count"
+                                  title={t("diff.contentSearchBadgeHint", {
+                                    leftLabel: item.leftLabel,
+                                    rightLabel: item.rightLabel,
+                                    a: hit.left.count,
+                                    b: hit.right.count,
+                                  })}
+                                >
+                                  {t("diff.contentSearchBadge", { a: hit.left.count, b: hit.right.count })}
+                                </span>
+                                <span className="batch-diff-nav-hit-line">{t("diff.contentSearchLine", { line: hitLine })}</span>
+                              </div>
+                            )}
+                            {hit && hitSnippet && (
+                              <div
+                                className="batch-diff-nav-snippet"
+                                title={hitSnippet}
+                                dangerouslySetInnerHTML={{ __html: highlightSearchTerm(hitSnippet, diffSearch.term) }}
+                              />
+                            )}
                           </button>
                         );
                       })}
@@ -2203,6 +2381,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                           rightText={mergePreviewForItem(selectedBatchItem, mergePreviews).rightText}
                           format={selectedBatchItem.format}
                           active={active}
+                          searchTerm={isContentSearchActive ? contentSearchTerm : undefined}
                           warnings={batchWarningsForItem(selectedBatchItem, mergePreviews, t)}
                           onlyChanges={batchOnlyChanges.has(selectedBatchItem.dataId)}
                           onOnlyChangesChange={(checked) => toggleItemOnlyChanges(selectedBatchItem.dataId, checked)}
