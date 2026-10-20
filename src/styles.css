@@ -2155,6 +2155,21 @@ textarea {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  align-items: center;
+}
+/* 轮49 R49-03：「高亮变更 / 原始内容」换成分段控件（两颗恒定命名的按钮）。
+   外观与 .browser-search-mode 取同一档：同一件「在两个互斥视图里选一个」的事，
+   不该在两个页面长得不一样。按钮本身仍走 .btn.btn-ghost.btn-sm，这里只画外框与按下态。 */
+.view-mode {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.view-mode .btn.active {
+  color: var(--text-hi);
+  background: var(--bg-active);
 }
 .err-actions {
   display: flex;
@@ -2260,6 +2275,19 @@ textarea {
 }
 .udiff-gutter.is-hit {
   color: var(--red-h);
+}
+/* 轮49：视图内查找接到这块正文之后，「当前命中」必须赢过上面那条 0.28 底。
+   两条都是 (0,2,0) 时后写的会翻掉前者 ⇒ 补一条 (0,3,0)，写法与
+   .diff-cell .search-hit.search-hit-current / .code-area .search-hit.search-hit-current 成对。 */
+.udiff-text .search-hit.search-hit-current {
+  background: var(--red-fill);
+  color: #fff;
+}
+/* 当前命中那一行的行号：与 .diff-gutter.is-current / .code-ln.is-current 同一对写法。
+   指示只走行号这一个通道，不给 .udiff-row 叠背景（那会把「新增/删除」的语义色挤掉，R41-3）。 */
+.udiff-gutter.is-current {
+  color: var(--text-hi);
+  background: rgba(244, 71, 71, 0.22);
 }
 .udiff-row.add {
   background: var(--diff-add-bg);
@@ -8271,7 +8299,9 @@ button.diff-workflow-step-btn:hover {
 .update-release-notes:focus-visible,
 .match-side-scroll:focus-visible,
 /* 轮48：查找栏关掉后焦点归还给这块正文，它同时是 Tab 可达的滚动区，环必须看得见。 */
-.diff-body:focus-visible {
+.diff-body:focus-visible,
+/* 轮49：历史「高亮变更」那一屏同理——它现在也是查找栏宿主，关栏要把焦点还给这一层。 */
+.udiff:focus-visible {
   outline: 2px solid var(--focus-outline);
   outline-offset: -2px;
 }

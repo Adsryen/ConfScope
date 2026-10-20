@@ -366,13 +366,31 @@ export default function HistoryView({
                     )}
                   </span>
                   <span className="head-actions">
-                    <button
-                      className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
-                      onClick={() => setRawView((v) => !v)}
-                      aria-pressed={!rawView}
-                    >
-                      {rawView ? t('history.highlightChanges') : t('history.rawContent')}
-                    </button>
+                    {/*
+                      分段控件（轮49 R49-03）。原先这里是一颗按钮同时改文案、改 active、改 aria-pressed，
+                      而三者指向的是「另一个视图」：屏幕显示高亮变更时，按钮上写着「原始内容」却是按下态，
+                      读屏念出「原始内容，已按下」就把人指到了根本没显示的那个视图。
+                      拆成两颗恒定命名的按钮——哪个视图在屏上，active 与 aria-pressed 就在同名那颗上。
+                      （守卫 tests/ux/historyViewModeToggleTellsTruth；真机 DF2-06 钉的是用户看得见的 class。）
+                    */}
+                    <div className="view-mode" role="group" aria-label={t("history.viewMode")}>
+                      <button
+                        type="button"
+                        className={`btn btn-ghost btn-sm${rawView ? "" : " active"}`}
+                        aria-pressed={!rawView}
+                        onClick={() => setRawView(false)}
+                      >
+                        {t("history.highlightChanges")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-ghost btn-sm${rawView ? " active" : ""}`}
+                        aria-pressed={rawView}
+                        onClick={() => setRawView(true)}
+                      >
+                        {t("history.rawContent")}
+                      </button>
+                    </div>
                     <CopyButton text={contents[viewing] ?? ""} label={t('history.copyVersion')} />
                     {canRollback && (
                       <button
@@ -408,6 +426,7 @@ export default function HistoryView({
                     newText={contents[dv!] ?? ""}
                     format={format}
                     searchTerm={searchTerm}
+                    active={active}
                   />
                 )}
               </div>

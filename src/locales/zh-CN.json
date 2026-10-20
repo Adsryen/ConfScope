@@ -1024,6 +1024,7 @@
     "firstVersion": "首个版本（无上一版）",
     "highlightChanges": "高亮变更",
     "rawContent": "原始内容",
+    "viewMode": "正文视图",
     "copyVersion": "复制本版",
     "rollbackToThis": "回滚到此版本",
     "selectHint": "点击左侧版本查看内容，或勾选版本进行对比",

@@ -1024,6 +1024,7 @@
     "firstVersion": "First version (no previous)",
     "highlightChanges": "Highlight Changes",
     "rawContent": "Raw Content",
+    "viewMode": "Content view",
     "copyVersion": "Copy Version",
     "rollbackToThis": "Rollback to this",
     "selectHint": "Click a version on the left to view, or pick versions to compare",
