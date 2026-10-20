@@ -7,7 +7,12 @@ import { busyProps } from "../lib/busyRegion";
 import { formatDateTime } from "../lib/formatDateTime";
 import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
-import { buildPromotionEntryFromVerification, buildRollbackEntryFromApplyRecord, fingerprintsForCurrentPlanTargets } from "../lib/applyFollowup";
+import {
+  buildPromotionEntryFromVerification,
+  buildRollbackEntryFromApplyRecord,
+  canBuildRollbackEntry,
+  fingerprintsForCurrentPlanTargets,
+} from "../lib/applyFollowup";
 import {
   loadOperationHistory,
   filterOperationHistory,
@@ -59,8 +64,16 @@ interface FollowupError {
   detail: string;
 }
 
+/**
+ * 后续动作面板要不要出现（R55-A4）。
+ *
+ * 成功记录照旧；**部分写入的失败记录**也进面板——它带着 planId + 写前备份快照，
+ * 前面几条已经落到目标上了，不给出口就只能看着。沙箱验证 / 晋级只对成功记录有意义，
+ * 由渲染层单独收口；回退按钮则按 `canBuildRollbackEntry` 放，现场不齐的记录不再「点了才报错」。
+ */
 function isApplyFollowupRecord(record: OperationRecord): boolean {
-  return record.result === "success" && (record.type === "apply" || record.type === "promote" || record.type === "restore");
+  if (record.result === "success") return record.type === "apply" || record.type === "promote" || record.type === "restore";
+  return canBuildRollbackEntry(record);
 }
 
 function findVerification(verifications: ApplyVerification[], record: OperationRecord): ApplyVerification | null {
@@ -452,144 +465,159 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
         <div className="data-detail history-detail-panel">
           {selectedVisibleRecord ? (
             <>
-              {(() => {
-                const rollbackable = isRollbackableOperation(selectedVisibleRecord);
-                const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
-                const followupRecord = isApplyFollowupRecord(selectedVisibleRecord);
-                const verification = findVerification(verifications, selectedVisibleRecord);
-                const productionTargets = productionTargetsFor(selectedVisibleRecord, verification);
-                const promotionTargetId = selectedPromotionTargetId(selectedVisibleRecord, verification);
-                const rollbackBusy = followupBusy === `rollback:${selectedVisibleRecord.id}`;
-                const verifyBusy = followupBusy === `verify:${selectedVisibleRecord.id}`;
-                const promoteBusy = followupBusy === `promote:${selectedVisibleRecord.id}`;
-                const visibleFollowupError = followupError?.recordId === selectedVisibleRecord.id ? followupError.detail : "";
+                {(() => {
+                  const rollbackable = isRollbackableOperation(selectedVisibleRecord);
+                  const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
+                  const followupRecord = isApplyFollowupRecord(selectedVisibleRecord);
+                  // 回退入口的现场齐不齐（planId + 备份快照）；失败记录只有齐了才谈得上回退。
+                  const rollbackEntryAvailable = canBuildRollbackEntry(selectedVisibleRecord);
+                  // 沙箱验证与晋级只对成功执行过的记录有意义，失败记录不给这两个入口。
+                  const followupSucceeded = selectedVisibleRecord.result === "success";
+                  const verification = findVerification(verifications, selectedVisibleRecord);
+                  const productionTargets = productionTargetsFor(selectedVisibleRecord, verification);
+                  const promotionTargetId = selectedPromotionTargetId(selectedVisibleRecord, verification);
+                  const rollbackBusy = followupBusy === `rollback:${selectedVisibleRecord.id}`;
+                  const verifyBusy = followupBusy === `verify:${selectedVisibleRecord.id}`;
+                  const promoteBusy = followupBusy === `promote:${selectedVisibleRecord.id}`;
+                  const visibleFollowupError = followupError?.recordId === selectedVisibleRecord.id ? followupError.detail : "";
 
-                return (
-                  <>
-              <div className="data-detail-header">
-                <div>
-                  <h3 className="data-detail-title">{selectedVisibleRecord.dataId}</h3>
-                  <div className="data-detail-subtitle">
-                    {selectedVisibleRecord.connectionName} · {selectedVisibleRecord.namespace}/{selectedVisibleRecord.group}
+                  return (
+                    <>
+                <div className="data-detail-header">
+                  <div>
+                    <h3 className="data-detail-title">{selectedVisibleRecord.dataId}</h3>
+                    <div className="data-detail-subtitle">
+                      {selectedVisibleRecord.connectionName} · {selectedVisibleRecord.namespace}/{selectedVisibleRecord.group}
+                    </div>
                   </div>
+                  <CopyButton text={JSON.stringify(selectedVisibleRecord, null, 2)} label={t("operationHistory.copyRecord")} />
                 </div>
-                <CopyButton text={JSON.stringify(selectedVisibleRecord, null, 2)} label={t("operationHistory.copyRecord")} />
-              </div>
-              <div className="data-info-grid">
-                <div className="info-row">
-                  <span className="info-label">{t("operationHistory.operationType")}:</span>
-                  <span className="info-value">{t(OPERATION_LABELS[selectedVisibleRecord.type])}</span>
+                <div className="data-info-grid">
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.operationType")}:</span>
+                    <span className="info-value">{t(OPERATION_LABELS[selectedVisibleRecord.type])}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.result")}:</span>
+                    <span className={`info-value ${selectedVisibleRecord.result === "failure" ? "error" : ""}`}>
+                      {t(RESULT_LABELS[selectedVisibleRecord.result])}
+                    </span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.time")}:</span>
+                    <span className="info-value">{formatDateTime(selectedVisibleRecord.timestamp)}</span>
+                  </div>
+                  {selectedVisibleRecord.planId && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.planId")}:</span>
+                      <span className="info-value">{selectedVisibleRecord.planId}</span>
+                    </div>
+                  )}
+                  {selectedVisibleRecord.planSummary && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.planSummary")}:</span>
+                      <span className="info-value">{formatPlanSummary(selectedVisibleRecord)}</span>
+                    </div>
+                  )}
+                  {formatBackupSnapshot(selectedVisibleRecord) && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.backupSnapshot")}:</span>
+                      <span className="info-value">{formatBackupSnapshot(selectedVisibleRecord)}</span>
+                    </div>
+                  )}
+                  {selectedVisibleRecord.taskId && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.taskId")}:</span>
+                      <span className="info-value">{selectedVisibleRecord.taskId}</span>
+                    </div>
+                  )}
+                  {formatApplyDirection(selectedVisibleRecord) && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.applyDirection")}:</span>
+                      <span className="info-value">{formatApplyDirection(selectedVisibleRecord)}</span>
+                    </div>
+                  )}
+                  <div className="info-row">
+                    <span className="info-label">{t("operationHistory.rollbackState")}:</span>
+                    <span className={`info-value history-rollback-state ${rollbackable ? "available" : "unavailable"}`}>
+                      {rollbackable ? t("operationHistory.rollbackable") : t("operationHistory.notRollbackable")}
+                    </span>
+                  </div>
+                  {!rollbackable && rollbackReason && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.rollbackReason")}:</span>
+                      <span className="info-value">{t(rollbackReason)}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="info-row">
-                  <span className="info-label">{t("operationHistory.result")}:</span>
-                  <span className={`info-value ${selectedVisibleRecord.result === "failure" ? "error" : ""}`}>
-                    {t(RESULT_LABELS[selectedVisibleRecord.result])}
-                  </span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">{t("operationHistory.time")}:</span>
-                  <span className="info-value">{formatDateTime(selectedVisibleRecord.timestamp)}</span>
-                </div>
-                {selectedVisibleRecord.planId && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.planId")}:</span>
-                    <span className="info-value">{selectedVisibleRecord.planId}</span>
-                  </div>
-                )}
-                {selectedVisibleRecord.planSummary && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.planSummary")}:</span>
-                    <span className="info-value">{formatPlanSummary(selectedVisibleRecord)}</span>
-                  </div>
-                )}
-                {formatBackupSnapshot(selectedVisibleRecord) && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.backupSnapshot")}:</span>
-                    <span className="info-value">{formatBackupSnapshot(selectedVisibleRecord)}</span>
-                  </div>
-                )}
-                {selectedVisibleRecord.taskId && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.taskId")}:</span>
-                    <span className="info-value">{selectedVisibleRecord.taskId}</span>
-                  </div>
-                )}
-                {formatApplyDirection(selectedVisibleRecord) && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.applyDirection")}:</span>
-                    <span className="info-value">{formatApplyDirection(selectedVisibleRecord)}</span>
-                  </div>
-                )}
-                <div className="info-row">
-                  <span className="info-label">{t("operationHistory.rollbackState")}:</span>
-                  <span className={`info-value history-rollback-state ${rollbackable ? "available" : "unavailable"}`}>
-                    {rollbackable ? t("operationHistory.rollbackable") : t("operationHistory.notRollbackable")}
-                  </span>
-                </div>
-                {!rollbackable && rollbackReason && (
-                  <div className="info-row">
-                    <span className="info-label">{t("operationHistory.rollbackReason")}:</span>
-                    <span className="info-value">{t(rollbackReason)}</span>
-                  </div>
-                )}
-              </div>
-              {followupRecord && onStartApply && (
-                <div className="history-followup-panel">
-                  <div className="history-detail-actions">
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={() => startRollbackDryRun(selectedVisibleRecord)}
-                      disabled={rollbackBusy}
-                    >
-                      {rollbackBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.generateRollbackPlan")}
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      type="button"
-                      onClick={() => void markSandboxVerified(selectedVisibleRecord)}
-                      disabled={verifyBusy}
-                    >
-                      {verifyBusy
-                        ? t("operationHistory.generatingFollowup")
-                        : verification
-                          ? t("operationHistory.sandboxVerifiedState")
-                          : t("operationHistory.markSandboxVerified")}
-                    </button>
-                  </div>
-                  <div className="history-promote-row">
-                    <label className="field-label" htmlFor={`promotion-target-${selectedVisibleRecord.id}`}>
-                      {t("operationHistory.productionTarget")}
-                    </label>
-                    <select
-                      id={`promotion-target-${selectedVisibleRecord.id}`}
-                      className="history-filter-select"
-                      value={promotionTargetId}
-                      onChange={(event) =>
-                        setPromotionTargets((current) => ({ ...current, [selectedVisibleRecord.id]: event.target.value }))
-                      }
-                    >
-                      {productionTargets.length === 0 ? (
-                        <option value="">{t("operationHistory.noProductionTarget")}</option>
-                      ) : (
-                        productionTargets.map((conn) => (
-                          <option key={conn.id} value={conn.id}>
-                            {conn.name}
-                          </option>
-                        ))
+                {followupRecord && onStartApply && (
+                  <div className="history-followup-panel">
+                    {!followupSucceeded && <div className="field-hint">{t("operationHistory.partialFailureFollowupHint")}</div>}
+                    <div className="history-detail-actions">
+                      {rollbackEntryAvailable && (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          type="button"
+                          onClick={() => startRollbackDryRun(selectedVisibleRecord)}
+                          disabled={rollbackBusy}
+                        >
+                          {rollbackBusy
+                            ? t("operationHistory.generatingFollowup")
+                            : t(followupSucceeded ? "operationHistory.generateRollbackPlan" : "operationHistory.rollbackFromBackupPlan")}
+                        </button>
                       )}
-                    </select>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={() => startPromotionDryRun(selectedVisibleRecord)}
-                      disabled={!verification || !promotionTargetId || promoteBusy}
-                    >
-                      {promoteBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.promoteToTarget")}
-                    </button>
-                  </div>
-                  {!verification && (
-                    <div className="field-hint">{t("operationHistory.promoteRequiresVerification")}</div>
+                      {followupSucceeded && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          type="button"
+                          onClick={() => void markSandboxVerified(selectedVisibleRecord)}
+                          disabled={verifyBusy}
+                        >
+                          {verifyBusy
+                            ? t("operationHistory.generatingFollowup")
+                            : verification
+                              ? t("operationHistory.sandboxVerifiedState")
+                              : t("operationHistory.markSandboxVerified")}
+                        </button>
+                      )}
+                    </div>
+                    {followupSucceeded && (
+                    <>
+                      <div className="history-promote-row">
+                        <label className="field-label" htmlFor={`promotion-target-${selectedVisibleRecord.id}`}>
+                          {t("operationHistory.productionTarget")}
+                        </label>
+                        <select
+                          id={`promotion-target-${selectedVisibleRecord.id}`}
+                          className="history-filter-select"
+                          value={promotionTargetId}
+                          onChange={(event) =>
+                            setPromotionTargets((current) => ({ ...current, [selectedVisibleRecord.id]: event.target.value }))
+                          }
+                        >
+                          {productionTargets.length === 0 ? (
+                            <option value="">{t("operationHistory.noProductionTarget")}</option>
+                          ) : (
+                            productionTargets.map((conn) => (
+                              <option key={conn.id} value={conn.id}>
+                                {conn.name}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          type="button"
+                          onClick={() => startPromotionDryRun(selectedVisibleRecord)}
+                          disabled={!verification || !promotionTargetId || promoteBusy}
+                        >
+                          {promoteBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.promoteToTarget")}
+                        </button>
+                      </div>
+                      {!verification && (
+                        <div className="field-hint">{t("operationHistory.promoteRequiresVerification")}</div>
+                      )}
+                    </>
                   )}
                   {visibleFollowupError && (
                     <InlineError title={t("operationHistory.followupFailed")} message={visibleFollowupError} />

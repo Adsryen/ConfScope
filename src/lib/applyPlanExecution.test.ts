@@ -5,6 +5,7 @@ import type { OperationRecord } from "../store/operationHistory";
 import type { Task, TaskManager } from "./taskmanager";
 import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type ApplyPlanEndpoint, type ApplyPlanRef, type BuildApplyPlanInput } from "./applyPlan";
 import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "./applyPlanExecution";
+import { translate } from "../locales";
 
 const baseConnection: Connection = {
   id: "conn-safe",
@@ -254,7 +255,15 @@ describe("executeApplyPlan", () => {
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toMatchObject({ ok: false, taskId: "task-apply-1", error: expect.stringContaining("/source") });
+    expect(result).toMatchObject({
+      ok: false,
+      taskId: "task-apply-1",
+      error: expect.stringContaining("public/DEFAULT_GROUP/changed.yaml"),
+    });
+    // R55-A3：文案里不许再出现 itemId 的 `|` 拼接串，也不许漏出内部连接 id
+    if (result.ok) throw new Error("expected execution to fail");
+    expect(result.error).not.toContain("|");
+    expect(result.error).not.toContain("conn-prod");
     expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
@@ -264,10 +273,14 @@ describe("executeApplyPlan", () => {
         result: "failure",
         planId: "plan-1",
         taskId: "task-apply-1",
-        error: expect.stringContaining("/source"),
+        error: expect.stringContaining("public/DEFAULT_GROUP/changed.yaml"),
       })
     );
-    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", false, expect.stringContaining("/source"));
+    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith(
+      "task-apply-1",
+      false,
+      expect.stringContaining("public/DEFAULT_GROUP/changed.yaml")
+    );
   });
 
   it("stops when before backup fails and does not publish or delete", async () => {
@@ -706,6 +719,127 @@ describe("executeApplyPlan", () => {
     );
   });
 
+  // R55-A1：批量新鲜度校验只覆盖「校验那一刻」，从校验到真正落库之间被人改过的值
+  // 会照写不误。写前最后一刻用同一次读取的指纹复检，是这个窗口里唯一能兜住的手段。
+  describe("写前最后一刻指纹复检", () => {
+    /**
+     * 让目标连接上某个 dataId 的第 fromCall 次（含）之后的读取返回另一份内容，
+     * 用来模拟「校验时还好好的、落库前被人改了一刀」。
+     * 单项计划下目标连接的读取顺序固定：①批量新鲜度 ②写前备份快照 ③写入前复检。
+     */
+    function depsWithLateTargetRead(
+      documents: Record<string, ConfigDocument | null>,
+      options: { dataId: string; lateContent?: string; fromCall: number; failFromCall?: number }
+    ) {
+      const base = deps(documents);
+      const original = base.getConfigDocument;
+      let targetReads = 0;
+      base.getConfigDocument = vi.fn(async (conn: Connection, namespace: string, dataId: string, group: string) => {
+        if (conn.id === "conn-prod" && dataId === options.dataId) {
+          targetReads += 1;
+          if (options.failFromCall !== undefined && targetReads >= options.failFromCall) {
+            throw new Error(`network boom: ${dataId}`);
+          }
+          if (options.lateContent !== undefined && targetReads >= options.fromCall) {
+            return doc(options.lateContent, "yaml", `late-${targetReads}`);
+          }
+        }
+        return original(conn, namespace, dataId, group);
+      });
+      return base;
+    }
+
+    it("目标在校验后被人改动时停止该项，不覆盖别人的值", async () => {
+      const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+      const runDeps = depsWithLateTargetRead(
+        { "conn-dev:changed.yaml": doc("new"), "conn-prod:changed.yaml": doc("old") },
+        { dataId: "changed.yaml", lateContent: "someone-else-wrote-this", fromCall: 3 }
+      );
+
+      const result = await executeApplyPlan(plan, runDeps);
+
+      if (result.ok) throw new Error("expected execution to fail");
+      expect(result.error).toBe(translate("apply.writeConflictDetected", { ref: "public/DEFAULT_GROUP/changed.yaml" }));
+      expect(runDeps.publishConfig).not.toHaveBeenCalled();
+      expect(result.progress).toEqual({
+        completedWrites: 0,
+        totalWrites: 1,
+        failedIndex: 1,
+        failedRef: "public/DEFAULT_GROUP/changed.yaml",
+      });
+      expect(runDeps.recordOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ result: "failure", planId: "plan-1", backupSnapshotId: "snap-before-1" })
+      );
+    });
+
+    it("复检读不到现值时维持 best-effort，照常执行写入", async () => {
+      const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+      const runDeps = depsWithLateTargetRead(
+        { "conn-dev:changed.yaml": doc("new"), "conn-prod:changed.yaml": doc("old") },
+        { dataId: "changed.yaml", fromCall: 99, failFromCall: 3 }
+      );
+
+      const result = await executeApplyPlan(plan, runDeps);
+
+      expect(result).toEqual({ ok: true, taskId: "task-apply-1", historyId: "history-1" });
+      expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
+    });
+
+    it("逐项失败时外露「已写入几项 / 第几项失败」的进度", async () => {
+      const plan = applyPlan([
+        { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+        { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+      ]);
+      const base = deps({
+        "conn-dev:a.yaml": doc("a2"),
+        "conn-prod:a.yaml": doc("a1"),
+        "conn-dev:b.yaml": doc("b2"),
+        "conn-prod:b.yaml": doc("b1"),
+      });
+      const runDeps = {
+        ...base,
+        publishConfig: vi.fn(async (_conn: Connection, _namespace: string, dataId: string) => {
+          if (dataId === "b.yaml") throw new Error("publish denied: b.yaml");
+        }),
+      };
+
+      const result = await executeApplyPlan(plan, runDeps);
+
+      if (result.ok) throw new Error("expected execution to fail");
+      expect(result.error).toBe("publish denied: b.yaml");
+      expect(result.progress).toEqual({
+        completedWrites: 1,
+        totalWrites: 2,
+        failedIndex: 2,
+        failedRef: "public/DEFAULT_GROUP/b.yaml",
+      });
+      // 第二条确实发起过写入请求（失败在 provider 侧），成功落库的只有第一条
+      expect(runDeps.publishConfig.mock.calls.map((call: unknown[]) => call[2])).toEqual(["a.yaml", "b.yaml"]);
+    });
+
+    it("第二项在写前复检时被人改动，进度按已成功项计数", async () => {
+      const plan = applyPlan([
+        { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+        { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+      ]);
+      const runDeps = depsWithLateTargetRead(
+        {
+          "conn-dev:a.yaml": doc("a2"),
+          "conn-prod:a.yaml": doc("a1"),
+          "conn-dev:b.yaml": doc("b2"),
+          "conn-prod:b.yaml": doc("b1"),
+        },
+        { dataId: "b.yaml", lateContent: "b-late", fromCall: 3 }
+      );
+
+      const result = await executeApplyPlan(plan, runDeps);
+
+      if (result.ok) throw new Error("expected execution to fail");
+      expect(result.progress).toMatchObject({ completedWrites: 1, totalWrites: 2, failedIndex: 2 });
+      expect(runDeps.publishConfig).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("supports dry-run without writing, backup snapshots or history records", async () => {
     const plan = applyPlan([
       { ref: ref("changed.yaml"), sourceValue: documentValue("next changed"), targetValue: documentValue("old changed") },
@@ -809,8 +943,9 @@ describe("content-replace 风格计划（source override + 原文基线指纹）
 
     const result = await executeApplyPlan(plan, runDeps);
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("/source") });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("public/DEFAULT_GROUP/app.yaml") });
     if (result.ok) throw new Error("expected execution to fail");
+    expect(result.error).not.toContain("|");
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
   });

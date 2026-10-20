@@ -15,7 +15,12 @@ import { validateConfig } from "../lib/validate";
 import { describeParseError } from "../lib/parseErrorCopy";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
-import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "../lib/applyPlanExecution";
+import {
+  applyConfirmationText,
+  executeApplyPlan,
+  isProtectedApplyTarget,
+  type ApplyExecutionProgress,
+} from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
 import { recordOperation } from "../store/operationHistory";
 import { publishConfigChange } from "../lib/configChangeBus";
@@ -376,6 +381,7 @@ function ConfirmationPanel({
   confirmationText,
   executionMode,
   executeError,
+  executeProgress,
   executeNotice,
   executionTask,
   executionSucceeded,
@@ -392,6 +398,8 @@ function ConfirmationPanel({
   confirmationText: string;
   executionMode: ExecutionMode | null;
   executeError: string | null;
+  /** 部分写入的进度（R55-A2）：失败时由执行器算出来，拿不到就不显示这一行。 */
+  executeProgress: ApplyExecutionProgress | null;
   executeNotice: string | null;
   executionTask: Task | null;
   executionSucceeded: boolean;
@@ -519,7 +527,26 @@ function ConfirmationPanel({
           {executionTask.error && <pre className="apply-task-progress-error">{executionTask.error}</pre>}
         </div>
       )}
-      {executeError && <InlineError title={t("apply.executionFailed")} message={executeError} copyLabel={t("apply.copyError")} />}
+      {executeError && (
+        <InlineError
+          title={t("apply.executionFailed")}
+          message={executeError}
+          copyLabel={t("apply.copyError")}
+          /* 重试直接走同一个 onExecute，守卫复用按钮那套判定（executeDisabled）：
+             确认勾选 / 确认文本 / blocked 项 / 成功一次后禁再执行，一个都绕不过去（R55-A6）。 */
+          onRetry={executeDisabled ? undefined : onExecute}
+        />
+      )}
+      {executeError && executeProgress && (
+        <div className="apply-partial-write" {...statusMessageProps("info")}>
+          {t("apply.progressPartial", {
+            completed: executeProgress.completedWrites,
+            total: executeProgress.totalWrites,
+            failedIndex: executeProgress.failedIndex ?? "?",
+            ref: executeProgress.failedRef ?? "",
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -532,6 +559,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   // 未保存的「编辑目标内容」：itemId -> 草稿。只有本页会写，切选中项不丢，离开前拦一道。
   const [targetEdits, setTargetEdits] = useState<Record<string, TargetEdit>>({});
   const [askDiscardEdits, setAskDiscardEdits] = useState(false);
+  // 写入进行中点「返回」/stepper 回退：先确认一次再走（R55-A5）
+  const [askLeaveDuringRun, setAskLeaveDuringRun] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmationText, setConfirmationText] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode | null>(null);
@@ -540,6 +569,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [executionSucceeded, setExecutionSucceeded] = useState(false);
   const [executionTask, setExecutionTask] = useState<Task | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
+  // 失败时的「已写入几项 / 第几项断的」（R55-A2）：跟着 executeError 一起清，避免留旧数
+  const [executeProgress, setExecuteProgress] = useState<ApplyExecutionProgress | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
   const taskManager = getTaskManager();
   const trackedTaskIdRef = useRef<string | null>(null);
@@ -549,6 +580,19 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   // 不用 createAuditSession 的返回值是因为事件需写入会话列表供审计日志页展示）
   const applyEntrySessionRef = useRef<string | null>(null);
 
+  // 写入进行中关掉整个应用会掐断在途请求，已落库的配置也不会自动回退，
+  // 所以这一层用 beforeunload 拦一次（R55-A5）。dry-run 什么都不写，不挂。
+  // 挂在 executionMode 上：离开执行态（finally）自动摘除，不给后续操作留隐形拦截。
+  useEffect(() => {
+    if (executionMode !== "apply") return;
+    const blockLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", blockLeave);
+    return () => window.removeEventListener("beforeunload", blockLeave);
+  }, [executionMode]);
+
   useEffect(() => {
     const unsubscribe = taskManager.onTaskUpdate((task) => {
       if (task.id === trackedTaskIdRef.current) setExecutionTask(task);
@@ -556,25 +600,27 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     return () => unsubscribe?.();
   }, [taskManager]);
 
+  // 计划构建从「进入本页」的 useEffect 里提出来（R55-A6）：以前构建逻辑长在 effect 内部，
+  // 生成失败后界面上除了退出再进来没有第二条路，行内错误也就无从挂「重试」。
+  // attempt 计数 + mounted 双保险：重试或换 entry 时，上一趟 promise 的回调不许再落状态。
+  const buildAttemptRef = useRef(0);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    setConfirmed(false);
-    setConfirmationText("");
-    setExecutionMode(null);
-    setLastExecutionMode(null);
-    setExecutionCompleted(false);
-    setExecutionSucceeded(false);
-    setExecutionTask(null);
-    trackedTaskIdRef.current = null;
-    setExecuteError(null);
-    setExecuteNotice(null);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const buildDraft = useCallback(() => {
     if (!entry) {
       setDraftState({ status: "idle" });
       setSelectedId("");
       setSelectedIds(new Set());
       return;
     }
-
-    let alive = true;
+    buildAttemptRef.current += 1;
+    const attempt = buildAttemptRef.current;
     setDraftState({ status: "loading" });
     setSelectedId("");
     setSelectedIds(new Set());
@@ -586,7 +632,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       getConfigDocument,
     })
       .then((result) => {
-        if (!alive) return;
+        if (!mountedRef.current || attempt !== buildAttemptRef.current) return;
         if (!result.ok) {
           setDraftState({ status: "error", detail: result.detail });
           return;
@@ -633,14 +679,26 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
         setSelectedIds(defaultSelectedItemIds(savedPlan));
       })
       .catch((error) => {
-        if (!alive) return;
+        if (!mountedRef.current || attempt !== buildAttemptRef.current) return;
         setDraftState({ status: "error", detail: errorText(error) });
       });
-
-    return () => {
-      alive = false;
-    };
   }, [connections, entry]);
+
+  // 换来源 / 换连接：执行态与确认态一律重置，然后重建计划草稿。
+  useEffect(() => {
+    setConfirmed(false);
+    setConfirmationText("");
+    setExecutionMode(null);
+    setLastExecutionMode(null);
+    setExecutionCompleted(false);
+    setExecutionSucceeded(false);
+    setExecutionTask(null);
+    trackedTaskIdRef.current = null;
+    setExecuteError(null);
+    setExecuteProgress(null);
+    setExecuteNotice(null);
+    buildDraft();
+  }, [buildDraft]);
 
   // 第 3 步「选择变更」：每次勾选变化记录选中集 + 每项完整内容（变化才记，避免刷屏）
   const selectionJson = JSON.stringify(Array.from(selectedIds).sort());
@@ -689,6 +747,13 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   // 记下来时的目标步骤，确认后才带着它走，避免「放弃草稿」把用户丢到别的步骤。
   const pendingBackStepRef = useRef<WorkflowStepId | undefined>(undefined);
   const attemptBack = (focusStep?: WorkflowStepId) => {
+    // 执行中优先拦这一条：任务中心是全局的，返回不丢进度，但这一页的结果面板会消失，
+    // 而且中途关窗会掐断在途请求（R55-A5）。确认后才带着目标步骤走，逻辑同「放弃草稿」。
+    if (executionMode === "apply") {
+      pendingBackStepRef.current = focusStep;
+      setAskLeaveDuringRun(true);
+      return;
+    }
     if (unsavedEditCount === 0) {
       onBack(focusStep);
       return;
@@ -797,6 +862,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     setExecutionTask(null);
     trackedTaskIdRef.current = null;
     setExecuteError(null);
+    setExecuteProgress(null);
     setExecuteNotice(null);
     // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
     const session = applyEntrySessionRef.current ?? createAuditSession("apply");
@@ -889,6 +955,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       }
       if (!result.ok) {
         setExecuteError(result.error);
+        setExecuteProgress(result.progress ?? null);
         auditSessionEvent(session, { kind: "apply_error", result: "failure", taskId: result.taskId, historyId: resultHistoryId, error: result.error });
         endAuditSession(session, "failure", result.error);
         return;
@@ -931,6 +998,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       endAuditSession(session, "success");
     } catch (error) {
       setExecuteError(errorText(error));
+      setExecuteProgress(null);
       auditSessionEvent(session, {
         kind: "apply_error",
         result: "failure",
@@ -982,7 +1050,14 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       {entry && draftState.status === "loading" && <div className="pad-msg big apply-draft-loading" role="status">{t("apply.generating")}</div>}
 
       {entry && draftState.status === "error" && (
-        <InlineError title={t("apply.generationFailed")} message={draftState.detail} copyLabel={t("apply.copyError")} />
+        /* 构建逻辑从 effect 提到 buildDraft 后，「生成失败」也有了第二条出路：
+           原地重试，不用退出再进来（R55-A6）。 */
+        <InlineError
+          title={t("apply.generationFailed")}
+          message={draftState.detail}
+          copyLabel={t("apply.copyError")}
+          onRetry={buildDraft}
+        />
       )}
 
       {plan && (
@@ -1049,6 +1124,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
               confirmationText={confirmationText}
               executionMode={executionMode}
               executeError={executeError}
+              executeProgress={executeProgress}
               executeNotice={executeNotice}
               executionTask={executionTask}
               executionSucceeded={executionSucceeded}
@@ -1059,6 +1135,19 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
             />
           </div>
         </div>
+      )}
+      {askLeaveDuringRun && (
+        <ConfirmModal
+          danger
+          title={t("apply.leaveDuringRunTitle")}
+          message={t("apply.leaveDuringRunMessage")}
+          confirmLabel={t("apply.leaveDuringRunConfirm")}
+          onConfirm={() => {
+            setAskLeaveDuringRun(false);
+            onBack(pendingBackStepRef.current);
+          }}
+          onCancel={() => setAskLeaveDuringRun(false)}
+        />
       )}
       {askDiscardEdits && (
         <ConfirmModal

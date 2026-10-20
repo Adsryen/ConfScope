@@ -7,8 +7,11 @@ import {
   validateApplyPlanFreshness,
   type ApplyPlan,
   type ApplyPlanEndpoint,
+  type ApplyPlanFreshnessIssue,
+  type ApplyPlanFreshnessSide,
   type ApplyPlanFreshnessSnapshot,
   type ApplyPlanItem,
+  type ApplyPlanRef,
   type ApplyPlanValueInput,
 } from "./applyPlan";
 import {
@@ -69,7 +72,24 @@ export interface ExecuteApplyPlanOptions {
 export type ExecuteApplyPlanResult =
   | { ok: true; taskId: string; historyId: string }
   | { ok: true; dryRun: true; taskId: string; plannedWrites: number }
-  | { ok: false; taskId?: string; historyId?: string; error: string };
+  | { ok: false; taskId?: string; historyId?: string; error: string; progress?: ApplyExecutionProgress };
+
+/**
+ * 失败时外露的执行进度（R55-A2，轮54 复检）。
+ *
+ * 逐项写入是「一失败就停」，前面落成功的项已经改了服务端。以前结果里只有一句错误串，
+ * 用户既不知道写了几条、也不知道断在哪一条，没法判断要不要立刻回退。
+ */
+export interface ApplyExecutionProgress {
+  /** 失败前真正写成功的项数。 */
+  completedWrites: number;
+  /** 本次要执行的总项数。 */
+  totalWrites: number;
+  /** 失败项在本次写入序列里的序号（1 起）。 */
+  failedIndex?: number;
+  /** 失败项的人读标签（命名空间/分组/dataId (+ key)）。 */
+  failedRef?: string;
+}
 
 function targetSearchText(connection: Connection | null | undefined, endpoint: ApplyPlanEndpoint): string {
   return [
@@ -407,13 +427,42 @@ function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps, onTaskCreated?:
   return task.id;
 }
 
+/** 人读的项标签：`命名空间/分组/dataId`，key 级再补 `(key)`（R55-A3）。 */
+function itemRefLabel(ref: ApplyPlanRef): string {
+  const base = `${ref.namespace}/${ref.group}/${ref.dataId}`;
+  return ref.key && ref.key !== DOCUMENT_KEY ? `${base} (${ref.key})` : base;
+}
+
+function sideLabel(side: ApplyPlanFreshnessSide): string {
+  return translate(side === "source" ? "apply.source" : "apply.target");
+}
+
+/**
+ * 过期项的可读清单（R55-A3）。
+ *
+ * 以前这里塞的是 `${itemId}/${side}`，而 itemId 本身是
+ * `provider|connectionId|namespace|group|dataId|key` 的拼接串——界面上一长串管道符，
+ * 用户读不出「哪一份配置、哪一侧」变了。
+ */
+function staleIssueLabel(plan: ApplyPlan, issue: ApplyPlanFreshnessIssue): string {
+  const item = plan.items.find((candidate) => candidate.id === issue.itemId);
+  if (!item) {
+    // 理论上到不了这儿：过期项是从 plan.items 算出来的。兜底也只还原成 `/` 路径，
+    // 不把 `|` 拼接串再吐给用户。
+    return `${issue.itemId.replace(/\|/g, "/")} · ${sideLabel(issue.side)}`;
+  }
+  const ref = issue.side === "source" ? sourceRef(item) : targetRef(item);
+  return `${itemRefLabel(ref)} · ${sideLabel(issue.side)}`;
+}
+
 function recordFailure(
   plan: ApplyPlan,
   deps: ExecuteApplyPlanDeps,
   taskId: string,
   error: string,
   backup: ApplyBackupSummary = emptyBackup(),
-  recordHistory = true
+  recordHistory = true,
+  progress?: ApplyExecutionProgress
 ): ExecuteApplyPlanResult {
   let historyId = "";
   if (recordHistory) {
@@ -428,7 +477,7 @@ function recordFailure(
     historyId = history.id;
   }
   deps.taskManager.completeTask(taskId, false, error);
-  return recordHistory ? { ok: false, taskId, historyId, error } : { ok: false, taskId, error };
+  return recordHistory ? { ok: false, taskId, historyId, error, progress } : { ok: false, taskId, error, progress };
 }
 
 export async function executeApplyPlan(
@@ -467,7 +516,9 @@ export async function executeApplyPlan(
     const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
     const freshness = validateApplyPlanFreshness(workingPlan, currentSnapshots);
     if (!freshness.ok) {
-      const error = translate("apply.planStale", { items: freshness.staleItems.map((item) => `${item.itemId}/${item.side}`).join(", ") });
+      const error = translate("apply.planStale", {
+        items: freshness.staleItems.map((issue) => staleIssueLabel(workingPlan, issue)).join(", "),
+      });
       return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), !options.dryRun);
     }
 
@@ -491,47 +542,66 @@ export async function executeApplyPlan(
       return { ok: false, taskId, historyId: history.id, error: safety.error };
     }
 
+    // 失败项在本次写入序列里的位置与人读标签（R55-A2）：一失败就停，但
+    // 「停在哪一条、前面写了几条」必须能报给界面，所以计数声明在 try 外面。
+    let processed = 0;
+    let attemptedIndex = 0;
+    let attemptedRefLabel = "";
+    let completedWrites = 0;
     try {
-      let completed = 0;
       for (const write of writes) {
         const ref = targetRef(write.item);
+        attemptedIndex += 1;
+        attemptedRefLabel = itemRefLabel(ref);
         // 完整现场：写入前目标当前内容（best-effort；读失败不阻断执行）
         let beforeContent: string | undefined;
+        let currentFingerprint: string | undefined;
         try {
           const current = await readCurrentValue(write.item, targetConnection, "target", deps);
           beforeContent = current.content ?? current.value;
+          currentFingerprint = current.fingerprint;
         } catch {
           beforeContent = undefined;
         }
         let itemError: string | undefined;
-        try {
-          if (write.kind === "publish") {
-            await deps.publishConfig(
-              targetConnection,
-              ref.namespace,
-              ref.dataId,
-              ref.group,
-              write.content ?? "",
-              write.configType ?? "text"
-            );
-          } else if (write.kind === "delete") {
-            await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
-          } else if (write.kind === "publish_ref") {
-            if (!deps.publishConfigRef) throw new Error(translate("apply.publishRefBindingMissing"));
-            const writeRef = providerWriteRef(write.item);
-            if (typeof writeRef === "string") throw new Error(writeRef);
-            await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
-          } else {
-            if (!deps.deleteConfigRef) throw new Error(translate("apply.deleteRefBindingMissing"));
-            const writeRef = providerWriteRef(write.item);
-            if (typeof writeRef === "string") throw new Error(writeRef);
-            await deps.deleteConfigRef(targetConnection, writeRef);
+        // 最后一刻指纹复检（R55-A1，轮54 复检）。批量新鲜度校验在这轮循环之前一次读完，
+        // 从那次读到此刻落库之间被别人改过的值，靠这一次「本来就要读」的现值兜住——
+        // Nacos/Apollo 的 key 级写入没有 CAS，覆盖一旦发出去就收不回。
+        // 读取失败时手上没有可比对的现值，维持原有 best-effort 语义，不新增阻断。
+        const plannedFingerprint = write.item.targetFingerprint || write.item.targetValue?.fingerprint;
+        if (currentFingerprint && plannedFingerprint && currentFingerprint !== plannedFingerprint) {
+          itemError = translate("apply.writeConflictDetected", { ref: attemptedRefLabel });
+        } else {
+          try {
+            if (write.kind === "publish") {
+              await deps.publishConfig(
+                targetConnection,
+                ref.namespace,
+                ref.dataId,
+                ref.group,
+                write.content ?? "",
+                write.configType ?? "text"
+              );
+            } else if (write.kind === "delete") {
+              await deps.deleteConfig(targetConnection, ref.namespace, ref.dataId, ref.group);
+            } else if (write.kind === "publish_ref") {
+              if (!deps.publishConfigRef) throw new Error(translate("apply.publishRefBindingMissing"));
+              const writeRef = providerWriteRef(write.item);
+              if (typeof writeRef === "string") throw new Error(writeRef);
+              await deps.publishConfigRef(targetConnection, writeRef, write.content ?? "", write.configType ?? "text");
+            } else {
+              if (!deps.deleteConfigRef) throw new Error(translate("apply.deleteRefBindingMissing"));
+              const writeRef = providerWriteRef(write.item);
+              if (typeof writeRef === "string") throw new Error(writeRef);
+              await deps.deleteConfigRef(targetConnection, writeRef);
+            }
+          } catch (e) {
+            itemError = errorText(e);
           }
-        } catch (e) {
-          itemError = errorText(e);
         }
-        completed += 1;
-        deps.taskManager.updateProgress(taskId, completed, 0, writes.length);
+        processed += 1;
+        if (!itemError) completedWrites += 1;
+        deps.taskManager.updateProgress(taskId, processed, 0, writes.length);
         if (options.onItemResult) {
           try {
             options.onItemResult({
@@ -552,7 +622,12 @@ export async function executeApplyPlan(
     } catch (error) {
       // 部分写入：失败项之前落成功的那些已经改过服务端了，同样要广播失效
       notifyConfigsChanged();
-      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup);
+      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, true, {
+        completedWrites,
+        totalWrites: writes.length,
+        failedIndex: attemptedIndex,
+        failedRef: attemptedRefLabel,
+      });
     }
 
     const history = deps.recordOperation(safety.historyInput);

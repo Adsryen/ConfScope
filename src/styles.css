@@ -3421,6 +3421,15 @@ button.diff-workflow-step-btn:hover {
   flex-wrap: wrap;
 }
 
+/* 过期合并草稿的入口拦截（R55-A7）：行内把话说完——先重新对比，再进计划。
+   不自带 .field-hint：那条是字段辅助说明的灰色语义，这里是警告；而且两个同特异度的类
+   都声明 color 会撞上 R83 顺序守卫（字号行距在这里自己写全）。 */
+.merge-plan-blocker {
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .merge-workbench-summary {
   min-width: min(560px, 100%);
   max-width: min(760px, 62vw);
@@ -7736,6 +7745,19 @@ button.diff-workflow-step-btn:hover {
   color: var(--yellow);
   font-size: 12px;
   list-style: none;
+}
+
+/* 部分写入提示（R55-A2）：执行失败时「已落库几项 / 第几项断的」。
+   和 .apply-blocker-hint 同色系——这是警告不是失败本身（失败由 InlineError 承载），
+   也不许复用 .apply-execution-notice（那个是成功语义的绿色）。 */
+.apply-partial-write {
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 220, 170, 0.28);
+  border-radius: 4px;
+  background: rgba(220, 220, 170, 0.08);
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .apply-execution-notice {

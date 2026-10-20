@@ -1701,7 +1701,14 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     });
   };
 
+  // 结果已过期 + 还有未清空的合并草稿：草稿里挑的是「过期基线」上的内容，
+  // 直接带进计划等于拿旧值去写，而计划页看到的是自己生成的 diff，用户没有第二次机会发现。
+  // 纯引用路径不受影响——计划生成时按 ref 现读并做新鲜度校验，过期了会自己报 stale。
+  // 所以这里只锁草稿这一条，并说清楚「重新对比」是唯一的出路（R55-A7）。
+  const enterPlanBlockedByStaleMerge = resultStale && hasMergePreviewDraft;
+
   const startApplyFromCurrentDiff = () => {
+    if (enterPlanBlockedByStaleMerge) return;
     if (hasMergePreviewDraft) {
       startMergeDraftApply();
       return;
@@ -1925,13 +1932,22 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 </button>
                 {onStartApply && (
                   <div className="merge-plan-actions">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm result-action result-action-plan"
-                      onClick={startApplyFromCurrentDiff}
-                    >
-                      {t("diff.enterBatchApply", { count: hasMergePreviewDraft ? mergeRightCount : batchResults.length })}
-                    </button>
+                    {/* disabled 收不到 pointer 事件，原因挂在包裹的 .btn-guard 上（与执行确认区同一写法）；
+                        读屏不靠悬停，紧跟一条 field-hint 把话说完。 */}
+                    <span className="btn-guard" title={enterPlanBlockedByStaleMerge ? t("diff.enterPlanBlockedStaleMerge") : undefined}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm result-action result-action-plan"
+                        onClick={startApplyFromCurrentDiff}
+                        disabled={enterPlanBlockedByStaleMerge}
+                        aria-disabled={enterPlanBlockedByStaleMerge}
+                      >
+                        {t("diff.enterBatchApply", { count: hasMergePreviewDraft ? mergeRightCount : batchResults.length })}
+                      </button>
+                    </span>
+                    {enterPlanBlockedByStaleMerge && (
+                      <span className="merge-plan-blocker">{t("diff.enterPlanBlockedStaleMerge")}</span>
+                    )}
                   </div>
                 )}
               </>

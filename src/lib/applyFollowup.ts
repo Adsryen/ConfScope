@@ -95,8 +95,19 @@ function planFromRecord(record: OperationRecord, deps: ApplyFollowupDeps): Apply
   return plan ?? translate("apply.followupPlanMissing", { id: record.planId });
 }
 
+/**
+ * 这条操作记录能不能构造回退入口（R55-A4）。
+ *
+ * 判据是「回退现场齐不齐」，而不是「这次执行成没成功」：逐项写入一失败就停，
+ * 失败项之前已经有配置落到目标上了，失败记录同样带着 planId + 写前备份快照——
+ * 只放行成功记录等于把半截改动留在生产上却没有出口。
+ * 反过来，现场缺任何一样（没关联计划 / 没备份快照）就不该把入口放出去，
+ * 让用户点下去才收到一句「变更记录 X 没有关联变更计划」。
+ */
 export function canBuildRollbackEntry(record: OperationRecord): boolean {
-  return record.result === "success" && ["apply", "promote", "restore"].includes(record.type) && !!record.planId && !!record.backupSnapshotId;
+  if (!["apply", "promote", "restore"].includes(record.type)) return false;
+  if (!record.planId || !record.backupSnapshotId) return false;
+  return record.result === "success" || record.result === "failure";
 }
 
 export async function buildRollbackEntryFromApplyRecord(

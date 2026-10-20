@@ -1232,6 +1232,87 @@ describe("DiffView", () => {
     expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
   });
 
+  // ── R55-A7：过期结果上的合并草稿不许带进变更计划 ──
+  // 草稿里的正文是在「过期基线」上手工挑出来的，计划页只看到自己生成的 diff，
+  // 用户进去以后没有第二次机会发现写的是旧内容；纯引用路径不受影响（计划生成时按 ref 现读 + 新鲜度校验）。
+  function renderMergeDraftHarness() {
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" ? "feature.enabled=false\nserver.port=8080" : "feature.enabled=true\nserver.port=8080"
+    );
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn]}
+          initialParams={{
+            leftConnId: "left-nacos",
+            rightConnId: "right-nacos",
+            left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+    return { onStartApply };
+  }
+
+  it("locks the merge-draft plan entry while the compare result is stale", async () => {
+    const { onStartApply } = renderMergeDraftHarness();
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Take left to right preview" }));
+
+    const planButton = (await screen.findByRole("button", {
+      name: "Enter Configuration Change Plan (1 files)",
+    })) as HTMLButtonElement;
+    expect(planButton).toBeEnabled();
+
+    await act(async () => {
+      publishConfigChange({ connectionId: "right-nacos", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+
+    await waitFor(() => expect(planButton).toBeDisabled());
+    // 原因两处都要有：悬停给鼠标（挂在守卫层，disabled 按钮自己弹不出 tooltip），行内文字给读屏
+    expect(planButton).toHaveAttribute("aria-disabled", "true");
+    expect(planButton.closest(".btn-guard")).toHaveAttribute(
+      "title",
+      "The compare result is stale and a merge draft is still open. Re-run the comparison before entering the change plan."
+    );
+    expect(screen.getByText(/compare result is stale and a merge draft is still open/)).toBeInTheDocument();
+
+    // 就算被程序化点击也不许放行
+    fireEvent.click(planButton);
+    expect(onStartApply).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pure-reference plan entry clickable while the result is stale", async () => {
+    const { onStartApply } = renderMergeDraftHarness();
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+
+    await act(async () => {
+      publishConfigChange({ connectionId: "right-nacos", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+
+    // 没有草稿就没有「旧内容被手工固化」这回事，闸门不该顺手把这条路也堵死
+    const planButton = (await screen.findByRole("button", {
+      name: "Enter Configuration Change Plan (1 files)",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(document.querySelector(".diff-result-stale")).not.toBeNull());
+    expect(planButton).toBeEnabled();
+    expect(planButton.closest(".btn-guard")).not.toHaveAttribute("title");
+
+    fireEvent.click(planButton);
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+  });
+
   it("generates one-way materialized merge plans from selected arrows", async () => {
     const onStartApply = vi.fn();
     apiMocks.listConfigs.mockResolvedValue({

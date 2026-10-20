@@ -914,6 +914,176 @@ describe("ApplyPlanView", () => {
     expect(screen.getByRole("button", { name: "Execute change" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
   });
 
+  // ── 波16：执行安全网三条（R55-A5 关窗/离开、R55-A6 失败重试、R55-A2 部分写入进度） ──
+
+  /** 把组件停在「写入进行中」这一帧：执行 promise 由用例自己收尾。 */
+  async function renderRunningApply() {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    let finishExecution: ((result: { ok: true; taskId: string; historyId: string }) => void) | undefined;
+    executionMocks.executeApplyPlan.mockImplementation(
+      () =>
+        new Promise<{ ok: true; taskId: string; historyId: string }>((resolve) => {
+          finishExecution = resolve;
+        })
+    );
+    const { onBack } = renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+    await screen.findByRole("button", { name: "Executing..." });
+    return { onBack, finishExecution: () => finishExecution?.({ ok: true, taskId: "task-leave-1", historyId: "history-leave-1" }) };
+  }
+
+  it("blocks closing the app while writes are in flight, and stops blocking afterwards", async () => {
+    const { finishExecution } = await renderRunningApply();
+
+    const closing = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(closing);
+    expect(closing.defaultPrevented).toBe(true);
+
+    // 任务收尾后守卫必须摘掉：留在 body 上会拦掉之后每一次正常关窗
+    finishExecution();
+    await screen.findByText(/This plan already ran successfully/);
+    const closingAgain = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(closingAgain);
+    expect(closingAgain.defaultPrevented).toBe(false);
+  });
+
+  it("does not block closing the app during a dry-run", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    let finishDryRun: ((result: { ok: true; dryRun: true; taskId: string; plannedWrites: number }) => void) | undefined;
+    executionMocks.executeApplyPlan.mockImplementation(
+      () =>
+        new Promise<{ ok: true; dryRun: true; taskId: string; plannedWrites: number }>((resolve) => {
+          finishDryRun = resolve;
+        })
+    );
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByRole("button", { name: "Dry-run check" }));
+    await screen.findByRole("button", { name: "Dry-run checking..." });
+
+    // dry-run 什么都不写，关窗不该被拦
+    const closing = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(closing);
+    expect(closing.defaultPrevented).toBe(false);
+    finishDryRun?.({ ok: true, dryRun: true, taskId: "task-dry-1", plannedWrites: 1 });
+  });
+
+  it("asks before leaving mid-write and keeps the stepper target step", async () => {
+    const { onBack } = await renderRunningApply();
+
+    fireEvent.click(backButton());
+    const ask = await screen.findByRole("dialog", { name: "Changes are still being applied" });
+    expect(ask).toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+
+    fireEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Changes are still being applied" })).not.toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+
+    // stepper 回退走同一个守卫，确认后仍带着目标步骤走
+    fireEvent.click(document.querySelector(".diff-workflow-step button") as HTMLElement);
+    expect(await screen.findByRole("dialog", { name: "Changes are still being applied" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onBack).toHaveBeenCalledWith("choose");
+  });
+
+  it("retries plan generation from the inline error without leaving the page", async () => {
+    draftMocks.buildApplyPlanFromEntry
+      .mockResolvedValueOnce({ ok: false, error: "apply_plan_draft_failed", detail: "connect ECONNREFUSED" })
+      .mockResolvedValue({
+        ok: true,
+        plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]),
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+
+    renderView();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("connect ECONNREFUSED");
+    // 以前生成失败只有「退出再进来」一条路，行内错误上连个重试都挂不住
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(draftMocks.buildApplyPlanFromEntry).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "Dry-run check" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows how far the write got and offers one-click retry on the failed item", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-partial-1",
+      error: "write failed: HTTP 500 on app.yaml",
+      progress: { completedWrites: 1, totalWrites: 3, failedIndex: 2, failedRef: "public/DEFAULT_GROUP/app.yaml" },
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    // 断在哪一条、已经落了几条，得写在脸上（R55-A2）
+    expect(await screen.findByRole("alert")).toHaveTextContent("write failed: HTTP 500");
+    const partial = document.querySelector(".apply-partial-write");
+    expect(partial).not.toBeNull();
+    expect(partial).toHaveTextContent("1 of 3 items written; item 2 failed: public/DEFAULT_GROUP/app.yaml");
+    expect(partial).toHaveTextContent("rolled back with this run");
+
+    // 行内错误的重试不许绕过确认守卫：仍走 onExecute，勾选状态没丢就能再点
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the partial-write notice off the screen when execution gives no progress", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({ ok: false, error: "plan is stale" });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    // 计划层面就失败（一项都没写）时不许凭空报「已写入几项」
+    expect(await screen.findByRole("alert")).toHaveTextContent("plan is stale");
+    expect(document.querySelector(".apply-partial-write")).toBeNull();
+  });
+
   // ── 波16：内联「编辑目标内容」的未保存草稿（R60 串内容 / R58 静默丢弃） ──
   function renderTwoItems() {
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({

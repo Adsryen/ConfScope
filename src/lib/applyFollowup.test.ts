@@ -171,6 +171,31 @@ function verification(applyPlan = plan(), fingerprint = fingerprintApplyPlanValu
   };
 }
 
+describe("canBuildRollbackEntry", () => {
+  // R55-A4：判据是「回退现场齐不齐」，不是「这次成没成功」。
+  // 逐项写入失败即停，失败项之前的配置已经落到目标上了——失败记录必须也有出口。
+  it("allows failure records that still carry plan and before-snapshot", () => {
+    expect(canBuildRollbackEntry(record({ result: "failure" }))).toBe(true);
+    expect(canBuildRollbackEntry(record({ result: "failure", type: "promote" }))).toBe(true);
+    expect(canBuildRollbackEntry(record({ result: "failure", type: "restore" }))).toBe(true);
+  });
+
+  it("rejects failure records with an incomplete rollback scene", () => {
+    expect(canBuildRollbackEntry(record({ result: "failure", backupSnapshotId: undefined }))).toBe(false);
+    expect(canBuildRollbackEntry(record({ result: "failure", planId: undefined }))).toBe(false);
+  });
+
+  it("still rejects success records with an incomplete scene, and types without a plan-backed rollback", () => {
+    expect(canBuildRollbackEntry(record({ planId: undefined }))).toBe(false);
+    expect(canBuildRollbackEntry(record({ backupSnapshotId: undefined }))).toBe(false);
+    // publish / delete / rollback 这三类不带 planId+备份快照的现场，走的是旧的「重发旧内容」路线，
+    // 不能因为 result 是 success 就从这里放出入口。
+    expect(canBuildRollbackEntry(record({ type: "publish" }))).toBe(false);
+    expect(canBuildRollbackEntry(record({ type: "delete" }))).toBe(false);
+    expect(canBuildRollbackEntry(record({ type: "rollback" }))).toBe(false);
+  });
+});
+
 describe("apply follow-up entry builders", () => {
   it("builds rollback dry-run entries from successful apply records and before snapshots", async () => {
     const applyPlan = plan();

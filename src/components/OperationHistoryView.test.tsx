@@ -6,6 +6,7 @@ import { buildApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory, type OperationRecord } from "../store/operationHistory";
+import { translate } from "../locales";
 import OperationHistoryView from "./OperationHistoryView";
 import { clearViewState, readViewState } from "../lib/viewState";
 
@@ -454,6 +455,57 @@ describe("OperationHistoryView", () => {
     });
   });
 
+  // R55-A4：逐项写入「失败即停」，失败项之前的配置已经落到目标上了。
+  // 过去整个后续面板只认成功记录，半截改动既看不到也没有出口。
+  it("offers a backup-snapshot rollback for partially failed apply records", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan();
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ result: "failure", error: "boom on item 2" })]));
+    const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    // 说清「这次没跑完，已写入的还在目标上」
+    expect(screen.getByText(/This run did not finish/)).toBeDefined();
+    // 出口按现场齐不齐放，文案区别于成功记录的那条
+    const rollbackButton = screen.getByRole("button", { name: "Roll back written items from the backup snapshot" });
+    expect(rollbackButton).toBeDefined();
+    fireEvent.click(rollbackButton);
+    await waitFor(() => {
+      expect(onStartApply).toHaveBeenCalledTimes(1);
+    });
+    expect(onStartApply.mock.calls[0][0]).toMatchObject({ sourceType: "rollback", source: { connectionId: "snapshot:snap-before-1" } });
+  });
+
+  it("keeps sandbox verification and promotion off partially failed apply records", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan();
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ result: "failure" })]));
+    renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    // 回退留着，验证 / 晋级收掉——没跑成功的沙箱不配被标记为「已验证」。
+    expect(screen.getByRole("button", { name: "Roll back written items from the backup snapshot" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Mark sandbox verified" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Promote to selected target" })).toBeNull();
+    expect(screen.queryByLabelText("Production target")).toBeNull();
+  });
+
+  it("hides the follow-up panel when a failed record lacks a backup snapshot", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan();
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ result: "failure", backupSnapshotId: undefined })]));
+    const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    // 现场不齐就不放入口，免得点下去才收到一句「找不到备份快照」。
+    expect(screen.queryByRole("button", { name: "Roll back written items from the backup snapshot" })).toBeNull();
+    expect(screen.queryByText(/This run did not finish/)).toBeNull();
+    expect(onStartApply).not.toHaveBeenCalled();
+  });
+
   it("shows a copyable follow-up error when rollback plan data is missing", async () => {
     localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ planId: "missing-plan" })]));
@@ -534,7 +586,7 @@ describe("OperationHistoryView", () => {
     expect(nacosMocks.publishConfig).not.toHaveBeenCalled();
     expect(loadOperationHistory().filter((record) => record.type === "rollback")).toHaveLength(0);
   });
-  it("切走再回来：连接/类型/dataId 筛选与选中记录都还在，并按记住的连接补拉一次中心历史（R27）", async () => {
+  it("切走再回来：连接/类型/dataId 筛选与选中记录都还在，且不再补拉中心历史（R27 + R55-E3）", async () => {
     localStorage.setItem(
       "cs.operationHistory",
       JSON.stringify([
@@ -577,8 +629,13 @@ describe("OperationHistoryView", () => {
     expect((screen.getAllByRole("combobox")[1] as HTMLSelectElement).value).toBe("delete");
     expect((screen.getByPlaceholderText("输入 dataId 筛选") as HTMLInputElement).value).toBe("app");
 
-    // 记住的连接筛选要补拉一次中心历史，且连接数组换引用也不重复拉
-    await waitFor(() => expect(nacosMocks.listHistory).toHaveBeenCalledTimes(1));
+    // R55-E3（真机取证）：命名空间级中心历史现有 provider 全都拿不到，闸门按能力关掉——
+    // 记住的连接不再补拉请求，界面直接讲清去哪看版本级历史。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(nacosMocks.listHistory).not.toHaveBeenCalled();
+    expect(screen.getByText(translate("history.centerHistoryUnsupported"))).toBeDefined();
+
+    // 连接数组换个引用也不该把请求捡回来（这条守卫正是当初假空的来源）
     act(() => {
       second.rerender(
         <I18nProvider>
@@ -587,7 +644,7 @@ describe("OperationHistoryView", () => {
       );
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(nacosMocks.listHistory).toHaveBeenCalledTimes(1);
+    expect(nacosMocks.listHistory).not.toHaveBeenCalled();
 
     expect(await screen.findByText("permission denied")).toBeDefined();
   });
