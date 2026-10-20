@@ -7,7 +7,8 @@
  * `taRef.current?.focus()`——两条出口口径不一致，说明这是漏接而不是设计。
  *
  * 口径（一句话）：**查找结束，焦点回到被查找的那一层**。
- * 1. 每个查找宿主都要能识别「被查找的那一层」：挂着 ref 的只读正文（`.code-area`）或编辑区（`textarea`）；
+ * 1. 每个查找宿主都要能识别「被查找的那一层」：挂着 ref 的只读正文（`.code-area` / `.diff-body` /
+ *    `.udiff`）或编辑区（`textarea`）；
  * 2. 凡收起查找栏的出口（`setFindOpen(false)`，且不属于「换内容重置」），所属语句里必须把焦点还给那一层，
  *    按 **ref 名** 校验（含 `const ta = taRef.current` 这种别名）——换成 `tabIndex={-1}` 的根节点等于没还；
  * 3. 「换内容重置」（切文件 / 切草稿那条 useEffect）**不许**移焦：那是用户在左侧列表里点出来的，
@@ -17,16 +18,34 @@
  * 5. 归还目标必须仍然键盘可达（`tabIndex={0}` + `role="region"`），否则还过去也接不住按键；
  * 6. Esc 与 ✕ 两条出口必须共用同一个 `closeFind`，不许长出第二份内联写法绕开焦点口径；
  * 7. 行为用例是另一张网：`document.activeElement` 断言数量钉下限，防守卫将来被改空。
+ *
+ * 轮49 的形状变化：量 DOM 那一派（DiffPanel / UnifiedDiff）不再自己写 closeFind——
+ * 「收栏 + 还焦点」这一段进了 src/lib/useFindLayer.ts，宿主侧只剩接线（`onClose={closeFind}`）。
+ * 所以本守卫拆成两侧：焦点语句按**编排所在文件**校验（两个代码视图 + 共享层），
+ * 键盘可达与接线按**渲染条子的宿主**校验（四个）。少任何一侧都会退回原缺陷。
  */
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { lineAt, PROJECT_ROOT, readScannedSource, sourceFiles } from "./scanUtils";
 
-/** 三个查找宿主：只读正文（CodeView）、编辑区（CodeEditor）、并排差异正文（DiffPanel，轮48）。 */
-const HOSTS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx", "src/components/DiffPanel.tsx"];
-/** 被查找的那一层：只读正文层按 className 片段识别（两处），编辑区按标签识别。 */
-const READONLY_LAYERS = ['className="code-area', 'className="diff-body'];
+/** 四个渲染查找条的宿主：浏览态、编辑态、并排差异（轮48）、单列差异（轮49）。 */
+const JSX_HOSTS = [
+  "src/components/CodeView.tsx",
+  "src/components/CodeEditor.tsx",
+  "src/components/DiffPanel.tsx",
+  "src/components/UnifiedDiff.tsx",
+];
+/** 还没迁进共享层、仍在宿主里自己写收栏语句 + 登记 Esc 的地方。 */
+const CODE_VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
+const LAYER = "src/lib/useFindLayer.ts";
+/** 握着「收栏出口语句」的文件：两个代码视图 + 共享层那一份编排。 */
+const CLOSE_FILES = [...CODE_VIEWS, LAYER];
+/** 共享层里「被查找的那一层」就是入参 `bodyRef`：没有 JSX，按 ref 名校验。 */
+const LAYER_REF = "bodyRef";
+const ALL_FILES = [...new Set([...JSX_HOSTS, ...CLOSE_FILES])];
+/** 被查找的那一层：只读正文层按 className 片段识别（三处），编辑区按标签识别。 */
+const READONLY_LAYERS = ['className="code-area', 'className="diff-body', 'className="udiff'];
 const EDITOR_LAYER = "<textarea";
 /** 「换内容重置」出口的依赖键：出现这些才算内容切换，而非查找结束。 */
 const CONTENT_SWITCH_KEYS = ["code", "contentKey", "doc", "format", "value", "leftText", "rightText"];
@@ -162,19 +181,23 @@ function ownerStatement(file: string, source: string, at: number): Site {
   const isEffect = /^\s*useEffect\s*\(/.test(statement);
   const depsMatch = /\}\s*,\s*\[([^\]]*)\]/.exec(tail);
   const deps = depsMatch ? depsMatch[1].split(",").map((d) => normalize(d)) : [];
+  const name = named ? named[1] : isEffect ? "useEffect" : "(匿名)";
+  // 「换内容重置」的两种形状：带正文依赖键的 useEffect（未迁宿主），
+  // 以及共享层里那条按名字说清语义的 useCallback（层拿不到宿主的正文依赖）。
+  const isResetByName = /ForNewContent$/.test(name);
   return {
     file,
     at,
     statement,
-    name: named ? named[1] : isEffect ? "useEffect" : "(匿名)",
+    name,
     deps,
-    isResetEffect: isEffect && deps.some((d) => CONTENT_SWITCH_KEYS.includes(d)),
+    isResetEffect: (isEffect && deps.some((d) => CONTENT_SWITCH_KEYS.includes(d))) || isResetByName,
   };
 }
 
 function closeSites(): Site[] {
   const acc: Site[] = [];
-  for (const file of HOSTS) {
+  for (const file of CLOSE_FILES) {
     const source = readScannedSource(file);
     for (const m of Array.from(source.matchAll(/\bsetFindOpen\(false\)/g))) {
       acc.push(ownerStatement(file, source, m.index ?? 0));
@@ -184,8 +207,12 @@ function closeSites(): Site[] {
 }
 
 const SITES = closeSites();
-const LAYERS = new Map(HOSTS.map((file) => [file, searchedLayers(file)]));
-const ALIASES = new Map(HOSTS.map((file) => [file, aliasMap(readScannedSource(file))]));
+function layersFor(file: string): Layer[] {
+  if (file === LAYER) return [{ ref: LAYER_REF, tag: "div", head: "", at: readScannedSource(file).indexOf(".focus(") }];
+  return searchedLayers(file);
+}
+const LAYERS = new Map(ALL_FILES.map((file) => [file, layersFor(file)]));
+const ALIASES = new Map(ALL_FILES.map((file) => [file, aliasMap(readScannedSource(file))]));
 
 /** `src/components/*.test.tsx`：sourceFiles() 有意排掉测试，这里单独捞。 */
 function componentTestFiles(): string[] {
@@ -195,15 +222,18 @@ function componentTestFiles(): string[] {
 }
 
 describe("收起查找栏把焦点还给被查找的那一层", () => {
-  it("两个查找宿主都能识别「被查找的那一层」，且那一层挂着 ref", () => {
-    for (const file of HOSTS) {
+  it("四个查找宿主都能识别「被查找的那一层」，且那一层挂着 ref", () => {
+    for (const file of JSX_HOSTS) {
       expect((LAYERS.get(file) ?? []).length, `${file} 找不到带 ref 的正文层/编辑层：口径漂了先在这里红`).toBeGreaterThan(0);
     }
+    // 共享层的归还目标必须是入参那颗，不许在层里 querySelector 猜一个
+    const layerSrc = readScannedSource(LAYER);
+    expect(layerSrc, `${LAYER} 的归还目标不再是入参 bodyRef`).toMatch(new RegExp(String.raw`bodyRef: RefObject<HTMLElement \| null>;`));
   });
 
   it(`只读正文层仍然键盘可达：tabIndex={0} + role="region"`, () => {
     const offenders: string[] = [];
-    for (const file of HOSTS) {
+    for (const file of JSX_HOSTS) {
       for (const layer of LAYERS.get(file) ?? []) {
         if (layer.tag === "textarea") continue; // 编辑区天然可聚焦
         if (!/tabIndex=\{0\}/.test(layer.head) || !/role="region"/.test(layer.head)) {
@@ -233,8 +263,12 @@ describe("收起查找栏把焦点还给被查找的那一层", () => {
     expect(offenders, "焦点掉回 body 后方向键 / PageDown 失效：\n" + offenders.join("\n")).toEqual([]);
     expect(
       closers.length,
-      "「收起查找栏」出口下限 4 处：三个宿主各一份 closeFind + CodeEditor 的 revealLine"
+      "「收起查找栏」出口下限 4 处：两个代码视图的 closeFind + CodeEditor 的 revealLine + 共享层的 closeFind"
     ).toBeGreaterThanOrEqual(4);
+    // 编排只许有一份：量 DOM 那一派的宿主里不该再出现收栏语句本身
+    for (const file of ["src/components/DiffPanel.tsx", "src/components/UnifiedDiff.tsx"]) {
+      expect(readScannedSource(file), `${file} 自己写了一份 setFindOpen(false)（第二套关栏出口）`).not.toMatch(/setFindOpen\(/);
+    }
   });
 
   it("「换内容重置」出口不许移焦：换文件不是查找结束", () => {
@@ -248,7 +282,7 @@ describe("收起查找栏把焦点还给被查找的那一层", () => {
 
   it("只读正文层聚焦带 preventScroll，编辑区不带", () => {
     const offenders: string[] = [];
-    for (const file of HOSTS) {
+    for (const file of ALL_FILES) {
       const layers = LAYERS.get(file) ?? [];
       const readonlyRefs = new Set(layers.filter((l) => l.tag !== "textarea").map((l) => l.ref));
       const editorRefs = new Set(layers.filter((l) => l.tag === "textarea").map((l) => l.ref));
@@ -266,19 +300,27 @@ describe("收起查找栏把焦点还给被查找的那一层", () => {
 
   it("Esc 与 ✕ 共用同一个 closeFind，不许长出第二份内联出口", () => {
     const offenders: string[] = [];
-    for (const file of HOSTS) {
-      const source = readScannedSource(file);
-      const flat = normalize(source);
-      expect(
-        flat.split("closeFind").length - 1,
-        `${file} 里 closeFind 至少要出现 3 次（定义 / useEscape 登记 / 递给条子的 onClose）`
-      ).toBeGreaterThanOrEqual(3);
+    // Esc 的登记点只有「编排在哪」那一处：代码视图在宿主里，量 DOM 那一派在共享层里
+    for (const file of CLOSE_FILES) {
+      const flat = normalize(readScannedSource(file));
       if (!new RegExp(`useEscape\\([^;]*?closeFind[^;]*?EscapePriority\\.find`).test(flat)) {
         offenders.push(`${file} 的 Esc 不再指向 closeFind（波37 的登记口径被改动）`);
       }
-      // 轮48：✕ 长在共用的 FindBar 里，宿主这一侧的接线就是 onClose={closeFind}
+    }
+    // 渲染条子的四个宿主都只认 onClose={closeFind} 这一颗出口
+    for (const file of JSX_HOSTS) {
+      const source = readScannedSource(file);
+      const flat = normalize(source);
+      const min = CODE_VIEWS.includes(file) ? 3 : 2; // 未迁：定义 / 登记 / 接线；已迁：解构 / 接线
+      expect(flat.split("closeFind").length - 1, `${file} 里 closeFind 至少要出现 ${min} 次`).toBeGreaterThanOrEqual(min);
       if (!/onClose=\{closeFind\}/.test(source)) {
         offenders.push(`${file} 没把 closeFind 接给条子的 onClose：✕ 会绕开焦点口径`);
+      }
+    }
+    // 迁进共享层的宿主不许再自己挂一份 Esc 登记：两份登记 = 一次按键两次关栏
+    for (const file of ["src/components/DiffPanel.tsx", "src/components/UnifiedDiff.tsx"]) {
+      if (/useEscape\(/.test(readScannedSource(file))) {
+        offenders.push(`${file} 又自己登记了一遍 Esc：与共享层的 closeFind 抢同一个按键`);
       }
     }
     expect(offenders, "两条出口必须同函数：\n" + offenders.join("\n")).toEqual([]);

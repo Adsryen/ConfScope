@@ -319,17 +319,35 @@ describe("HistoryView", () => {
     });
   });
 
-  it("原始内容切换按钮的按下态与视图一致（R69）", async () => {
+  // 轮49 R49-03 改写法：这里原本钉的是谎言——默认屏上是「高亮变更」，却要求那颗写着
+  // 「原始内容」的按钮处于按下态（旧控件的文案随状态变，一颗按钮同时是标签和另一个视图的名字）。
+  // 现在换成恒定命名的分段控件，按下态必须落在与在屏视图同名的那颗上，四者一起断言：
+  // 文案（不随状态变）+ aria-pressed + class active + 屏上真正渲染的组件。
+  it("正文视图分段控件的按下态跟着在屏视图，文案恒定（R69 / 轮49 R49-03）", async () => {
     renderHistory();
     fireEvent.click(await screen.findByText("nid 2"));
 
-    // 默认是高亮视图，此时按钮视觉上就是 active，aria-pressed 必须跟着 active 类
-    const toggle = await screen.findByRole("button", { name: "原始内容" });
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    const highlight = await screen.findByRole("button", { name: "高亮变更" });
+    const raw = await screen.findByRole("button", { name: "原始内容" });
+    // 默认在屏的是高亮变更，按下态与视觉态都在这颗上
+    expect(highlight).toHaveAttribute("aria-pressed", "true");
+    expect(highlight).toHaveClass("active");
+    expect(raw).toHaveAttribute("aria-pressed", "false");
+    expect(raw).not.toHaveClass("active");
+    expect(document.querySelector(".udiff")).toBeTruthy();
 
-    fireEvent.click(toggle);
-    const back = await screen.findByRole("button", { name: "高亮变更" });
-    expect(back).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(raw);
+    // 切换后两颗名字不变（旧写法在这里会把按钮名翻成「高亮变更」，等于又造一颗谎言按钮）
+    expect(await screen.findByRole("button", { name: "原始内容" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("button", { name: "原始内容" })).toHaveClass("active");
+    expect(await screen.findByRole("button", { name: "高亮变更" })).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("button", { name: "高亮变更" })).not.toHaveClass("active");
+    await waitFor(() => expect(document.querySelector(".code-area")).toBeTruthy());
+    expect(document.querySelector(".udiff")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "高亮变更" }));
+    await waitFor(() => expect(document.querySelector(".udiff")).toBeTruthy());
+    expect(document.querySelector(".code-area")).toBeNull();
   });
 
   // 轮40 R40-1 / R40-3：页面级正文搜索词必须跟到「历史变更」的原文视图。

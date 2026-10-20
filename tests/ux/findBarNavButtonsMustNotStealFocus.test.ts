@@ -17,6 +17,9 @@
  * 轮48：条子抽成 src/components/FindBar.tsx 一份实现，浏览态 / 编辑态 / 并排差异三个宿主共用，
  * 于是「两个视图各守一遍」换成两条：只有一份可守（第一、三、四条），以及三个宿主各自
  * 把焦点还回自己那一层（第二条）。少了后者，条子里的 ✕ 就成了不知道在关谁的栏。
+ * 轮49：量 DOM 那一派（DiffPanel / UnifiedDiff）的 closeFind 收进 src/lib/useFindLayer.ts，
+ * 于是「还焦点那句」的可守站点变成 CodeView / CodeEditor / 共享层三处——宿主侧改守
+ * 「关栏出口只有一个名字接给条子」（onClose={closeFind}），不再各抄一份 focus 调用。
  */
 import { describe, expect, it } from "vitest";
 import { readScannedSource } from "./scanUtils";
@@ -59,11 +62,17 @@ describe("查找栏按钮的焦点策略（轮32 F-29）", () => {
       /areaRef\.current\?\.focus\(\{ preventScroll: true \}\);/
     );
     expect(editor, "CodeEditor 的 closeFind 不再把焦点还给 textarea：用户得重新点一下才能打字").toMatch(/taRef\.current\?\.focus\(\);/);
-    // 轮48：并排差异那一层是 `.diff-body`（tabIndex=0 + role="region"），不还焦点就是同一个 R62
-    const diff = readScannedSource("src/components/DiffPanel.tsx");
-    expect(diff, "DiffPanel 的 closeFind 不再把焦点还给 .diff-body：关栏后方向键 / PageUp 一动不动").toMatch(
+    // 轮48/49：量 DOM 那一派（`.diff-body` / `.udiff`）共用共享层那一句归还——都是 tabIndex=0 +
+    // role="region" 的正文层，少这一句就是同一个 R62（关栏后方向键 / PageUp 一动不动）。
+    const layer = readScannedSource("src/lib/useFindLayer.ts");
+    expect(layer, "共享层的 closeFind 不再把焦点还给正文层：两个差异宿主一起退回「焦点掉回 body」").toMatch(
       /bodyRef\.current\?\.focus\(\{ preventScroll: true \}\);/
     );
+    // 宿主侧不许再抄一份：抄了就出现「换内容重置也移焦」这类语义混用（R62 口径）
+    for (const host of ["src/components/DiffPanel.tsx", "src/components/UnifiedDiff.tsx"]) {
+      expect(readScannedSource(host), `${host} 自己写了一份归还焦点（关栏出口不再只有一个）`).not.toMatch(/bodyRef\.current\?\.focus\(/);
+      expect(readScannedSource(host), `${host} 的 ✕ 没接关栏出口：焦点归还不成立`).toContain("onClose={closeFind}");
+    }
   });
 
   it("整条查找栏里取消 mousedown 的只有那四个，没有第五个", () => {

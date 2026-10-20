@@ -113,6 +113,9 @@ const NON_PRE_REGISTRY: Record<string, { accessible: number; total: number }> = 
   "src/components/DiffView.tsx|match-side-scroll": { accessible: 1, total: 2 },
   // 对比正文：轮48 接查找条时顺手登记（面板唯一滚动容器，Tab 要能停进去滚到底）
   "src/components/DiffPanel.tsx|diff-body": { accessible: 1, total: 1 },
+  // 单列差异正文：轮49 接查找条时从遗留名单提上来（关栏要把焦点还给这一层，
+  // 少了 tabIndex={0} 那句 bodyRef.focus() 就是空操作，方向键 / PageUp 当场失效）
+  "src/components/UnifiedDiff.tsx|udiff": { accessible: 1, total: 1 },
 };
 
 /**
@@ -153,7 +156,6 @@ const LEGACY_NON_PRE_CLASSES = new Set([
   "settings-rail",
   "ssh-manager-page",
   "ssh-profile-list",
-  "udiff",
 ]);
 
 function scanFile(relPath: string, stripped: string) {
@@ -208,6 +210,7 @@ const FOCUS_RING_CLASSES = [
   "update-release-notes",
   "match-side-scroll",
   "diff-body",
+  "udiff",
 ];
 
 /** 该类的 :focus-visible 里有没有真的画 outline（值为 none 等于没画）。 */

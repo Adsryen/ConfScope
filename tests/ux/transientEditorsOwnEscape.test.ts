@@ -9,7 +9,9 @@
  *
  * 口径：
  * 1. 档位表：`find` 必须存在且数值夹在 `overlay` 与 `dropdown` 之间，既有档位不许重排；
- * 2. 站点名单：三处瞬时层按「文件 + 门控 + 回调」钉死，不钉行号（上方插一行就漂）；
+ * 2. 站点名单：瞬时层按「文件 + 门控 + 回调」钉死，不钉行号（上方插一行就漂）；
+ *    轮49 起查找栏的登记住在 src/lib/useFindLayer.ts（两个 diff 宿主共用一处），
+ *    浏览态与编辑态那条「行号公式」分支仍各自登记（迁移口径见该任务 PRD §5）；
  * 3. 门控：`find` 档登记不许常开，门控必须引用本组件的瞬时层状态；同文件里若宿主已按 page/overlay
  *    登记，find 的门控必须包含宿主那段表达式（隐藏的宿主不许让内层抢走 Esc，波31 同类事故）；
  * 4. 反向钉：`src/` 下除分派器本身，不许再出现「裸 Escape 分支」；
@@ -47,9 +49,11 @@ interface Site {
 const SITES: Site[] = [
   { file: "src/components/CodeView.tsx", gate: "active && findOpen", callback: "closeFind", why: "浏览态代码视图的查找栏" },
   { file: "src/components/CodeEditor.tsx", gate: "active && findOpen", callback: "closeFind", why: "新建/编辑弹层里的查找栏" },
-  // 轮48：并排差异正文接入同一个查找条。它是页面内的瞬时层（栏一关就清词、不遮挡宿主弹层），
-  // 门控与上面两处逐字同形：宿主页面被保活隐藏时（active=false）绝不登记 Esc。
-  { file: "src/components/DiffPanel.tsx", gate: "active && findOpen", callback: "closeFind", why: "并排差异正文的查找栏（轮48）" },
+  // 轮48 并排差异正文接入同一个查找条时，这行还写在 DiffPanel.tsx 里；轮49 把它和 UnifiedDiff
+  // 的登记一起收进共享层——两个宿主都经 useFindLayer 登记，门控与上面两处逐字同形：
+  // 宿主页面被保活隐藏时（active=false）绝不登记 Esc。这里钉「只有一个出处」，
+  // 宿主里再出现一份同形登记就是第二份状态机（见 findBarSingleImplementation 的宿主名单）。
+  { file: "src/lib/useFindLayer.ts", gate: "active && findOpen", callback: "closeFind", why: "查找栏共享层（DiffPanel / UnifiedDiff 两个宿主）" },
   {
     file: "src/components/ConnectionManager.tsx",
     gate: "!embedded && !!renamingProject",
@@ -214,7 +218,7 @@ describe("Esc 分层：瞬时编辑层自己登记", () => {
     }
   });
 
-  it("三处瞬时层站点按「文件 + 门控 + 回调」钉死", () => {
+  it("瞬时层站点按「文件 + 门控 + 回调」钉死", () => {
     const missing = SITES.filter(
       (site) => !FIND_CALLS.some((c) => c.file === site.file && c.gate === site.gate && c.callback === site.callback)
     ).map((site) => `${site.file}（${site.why}）找不到 useEscape(门控=${site.gate}, ${site.callback}, EscapePriority.find)`);

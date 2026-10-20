@@ -6,6 +6,9 @@
  * （并排差异 DiffPanel）时，第三份拷贝就等于把「只补一边」这个事故形状再复制一遍 ——
  * 轮22 R75 记的就是它：两套条子里改了一套，另一套的键名提示 / 焦点行为从此各说各话。
  *
+ * 轮49 把「状态与副作用编排」也收成了唯一一份（src/lib/useFindLayer.ts）：第四个宿主
+ * UnifiedDiff 接进来时不再抄第四份散装 state，量 DOM 那一派（DiffPanel / UnifiedDiff）共用它。
+ *
  * 现在条子在 src/components/FindBar.tsx 里只有一份，宿主只传状态与几何。守卫钉四件事：
  * 1. 条子的类名字面量（code-find*）只许出现在这一份 JSX 里 —— 第二份就等于第二套几何；
  * 2. 宿主只许 <FindBar / <FindOpenButton 两个入口，宿主名单在这里登记，新增宿主必须显式加；
@@ -21,6 +24,8 @@ const HOSTS = [
   "src/components/CodeView.tsx",
   "src/components/CodeEditor.tsx",
   "src/components/DiffPanel.tsx",
+  // 轮49：历史「高亮变更」那一屏（默认视图）也是查找栏宿主
+  "src/components/UnifiedDiff.tsx",
 ] as const;
 
 /** 条子这一层的全部类名（styles.css 里 .code-find* 那组规则的唯一使用者）。 */
@@ -97,7 +102,7 @@ describe("查找条只有一份实现（轮48）", () => {
     });
   });
 
-  it("宿主名单固定三处，只经 <FindBar / <FindOpenButton 两个入口", () => {
+  it("宿主名单固定四处，只经 <FindBar / <FindOpenButton 两个入口", () => {
     expect(barUsers().sort(), "出现第二处查找条实现或宿主名单漏登记").toEqual([...HOSTS].sort());
     HOSTS.forEach((file) => {
       const src = readScannedSource(file);
@@ -146,7 +151,7 @@ describe("查找条只有一份实现（轮48）", () => {
     expect(classNameTokens(mutant).filter((token) => BAR_CLASSES.includes(token))).not.toEqual([]);
     // 同样的变异走「删掉唯一实现」那条路也必须被第 2 条拦住
     const stripped = host.replace("<FindBar", "<Nothing");
-    expect(barUsers().length).toBe(3);
+    expect(barUsers().length).toBe(HOSTS.length);
     expect(stripped).not.toContain("<FindBar");
   });
 

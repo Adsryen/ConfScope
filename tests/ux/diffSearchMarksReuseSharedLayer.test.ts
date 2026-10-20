@@ -83,4 +83,30 @@ describe("diff 视图的搜索标记复用共享层（轮41）", () => {
     expect(cssBlock(".udiff-row.del")).toMatch(/background: var\(--diff-del-bg\)/);
     expect(CSS, "不许给 diff 行叠搜索背景：那会把语义色挤掉").not.toMatch(/\.udiff-row\.is-hit|\.udiff-row\.search-hit/);
   });
+
+  it("轮49：两条标红出口互斥——栏没开时才走外部词那颗，不许叠两层红", () => {
+    const memo = diffSrc.slice(diffSrc.indexOf("const markedLines = useMemo("), diffSrc.indexOf("const identical"));
+    expect(memo.length, "读不到 markedLines 那条 memo（取样点漂了）").toBeGreaterThan(0);
+    expect(memo, "开栏 / 关栏两条分支不见了").toMatch(/if \(findOpen\) \{/);
+    const openBranch = memo.slice(memo.indexOf("if (findOpen) {"), memo.indexOf("const marked = markLineSearchHits"));
+    const closedBranch = memo.slice(memo.indexOf("const marked = markLineSearchHits"));
+    expect(openBranch, "开栏时不再经共享命中层标红（会绕开 Aa / ab| 口径）").toMatch(/markHighlightedHtml\(/);
+    expect(
+      closedBranch,
+      "关栏后不再走轮41 那条外部词路径：浏览态「按内容搜索」点进历史默认视图又标不上了"
+    ).toMatch(/markLineSearchHits\(baseHtml, l\.text, searchTerm \?\? ""\)/);
+    expect(openBranch, "开栏分支里同时出现两颗词来源（外部词与栏内词会叠红）").not.toMatch(/markLineSearchHits/);
+    expect(closedBranch, "外部词路径借用「全篇唯一编号」就是 R41-6 那条老路").not.toMatch(/baseIndexForSide|toLineHits|marksForRowSide/);
+    // 计数与正文同源：外部词进共享层做命中表，栏一开由 effectiveTerm 接管（CodeView 同一句话）
+    expect(diffSrc, "UnifiedDiff 的外部词没交给共享命中层（计数与标红会各说各话）").toMatch(/externalTerm: searchTerm \?\? "",/);
+    expect(diffSrc, "UnifiedDiff 起了第二份词状态").not.toMatch(/useState[^\n]*[Tt]erm/);
+  });
+
+  it("自检：把两条出口的条件反过来必须判红", () => {
+    const honest = "if (findOpen) {";
+    expect(diffSrc, "取样点漂了：源码里读不到那条分支").toContain(honest);
+    const regressed = diffSrc.replace(honest, "if (!findOpen) {");
+    expect(regressed !== diffSrc, "变异没落进被测文本").toBe(true);
+    expect(regressed).not.toMatch(/if \(findOpen\) \{/);
+  });
 });

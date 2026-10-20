@@ -17,7 +17,9 @@
  * 3. 注册表属性 `data-find-key-owner` 与 keydown 监听**同生同灭**：挂在同一个 effect 里，
  *    且必须在 `if (!enableFind || !active) return` 之后——先打标记再退出，等于把
  *    「隐藏的视图会抢」这条假信息重新写回 DOM，就是本轮的根因；
- * 4. 全站只有这两个视图劫持 Ctrl+F/F3，别处再加第三份所有权判定会被第一条判红。
+ * 4. 全站只有这些监听点劫持 Ctrl+F/F3，别处再加一份所有权判定会被第一条判红。
+ *    轮49 把监听点的名单从「三个宿主」改成「两个宿主 + 一个共享层」：量 DOM 那一派
+ *    （DiffPanel / UnifiedDiff）改用 src/lib/useFindLayer.ts，宿主自己再挂一份就判红。
  */
 import { describe, expect, it } from "vitest";
 import { readScannedSource, sourceFiles } from "./scanUtils";
@@ -25,10 +27,17 @@ import { readScannedSource, sourceFiles } from "./scanUtils";
 const LIB = "src/lib/findKeyOwnership.ts";
 const CODE_VIEW = "src/components/CodeView.tsx";
 const CODE_EDITOR = "src/components/CodeEditor.tsx";
-// 轮48 第三处宿主：并排差异正文也接了 Ctrl+F。三个宿主共用 lib 那份判定，
+// 轮48 第三处宿主：并排差异正文也接了 Ctrl+F。轮49 把「量 DOM 那一派」（DiffPanel +
+// 新接入的 UnifiedDiff）的监听与所有权登记一起收进 src/lib/useFindLayer.ts，
+// 所以这一段现在只在共享层里出现一次；两个宿主只递 ref 与开关。
 // 少守一处就等于把轮39 那个「两边都不接管」的分叉重新允许回来。
-const DIFF_PANEL = "src/components/DiffPanel.tsx";
-const VIEWS = [CODE_VIEW, CODE_EDITOR, DIFF_PANEL];
+const FIND_LAYER = "src/lib/useFindLayer.ts";
+/** 把监听交给共享层的宿主：它们自己再写一份所有权判定就是第二套 Ctrl+F。 */
+const LAYER_HOSTS = ["src/components/DiffPanel.tsx", "src/components/UnifiedDiff.tsx"];
+/** 还自己挂着监听的宿主（套行号公式那一派，迁移口径见 10-20-ui-ux-49 的 PRD §5）。 */
+const VIEWS = [CODE_VIEW, CODE_EDITOR];
+/** 「挂着查找监听」这段代码的全部合法出处。 */
+const LISTENERS = [...VIEWS, FIND_LAYER];
 const ATTR = "FIND_KEY_OWNER_ATTR";
 
 /** 视图里唯一合法的接管形状：把事件源和本视图根交给共享判定，自己不再算条件。 */
@@ -108,21 +117,35 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
     expect(lib).not.toMatch(/querySelector(?:All)?\(\s*["'`]\./);
   });
 
-  it("三个宿主都只递参数，旧判据不许复活", () => {
-    for (const file of VIEWS) {
+  it("宿主与共享层都只递参数，旧判据不许复活", () => {
+    for (const file of LISTENERS) {
       const src = readScannedSource(file);
-      expect(src, `${file} 没有引用 lib/findKeyOwnership`).toContain('from "../lib/findKeyOwnership"');
+      expect(
+        src,
+        `${file} 没有引用 lib/findKeyOwnership`
+      ).toMatch(/from "\.\.\/lib\/findKeyOwnership"|from "\.\/findKeyOwnership"/);
       expect(src, `${file} 的接管点不是共享判定`).toMatch(TAKE_CALL);
       for (const [why, re] of LEGACY_TESTS) {
         expect(re.test(src), `${file} 复活了${why}`).toBe(false);
       }
     }
-    // 引用站点必须是「lib 定义 + 三个宿主使用」，多出第四处 = 又写了一份所有权
-    expect(referencingFiles("takesFindKeyOwnership"), "接管判定的站点变了").toEqual([...VIEWS, LIB].sort());
+    // 引用站点必须是「lib 定义 + 两处宿主监听 + 共享层」，多出别处 = 又写了一份所有权
+    expect(referencingFiles("takesFindKeyOwnership"), "接管判定的站点变了").toEqual([...LISTENERS, LIB].sort());
+  });
+
+  it("量 DOM 那一派的宿主只调共享层，不许自己再挂一份监听", () => {
+    for (const file of LAYER_HOSTS) {
+      const src = readScannedSource(file);
+      expect(src, `${file} 没有改用 src/lib/useFindLayer（第四份散装状态机）`).toMatch(/from "\.\.\/lib\/useFindLayer"/);
+      expect(src, `${file} 没有真正调用 useFindLayer(`).toContain("useFindLayer({");
+      expect(src, `${file} 自己劫持了 Ctrl+F/F3，与共享层形成两套所有权`).not.toMatch(FIND_KEY_TEST);
+      expect(src, `${file} 自己算所有权判定`).not.toMatch(/takesFindKeyOwnership/);
+      expect(src, `${file} 自己写 keydown 捕获监听`).not.toMatch(/addEventListener\("keydown"/);
+    }
   });
 
   it("注册表与监听同生同灭：同一个 effect 里打标记、在 active 短路之后、卸载时摘掉", () => {
-    for (const file of VIEWS) {
+    for (const file of LISTENERS) {
       const block = findKeyEffect(readScannedSource(file));
       expect(block, `${file} 没在监听所在的 effect 里注册所有权`).toContain(`setAttribute(${ATTR}`);
       expect(block, `${file} 卸载时不摘标记，兄弟视图会一直以为它还会抢`).toContain(`removeAttribute(${ATTR}`);
@@ -139,22 +162,22 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
     }
   });
 
-  it("所有权标记只由这三个宿主读写，别处不许再插一套", () => {
+  it("所有权标记只由这些监听点读写，别处不许再插一套", () => {
     const users = referencingFiles(ATTR).sort();
-    expect(users, "注册表属性的读写站点变了").toEqual([...VIEWS, LIB].sort());
+    expect(users, "注册表属性的读写站点变了").toEqual([...LISTENERS, LIB].sort());
     // 属性名字面量也只许出现在 lib（视图经符号引用，抄字符串就是第二份口径）
     expect(sourceFiles().filter((file) => file !== LIB && readScannedSource(file).includes('"data-find-key-owner"'))).toEqual([]);
   });
 
-  it("全站只有这三个宿主劫持 Ctrl+F/F3，别处再加一份所有权判定就判红", () => {
+  it("全站只有这些监听点劫持 Ctrl+F/F3，别处再加一份所有权判定就判红", () => {
     const hijackers = sourceFiles()
       .filter((file) => file !== LIB)
       .filter((file) => FIND_KEY_TEST.test(readScannedSource(file)));
-    expect(hijackers, "出现了第三处查找快捷键劫持点").toEqual([...VIEWS].sort());
+    expect(hijackers, "出现了多一处查找快捷键劫持点").toEqual([...LISTENERS].sort());
   });
 
   it("组合态（IME）先让位：每条监听都在所有权判定之前挡掉输入法候选", () => {
-    for (const file of VIEWS) {
+    for (const file of LISTENERS) {
       const block = findKeyEffect(readScannedSource(file));
       const ime = block.search(/if \(isImeComposing\(e\)\) return/);
       const take = block.indexOf("takesFindKeyOwnership(");
