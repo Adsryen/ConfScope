@@ -279,6 +279,21 @@ func TestCheckBypassesProxyWhenNoProxyMatches(t *testing.T) {
 	}
 }
 
+// TestUnreleasedBuildVersionComparesAsOldest 钉住「未注入版本号的产物被当成 0.0.0」这件事。
+//
+// parseVersion 对 "dev" 不报错：strconv.Atoi 失败后 parts 留在零值，等价 0.0.0。
+// 这既是 v1.9.1 发布产物「永远提示有更新」的机理，也是它的防线该放在哪的理由——
+// 版本号不可信 ≠ 版本很旧，调用侧必须先判可比性（前端 src/lib/appVersion.ts，
+// 后台自动检查据此跳过），别指望这里抛错。哪天改了这个语义，这条测试会先红。
+func TestUnreleasedBuildVersionComparesAsOldest(t *testing.T) {
+	if got := CompareVersions("1.9.2", "dev"); got != 1 {
+		t.Fatalf(`CompareVersions("1.9.2", "dev") = %d，当前语义是 dev 等价 0.0.0（改语义要同步改调用侧的跳过判据）`, got)
+	}
+	if got := CompareVersions("1.9.2", ""); got != 1 {
+		t.Fatalf(`CompareVersions("1.9.2", "") = %d，空版本同样被当成 0.0.0`, got)
+	}
+}
+
 func TestCompareVersionsHandlesVPrefixAndPrerelease(t *testing.T) {
 	tests := []struct {
 		a    string

@@ -1,0 +1,11 @@
+# 供 buildVersionSymbolResolvesToGoDeclaration 自检用的负样本：整段没有 -X 注入。
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+jobs:
+  build:
+    steps:
+      - name: Build
+        run: wails build -clean

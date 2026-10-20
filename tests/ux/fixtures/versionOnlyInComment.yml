@@ -1,0 +1,8 @@
+# 供 buildVersionSymbolResolvesToGoDeclaration 自检用：
+#   历史写法 -X main.appVersion=${VERSION} 只出现在注释里，不该被抽成注入目标。
+name: Release
+jobs:
+  build:
+    steps:
+      - name: Build
+        run: wails build -clean -ldflags "-X confscope/internal/app.appVersion=${VERSION}"
