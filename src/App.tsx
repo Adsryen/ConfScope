@@ -32,6 +32,7 @@ import { useMountOnceVisible } from "./lib/keepAlive";
 import { useBlockNativeSaveShortcut } from "./lib/saveShortcut";
 import { useBlockNativeReloadShortcut } from "./lib/reloadShortcut";
 import { consumeAppDataDocNotice } from "./lib/appDataDoc";
+import { isComparableReleaseVersion } from "./lib/appVersion";
 import { checkForUpdates, getAppInfo } from "./api/app";
 import { loadSettings, updateStartupSettings, updateUpdateSettings } from "./store/settings";
 import AuditView from "./components/AuditView";
@@ -302,6 +303,10 @@ export default function App() {
       async () => {
         try {
           const info = await getAppInfo();
+          // 未注入版本号的构建（appVersion 还是 dev 或裸 sha）在 Go 侧被解析成 0.0.0，
+          // 后台检查就会永远报「有新版本」，即使装的正是最新版（轮51 的线上事故形态）。
+          // 版本号不可比 ≠ 版本很旧：这里直接不发请求，关于页的手动检查不受影响。
+          if (!isComparableReleaseVersion(info.version)) return;
           const result = await checkForUpdates({
             currentVersion: info.version,
             sources: info.updateSources,

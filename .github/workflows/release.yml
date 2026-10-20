@@ -79,7 +79,10 @@ jobs:
             VERSION="dev-${GITHUB_SHA::7}"
           fi
           echo "Building ConfScope version=${VERSION} GOARCH=${GOARCH}"
-          wails build -clean -ldflags "-X main.appVersion=${VERSION}"
+          # -X 的目标必须是变量真实所在的包路径：77fa451 把 appVersion 从 package main
+          # 迁到 confscope/internal/app，写 main.appVersion 会被链接器静默忽略，
+          # 产物里永远是 "dev"（钉在 tests/ux/buildVersionSymbolResolvesToGoDeclaration）。
+          wails build -clean -ldflags "-X confscope/internal/app.appVersion=${VERSION}"
         env:
           GOARCH: ${{ matrix.goarch }}
 

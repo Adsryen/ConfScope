@@ -43,13 +43,20 @@ Write-Host ">> installing dependencies (pnpm install) ..." -ForegroundColor Cyan
 pnpm install --frozen-lockfile
 if ($LASTEXITCODE -ne 0) { throw "pnpm install failed. If it is a permission/link issue (EACCES), delete node_modules and retry with -ForceClean." }
 
+# 版本号与 CI 同源（tag）。不带 -ldflags 时产物里永远是 "dev"，
+# 关于页/更新检查这类链路在开发机上就验不动，也会把 CI 的注入失效伪装成正常现象。
+$describe = (& git describe --tags --always --dirty 2>$null)
+$appVersion = if ($LASTEXITCODE -eq 0 -and $describe) { "$describe".Trim() } else { "dev" }
+# 注入路径必须与 internal/app/app.go 里 var appVersion 的包路径一致（守卫钉死）。
+$ldflags = "-X confscope/internal/app.appVersion=$appVersion"
+
 if ($SkipFrontend) {
   if (-not (Test-Path dist)) { throw "dist/ not found. Run a full build once first (without -SkipFrontend)." }
-  Write-Host ">> wails build -s (fast build: reuse existing frontend dist, rebuild Go side only)..." -ForegroundColor Cyan
-  wails build -s
+  Write-Host ">> wails build -s (fast build: reuse existing frontend dist, rebuild Go side only)... version=$appVersion" -ForegroundColor Cyan
+  wails build -s -ldflags $ldflags
 } else {
-  Write-Host ">> building frontend + production guard + wails build ..." -ForegroundColor Cyan
-  wails build
+  Write-Host ">> building frontend + production guard + wails build ... version=$appVersion" -ForegroundColor Cyan
+  wails build -ldflags $ldflags
 }
 
 $exe = Join-Path (Split-Path -Parent $PSScriptRoot) "build\bin\ConfScope.exe"

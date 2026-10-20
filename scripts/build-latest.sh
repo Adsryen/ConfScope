@@ -68,14 +68,21 @@ export CI=true
 echo ">> 安装依赖 (pnpm install) ..."
 pnpm install --frozen-lockfile
 
-# 4) 构建（frontend:build 内含生产守卫 check:bundle）
+# 4) 版本号：与 CI 同源（tag），本地出包也要带上，否则关于页永远显示 dev，
+#    「更新检查」这类只有真版本号才能验证的链路在开发机上根本没法验。
+GIT_DESCRIBE="$(git describe --tags --always --dirty 2>/dev/null || true)"
+VERSION="${GIT_DESCRIBE:-dev}"
+# 注入路径必须与 internal/app/app.go 里 var appVersion 的包路径一致（守卫钉死）。
+LDFLAGS="-X confscope/internal/app.appVersion=${VERSION}"
+
+# 5) 构建（frontend:build 内含生产守卫 check:bundle）
 if [ "$SKIP_FRONTEND" -eq 1 ]; then
   [ -d dist ] || { echo "错误: 未找到 dist/，请先完整构建一次（不加 --skip-frontend）。" >&2; exit 1; }
-  echo ">> wails build -s（快速编译：复用现有前端 dist，仅重编 Go 侧）..."
-  wails build -s
+  echo ">> wails build -s（快速编译：复用现有前端 dist，仅重编 Go 侧）version=${VERSION} ..."
+  wails build -s -ldflags "${LDFLAGS}"
 else
-  echo ">> wails build ..."
-  wails build
+  echo ">> wails build ... version=${VERSION}"
+  wails build -ldflags "${LDFLAGS}"
 fi
 
 BIN="build/bin/ConfScope"
