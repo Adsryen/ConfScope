@@ -10,7 +10,80 @@ permissions:
   contents: write
 
 jobs:
+  # 出包前的同一道闸门（轮52）。轮50/51 两次事故都是"链路里一环坏了但没人报错"：
+  # 数据绑定命名空间漂了静默降级、-X 注入打不到 Go 声明静默忽略，两者在编译期/一次单测里
+  # 就能拦住，可整条发版链路一条检查都不跑——vite/esbuild 只剥类型不做类型检查。
+  # 所以 build 现在 needs 这个作业：判据不过，四个平台连编都不编。
+  # 人在本地打 tag 前跑 scripts/verify-release-version.sh，CI 在同一个 commit 上用同一份判据
+  # 再跑一遍，两边不是两套口径。
+  preflight:
+    runs-on: ubuntu-22.04
+    name: Preflight (typecheck · guards · go · version inject)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      # 锁文件与 package.json 同步（本轮实测 pnpm install --frozen-lockfile 干净目录 exit 0），
+      # 所以这里用 frozen：装出来的依赖漂移要在出包前就红，而不是四个平台各装各的。
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      # 生产守卫（脚手架不得混进产物）跟着前端构建一起跑，别等到平台作业才发现
+      - name: Build web bundle
+        run: pnpm build:web
+
+      - name: Static guards and unit tests
+        run: pnpm exec vitest run tests/ux
+
+      - name: Go format gate
+        shell: bash
+        run: |
+          # 排除 node_modules：里面躺着第三方 .go，不该由本仓库的格式判据负责
+          UNFORMATTED="$(find . -name '*.go' -not -path './node_modules/*' -print0 | xargs -0 -r gofmt -l)"
+          if [ -n "${UNFORMATTED}" ]; then
+            echo "以下 Go 文件不是 gofmt 形态，先 gofmt -w 归位：" >&2
+            echo "${UNFORMATTED}" >&2
+            exit 1
+          fi
+
+      - name: Go vet and tests
+        shell: bash
+        run: |
+          go vet ./internal/...
+          go test ./internal/...
+
+      # 可执行证据：注入必须真的落进 internal/app（本轮线上事故的形态），不是只 grep 文本
+      - name: Version injection evidence
+        shell: bash
+        run: |
+          CONFSCOPE_EXPECT_APP_VERSION=9.9.9 go test -count=1 \
+            -ldflags "-X confscope/internal/app.appVersion=9.9.9" \
+            -run TestAppVersionInjectionLandsInThisPackage ./internal/app/
+
+      - name: Release gate
+        if: github.ref_type == 'tag'
+        shell: bash
+        # --skip-bundle：前端构建与生产守卫在上面一步已经跑过了，别在这里重编第二遍
+        run: bash scripts/verify-release-version.sh --skip-bundle
+
   build:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
@@ -141,6 +214,8 @@ jobs:
         with:
           name: ConfScope-windows-amd64
           path: build/bin/ConfScope.exe
+          # 产物没编出来要在上传这一步就红；默认的 warn 会把它推到下游 sha256sum 才炸
+          if-no-files-found: error
 
       # Linux 打包原始二进制 + .deb + .rpm
       - name: Package Linux tarball
@@ -253,6 +328,7 @@ jobs:
             build/bin/confscope-linux-amd64.tar.gz
             build/bin/confscope-linux-amd64.deb
             build/bin/confscope-linux-amd64.rpm
+          if-no-files-found: error
 
   generate-manifest:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -358,6 +434,7 @@ jobs:
         with:
           name: update-manifest
           path: artifacts/update.json
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
