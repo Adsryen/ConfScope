@@ -9,6 +9,7 @@
 // 仅在 loader 层通过水合/推送切换数据来源。
 
 import { reportError } from "./errorCenter";
+import { wailsAppBindings } from "./wailsAppBindings";
 import { translate } from "../locales";
 import { errorText } from "./errorText";
 
@@ -98,8 +99,9 @@ function storage(): Storage | null {
 }
 
 function appBindings(): DocBindings | null {
-  const g = globalThis as { go?: { main?: { App?: DocBindings } } };
-  const app = g.go?.main?.App;
+  // 命名空间交给唯一出口（轮50）：这里曾自己写 `g.go?.main?.App`，
+  // Go 包拆分把它改名为 app 后这一句没人同步，导致整个数据文件层静默降级成纯缓存。
+  const app = wailsAppBindings<DocBindings>();
   if (!app || typeof app.GetAppDataDocument !== "function" || typeof app.SaveAppDataDocument !== "function") {
     return null;
   }
