@@ -8,6 +8,44 @@ interface NacosEndpoint {
   namespace: string;
 }
 
+// ── 主数据文档（[数据根]/app-data/confscope-data.json）的桥内替身（轮50）──────────────
+// 为什么放内存而不是落盘：retest 禁止写桌面应用正式数据目录 portable/ConfScopeData（数据纪律第 3 条），
+// 而这条链路要验的是「前端到底有没有把文档推给原生绑定、重启后有没有从绑定水合」；
+// Go 侧的原子写、读回校验与损坏隔离由 internal/app/app_data_doc_test.go 负责，不在桥里重复。
+// 桥每次 install 重置一次，等价于一个干净的数据目录，避免用例之间互相喂数据。
+interface RetestAppDataDocState {
+  document: Record<string, unknown> | null;
+  saves: number;
+  gets: number;
+}
+
+let appDataDoc: RetestAppDataDocState = { document: null, saves: 0, gets: 0 };
+
+export function resetRetestAppDataDoc(): void {
+  appDataDoc = { document: null, saves: 0, gets: 0 };
+}
+
+export function retestAppDataDocSnapshot(): RetestAppDataDocState {
+  return { ...appDataDoc };
+}
+
+/** 对齐 Go 侧 AppDataDocumentStatus 的字段（前端 normalizeStatus 只认这些）。 */
+function appDataDocStatus(document: Record<string, unknown> | null) {
+  const savedAt = typeof document?.savedAt === "string" ? document.savedAt : "";
+  return {
+    exists: document !== null,
+    valid: document !== null,
+    path: "/tmp/confscope-retest/app-data/confscope-data.json（桥内内存替身）",
+    schemaVersion: typeof document?.schemaVersion === "number" ? document.schemaVersion : 0,
+    savedAt,
+    appVersion: "retest",
+    sizeBytes: document ? JSON.stringify(document).length : 0,
+    corruptFile: "",
+    document,
+    error: "",
+  };
+}
+
 function endpointFor(baseUrl: string): NacosEndpoint | null {
   const state = loadRetestState();
   for (const key of ["a", "b"] as const) {
@@ -872,6 +910,18 @@ export function createRetestInvoke(): RetestInvoke {
           throw new Error(`unknown data location key: ${args[0]}`);
         }
         return null;
+      case "GetAppDataDocument":
+        appDataDoc.gets += 1;
+        return appDataDocStatus(appDataDoc.document);
+      case "SaveAppDataDocument": {
+        const doc = (args[0] ?? null) as Record<string, unknown> | null;
+        appDataDoc.document = doc;
+        appDataDoc.saves += 1;
+        return appDataDocStatus(doc);
+      }
+      case "RetestAppDataDocSnapshot":
+        // 只给复测断言用（前端不调它）：读桥内替身的调用计数与最后一份文档。
+        return { ...appDataDoc };
       default:
         throw new Error(`retest bridge: 未实现绑定 ${method}`);
     }

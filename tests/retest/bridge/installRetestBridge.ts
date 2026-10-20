@@ -1,12 +1,16 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
+import { createRetestInvoke, resetRetestAppDataDoc, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
 
 const WAILS_METHODS = [
   "GetAppInfo",
+  // 主数据文档读写（src/lib/appDataDoc.ts 经 go.app.App 调用；桥内内存替身，见 retestBinding）
+  "GetAppDataDocument",
+  "SaveAppDataDocument",
+  "RetestAppDataDocSnapshot",
   "CheckForUpdates",
   "GetCurrentPlatform",
   "SelectLocalSnapshotDirectory",
@@ -66,6 +70,8 @@ const WAILS_METHODS = [
 ] as const;
 
 export async function installRetestBridge(page: Page, state: RetestState): Promise<void> {
+  // 每个用例一份干净的文档替身（等价于空数据目录），避免同 worker 内用例互相喂数据。
+  resetRetestAppDataDoc();
   // 审计落盘恢复（node 侧）：retestBinding 为浏览器兼容不再直接 import node:fs，
   // 改由本 node 专属文件注入 sink，写回 /tmp 的 audit-trail.jsonl（只追加）。
   setRetestAuditLineSink((line) => {
