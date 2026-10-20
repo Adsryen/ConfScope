@@ -26,6 +26,7 @@
 
 ### Fixed
 - 发布产物的版本号从未注入成功：构建拆分 Go 主包后（`77fa451`），Release 工作流里的 `-X main.appVersion` 已打不到变量真实所在的包，而 Go 链接器对不存在的注入目标静默忽略，于是自 v1.9.1 起所有安装包的版本号都是 `dev`，被比较逻辑当成 `0.0.0`——关于页显示 `vdev`，「检查更新」永远提示有新版本。现修正注入路径，后台自动检查改为只在版本号可比时发起，本地构建脚本也一并注入 `git describe` 版本。
+- 检查更新弹窗里的发布说明永远只有一句「发行版 x.y.z」：Release 工作流用 `gh release view` 读发行正文，而该作业被 `release` 依赖，跑的时候 Release 还没被创建，失败又被 `2>/dev/null || echo ""` 咽掉，于是恒走占位兜底；这两处文字直接进关于页和后台检查的通知。现改由 `scripts/extract-release-notes.mjs` 从本文件对应段落抽取（小节标题按中文口径给出、剥掉 markdown 记号），段落缺失、标题没写日期、正文为空都让出包直接失败，不再带着空话发布。
 - 主数据文件（`app-data/confscope-data.json`）自 2026-09-05 起实际未被写入：前端一处手写的 Wails 绑定命名空间停留在重构前的 `go.main.App`，取不到绑定即静默降级为只跑 localStorage。现绑定读取收进唯一出口，落盘、首启水合与损坏隔离恢复生效。
 - 配置对比的来源不再有两套状态互相覆盖，重启后不会丢掉用户实际比过的那一对。
 - 审计页配置矩阵默认窗口不再塌成 0 行，执行审计工具栏不再把面板挤变形。
@@ -36,7 +37,9 @@
 - 关于页外链改走系统浏览器，不再是点了没反应的死按钮；被省略号截断的文本悬停可见全文且可复制。
 
 ### Engineering
-- `tests/ux` 静态守卫扩到 75 个文件 / 599 条用例：新增查找层唯一实现、Wails 绑定命名空间唯一事实源、构建期注入符号必须打中 Go 声明、后台更新检查必须先验版本号可比等守卫，每条都带变异自检。
+- 发版链路此前一条检查都不跑（`release.yml` 里 `tsc` / `vitest` / `go test` / `gofmt` 的计数为 0，而 `vite build` 用的 esbuild 只剥类型不做类型检查）。现在出包前先过 `preflight` 作业：按锁文件装依赖、类型检查、前端构建与生产守卫、`vitest run tests/ux`、gofmt 与 `go vet`/`go test`、版本注入的可执行证据，tag 触发时再用同一份 `scripts/verify-release-version.sh --skip-bundle` 跑一遍；四个平台的作业 `needs` 它，判据不过连编都不编。产物上传原先只有 macOS 一条会因缺文件报错，现全部改成 `if-no-files-found: error`。
+- 新增 `tests/ux/releaseChainContractStaysAligned.test.ts`：把 CI 的 jq 模板、Go 侧 `Manifest`/`PlatformAsset` 的 json tag、构建矩阵、Release 资产名四方对齐（`json.Decode` 对未知字段静默忽略，漂一个字母只会让 sha256 变空、不会让构建变红），并钉住 preflight 在位且被 `build` 依赖、发版说明只能来自抽取脚本。版本注入守卫随之区分「出包注入」与预检作业里那条配对的写死金丝雀，`tests/ux` 静态守卫扩到 78 个文件 / 635 条用例：另含查找层唯一实现、Wails 绑定命名空间唯一事实源、后台更新检查必须先验版本号可比等守卫，每条都带变异对照。
+- 五个历史 Go 文件按 gofmt 归位（`app_audit.go` 的尾随空行、`task.go` 的注释列对齐、`updatecheck/platform_*.go` 补文件末尾换行），gofmt 判据进了 preflight 就不会再漂。
 - retest 真机永久回归新增对比正文/高亮变更查找（DF、DF2）、主数据文档绑定链路（DD）、视图切换与滚动归零（V、D）等组。
 - 发布链路加校验脚本 `scripts/verify-release-version.sh`：tag、`package.json`、本文件顶部版本三者一致，并实测 `-ldflags` 注入能落进 `internal/app`。
 
