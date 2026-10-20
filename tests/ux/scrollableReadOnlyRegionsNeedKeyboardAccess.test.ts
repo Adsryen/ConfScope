@@ -12,6 +12,9 @@
  *    aria-label 挂在裸 pre/div 这类隐式 generic 上会被部分读屏忽略）；
  * 2. 高亮叠层这类「假正文」豁免（真焦点在别的元素上），但要钉死数量并验证 aria-hidden；
  * 3. 非 pre 的滚动区靠登记表：合规数与总数都钉死，静默新增或漏改都会红；
+ *    轮48 修补了一个空洞——原先「没登记的非 pre 滚动区」被扫描直接丢掉，最后那条
+ *    「先登记再实现」永远咬不住新写的块。现在未登记的也进视野，按**类名**分档：
+ *    纯展示正文必须登记进 NON_PRE_REGISTRY，内部本来就有可聚焦项的进遗留名单（只减不增）；
  * 4. 能被 Tab 到达就得看得见：styles.css 里该类的 :focus-visible 必须真的画 outline。
  */
 import { readFileSync } from "node:fs";
@@ -108,7 +111,50 @@ const NON_PRE_REGISTRY: Record<string, { accessible: number; total: number }> = 
   "src/components/About.tsx|update-release-notes": { accessible: 1, total: 1 },
   // 左右两栏只有右栏是纯展示（左栏每行带 checkbox，Tab 本来就到得了）
   "src/components/DiffView.tsx|match-side-scroll": { accessible: 1, total: 2 },
+  // 对比正文：轮48 接查找条时顺手登记（面板唯一滚动容器，Tab 要能停进去滚到底）
+  "src/components/DiffPanel.tsx|diff-body": { accessible: 1, total: 1 },
 };
+
+/**
+ * 遗留的非 pre 滚动**类名**基线：这些容器内部本来就有可聚焦项（列表行、按钮、输入框），
+ * 或者标签本身可聚焦（textarea），Tab 经子孙到达，所以不需要自己再挂 tabIndex。
+ *
+ * 这份名单只减不增：轮48 补空洞时才把它建起来（此前这些站点被静默丢弃，从未被回答过）。
+ * 真要逐类核实「键盘能不能滚到底」时，把类从名单里删掉并补 tabIndex/role/aria-label。
+ */
+const LEGACY_NON_PRE_CLASSES = new Set([
+  "about-page",
+  "apply-detail",
+  "apply-item-list",
+  "apply-workspace",
+  "audit-matrix-body",
+  "audit-page",
+  "batch-diff-failures",
+  "batch-diff-nav-scroll",
+  "browser-items",
+  "code-editor-ta", // textarea 本身可聚焦
+  "combo-menu",
+  "conn-form",
+  "conn-list",
+  "data-detail",
+  "data-list",
+  "data-split",
+  "diff-workspace",
+  "field-error",
+  "field-error-box",
+  "history-items",
+  "log-detail-expanded",
+  "log-viewer",
+  "message-list",
+  "modal",
+  "modal-body",
+  "sel-menu",
+  "settings-panels",
+  "settings-rail",
+  "ssh-manager-page",
+  "ssh-profile-list",
+  "udiff",
+]);
 
 function scanFile(relPath: string, stripped: string) {
   const preSites: Site[] = [];
@@ -130,8 +176,11 @@ function scanFile(relPath: string, stripped: string) {
       labelRef: labelRefOf(attrs),
       accessible: isKeyboardAccessible(attrs),
     };
-    if (NON_PRE_REGISTRY[`${relPath}|${cls}`]) otherSites.push(site);
-    else if (tag === "pre") (LAYER_EXCEPTIONS[`${relPath}|${cls}`] ? exceptions : preSites).push(site);
+    const key = `${relPath}|${cls}`;
+    if (NON_PRE_REGISTRY[key]) otherSites.push(site);
+    else if (tag === "pre") (LAYER_EXCEPTIONS[key] ? exceptions : preSites).push(site);
+    // 轮48 修补：以前这一档直接落空（既不登记也不上报），新写的非 pre 滚动区躲得过守卫
+    else otherSites.push(site);
   }
   return { preSites, exceptions, otherSites };
 }
@@ -158,6 +207,7 @@ const FOCUS_RING_CLASSES = [
   "inline-error-body",
   "update-release-notes",
   "match-side-scroll",
+  "diff-body",
 ];
 
 /** 该类的 :focus-visible 里有没有真的画 outline（值为 none 等于没画）。 */
@@ -204,10 +254,23 @@ describe("只读滚动区必须能被键盘到达", () => {
       const accessible = hits.filter((site) => site.accessible).length;
       expect(accessible, `${key} 需要键盘可达的份数对不上（登记 ${expected.accessible}）`).toBe(expected.accessible);
     });
-    const unregistered = found
+    const unregisteredKeys = found
       .map((site) => site.id.split("|").slice(0, 2).join("|"))
       .filter((key, index, all) => !(key in NON_PRE_REGISTRY) && all.indexOf(key) === index);
-    expect(unregistered, "新的非 pre 滚动区要先登记再实现").toEqual([]);
+    const classOf = (key: string) => key.split("|")[1];
+    const freshClasses = unregisteredKeys.map(classOf).filter((cls) => !LEGACY_NON_PRE_CLASSES.has(cls));
+    expect(
+      freshClasses,
+      `新冒出的非 pre 滚动类要先回答「键盘能不能滚到底」：纯展示正文补 tabIndex={0} + role="region" + aria-label 并登记进 NON_PRE_REGISTRY；` +
+        `确认内部本来就有可聚焦项的才进遗留名单并写明理由：\n${freshClasses.join("\n")}`
+    ).toEqual([]);
+    const stale = [...LEGACY_NON_PRE_CLASSES].filter((cls) => !unregisteredKeys.some((key) => classOf(key) === cls));
+    expect(stale, `这些遗留类已经扫不到站点，从 LEGACY_NON_PRE_CLASSES 删掉，别留僵尸把守卫拖空：\n${stale.join("\n")}`).toEqual([]);
+    // 自检：补空洞后这条路径必须真的扫到东西（轮48 之前 unregisteredKeys 恒为空，守卫是空转的）
+    expect(
+      unregisteredKeys.length,
+      "未登记的非 pre 滚动站点一条都没扫到，说明扫描又退回了「静默丢弃」"
+    ).toBeGreaterThanOrEqual(LEGACY_NON_PRE_CLASSES.size);
   });
 
   it("aria-labelledby 指向的 id 在本文件真的挂上了", () => {

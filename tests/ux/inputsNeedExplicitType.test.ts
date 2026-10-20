@@ -69,8 +69,9 @@ describe("输入元素必须显式声明 type", () => {
     expect(missing.map((s) => `${s.file}:${s.line}`).join("\n")).toBe("");
   });
 
-  it('显式 type="text" 的数量只增不减（波15 交付时 53）', () => {
-    expect(textType.length).toBeGreaterThanOrEqual(53);
+  it('显式 type="text" 的数量只增不减（轮48 抽 FindBar 后 52）', () => {
+    // 53 → 52：两份重复的查找输入框合成 FindBar 里的一份，是去重不是漏标。
+    expect(textType.length).toBeGreaterThanOrEqual(52);
     // 这条断言不能靠「所有 input 都是 text」成立：确实存在 password/checkbox 等其他类型
     const nonText = sites.filter((s) => /\btype\s*=/.test(s.attrs) && !/\btype=(?:"text"|\{\s*"text")/.test(s.attrs));
     expect(nonText.length).toBeGreaterThanOrEqual(10);

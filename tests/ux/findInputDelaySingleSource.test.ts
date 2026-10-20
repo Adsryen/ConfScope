@@ -16,12 +16,20 @@ import { describe, expect, it } from "vitest";
 import { readScannedSource, sourceFiles } from "./scanUtils";
 
 const POLICY = "src/lib/findInput.ts";
-const VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
+const DIFF_PANEL = "src/components/DiffPanel.tsx";
+const CODE_VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
+const VIEWS = [...CODE_VIEWS, DIFF_PANEL];
 
-/** 视图里引 hook 的唯一合法形状：词来自查找栏，行数决定要不要推迟。 */
-const HOOK_CALL = /useDebouncedFindTerm\(findTerm, totalLines\)/;
+/**
+ * 视图里引 hook 的唯一合法形状：词来自查找栏，工作量决定要不要推迟。
+ * 入参名按正文形状走：代码视图是总行数，并排差异只有**渲染出来的**行参与命中扫描
+ * （勾掉等行之后那份工作量确实小了），所以允许 `rows.length`。
+ */
+const HOOK_CALL = /useDebouncedFindTerm\(findTerm, (?:totalLines|rows\.length)\)/;
 /** 命中层只认这一份 term；名字换了就是第二份口径的开头。 */
 const EFFECTIVE_TERM = /const effectiveTerm = findOpen \? committedFindTerm : [^\n]*searchTerm/;
+/** 并排差异没有「外部内容搜索词」那条路径：栏一关就等于没词，else 分支必须是空串。 */
+const EFFECTIVE_TERM_EMPTY = /const effectiveTerm = findOpen \? committedFindTerm : "";/;
 
 /** 按「谁引用了这个符号」统计站点，含定义所在文件。 */
 function referencingFiles(symbol: string): string[] {
@@ -47,14 +55,17 @@ describe("查找词输入延迟单一来源（轮29 F-16）", () => {
     expect(policy).toMatch(/clearTimeout\(timerRef\.current\)/);
   });
 
-  it("两个视图都走同一份 hook，且 searchTerm 留在即时那一侧", () => {
+  it("三个宿主都走同一份 hook，且 searchTerm 留在即时那一侧", () => {
     for (const file of VIEWS) {
       const view = readScannedSource(file);
       expect(view, `${file} 没引用 lib/findInput`).toMatch(/from "\.\.\/lib\/findInput"/);
       expect(view, `${file} 的 hook 调用形状变了`).toMatch(HOOK_CALL);
-      expect(view, `${file} 的命中层不再只认这一份 term`).toMatch(EFFECTIVE_TERM);
       expect(view, `${file} 自己写了一份延迟`).not.toMatch(/FIND_INPUT_DEBOUNCE_MS|findInputDelayFor/);
     }
+    for (const file of CODE_VIEWS) {
+      expect(readScannedSource(file), `${file} 的命中层不再只认这一份 term`).toMatch(EFFECTIVE_TERM);
+    }
+    expect(readScannedSource(DIFF_PANEL), `${DIFF_PANEL} 的命中层不再只认这一份 term`).toMatch(EFFECTIVE_TERM_EMPTY);
     expect(referencingFiles("useDebouncedFindTerm"), "hook 的定义/调用站点变了").toEqual([...VIEWS, POLICY].sort());
   });
 

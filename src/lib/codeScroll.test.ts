@@ -9,8 +9,10 @@ import {
   HIT_REVEAL_MARGIN,
   measureFindBarHeight,
   neededScrollLeftForMark,
+  neededScrollTopToCenter,
   padTopForFindBar,
   revealMarkHorizontally,
+  revealRowVertically,
 } from "./codeScroll";
 
 function rect(left: number, width: number): DOMRect {
@@ -223,5 +225,200 @@ describe("measureFindBarHeight：查找条高度量不到就交 0 给公式兜�
   it("量得到就照实返回", () => {
     expect(measureFindBarHeight(elWithHeight(34))).toBe(34);
     expect(measureFindBarHeight(elWithHeight(60))).toBe(60);
+  });
+});
+
+/** 视口相对的竖向矩形桩（只需 top/height/bottom 参与计算）。 */
+function rectV(top: number, height: number): DOMRect {
+  return {
+    left: 0,
+    right: 100,
+    width: 100,
+    top,
+    bottom: top + height,
+    height,
+    x: 0,
+    y: top,
+    toJSON: () => "",
+  } as DOMRect;
+}
+
+/**
+ * 手写一棵变高行的最小 DOM：滚动容器 + 一行 + 行内命中标记。
+ *
+ * 入参的 top 全部写**内容坐标**（这行在文档里的第几像素），但桩出来的矩形必须是
+ * **视口相对**的——真浏览器里 rect.top 已经减掉了一次 scrollTop，lib 为了拿内容坐标
+ * 会再加回来。桩成内容坐标就等于测了个假几何（与上面水平那组同一教训）。
+ * 桩用 mockImplementation 现算，所以第二次导航读到的是第一次写回之后的几何。
+ */
+function buildRowDoc(spec: {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop?: number;
+  scrollerTop?: number;
+  row?: { top: number; height: number } | null;
+  marks?: Array<{ cls: string; top: number; height: number }>;
+}) {
+  const scroller = document.createElement("div");
+  const row = document.createElement("div");
+  row.className = "diff-row";
+  row.setAttribute("data-row-index", "7");
+  scroller.appendChild(row);
+  document.body.appendChild(scroller);
+
+  let scrollTop = spec.scrollTop ?? 0;
+  const scrollerTop = spec.scrollerTop ?? 0;
+  Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => spec.clientHeight });
+  Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => spec.scrollHeight });
+  Object.defineProperty(scroller, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+    },
+  });
+  vi.spyOn(scroller, "getBoundingClientRect").mockImplementation(() => rectV(scrollerTop, spec.clientHeight));
+
+  const rowSpec = spec.row ?? null;
+  if (rowSpec) {
+    vi.spyOn(row, "getBoundingClientRect").mockImplementation(
+      () => rectV(scrollerTop + rowSpec.top - scrollTop, rowSpec.height)
+    );
+  }
+  for (const markSpec of spec.marks ?? []) {
+    const mark = document.createElement("mark");
+    mark.className = markSpec.cls;
+    mark.textContent = "x";
+    vi.spyOn(mark, "getBoundingClientRect").mockImplementation(
+      () => rectV(scrollerTop + markSpec.top - scrollTop, markSpec.height)
+    );
+    row.appendChild(mark);
+  }
+  return { scroller, row, getTop: () => scrollTop, setTop: (value: number) => (scrollTop = value) };
+}
+
+describe("neededScrollTopToCenter：变高行该送到哪个垂直偏移", () => {
+  const base = { targetTop: 1000, targetHeight: 20, clientHeight: 400, scrollTop: 0, scrollHeight: 4000 };
+
+  it("居中的是目标块的中线：算式含目标自身高度，行比视口高时不会只把顶边推进来", () => {
+    expect(neededScrollTopToCenter({ ...base, targetTop: 1000 })).toBe(1000 - (400 - 20) / 2);
+    expect(neededScrollTopToCenter({ ...base, targetTop: 1000, targetHeight: 800 })).toBe(1000 - (400 - 800) / 2);
+  });
+
+  it("两端都夹在 [0, scrollHeight - clientHeight] 内", () => {
+    // 第一行：居中算式给出负数，夹到 0（scrollTop 本来就是 0 时返回 null，见下一条）
+    expect(neededScrollTopToCenter({ ...base, targetTop: 10, scrollTop: 500 })).toBe(0);
+    expect(neededScrollTopToCenter({ ...base, targetTop: 3950 })).toBe(4000 - 400);
+    expect(neededScrollTopToCenter({ ...base, targetTop: 99999, scrollTop: 100 })).toBe(4000 - 400);
+  });
+
+  it("目标已经在顶上：算出来还是 0，不动（别把第一次开栏写成一次无意义滚动）", () => {
+    expect(neededScrollTopToCenter({ ...base, targetTop: 10, scrollTop: 0 })).toBeNull();
+  });
+
+  it("没有纵向溢出时：已在 0 就不动，停在别处才归位（容器刚被放大过）", () => {
+    const flat = { ...base, clientHeight: 400, scrollHeight: 400 };
+    expect(neededScrollTopToCenter({ ...flat, targetTop: 100, scrollTop: 0 })).toBeNull();
+    expect(neededScrollTopToCenter({ ...flat, targetTop: 100, scrollTop: 50 })).toBe(0);
+  });
+
+  it("量不到（高度 0 / 视口 0 / 非有限数）一律 null：动就是把用户已有的偏移清掉", () => {
+    expect(neededScrollTopToCenter({ ...base, targetTop: 1000, targetHeight: 0 })).toBeNull();
+    expect(neededScrollTopToCenter({ ...base, targetTop: 1000, targetHeight: Number.NaN })).toBeNull();
+    expect(neededScrollTopToCenter({ ...base, targetTop: Number.NaN })).toBeNull();
+    expect(neededScrollTopToCenter({ ...base, clientHeight: 0 })).toBeNull();
+    expect(neededScrollTopToCenter({ ...base, scrollTop: Number.NaN })).toBeNull();
+    expect(neededScrollTopToCenter({ ...base, scrollHeight: Number.NaN })).toBeNull();
+  });
+
+  it("差不到 1px 当作已到位：写一次 scrollTop 就是一轮重排加一次 scroll 事件", () => {
+    const centered = neededScrollTopToCenter({ ...base, targetTop: 1000 })!;
+    expect(neededScrollTopToCenter({ ...base, targetTop: 1000, scrollTop: centered - 0.5 })).toBeNull();
+  });
+});
+
+describe("revealRowVertically：从 DOM 量行矩形并写回 scrollTop", () => {
+  it("行在视口外：写 scrollTop 并报告动过", () => {
+    const doc = buildRowDoc({ clientHeight: 400, scrollHeight: 4000, row: { top: 1000, height: 20 } });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    expect(doc.getTop()).toBe(1000 - (400 - 20) / 2);
+  });
+
+  it("优先量当前命中：行比视口高时，居中整行只把行的中段推进来，命中仍在屏幕外", () => {
+    const doc = buildRowDoc({
+      clientHeight: 400,
+      scrollHeight: 4000,
+      row: { top: 1000, height: 800 },
+      marks: [{ cls: "search-hit search-hit-current", top: 1600, height: 20 }],
+    });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    expect(doc.getTop()).toBe(1600 - (400 - 20) / 2);
+  });
+
+  it("一个命中被切成几个 <mark> 时取并集：只量第一格会少算高度", () => {
+    const doc = buildRowDoc({
+      clientHeight: 400,
+      scrollHeight: 4000,
+      row: { top: 0, height: 4000 },
+      marks: [
+        { cls: "search-hit search-hit-current", top: 1600, height: 20 },
+        { cls: "search-hit search-hit-current", top: 1700, height: 20 },
+      ],
+    });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    // 并集 1600..1720 ⇒ 居中 (1600 + 1720) / 2 - 200 = 1460
+    expect(doc.getTop()).toBe(1460);
+  });
+
+  it("栏没开（外部搜索词整篇标红，不存在 current）时退到这一行里的第一处命中", () => {
+    const doc = buildRowDoc({
+      clientHeight: 400,
+      scrollHeight: 4000,
+      row: { top: 1000, height: 800 },
+      marks: [
+        { cls: "search-hit", top: 2000, height: 20 },
+        { cls: "search-hit", top: 2500, height: 20 },
+      ],
+    });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    expect(doc.getTop()).toBe(2000 - (400 - 20) / 2);
+  });
+
+  it("这一行没有命中标记时量行本身：调用方给的可能是整行的几何", () => {
+    const doc = buildRowDoc({
+      clientHeight: 400,
+      scrollHeight: 4000,
+      row: { top: 1000, height: 20 },
+      marks: [{ cls: "hljs-string", top: 1000, height: 20 }],
+    });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    expect(doc.getTop()).toBe(1000 - (400 - 20) / 2);
+  });
+
+  it("第二次导航到同一行不再移动：居中判据自洽，不会来回抖", () => {
+    const doc = buildRowDoc({ clientHeight: 400, scrollHeight: 4000, row: { top: 1000, height: 20 } });
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(true);
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(false);
+  });
+
+  it("量不到任何矩形（jsdom 无布局 / 祖先隐藏）时不动，也不清掉用户已有的偏移", () => {
+    const doc = buildRowDoc({ clientHeight: 400, scrollHeight: 4000, row: null });
+    doc.setTop(300);
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(false);
+    expect(doc.getTop()).toBe(300);
+  });
+
+  it("容器或行为 null 时直接返回 false（调用方传的可能是 null ref / DOM 里没这一行）", () => {
+    const doc = buildRowDoc({ clientHeight: 400, scrollHeight: 4000, row: { top: 1000, height: 20 } });
+    expect(revealRowVertically(null, doc.row)).toBe(false);
+    expect(revealRowVertically(doc.scroller, null)).toBe(false);
+    expect(doc.getTop()).toBe(0);
+  });
+
+  it("容器还没布局（clientHeight 0）时不动：此时 clamp 的结果恒等于 0，跳一次等于没跳", () => {
+    const doc = buildRowDoc({ clientHeight: 0, scrollHeight: 4000, row: { top: 1000, height: 20 } });
+    doc.setTop(300);
+    expect(revealRowVertically(doc.scroller, doc.row)).toBe(false);
+    expect(doc.getTop()).toBe(300);
   });
 });

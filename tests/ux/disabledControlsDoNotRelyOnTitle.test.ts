@@ -35,13 +35,11 @@ const BASELINE: Record<string, string[]> = {
     '<button className="btn btn-ghost btn-sm" onClick={loadSnapshots} disabled={loading} title={t("backup.refresh")}>',
     '<button className="btn btn-ghost btn-sm backup-config-compare" onClick={() => jumpToDiff(selectedSnapshot, cfg)} disabled={!selectedSnapshot.path} tit',
   ],
-  "src/components/CodeEditor.tsx": [
-    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(-1)} disabled={!hits.length} title={t(',
-    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(1)} disabled={!hits.length} title={t("',
-  ],
-  "src/components/CodeView.tsx": [
-    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(-1)} disabled={!hits.length} title={t(',
-    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => navigate(1)} disabled={!hits.length} title={t("',
+  // 轮48：两个跳转按钮从 CodeView / CodeEditor 两份重复实现合进 FindBar 一份，
+  // 基线随之从 4 条变 2 条（disabled 与 title 的取舍本身没变，理由见上面的取证表）。
+  "src/components/FindBar.tsx": [
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => onNavigate(-1)} disabled={hitCount === 0} title',
+    '<button type="button" className="code-find-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => onNavigate(1)} disabled={hitCount === 0} title=',
   ],
   "src/components/ConfigBrowser.tsx": [
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportCurrentList") } aria-',

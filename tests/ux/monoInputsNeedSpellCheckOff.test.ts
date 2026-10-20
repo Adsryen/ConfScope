@@ -78,8 +78,9 @@ describe("输入框的拼写检查红线", () => {
     expect(monoMissing.map((e) => `${e.file}:${e.line} <${e.tag}>`).join("\n")).toBe("");
   });
 
-  it("显式声明数量只增不减（波14 交付时 45）", () => {
-    expect(declared.length).toBeGreaterThanOrEqual(45);
+  it("显式声明数量只增不减（轮48 抽 FindBar 后 44）", () => {
+    // 45 → 44：两份重复的查找输入框合成 FindBar 里的一份，spellCheck={false} 跟着只剩一处。
+    expect(declared.length).toBeGreaterThanOrEqual(44);
     // 顺带证明这条不是靠「整份文件都一样」蒙过去：locales 之外确实有输入框
     expect(declared.length).toBeLessThan(elements.length);
   });

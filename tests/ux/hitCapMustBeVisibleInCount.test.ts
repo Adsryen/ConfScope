@@ -9,8 +9,9 @@
  *
  * 钉四件事：
  * 1) 截断必须发生在**扫描侧**（循环里 break），而不是扫完再 slice——后者一分钟都省不下；
- * 2) 上限常量只有一份定义，视图不许自己写数字；
- * 3) 两个视图的计数都要分「截断 / 未截断」两态，未截断时文案与历史逐字不变；
+ * 2) 上限常量只有一份定义，宿主不许自己写数字；
+ * 3) 计数分「截断 / 未截断」两态，未截断时文案与历史逐字不变。轮48 起这条住在唯一的条子
+ *    （src/components/FindBar.tsx）里，三个宿主共用；宿主侧守的是「分母与上限从哪儿来」；
  * 4) 中英两份 locale 都要有「+」，且带 {max} 插值（漏一种语言就是漏一个用户群）。
  *
  * 末尾两条自检把「退回扫完再截断」「退回只显示 total」两种改法钉成判红。
@@ -19,7 +20,9 @@ import { describe, expect, it } from "vitest";
 import { loadLocale, readScannedSource } from "./scanUtils";
 
 const LIB = "src/lib/codeLines.ts";
-const VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
+const BAR = "src/components/FindBar.tsx";
+const DIFF_PANEL = "src/components/DiffPanel.tsx";
+const CODE_VIEWS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
 
 /** 截断必须写在扫描循环里：`hits.length >= limit` 之后紧跟 break。 */
 const EARLY_STOP = /if\s*\(\s*hits\.length\s*>=\s*limit\s*\)\s*break\s*;/;
@@ -57,25 +60,39 @@ describe("查找命中上限要可见（轮28 F-10）", () => {
       /export function isHitScanCapped\(\s*hits: CodeHit\[\]\s*,\s*limit = MAX_CODE_HITS\s*\)/
     );
     expect(source).toMatch(/return hits\.length >= limit/);
-    for (const file of VIEWS) {
+    for (const file of CODE_VIEWS) {
       const view = readScannedSource(file);
       expect(view, `${file} 没走 isHitScanCapped`).toMatch(/const hitsCapped = isHitScanCapped\(hits\);/);
       expect(view, `${file} 自己写了命中数字`).not.toMatch(/hits\.length\s*>=\s*\d{3,}/);
     }
+    // 并排差异的命中表在 lib/diffFind 里自己判触顶（单位是标红单元，不是 CodeHit 数组），
+    // 但它不许另起一个上限数字：必须引同一个 MAX_CODE_HITS。
+    const panel = readScannedSource(DIFF_PANEL);
+    const diffLib = readScannedSource("src/lib/diffFind.ts");
+    expect(diffLib, "lib/diffFind 没复用同一个上限常量").toMatch(/limit = MAX_CODE_HITS/);
+    expect(panel, "DiffPanel 把触顶位抄成了第二套判定").not.toMatch(/capped\s*\?[^\n]*\d{3,}/);
   });
 
-  it("两个视图的计数分两态，未截断时文案逐字不变", () => {
-    for (const file of VIEWS) {
-      const view = readScannedSource(file);
-      expect(view, `${file} 的计数没查上限位`).toMatch(/hitsCapped\s*\?\s*t\("config\.findCountCapped"/);
-      expect(view, `${file} 截断后还在报精确总数`).toMatch(/t\("config\.findCount",\s*\{\s*current:[^}]*total: hits\.length\s*\}\)/);
-      expect(view, `${file} 上限值没走常量`).toMatch(/max: MAX_CODE_HITS/);
-      expect(view, `${file} 缺截断解释的 title`).toMatch(
-        /title=\{hitsCapped \? t\("config\.findCountCappedHint",\s*\{ max: MAX_CODE_HITS \}\) : undefined\}/
-      );
-      // 上限值只能来自 lib：视图里出现裸数字就是第二套口径
-      expect(view, `${file} 把上限数字写死在视图里`).not.toMatch(/findCountCapped[\s\S]{0,120}?\d{4}/);
+  it("条子里的计数分两态，未截断时文案逐字不变", () => {
+    const bar = readScannedSource(BAR);
+    expect(bar, `${BAR} 的计数没查触顶位`).toMatch(/capped\s*\?\s*t\("config\.findCountCapped"/);
+    expect(bar, `${BAR} 截断后还在报精确总数`).toMatch(/t\("config\.findCount",\s*\{\s*current\b[^}]*total: hitCount\s*\}\)/);
+    expect(bar, `${BAR} 的截断分母没走宿主给的上限槽`).toMatch(/max:\s*cappedMax/);
+    expect(bar, `${BAR} 缺截断解释的 title`).toMatch(
+      /title=\{capped \? t\("config\.findCountCappedHint",\s*\{ max: cappedMax \}\) : undefined\}/
+    );
+    // 上限值只能来自宿主：条子里出现裸数字就是第二套口径
+    expect(bar, `${BAR} 把上限数字写死在条子里`).not.toMatch(/findCountCapped[\s\S]{0,120}?\d{4}/);
+  });
+
+  it("宿主各自把「能不能导航到的单位数」递给 cappedMax，不许拿扫描预算冒充总数", () => {
+    for (const file of CODE_VIEWS) {
+      expect(readScannedSource(file), `${file} 没把上限常量递给条子的 cappedMax`).toContain("cappedMax={MAX_CODE_HITS}");
     }
+    const panel = readScannedSource(DIFF_PANEL);
+    // diff 的步进单位是行：能导航到的就是 groups.length，拿 limit 当分母会吹出「1/5000」这种假数
+    expect(panel, "DiffPanel 的 cappedMax 不是可导航单位数").toMatch(/cappedMax=\{hitCount\}/);
+    expect(panel, "DiffPanel 的触顶位没接到 diffFind 的输出").toMatch(/capped=\{findResult\.capped\}/);
   });
 
   it("中英都把「还有更多」写进可见文案，解释句带上下限数字", () => {
@@ -104,9 +121,9 @@ describe("查找命中上限要可见（轮28 F-10）", () => {
     expect(mutant.includes("return hits.slice(0, limit);"), "变异没落到函数体里，这条自检是空转").toBe(true);
   });
 
-  it("自检二：视图退回只显示精确 total 必须判红", () => {
-    const honest = readScannedSource(VIEWS[0]);
-    const regressed = honest.replace(/hitsCapped\s*\?\s*t\("config\.findCountCapped",\s*\{[^}]*\}\)\s*:\s*/, "");
-    expect(regressed, "截断态退回只显示 total 必须判红").not.toMatch(/hitsCapped\s*\?\s*t\("config\.findCountCapped"/);
+  it("自检二：条子退回只显示精确 total 必须判红", () => {
+    const honest = readScannedSource(BAR);
+    const regressed = honest.replace(/capped\s*\?\s*t\("config\.findCountCapped",\s*\{[^}]*\}\)\s*:\s*/, "");
+    expect(regressed, "截断态退回只显示 total 必须判红").not.toMatch(/capped\s*\?\s*t\("config\.findCountCapped"/);
   });
 });

@@ -26,6 +26,8 @@ import { PROJECT_ROOT } from "./scanUtils";
 const LIB = "src/lib/codeScroll.ts";
 const CODE_VIEW = "src/components/CodeView.tsx";
 const CODE_EDITOR = "src/components/CodeEditor.tsx";
+const DIFF_PANEL = "src/components/DiffPanel.tsx";
+const BAR = "src/components/FindBar.tsx";
 const CSS_FILE = "src/styles.css";
 
 const CSS = readFileSync(join(PROJECT_ROOT, CSS_FILE), "utf8");
@@ -60,22 +62,28 @@ describe("查找栏顶部净空单一来源（波58 F-8）", () => {
   const lib = readScannedSource(LIB);
   const view = readScannedSource(CODE_VIEW);
   const editor = readScannedSource(CODE_EDITOR);
+  const panel = readScannedSource(DIFF_PANEL);
+  /**
+   * 三个宿主（轮48 起）：浏览态、编辑态、并排差异——「净空只有一个出口」与正文形状无关，三处都守。
+   * 而 `scrollTop - padTop` / `padTop + i * ROW_H` 那套**按行号算几何**只属于两个代码视图：
+   * `.diff-cell` 是 pre-wrap，一行长 JSON 能在视口里占十几屏，行号公式在那儿不成立，
+   * DiffPanel 的落地改为量 DOM（lib/codeScroll 的 revealRowVertically），下面只守它确实调了公式。
+   */
+  const hosts: Array<[string, string]> = [
+    [CODE_VIEW, view],
+    [CODE_EDITOR, editor],
+    [DIFF_PANEL, panel],
+  ];
 
-  it("公式与条高测量住在 lib，两个视图都只调用", () => {
+  it("公式与条高测量住在 lib，三个宿主都只调用", () => {
     for (const fn of ["padTopForFindBar", "measureFindBarHeight"]) {
       expect(lib, `src/lib/codeScroll.ts 里没有导出 ${fn}`).toContain(`export function ${fn}`);
-      for (const [file, src] of [
-        [CODE_VIEW, view],
-        [CODE_EDITOR, editor],
-      ] as const) {
+      for (const [file, src] of hosts) {
         expect(src, `${file} 没有从 lib/codeScroll 引 ${fn}`).toContain(fn);
       }
     }
     // 条子几何的三个数不许在组件里再写一遍字面量
-    for (const [file, src] of [
-      [CODE_VIEW, view],
-      [CODE_EDITOR, editor],
-    ] as const) {
+    for (const [file, src] of hosts) {
       expect(src, `${file} 里自己声明了查找栏几何常量`).not.toMatch(/const FIND_BAR_/);
       expect(src, `${file} 里抄了净空算式`).not.toMatch(/8 \+ 34 \+ 8|FIND_BAR_FALLBACK_HEIGHT \+/);
     }
@@ -103,12 +111,9 @@ describe("查找栏顶部净空单一来源（波58 F-8）", () => {
     expect(CSS).toMatch(/padding: var\(--code-pad-top\)/);
   });
 
-  it("条高在绘制前量、关栏清零，`.code-find` 挂着被测的那颗 ref", () => {
+  it("条高在绘制前量、关栏清零，`.code-find` 那颗 ref 由条子持有、宿主递进去", () => {
     const blocks = (src: string) => [...src.matchAll(/useLayoutEffect\(\(\) => \{[\s\S]*?\n\s*\}, \[/g)].map((m) => m[0]);
-    for (const [file, src] of [
-      [CODE_VIEW, view],
-      [CODE_EDITOR, editor],
-    ] as const) {
+    for (const [file, src] of hosts) {
       const measure = blocks(src).find((b) => b.includes("measureFindBarHeight"));
       expect(measure, `${file} 的条高测量不在 useLayoutEffect 里（开栏那一帧会先盖住正文再跳开）`).toBeTruthy();
       // 必须真的 observe 那颗条子并收摊：typeof ResizeObserver 的门卫句里也含这个名字，
@@ -120,9 +125,15 @@ describe("查找栏顶部净空单一来源（波58 F-8）", () => {
         /return \(\) => ro\.disconnect\(\)/
       );
       expect(measure, `${file} 关栏没清零条高：下一份内容开栏会用上一个文件的高度`).toMatch(/setFindBarHeight\(0\)/);
-      expect(src, `${file} 的查找条没挂 ref`).toMatch(
-        /className="code-find"[\s\S]{0,80}ref=\{findBarRef\}|ref=\{findBarRef\}[\s\S]{0,80}className="code-find"/
-      );
+    }
+    // 轮48：条子只剩一份实现。被测元素挂在自己的 barRef 上，宿主把自己那颗 findBarRef 递进去——
+    // 两头钉住，将来谁把测量对象换成「宿主根节点」都会在这里判红（量到的是整页高度，净空凭空变大）。
+    const bar = readScannedSource(BAR);
+    expect(bar, `${BAR} 里 .code-find 没挂被测的那颗 ref`).toMatch(
+      /className="code-find"[\s\S]{0,80}ref=\{barRef\}|ref=\{barRef\}[\s\S]{0,80}className="code-find"/
+    );
+    for (const [file, src] of hosts) {
+      expect(src, `${file} 没把自己那颗 findBarRef 递给条子`).toContain("barRef={findBarRef}");
     }
   });
 

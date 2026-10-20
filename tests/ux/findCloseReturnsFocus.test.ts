@@ -23,13 +23,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { lineAt, PROJECT_ROOT, readScannedSource, sourceFiles } from "./scanUtils";
 
-/** 两个查找宿主：只读正文（CodeView）与编辑区（CodeEditor）。 */
-const HOSTS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx"];
-/** 被查找的那一层：正文层按 className 片段识别，编辑区按标签识别。 */
-const READONLY_LAYER = 'className="code-area';
+/** 三个查找宿主：只读正文（CodeView）、编辑区（CodeEditor）、并排差异正文（DiffPanel，轮48）。 */
+const HOSTS = ["src/components/CodeView.tsx", "src/components/CodeEditor.tsx", "src/components/DiffPanel.tsx"];
+/** 被查找的那一层：只读正文层按 className 片段识别（两处），编辑区按标签识别。 */
+const READONLY_LAYERS = ['className="code-area', 'className="diff-body'];
 const EDITOR_LAYER = "<textarea";
 /** 「换内容重置」出口的依赖键：出现这些才算内容切换，而非查找结束。 */
-const CONTENT_SWITCH_KEYS = ["code", "contentKey", "doc", "format", "value"];
+const CONTENT_SWITCH_KEYS = ["code", "contentKey", "doc", "format", "value", "leftText", "rightText"];
 /** 焦点调用：允许 `x.current?.focus(` / `x.focus(` / `const ta = taRef.current; ta.focus()` 三种写法。 */
 const FOCUS_RE = /([A-Za-z_$][\w$]*)((?:\s*\.\s*current)?)\s*(?:\?\.|\.|!\.)\s*focus\s*\(([^)]*)\)/g;
 
@@ -102,7 +102,7 @@ interface Layer {
 function searchedLayers(file: string): Layer[] {
   const source = readScannedSource(file);
   const found: Layer[] = [];
-  for (const marker of [READONLY_LAYER, EDITOR_LAYER]) {
+  for (const marker of [...READONLY_LAYERS, EDITOR_LAYER]) {
     let at = source.indexOf(marker);
     while (at !== -1) {
       const head = tagHeadAt(source, at);
@@ -231,7 +231,10 @@ describe("收起查找栏把焦点还给被查找的那一层", () => {
       }
     }
     expect(offenders, "焦点掉回 body 后方向键 / PageDown 失效：\n" + offenders.join("\n")).toEqual([]);
-    expect(closers.length, "「收起查找栏」出口下限 3 处：CodeView closeFind + CodeEditor closeFind/revealLine").toBeGreaterThanOrEqual(3);
+    expect(
+      closers.length,
+      "「收起查找栏」出口下限 4 处：三个宿主各一份 closeFind + CodeEditor 的 revealLine"
+    ).toBeGreaterThanOrEqual(4);
   });
 
   it("「换内容重置」出口不许移焦：换文件不是查找结束", () => {
@@ -268,13 +271,14 @@ describe("收起查找栏把焦点还给被查找的那一层", () => {
       const flat = normalize(source);
       expect(
         flat.split("closeFind").length - 1,
-        `${file} 里 closeFind 至少要出现 3 次（定义 / useEscape 登记 / ✕ 按钮）`
+        `${file} 里 closeFind 至少要出现 3 次（定义 / useEscape 登记 / 递给条子的 onClose）`
       ).toBeGreaterThanOrEqual(3);
       if (!new RegExp(`useEscape\\([^;]*?closeFind[^;]*?EscapePriority\\.find`).test(flat)) {
         offenders.push(`${file} 的 Esc 不再指向 closeFind（波37 的登记口径被改动）`);
       }
-      if (!/onClick=\{closeFind\}/.test(source)) {
-        offenders.push(`${file} 的 ✕ 按钮没走 closeFind，焦点口径会被绕开`);
+      // 轮48：✕ 长在共用的 FindBar 里，宿主这一侧的接线就是 onClose={closeFind}
+      if (!/onClose=\{closeFind\}/.test(source)) {
+        offenders.push(`${file} 没把 closeFind 接给条子的 onClose：✕ 会绕开焦点口径`);
       }
     }
     expect(offenders, "两条出口必须同函数：\n" + offenders.join("\n")).toEqual([]);

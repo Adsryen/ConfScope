@@ -25,7 +25,10 @@ import { readScannedSource, sourceFiles } from "./scanUtils";
 const LIB = "src/lib/findKeyOwnership.ts";
 const CODE_VIEW = "src/components/CodeView.tsx";
 const CODE_EDITOR = "src/components/CodeEditor.tsx";
-const VIEWS = [CODE_VIEW, CODE_EDITOR];
+// 轮48 第三处宿主：并排差异正文也接了 Ctrl+F。三个宿主共用 lib 那份判定，
+// 少守一处就等于把轮39 那个「两边都不接管」的分叉重新允许回来。
+const DIFF_PANEL = "src/components/DiffPanel.tsx";
+const VIEWS = [CODE_VIEW, CODE_EDITOR, DIFF_PANEL];
 const ATTR = "FIND_KEY_OWNER_ATTR";
 
 /** 视图里唯一合法的接管形状：把事件源和本视图根交给共享判定，自己不再算条件。 */
@@ -105,7 +108,7 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
     expect(lib).not.toMatch(/querySelector(?:All)?\(\s*["'`]\./);
   });
 
-  it("两个视图都只递参数，旧判据不许复活", () => {
+  it("三个宿主都只递参数，旧判据不许复活", () => {
     for (const file of VIEWS) {
       const src = readScannedSource(file);
       expect(src, `${file} 没有引用 lib/findKeyOwnership`).toContain('from "../lib/findKeyOwnership"');
@@ -114,7 +117,7 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
         expect(re.test(src), `${file} 复活了${why}`).toBe(false);
       }
     }
-    // 引用站点必须是「lib 定义 + 两个视图使用」，多出第三处 = 又写了一份所有权
+    // 引用站点必须是「lib 定义 + 三个宿主使用」，多出第四处 = 又写了一份所有权
     expect(referencingFiles("takesFindKeyOwnership"), "接管判定的站点变了").toEqual([...VIEWS, LIB].sort());
   });
 
@@ -136,21 +139,21 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
     }
   });
 
-  it("所有权标记只由这两个视图读写，别处不许再插一套", () => {
+  it("所有权标记只由这三个宿主读写，别处不许再插一套", () => {
     const users = referencingFiles(ATTR).sort();
     expect(users, "注册表属性的读写站点变了").toEqual([...VIEWS, LIB].sort());
     // 属性名字面量也只许出现在 lib（视图经符号引用，抄字符串就是第二份口径）
     expect(sourceFiles().filter((file) => file !== LIB && readScannedSource(file).includes('"data-find-key-owner"'))).toEqual([]);
   });
 
-  it("全站只有这两个视图劫持 Ctrl+F/F3，别处再加一份所有权判定就判红", () => {
+  it("全站只有这三个宿主劫持 Ctrl+F/F3，别处再加一份所有权判定就判红", () => {
     const hijackers = sourceFiles()
       .filter((file) => file !== LIB)
       .filter((file) => FIND_KEY_TEST.test(readScannedSource(file)));
     expect(hijackers, "出现了第三处查找快捷键劫持点").toEqual([...VIEWS].sort());
   });
 
-  it("组合态（IME）先让位：两条监听都在所有权判定之前挡掉输入法候选", () => {
+  it("组合态（IME）先让位：每条监听都在所有权判定之前挡掉输入法候选", () => {
     for (const file of VIEWS) {
       const block = findKeyEffect(readScannedSource(file));
       const ime = block.search(/if \(isImeComposing\(e\)\) return/);

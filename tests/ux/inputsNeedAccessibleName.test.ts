@@ -157,7 +157,8 @@ describe("输入控件必须有不消失的可访问名", () => {
     expect(components.length).toBeGreaterThanOrEqual(9);
     expect(checkboxRadio.length).toBeGreaterThanOrEqual(20);
     // placeholder 是最容易被误当名字的来源，命中量要够，否则「placeholder 不算名字」那条会空转
-    expect(controls.filter((s) => attrValue(s.attrs, "placeholder") !== undefined).length).toBeGreaterThanOrEqual(45);
+    // 45 → 44：轮48 把浏览态 / 编辑态两份重复的查找输入框抽成 FindBar 一份（少一处 placeholder）。
+    expect(controls.filter((s) => attrValue(s.attrs, "placeholder") !== undefined).length).toBeGreaterThanOrEqual(44);
   });
 
   it("不许有没有名字的输入控件或共享组件调用点", () => {

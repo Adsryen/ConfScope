@@ -73,7 +73,9 @@ describe("当前命中不许重画整篇文档（轮28 F-14）", () => {
   it("lib 产出的 HTML 里没有「当前命中」的类，只有 data-hit 编号", () => {
     const lib = readScannedSource(LIB);
     expect(lib).toContain(`export const CURRENT_HIT_CLASS = "${CURRENT_CLASS}"`);
-    expect(lib).toMatch(/export function markHighlightedHtml\(html: string, hits: CodeHit\[\]\): string/);
+    // 第三参 hitIndexBase（轮48）：逐段标记（diff 的一行两格）需要全篇编号，默认 0 = 旧行为。
+    // 「当前命中」仍然不进这一层——所以它只能多一个编号基址，不许长出 active 之类的第二形态。
+    expect(lib).toMatch(/export function markHighlightedHtml\(html: string, hits: CodeHit\[\], hitIndexBase = 0\): string/);
     expect(lib, "markHighlightedHtml 又带回 activeOffset 参数了").not.toMatch(/markHighlightedHtml\([^)]*activeOffset/);
     expect(lib, "产出 HTML 里还有 active 分支＝每换一处都要重画整篇").not.toMatch(/range\.active/);
     expect(lib).toContain('<mark class="search-hit" data-hit="${range.hitIndex}"');

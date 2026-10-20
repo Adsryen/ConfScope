@@ -43,10 +43,13 @@ interface Site {
   why: string;
 }
 
-/** 波37 接线的三处瞬时层。 */
+/** 接线的瞬时层名单（新增站点要一起说明为什么不是宿主弹层本身）。 */
 const SITES: Site[] = [
   { file: "src/components/CodeView.tsx", gate: "active && findOpen", callback: "closeFind", why: "浏览态代码视图的查找栏" },
   { file: "src/components/CodeEditor.tsx", gate: "active && findOpen", callback: "closeFind", why: "新建/编辑弹层里的查找栏" },
+  // 轮48：并排差异正文接入同一个查找条。它是页面内的瞬时层（栏一关就清词、不遮挡宿主弹层），
+  // 门控与上面两处逐字同形：宿主页面被保活隐藏时（active=false）绝不登记 Esc。
+  { file: "src/components/DiffPanel.tsx", gate: "active && findOpen", callback: "closeFind", why: "并排差异正文的查找栏（轮48）" },
   {
     file: "src/components/ConnectionManager.tsx",
     gate: "!embedded && !!renamingProject",
