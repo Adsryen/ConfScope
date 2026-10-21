@@ -109,3 +109,6 @@ tests/retest/results-run/
 
 # NSIS 构建时下载的 WebView2 安装器缓存
 build/windows/installer/tmp/
+
+# README 截图取证的中间产物（正式图已拷入 .github/assets/，这里只留本地）
+/tests/retest/shots/out/

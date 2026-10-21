@@ -69,6 +69,21 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, "tests/e2e/**", "tests/smoke/specs/**", "tests/smoke/native/specs/**", "tests/retest/specs/**", "tests/smoke/bridge/**", "tests/smoke/global-teardown.test.ts", "tests/smoke/native/global-setup.test.ts", "tests/smoke/native/global-teardown.test.ts", ".tmp/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/e2e/**",
+      "tests/smoke/specs/**",
+      "tests/smoke/native/specs/**",
+      "tests/retest/specs/**",
+      // README 截图取证也是 Playwright spec。vitest 默认 include 覆盖 *.spec.ts，
+      // 不收进 exclude 就会把它当单测收集：里面用的是 @playwright/test 的 test()，
+      // 直接报错，还会把 shots/out/ 的产物路径逻辑跑进单测链路。
+      "tests/retest/shots/**",
+      "tests/smoke/bridge/**",
+      "tests/smoke/global-teardown.test.ts",
+      "tests/smoke/native/global-setup.test.ts",
+      "tests/smoke/native/global-teardown.test.ts",
+      ".tmp/**",
+    ],
   },
 });
