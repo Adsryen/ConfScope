@@ -6,6 +6,7 @@ import { Format } from "../lib/format";
 import { escapeHtml, highlightLine } from "../lib/highlight";
 import { baseIndexForSide, marksForRowSide, toLineHits, type DiffFindRow, type DiffSide } from "../lib/diffFind";
 import { useFindLayer } from "../lib/useFindLayer";
+import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 import FindBar, { FindOpenButton } from "./FindBar";
 
 interface Props {
@@ -119,6 +120,12 @@ export default function UnifiedDiff({ oldText, newText, format, searchTerm, acti
     navigate,
     onFindKeyDown,
   } = find;
+
+  // 换正文归零 + 外部搜索词定位，两件事一条出口（轮56，与 DiffPanel 同口径）：
+  // 历史变更里勾着搜索词切换版本，默认看到的就是这一屏（HistoryView 的 rawView 初值 false），
+  // 原先本视图既没接滚动归零、也没人把首个命中滚进来 ⇒ 行号列停在上一版的偏移处，
+  // 而新版的红字在屏幕外。定位口径整个待在 useFindLayer 里，本文件不许自己写 scrollTop。
+  useScrollResetOnContentChange(bodyRef, [oldText, newText], find.locateFirstExternalHit);
 
   /**
    * 每行一次「产 HTML → 叠标记」，两者必须同源于这一行（轮41 R41-2/R41-5）。

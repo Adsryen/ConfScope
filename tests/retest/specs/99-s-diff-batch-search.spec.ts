@@ -16,7 +16,7 @@
 // 用例：
 //   DBS-01 计数与徽标等于服务端真值（命中配置数 / 处数 / 每项 A·B / 首个命中行号）
 //   DBS-02 「只看命中项」只改列表，进入变更计划的条数与勾着一动不动
-//   DBS-03 点命中行换当前项，右侧 diff 按同一个词标红（列表与正文说同一句话）
+//   DBS-03 点命中行换当前项，右侧 diff 按同一个词标红**并真的滚到那一行**（列表与正文说同一句话）
 //   DBS-04 无命中把作用域说清（搜了几个配置、搜的是什么词），列表不静默变空
 //   DBS-05 Esc 先给右侧差异查找栏，第二次才收跨项搜索
 import { expect, type Page } from "@playwright/test";
@@ -77,6 +77,96 @@ function firstHitLine(text: string, term: string): number {
   const at = text.toLowerCase().indexOf(term.toLowerCase());
   if (at < 0) return 0;
   return (text.slice(0, at).match(/\n/g)?.length ?? 0) + 1;
+}
+
+interface SideTruth {
+  a: number;
+  b: number;
+  /** 左侧首个命中行（1 起），无命中 0。 */
+  lineA: number;
+  /** 右侧首个命中行（1 起），无命中 0。 */
+  lineB: number;
+  /** 徽标上那个数：先左后右，与 DiffView 的 `hit.left.line || hit.right.line` 同口径。 */
+  line: number;
+}
+
+/**
+ * 从两个 Nacos 读原文，逐条算 A/B 处数与各自的首个命中行号。
+ *
+ * 只返回命中过的条目。DBS-01 用它核对列表数字，DBS-03 用它挑「左右首个命中行号一致」
+ * 且落点足够深的那一条 —— 徽标只写一个行号（先左后右），两侧首命中行号不同的条目本身就有歧义，
+ * 拿它断言「滚到的那一行 = 徽标写的那一行」会把语义问题变成数据问题。
+ */
+async function buildServerTruth(dataIds: string[]): Promise<Map<string, SideTruth>> {
+  const truth = new Map<string, SideTruth>();
+  for (const dataId of dataIds) {
+    const [left, right] = await Promise.all([
+      fetchNacosContent(state.nacos.a.baseUrl, NS_A, dataId, GROUP),
+      fetchNacosContent(state.nacos.b.baseUrl, NS_B, dataId, GROUP),
+    ]);
+    const a = countOccurrences(left, TERM);
+    const b = countOccurrences(right, TERM);
+    if (!a && !b) continue;
+    const lineA = a ? firstHitLine(left, TERM) : 0;
+    const lineB = b ? firstHitLine(right, TERM) : 0;
+    truth.set(dataId, { a, b, lineA, lineB, line: lineA || lineB });
+  }
+  return truth;
+}
+
+/** 右侧 diff 滚动容器与第一处命中的几何（轮56：点命中行要真的滚到那一行）。 */
+interface DiffLocate {
+  bodyFound: boolean;
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  markCount: number;
+  /** 第一处命中所在 diff 行的 data-row-index 与两侧行号槽。 */
+  rowIndex: number | null;
+  rowLeftNo: number | null;
+  rowRightNo: number | null;
+  /** 第一处命中的矩形换算：内容坐标（与 scrollTop 无关）＋视口相对位置。 */
+  markContentTop: number;
+  markHeight: number;
+  markTopInBody: number;
+  markBottomInBody: number;
+}
+
+async function probeDiffLocate(page: Page): Promise<DiffLocate> {
+  return page.evaluate(() => {
+    const empty: DiffLocate = {
+      bodyFound: false, scrollTop: 0, clientHeight: 0, scrollHeight: 0, markCount: 0,
+      rowIndex: null, rowLeftNo: null, rowRightNo: null,
+      markContentTop: 0, markHeight: 0, markTopInBody: 0, markBottomInBody: 0,
+    } as DiffLocate;
+    const main = Array.from(document.querySelectorAll<HTMLElement>(".batch-diff-main")).find((m) => m.offsetParent !== null);
+    const body = main?.querySelector<HTMLElement>(".diff-body");
+    if (!body) return empty;
+    const num = (text: string | null): number | null => {
+      const trimmed = (text ?? "").trim();
+      return trimmed && /^\d+$/.test(trimmed) ? Number(trimmed) : null;
+    };
+    const marks = Array.from(body.querySelectorAll<HTMLElement>("mark.search-hit")).filter((m) => m.offsetParent !== null);
+    const first = marks[0] ?? null;
+    const row = first?.closest<HTMLElement>(".diff-row") ?? null;
+    const gutters = row ? Array.from(row.querySelectorAll<HTMLElement>(".diff-gutter")).map((g) => num(g.textContent)) : [];
+    const bodyRect = body.getBoundingClientRect();
+    const markRect = first?.getBoundingClientRect() ?? null;
+    return {
+      bodyFound: true,
+      scrollTop: body.scrollTop,
+      clientHeight: body.clientHeight,
+      scrollHeight: body.scrollHeight,
+      markCount: marks.length,
+      rowIndex: row ? Number(row.getAttribute("data-row-index") ?? NaN) : null,
+      rowLeftNo: gutters[0] ?? null,
+      rowRightNo: gutters[1] ?? null,
+      markContentTop: markRect ? markRect.top - bodyRect.top + body.scrollTop - body.clientTop : 0,
+      markHeight: markRect ? markRect.height : 0,
+      markTopInBody: markRect ? markRect.top - bodyRect.top : 0,
+      markBottomInBody: markRect ? markRect.bottom - bodyRect.top : 0,
+    };
+  });
 }
 
 async function probeBatch(page: Page): Promise<Probe> {
@@ -142,16 +232,7 @@ test("DBS-01 计数与徽标等于服务端真值", async ({ page, retest }) => 
   const dataIds = await enterBatch(page);
 
   // 基准：直接从两个 Nacos 读原文，逐条算 A/B 处数与首个命中行号
-  const truth = new Map<string, { a: number; b: number; line: number }>();
-  for (const dataId of dataIds) {
-    const [left, right] = await Promise.all([
-      fetchNacosContent(state.nacos.a.baseUrl, NS_A, dataId, GROUP),
-      fetchNacosContent(state.nacos.b.baseUrl, NS_B, dataId, GROUP),
-    ]);
-    const a = countOccurrences(left, TERM);
-    const b = countOccurrences(right, TERM);
-    if (a || b) truth.set(dataId, { a, b, line: (a ? firstHitLine(left, TERM) : firstHitLine(right, TERM)) });
-  }
+  const truth = await buildServerTruth(dataIds);
   const matchedItems = [...truth.values()];
   const expectMatches = matchedItems.reduce((sum, hit) => sum + hit.a + hit.b, 0);
   console.log(`[DBS-01] 作用域=${dataIds.length} 个已加载配置，服务端真值：命中 ${truth.size} 个 / 共 ${expectMatches} 处`);
@@ -217,27 +298,63 @@ test("DBS-02 只看命中项只改列表，不动将要应用的东西", async (
   await page.screenshot({ path: "results/v55_batch_search_filter.png" });
 });
 
-test("DBS-03 点命中行换当前项，右侧 diff 按同一个词标红", async ({ page, retest }) => {
+test("DBS-03 点命中行换当前项，右侧 diff 按同一个词标红并真的滚到那一行", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
-  await enterBatch(page);
+  const dataIds = await enterBatch(page);
   await searchBox(page).fill(TERM);
   await expect.poll(async () => (await probeBatch(page)).toolsVisible).toBe(true);
 
-  const target = (await probeBatch(page)).items.find((item) => item.badge && item.badge !== "A 0 · B 0");
-  expect(target, "没有任何命中项可点").toBeTruthy();
-  await page.locator(".batch-diff .batch-diff-nav-item").filter({ visible: true }).filter({ hasText: target!.dataId }).first().click();
+  // 挑一条「落点无歧义、且首命中就在这一屏之外」的：徽标只写一个行号（先左后右），
+  // 两侧首命中行号不同的条目拿它断言落点会把语义问题算成数据问题；首命中太靠前的条目
+  // 在 scrollTop=0 时本来就看得见，断言会空转（轮56 起草时正是靠深命中才拍到 bug）。
+  const truth = await buildServerTruth(dataIds);
+  const candidates = (await probeBatch(page))
+    .items.filter((item) => item.badge)
+    .map((item) => ({ item, hit: truth.get(item.dataId)! }))
+    .filter((pair) => pair.hit && (pair.hit.lineA === 0 || pair.hit.lineB === 0 || pair.hit.lineA === pair.hit.lineB))
+    .sort((a, b) => b.hit.line - a.hit.line);
+  expect(candidates.length, "没有任何「左右首个命中行号一致」的命中项可点，播种数据变了就先这里换词").toBeGreaterThan(0);
+  const target = candidates[0].item;
+  const want = candidates[0].hit;
+
+  await page.locator(".batch-diff .batch-diff-nav-item").filter({ visible: true }).filter({ hasText: target.dataId }).first().click();
 
   await expect
-    .poll(async () => (await probeBatch(page)).diffMarks, `点到 ${target!.dataId} 后右侧 diff 一处都没标红（词没下传）`)
+    .poll(async () => (await probeBatch(page)).diffMarks, `点到 ${target.dataId} 后右侧 diff 一处都没标红（词没下传）`)
     .toBeGreaterThan(0);
   const probe = await probeBatch(page);
-  expect(probe.items.find((item) => item.dataId === target!.dataId)?.active, "点中的行没成为当前项").toBe(true);
+  expect(probe.items.find((item) => item.dataId === target.dataId)?.active, "点中的行没成为当前项").toBe(true);
   expect(
     probe.items.filter((item) => item.active),
     "同时出现两个当前项"
   ).toHaveLength(1);
-  await page.screenshot({ path: "results/v55_batch_search_jump.png" });
+  // 徽标与内存真值必须还是同一句话，否则下面按行号核对落点没有意义
+  expect(target.hitLine, `徽标行号与 Nacos 原文不一致：期望 第 ${want.line} 行`).toBe(`第 ${want.line} 行`);
+
+  const locate = await probeDiffLocate(page);
+  expect(locate.bodyFound, "没探到右侧 diff 的滚动容器 .diff-body，本条用例的判据无从校验").toBe(true);
+  expect(locate.markCount, "diff 正文里一处命中都没有").toBeGreaterThan(0);
+  const maxScroll = Math.max(0, locate.scrollHeight - locate.clientHeight);
+  // 居中的是命中的矩形（lib/codeScroll 的口径），不是整行：长行换行时整行比视口还高
+  const expected = Math.min(Math.max(locate.markContentTop - (locate.clientHeight - locate.markHeight) / 2, 0), maxScroll);
+  console.log(
+    `[DBS-03] ${target.dataId} 徽标=第 ${want.line} 行 A=${want.a} B=${want.b} | ` +
+      `scrollTop=${locate.scrollTop.toFixed(1)} 期望=${expected.toFixed(1)} clientHeight=${locate.clientHeight} ` +
+      `scrollHeight=${locate.scrollHeight} 命中内容偏移=${locate.markContentTop.toFixed(1)} 落点行=${locate.rowIndex}(L${locate.rowLeftNo}/R${locate.rowRightNo})`
+  );
+  // 1) 这一行必须本来看不见 ⇒ 定位真的动了 scrollTop（轮56 的缺陷就是标红却停在第 1 行）
+  expect(locate.markContentTop > locate.clientHeight, `「第 ${want.line} 行」这一屏本来就看得见，本条用例失去意义，请换更深的命中`).toBe(true);
+  expect(locate.scrollTop, "整篇标红却停在文件开头：外部搜索词没人负责滚动").toBeGreaterThan(0);
+  // 2) 落点不是「随便滚了一下」：按同一套几何复算，误差 2px 内
+  expect(Math.abs(locate.scrollTop - expected), `scrollTop=${locate.scrollTop} 与命中矩形居中的 ${expected} 不一致`).toBeLessThanOrEqual(2);
+  // 3) 红字真的在视口里（用户看得见才叫定位成功）
+  expect(locate.markTopInBody, "命中跑到视口之上").toBeGreaterThanOrEqual(-1);
+  expect(locate.markBottomInBody, "命中跑到视口之下").toBeLessThanOrEqual(locate.clientHeight + 1);
+  // 4) 列表与正文说同一句话：滚到的那一行的行号槽就是徽标写的第 N 行
+  const gutterNumbers = [locate.rowLeftNo, locate.rowRightNo].filter((n): n is number => n !== null);
+  expect(gutterNumbers, `落点行的行号槽(${gutterNumbers.join("/")})里没有徽标写的第 ${want.line} 行`).toContain(want.line);
+  await page.screenshot({ path: "results/v56_batch_search_locate.png" });
 });
 
 test("DBS-04 无命中把作用域说清，列表不静默变空", async ({ page, retest }) => {

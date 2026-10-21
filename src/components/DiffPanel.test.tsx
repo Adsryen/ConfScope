@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { fireEvent, render, screen } from "../test/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import DiffPanel from "./DiffPanel";
 
@@ -283,5 +283,124 @@ describe("DiffPanel 外部内容搜索词（轮55 C线）", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "关闭查找" }));
     expect(hitMarks().length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("DiffPanel 外部搜索词的定位（轮56）", () => {
+  const ROW_H = 20;
+  const VIEW_H = 200;
+  const LINES = Array.from({ length: 30 }, (_, i) => `line-${i}`);
+  LINES[20] = "idle-timeout: 60";
+  // TERM_B 故意命中**两**行：只命中一行的话「第一处」和「最后一处」是同一个数，
+  // 把定位写成 groups[length-1] 都不会红（轮56 起草时实测过这条变异）。
+  LINES[26] = "tail-marker: on";
+  LINES[29] = "tail-marker: off";
+  const TEXT = LINES.join("\n");
+  /** 换正文那条出口用的第二份正文：同一个词落在另一行上。 */
+  const TEXT2 = LINES.map((line, i) => (i === 20 ? "line-20" : i === 26 ? "idle-timeout: 60" : line)).join("\n");
+  const TERM_A = "idle-timeout";
+  const TERM_B = "tail-marker";
+  const MISS = "no-such-key-9z7x";
+
+  type PanelProps = Parameters<typeof DiffPanel>[0];
+  const panelProps = (props: Partial<PanelProps>): PanelProps =>
+    ({ leftLabel: "dev/app.yaml", rightLabel: "prod/app.yaml", format: "TEXT", leftText: TEXT, rightText: TEXT, ...props }) as PanelProps;
+  const tree = (props: PanelProps) => (
+    <I18nProvider>
+      <DiffPanel {...props} />
+    </I18nProvider>
+  );
+
+  const body = () => document.querySelector<HTMLElement>(".diff-body")!;
+  /** 第一处命中落在第几行（按 DOM 现查，不按用例自己数的偏移猜）。 */
+  const firstHitRow = () =>
+    Array.from(body().querySelectorAll<HTMLElement>(".diff-row")).findIndex((row) => Boolean(row.querySelector("mark.search-hit")));
+  /**
+   * 居中口径只有 lib/codeScroll 那一份实现。这里按同一套假几何复算一遍，
+   * 为的是断言「落在第一处命中」，而不是「随便滚了一下」——只断 >0 的话，
+   * 滚到第二处、滚到文件尾都能过，等于没钉。
+   */
+  const expectedScrollTop = (rowIndex: number) => rowIndex * ROW_H - (VIEW_H - ROW_H) / 2;
+
+  /**
+   * jsdom 没有布局：clientHeight / scrollHeight / getBoundingClientRect 恒为 0，
+   * revealRowVertically 量不到矩形就返回 false（那是它该有的行为，不是本组用例要验的）。
+   * 行元素会被 React 重建，所以矩形挂在 Element.prototype 上按 data-row-index 现算，
+   * 只有滚动容器那两个尺寸挂在具体节点上（.diff-body 跨重渲染是同一个元素）。
+   */
+  function makeScrollable() {
+    const el = body();
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => VIEW_H });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 4_000 });
+  }
+
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    localStorage.setItem("locale", "zh-CN");
+    rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const row = this.closest(".diff-row");
+      const top = row ? Number(row.getAttribute("data-row-index") ?? 0) * ROW_H : 0;
+      return { top, bottom: top + ROW_H, height: ROW_H, left: 0, right: 120, width: 120, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+  afterEach(() => rectSpy.mockRestore());
+
+  it("同一份正文里改词：新词的第一处命中被滚进视口，而不是停在文件开头", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    // 挂载这一帧还没量得到高度（假几何是渲染后才装的），所以此刻不该有任何滚动
+    expect(body().scrollTop).toBe(0);
+    makeScrollable();
+    expect(firstHitRow()).toBe(20);
+
+    rerender(tree(panelProps({ searchTerm: TERM_B })));
+    expect(firstHitRow()).toBe(26);
+    expect(body().scrollTop).toBe(expectedScrollTop(26));
+  });
+
+  it("换正文（点批量列表的下一个命中行）：归零之后紧接着定位，不闪文件开头", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    makeScrollable();
+    rerender(tree(panelProps({ searchTerm: TERM_A, leftText: TEXT2, rightText: TEXT2 })));
+    // 词没变、正文变了：只有宿主挂在 useScrollResetOnContentChange 上的 onReset 会走这一拽
+    expect(firstHitRow()).toBe(26);
+    expect(body().scrollTop).toBe(expectedScrollTop(26));
+  });
+
+  it("零命中不插手：停在用户正看着的地方，不许把他弹回开头", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    makeScrollable();
+    body().scrollTop = 500;
+    rerender(tree(panelProps({ searchTerm: MISS })));
+    expect(body().querySelectorAll("mark.search-hit")).toHaveLength(0);
+    expect(body().scrollTop).toBe(500);
+  });
+
+  it("量不到高度不插手：视图被保活隐藏时，跳一次等于没跳，还会把定位成功演成假绿", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    // 故意不装假几何：clientHeight 与矩形恒量不到，等价于 .diff-body 在隐藏祖先里。
+    // 判据在 lib/codeScroll 那一层（本层不重复写），这条用例钉的是最终行为。
+    body().scrollTop = 500;
+    rerender(tree(panelProps({ searchTerm: TERM_B })));
+    expect(body().scrollTop).toBe(500);
+  });
+
+  it("查找栏开着时外部词不抢这一拽：栏有自己的当前命中语义（Enter / F3）", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    makeScrollable();
+    fireEvent.click(screen.getByRole("button", { name: "在此文件查找（Ctrl+F）" }));
+    // 栏内词以外部词为种子，命中表由栏接管；用户随后自己滚开
+    body().scrollTop = 500;
+    rerender(tree(panelProps({ searchTerm: TERM_B })));
+    expect(body().scrollTop).toBe(500);
+  });
+
+  it("词与正文都没变的后续重渲染，不得把用户拽回第一处", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    makeScrollable();
+    rerender(tree(panelProps({ searchTerm: TERM_B })));
+    expect(body().scrollTop).toBe(expectedScrollTop(26));
+    body().scrollTop = 500;
+    rerender(tree(panelProps({ searchTerm: TERM_B })));
+    expect(body().scrollTop).toBe(500);
   });
 });

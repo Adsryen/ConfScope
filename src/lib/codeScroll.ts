@@ -283,7 +283,10 @@ export function revealRowVertically(scroller: HTMLElement | null, row: Element |
   const span = (current.length ? measureVerticalSpanUnion(current) : null) ?? (mark ? measureVerticalSpan(mark) : null) ?? measureVerticalSpan(row);
   if (!span) return false;
   const scrollerRect = scroller.getBoundingClientRect();
-  if (!Number.isFinite(scrollerRect.top) || scroller.clientHeight <= 0) return false;
+  // 这里**不再判一次** clientHeight <= 0 / 矩形非有限（轮56 变异测试删掉了这道重复门，
+  // 两份判据叠在一起会让「高度量不到就不该动手」这条口径在变异下假绿：外面那层挡住，里面那层的
+  // 回归测不出来）。口径只留 neededScrollTopToCenter 那一处：容器视口量不到 ⇒ null；
+  // 容器矩形是 NaN ⇒ targetTop 跟着 NaN ⇒ 同一条 null。行为逐字等价，少一个第二出处。
   // clientTop = 容器上边框宽：内容坐标从 padding box 起算，与水平那一份的 clientLeft 同理。
   const targetTop = span.top - scrollerRect.top + scroller.scrollTop - scroller.clientTop;
   const next = neededScrollTopToCenter({

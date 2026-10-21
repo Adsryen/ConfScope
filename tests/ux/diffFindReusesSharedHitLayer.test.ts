@@ -14,12 +14,20 @@
  *
  * 另钉一条与形状无关的钱（轮28 F-14）：「当前命中」只切 DOM 类，标记层 memo 不许依赖它——
  * 否则按一次 Enter 就把整篇 HTML 重新解析一遍。
+ *
+ * 轮56 再补第四层：外部内容搜索词的**纵向定位**同样只认共享层这一处出口。缺陷长什么样：批量对比
+ * 左栏写着「A 2 · B 3 第 25 行」，点下去右侧整篇标红却停在第 1 行——`useFindLayer` 里那条当前命中
+ * 落地效果被 `!findOpen` 门死了，而外部词从不打开查找栏，于是这条路径上没人负责滚动。修法只许一种：
+ * 能力写在共享层，宿主挂到自己**已有的**滚动复位 onReset 上。谁在 DiffView / DiffPanel 里再写一份
+ * `scrollTop =`，diff 派就有了第三套滚动实现（与 detailScrollResetSingleSource、codeRevealSingleSource
+ * 的口径同源：几何与滚动的第二份实现就是下一轮 bug 的出处）。
  */
 import { describe, expect, it } from "vitest";
 import { readScannedSource } from "./scanUtils";
 
 const PANEL = "src/components/DiffPanel.tsx";
 const UNIFIED = "src/components/UnifiedDiff.tsx";
+const DIFF_VIEW = "src/components/DiffView.tsx";
 const LAYER = "src/lib/useFindLayer.ts";
 const LIB = "src/lib/diffFind.ts";
 const HOSTS = [PANEL, UNIFIED];
@@ -30,6 +38,24 @@ function layoutEffects(src: string): Array<{ body: string; deps: string }> {
     body: m[0],
     deps: (m[1] ?? "").replace(/\s+/g, " ").trim(),
   }));
+}
+
+/**
+ * 外部搜索词的定位接线（轮56）：宿主只许把共享层那条能力挂到**已有的**滚动复位上，
+ * 顺序由那个 hook 保证（绘制前归零 → 再定位），所以不许宿主自己排两条 effect。
+ */
+const LOCATE_WIRING = /useScrollResetOnContentChange\([^;]*find\.locateFirstExternalHit\s*\)/;
+/** 「同一份正文里改词」那条出口：依赖数组只许写 externalTerm（R4，多一颗就会把用户拽回第一处）。 */
+const LOCATE_EFFECT = /useEffect\(\(\) => \{\s*locateFirstExternalHit\(\);\s*\}, \[externalTerm\]\);/;
+/** 自己动手写滚动偏移——diff 派只许共享层那一处。 */
+const SCROLL_ASSIGN = /\.scroll(?:Top|Left)\s*=/;
+
+/** 取共享层 locateFirstExternalHit 的实现体（剥注释后按两个出口之间的片段算）。 */
+function locateImpl(src: string): string {
+  const start = src.indexOf("const locateFirstExternalHit = useCallback(");
+  if (start < 0) return "";
+  const end = src.indexOf("useEffect(", start);
+  return src.slice(start, end < 0 ? start + 1_500 : end);
 }
 
 /** 取 `decl` 这条 memo 的依赖数组内容；解析不到返回 null。 */
@@ -191,6 +217,38 @@ describe("差异视图复用共享命中层（轮48/轮49）", () => {
     expect(layer, "共享层不再有「换内容收起」这条不移焦的出口").toMatch(/const resetFindForNewContent = useCallback\(/);
   });
 
+  it("外部搜索词的定位只认共享层这一处出口（轮56）", () => {
+    const impl = locateImpl(layer);
+    expect(impl, "共享层没有 locateFirstExternalHit：外部搜索词又回到只标红不滚动").not.toBe("");
+    expect(layer, "共享层少把这条能力导给宿主（宿主就会自己写 scrollTop）").toMatch(/locateFirstExternalHit: \(\) => boolean;/);
+    expect(layer, "共享层的 return 少了这条能力").toMatch(/\n    locateFirstExternalHit,/);
+
+    // 三道门与 CodeView 的 R74 逐条对齐，少一道就会误伤别的口径
+    const gates: Array<[string, RegExp]> = [
+      ["查找栏开着不插手（栏有自己的当前命中语义）", /if \(findOpen\) return false;/],
+      ["空词不插手", /if \(!externalTerm\.trim\(\)\) return false;/],
+      ["零命中不插手（用户就该看到文件开头）", /const first = result\.groups\[0\];\s*if \(!first\) return false;/],
+      ["落在**第一处**命中那一行", /revealRowVertically\(body, body\.querySelector\(`\[data-row-index="\$\{first\.rowIndex\}"\]`\)\)/],
+    ];
+    for (const [label, re] of gates) {
+      expect(impl, `locateFirstExternalHit 少了「${label}」`).toMatch(re);
+    }
+    // 量不到高度那一道归 lib/codeScroll（neededScrollTopToCenter 是唯一的判据处），本层重复写
+    // 就有第二处真相，而且变异测试下会假绿——轮56 的电池第一轮就是这么抓到重复门的。
+    expect(impl, "共享层又抄了一份容器高度判据：几何口径只许 lib/codeScroll 那一处").not.toMatch(/clientHeight/);
+    expect(impl, "共享层绕过 lib/codeScroll 直接写偏移").not.toMatch(SCROLL_ASSIGN);
+
+    // 两条出口各管一半：改词走共享层这条，换正文走宿主那条
+    expect(layer, "「改词」出口的依赖数组不再只认 externalTerm").toMatch(LOCATE_EFFECT);
+    for (const file of HOSTS) {
+      const src = readScannedSource(file);
+      expect(src, `${file} 换正文时没把定位接到滚动复位的 onReset：点批量列表的下一个命中行会停在文件开头`).toMatch(LOCATE_WIRING);
+      expect(src, `${file} 里出现了第二份滚动赋值`).not.toMatch(SCROLL_ASSIGN);
+    }
+    // DiffView 手里就攥着「第 N 行」那个数字，它最容易顺手自己滚（scrollIntoView 那条是步进导航，不算）
+    expect(readScannedSource(DIFF_VIEW), "DiffView 自己写了一份滚动赋值：diff 派的定位出口就有了第二处").not.toMatch(SCROLL_ASSIGN);
+  });
+
   it("自检：退回第二份实现必须判红", () => {
     // 变异一：行高公式回来
     const withRowH = layer.replace("revealRowVertically(body,", "const ROW_H = 18;\n    revealRowVertically(body,");
@@ -209,5 +267,17 @@ describe("差异视图复用共享命中层（轮48/轮49）", () => {
     const hostMutant = unified.replace("const find = useFindLayer({", "const [findOpen, setFindOpen] = useState(false);\n  const find = useFindLayer({");
     expect(hostMutant !== unified, "变异四没落进源码").toBe(true);
     expect(hostMutant, "宿主自己攥状态这一步没被挡住").toMatch(/\bsetFindOpen\b/);
+    // 变异五（轮56）：宿主摘掉定位接线（退回「只标红不滚动」）
+    const wiringMutant = panel.replace(", find.locateFirstExternalHit)", ")");
+    expect(wiringMutant !== panel, "变异五没落进源码").toBe(true);
+    expect(wiringMutant, "宿主摘掉 locateFirstExternalHit 这一步没被挡住").not.toMatch(LOCATE_WIRING);
+    // 变异六（轮56）：改词出口的依赖数组多攢一颗，用户自己滚开的位置会被反复拽回第一处
+    const depsMutant = layer.replace("}, [externalTerm]);", "}, [externalTerm, locateFirstExternalHit]);");
+    expect(depsMutant !== layer, "变异六没落进源码").toBe(true);
+    expect(depsMutant, "依赖数组多攢一颗这一步没被挡住").not.toMatch(LOCATE_EFFECT);
+    // 变异七（轮56）：本层重复写高度判据（看着更保险，实际把几何口径劈成两处，还让电池假绿）
+    const dupGate = locateImpl(layer).length > 0 && layer.replace("if (!body) return false;", "if (!body || body.clientHeight <= 0) return false;");
+    expect(dupGate !== layer, "变异七没落进源码").toBe(true);
+    expect(locateImpl(dupGate as string), "本层重复判高度这一步没被挡住").toMatch(/clientHeight/);
   });
 });

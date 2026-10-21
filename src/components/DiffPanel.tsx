@@ -262,7 +262,11 @@ export default function DiffPanel({
 
   // 换内容把滚动位置拉回起点（R9）。这条是轮48 顺手修的真 bug：本面板此前根本没接这个 hook，
   // 批量态点下一个 dataId 之后正文仍停在上一份文件的偏移处，看起来像「内容没换」。
-  useScrollResetOnContentChange(bodyRef, [leftText, rightText]);
+  //
+  // onReset 是轮56 加的第二件事，顺序由 hook 保证（先归零再回调）：外部搜索词下传时，
+  // 归零之后紧接着把首个命中行拉进视口——否则左栏写着「第 25 行」，点进来却永远停在文件开头。
+  // 定位口径整个待在 useFindLayer 里（与改词那条出口同一出处），本文件不许自己写 scrollTop。
+  useScrollResetOnContentChange(bodyRef, [leftText, rightText], find.locateFirstExternalHit);
 
   // 换内容同时收起查找栏，防止旧关键词污染新内容。
   // 这里**不许**改成调用 closeFind：换文件是用户在列表里点出来的，焦点该留在他点的位置；

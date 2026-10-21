@@ -109,6 +109,14 @@ export interface FindLayer {
    * `closeFind` 的语义是「我刚结束查找，把焦点还给正文」。两条出口不许混（R62 口径）。
    */
   resetFindForNewContent: () => void;
+  /**
+   * 外部搜索词（查找栏没开）时把**首个命中行**拉进视口中线，返回 true 表示真的动过 scrollTop。
+   *
+   * 本 hook 自己只负责「同一份正文里改词」那条出口；「换正文」那条由宿主挂在已有的
+   * `useScrollResetOnContentChange(ref, keys, onReset)` 上（绘制前执行，不闪一帧文件开头）。
+   * 宿主侧不许自己写 `scrollTop =`，那是第三套滚动实现。
+   */
+  locateFirstExternalHit: () => boolean;
 }
 
 export function useFindLayer({
@@ -296,6 +304,43 @@ export function useFindLayer({
     revealRowVertically(body, body.querySelector(`[data-row-index="${currentGroup.rowIndex}"]`));
   }, [bodyRef, currentGroup, findOpen, navTick]);
 
+  /**
+   * 外部内容搜索词（查找栏没开）时的定位：把首个命中行送进视口中线。
+   *
+   * 缺陷长什么样（轮56 真机）：批量对比左栏写着「A 2 · B 3 第 25 行」，点下去右侧整篇标红
+   * 却停在第 1 行，红字得用户自己滚过去找。上面那条当前命中落地效果被 `!findOpen` 门死了，
+   * 而外部词从不打开查找栏 ⇒ 这条路径上没有任何人负责滚动。配置浏览为同一件事在轮74 修过
+   * CodeView（`locateFirstExternalHit`），量 DOM 这一派当时没跟上，本轮补齐。
+   *
+   * 三重门控与 CodeView 逐条对齐，少一个就会误伤别的口径：
+   * - 栏开着不插手：查找栏有自己的当前命中语义（Enter / F3 导航），不许被拽回第一处；
+   * - 没有命中不插手：用户就该看到文件开头；
+   * - 量不到高度不插手：视图被保活隐藏（`active=false` 那类宿主页面）或首帧还没布局时
+   *   根本量不到矩形，此时「跳一次」等于没跳，还会把「定位成功」演成假绿。
+   *   这一道**不在本层重复判**——`revealRowVertically` 自己量 `<mark>`/行的矩形与容器
+   *   `clientHeight`，量不到就返回 false（几何口径只许有一份，见 lib/codeScroll 文件头）。
+   *
+   * 横向不修（与浏览态唯一的差别）：`.diff-cell` / `.udiff-text` 是 pre-wrap + break-all，
+   * 长行在视口里换行而不是横向溢出；纵向这一份内部已按 `<mark>` 矩形量，不需要第二份几何。
+   */
+  const locateFirstExternalHit = useCallback(() => {
+    if (findOpen) return false;
+    if (!externalTerm.trim()) return false;
+    const body = bodyRef.current;
+    if (!body) return false;
+    const first = result.groups[0];
+    if (!first) return false;
+    return revealRowVertically(body, body.querySelector(`[data-row-index="${first.rowIndex}"]`));
+  }, [bodyRef, externalTerm, findOpen, result]);
+
+  // 同一份正文里改外部词：跟着定位新词的首个命中。依赖数组**只许写 externalTerm**（CodeView 同口径）：
+  // 关栏、步进、用户自己滚走都不该把这一拽搬出来，否则刚看的那处命中会被反复拽回第一处。
+  // 换正文那条出口在宿主侧的 useScrollResetOnContentChange 上，本 effect 与它落到同一行，无害。
+  useEffect(() => {
+    locateFirstExternalHit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalTerm]);
+
   /** Enter / Shift+Enter 步进。Esc 不在这里处理：查找栏已登记为 find 优先级的瞬时层（R61），
    *  分派器在捕获阶段就把按键吃掉，这里的裸分支是跑不到的死代码。 */
   const onFindKeyDown = useCallback(
@@ -329,6 +374,7 @@ export function useFindLayer({
     navigate,
     onFindKeyDown,
     resetFindForNewContent,
+    locateFirstExternalHit,
   };
 }
 
