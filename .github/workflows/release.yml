@@ -441,6 +441,31 @@ jobs:
     needs: [build, generate-manifest]
     runs-on: ubuntu-latest
     steps:
+      # 正文的事实源是 CHANGELOG.md（轮58）。原先这一路靠 GitHub 自动注记：它汇总的是
+      # "本版本合并进来的 PR"，而本仓库不走 PR 流程，于是线上 20 个 Release 除 v1.0.0
+      # （手写正文）外全只剩一行 compare 链接 —— 用户打开 releases 页看不到更新了什么。
+      # 现在正文由 scripts/sync-github-release-notes.mjs 从 CHANGELOG 段落渲染，与应用内
+      # 更新面板（scripts/extract-release-notes.mjs）同一份来源、同一套中文小节口径。
+      # 抽不到段落就让这一步红：宁可发版失败，也别再发一行 compare 链接当发布说明。
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build release body from CHANGELOG
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node scripts/sync-github-release-notes.mjs \
+            --print-body="${VERSION}" \
+            --repo="${{ github.repository }}" \
+            --out="${RUNNER_TEMP}/release-body.md"
+          echo "----- release body -----"
+          cat "${RUNNER_TEMP}/release-body.md"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -449,7 +474,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: ${{ runner.temp }}/release-body.md
           files: |
             artifacts/ConfScope-windows-amd64/ConfScope.exe
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz

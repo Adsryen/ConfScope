@@ -12,6 +12,10 @@
 // tag / package.json / CHANGELOG 三处版本一致，说明段落必然存在；抽不到就是发版没准备好，
 // 本脚本非 0 退出，让出包构建直接红，不再退回占位文案。
 //
+// 段落定位与中文小节口径都走 scripts/changelogSection.mjs（轮58 起与
+// sync-github-release-notes.mjs 同源），本文件只负责"给应用更新面板看的纯文本"这一层的
+// 记号处理：white-space: pre-wrap 的纯文本里留 markdown 记号就是噪点。
+//
 // 用法:
 //   node scripts/extract-release-notes.mjs 1.9.2
 //   node scripts/extract-release-notes.mjs v1.9.2 --changelog=CHANGELOG.md
@@ -21,20 +25,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SECTION_LABELS, findChangelogSection } from "./changelogSection.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-// Keep a Changelog 的小节标题按中文界面口径翻一下；没见过的标题原样保留，
-// 免得守卫因为将来新增一节就自红。
-const SECTION_LABELS = {
-  added: "新增",
-  changed: "变更",
-  deprecated: "废弃",
-  removed: "移除",
-  fixed: "修复",
-  security: "安全",
-  engineering: "工程",
-};
 
 /** 去掉行内 markdown 记号：更新弹窗按纯文本渲染，反引号/加粗/链接目标留着只会变噪点。 */
 function stripInlineMarkdown(text) {
@@ -50,20 +43,13 @@ function stripHtmlComments(text) {
 }
 
 /**
- * 纯函数：从 CHANGELOG 文本里抽 version 对应段落的正文。
+ * 纯函数：从 CHANGELOG 文本里抽 version 对应段落的正文，渲染成纯文本。
  * 返回字符串（可能为空串表示段落存在但没内容）；段落不存在返回 null。
  */
 export function extractReleaseNotes(markdown, version) {
-  const normalized = String(version || "").replace(/^v/i, "");
-  if (!/^\d+\.\d+\.\d+/.test(normalized)) return null;
-  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // 段落头必须是 "## [x.y.z] - YYYY-MM-DD"：没日期的段落属于半成品，闸门该拦。
-  const heading = new RegExp(`^## \\[${escaped}\\] - (\\d{4}-\\d{2}-\\d{2})[ \\t]*$`, "m");
-  const found = heading.exec(markdown);
-  if (!found) return null;
-  const rest = markdown.slice(found.index + found[0].length);
-  const nextSection = /^## \[/m.exec(rest);
-  const body = stripHtmlComments(nextSection ? rest.slice(0, nextSection.index) : rest);
+  const section = findChangelogSection(markdown, version);
+  if (!section) return null;
+  const body = stripHtmlComments(section.body);
 
   const lines = [];
   let sawContent = false;
@@ -74,10 +60,10 @@ export function extractReleaseNotes(markdown, version) {
       if (sawContent && lines.length && lines[lines.length - 1] !== "") lines.push("");
       continue;
     }
-    const section = /^###\s+(.+?)\s*$/.exec(line);
-    if (section) {
-      const key = section[1].trim().toLowerCase();
-      lines.push(SECTION_LABELS[key] ?? section[1].trim());
+    const heading = /^###\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      const key = heading[1].trim().toLowerCase();
+      lines.push(SECTION_LABELS[key] ?? heading[1].trim());
       sawContent = true;
       continue;
     }

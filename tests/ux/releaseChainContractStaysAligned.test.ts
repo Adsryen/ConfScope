@@ -18,20 +18,31 @@
  * 4. 矩阵每个 (platform, goarch) 都能在 platforms 里查到；downloadUrl 末段 == fileName
  *    == sha256sum 实参末段 == release 作业 files 里的路径末段（被哈希的就是被发布的那一个）；
  * 5. notes 必须来自 scripts/extract-release-notes.mjs（不得再回 gh release view，也不得留占位兜底）；
- * 6. 该脚本对真实 CHANGELOG 抽出多行 bullet 且无 markdown 残留，段落缺失/正文为空必须非 0 退出。
+ * 6. 该脚本对真实 CHANGELOG 抽出多行 bullet 且无 markdown 残留，段落缺失/正文为空必须非 0 退出；
+ * 7. （轮58）GitHub Release 正文也只能来自 CHANGELOG：release 作业必须先用
+ *    scripts/sync-github-release-notes.mjs 渲染 body_path 指向的那份文件，且不能再把
+ *    generate_release_notes 打开——那是按"合并进来的 PR"汇总的自动注记，本仓库不走 PR 流程，
+ *    线上 20 个 Release 除 v1.0.0 外正文就只剩一行 compare 链接（本轮要修的形态）；
+ * 8. （轮58）两个消费方同源：打过 tag 的版本必须在 CHANGELOG 里有段落，应用内纯文本 notes 与
+ *    Release markdown 正文的 bullet 必须一一对得上，处置规则（写入/覆盖/保留手写/已同步/缺段落）
+ *    用离线正文快照钉住，不许真打 API。
  *
  * 解释历史的注释不算代码：先按行剥掉 `#` 注释再抽判据，否则守卫会在自己解释自己的注释上自红。
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { listChangelogVersions, normalizeVersion } from "../../scripts/changelogSection.mjs";
+import { manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
 import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
 const WORKFLOW = ".github/workflows/release.yml";
 const CHECKER_GO = "internal/updatecheck/checker.go";
 const NOTES_SCRIPT = "scripts/extract-release-notes.mjs";
+const SYNC_SCRIPT = "scripts/sync-github-release-notes.mjs";
+const REPO = "Adsryen/ConfScope";
 const VERIFY_SCRIPT = "scripts/verify-release-version.sh";
 const PKG_VERSION: string = JSON.parse(readFileSync(join(PROJECT_ROOT, "package.json"), "utf8")).version;
 
@@ -536,5 +547,366 @@ describe("发布说明抽取脚本（真实 CHANGELOG 的可执行证据）", ()
   it("CHANGELOG 顶部段落与 package.json 版本对齐（发版闸门的判据之一）", () => {
     const changelog = readFileSync(join(PROJECT_ROOT, "CHANGELOG.md"), "utf8");
     expect(changelog).toMatch(new RegExp(`^## \\[${pkgVersion.replace(/\./g, "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}`, "m"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 轮58：GitHub Release 正文与 CHANGELOG 同源
+// ---------------------------------------------------------------------------
+
+/** CHANGELOG 里有日期的段落版本号（解析口径与两个消费方共用同一份模块）。 */
+function changelogVersions(markdown: string): string[] {
+  return listChangelogVersions(markdown).map((item) => item.version);
+}
+
+/** 本地能看到的 vX.Y.Z tag。CI 浅克隆时这张表可能只剩当前 tag，所以守卫只正向要求覆盖。 */
+function localReleaseTags(): string[] {
+  try {
+    return execFileSync("git", ["tag", "-l", "v[0-9]*"], { cwd: PROJECT_ROOT, encoding: "utf8" })
+      .split("\n")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** 取一个步骤 `with:` 的输入（只认 10 空格缩进的 `key: value` 单行写法；块标量不在本守卫口径内）。 */
+function stepInputs(chunk: string): Record<string, string> {
+  const lines = chunk.split("\n");
+  const at = lines.findIndex((line) => /^ {8}with:\s*$/.test(line));
+  if (at < 0) return {};
+  const out: Record<string, string> = {};
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    if (!/^ {10}\S/.test(line)) break;
+    const pair = /^ {10}([\w-]+):\s*(.*)$/.exec(line);
+    if (pair) out[pair[1]] = pair[2].trim();
+  }
+  return out;
+}
+
+/** runner.temp 的两种写法（Actions 表达式与 shell 变量）归一化，好比对同一份文件。 */
+function normalizeTempPath(value: string): string {
+  return String(value ?? "")
+    .replace(/\$\{\{\s*runner\.temp\s*\}\}/g, "<tmp>")
+    .replace(/\$\{RUNNER_TEMP\}/g, "<tmp>")
+    .replace(/^"|"$/g, "")
+    .trim();
+}
+
+/** release 作业块的文本变形（作业是最后一个，块含 `  release:` 头且只出现一次）。 */
+function mutateReleaseJob(text: string, mutate: (block: string) => string): string {
+  const block = jobBlocks(text).release;
+  if (!block) throw new Error("release.yml 没有 release 作业");
+  const mutated = mutate(block);
+  expect(mutated).not.toBe(block);
+  return text.replace(block, mutated);
+}
+
+/** 规则 7：GitHub Release 正文的事实源。返回问题清单，变异对照靠它判红。 */
+function releaseBodyProblems(text: string): string[] {
+  const problems: string[] = [];
+  const jobs = jobBlocks(text);
+  const block = jobs.release;
+  if (!block) return ["release.yml 没有 release 作业：没有东西去发布 Release 正文"];
+  const steps = stepChunks(block);
+  if (!steps.some((chunk) => /uses: *actions\/checkout/.test(chunk))) {
+    problems.push("release 作业没有 Checkout 步骤，读不到 CHANGELOG.md");
+  }
+
+  const syncStep = steps.find((chunk) => runBody(chunk).includes("sync-github-release-notes.mjs"));
+  const run = syncStep ? runBody(syncStep) : "";
+  if (!syncStep) {
+    problems.push("release 作业不再调用 scripts/sync-github-release-notes.mjs 渲染正文：等于回到 GitHub 自动注记，只剩一行 compare 链接");
+  } else {
+    if (!/--print-body="\$\{VERSION\}"/.test(run)) {
+      problems.push("--print-body 不再取 ${VERSION}：正文可能与本次发布的版本脱节（写死版本号最坏）");
+    }
+    if (!/VERSION="\$\{GITHUB_REF_NAME#v\}"/.test(run)) {
+      problems.push("VERSION 不再从 tag 名剥 v 前缀：${VERSION} 就对不上 CHANGELOG 的段落标题");
+    }
+    if (!/--repo="\$\{\{ *github\.repository *\}\}"/.test(run)) {
+      problems.push("--repo 没跟随当前仓库：compare 链接会被写死成某一个 owner/repo，换仓库或 fork 就是死链");
+    }
+    if (!/--out=(?:"|')(.*?)\.md(?:"|')/.test(run)) {
+      problems.push("渲染结果没有 --out 落盘：Create Release 无从读取正文");
+    }
+  }
+
+  const createStep = steps.find((chunk) => /uses: *softprops\/action-gh-release/.test(chunk));
+  if (!createStep) {
+    problems.push("release 作业没有 Create Release 步骤");
+    return problems;
+  }
+  const inputs = stepInputs(createStep);
+  if (inputs.generate_release_notes === "true") {
+    problems.push("Create Release 又打开 generate_release_notes：那是 GitHub 按合并 PR 生成的注记，本仓库不发 PR，正文只会剩一行 compare");
+  }
+  if (!inputs.body_path) {
+    problems.push("Create Release 没有 body_path：正文不再来自 CHANGELOG");
+  } else if (syncStep) {
+    const outPath = /--out=(?:"|')(.*?)(?:"|')/.exec(run)?.[1];
+    if (!outPath) {
+      problems.push("渲染步骤没有把正文写到文件，body_path 指向的是空气");
+    } else if (normalizeTempPath(outPath) !== normalizeTempPath(inputs.body_path)) {
+      problems.push(`body_path（${inputs.body_path}）与渲染步骤 --out（${outPath}）不是同一个文件`);
+    }
+  }
+  return problems;
+}
+
+function runSyncScript(args: string[]): { code: number; stdout: string; stderr: string } {
+  try {
+    const stdout = execFileSync("node", [join(PROJECT_ROOT, SYNC_SCRIPT), ...args], { encoding: "utf8" });
+    return { code: 0, stdout, stderr: "" };
+  } catch (error) {
+    const failure = error as { status?: number; stdout?: string; stderr?: string };
+    return { code: failure.status ?? -1, stdout: failure.stdout ?? "", stderr: failure.stderr ?? "" };
+  }
+}
+
+/** 处置规则要能被钉住，就得能离线跑：正文快照 + 迷你 CHANGELOG，一次 API 都不打。 */
+const FIXTURE_CHANGELOG = `# Changelog
+
+## [Unreleased]
+
+## [2.0.1] - 2026-11-01
+
+### Added
+- 甲功能
+- 乙功能
+
+## [2.1.0] - 2026-11-05
+
+### Added
+- 庚功能
+
+## [2.0.0] - 2026-10-01
+
+### Added
+- 丙功能
+- 丁功能
+
+### Fixed
+- 修好一件事
+
+## [1.9.9] - 2026-09-01
+
+### Added
+- 更早的段落
+
+## [0.9.8] - 2026-08-01
+
+### Added
+- 最后一个段落：没有下一段可依，compare 行要退回 commits 链接
+`;
+
+function fixtureDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "confscope-release-notes-"));
+  writeFileSync(join(dir, "CHANGELOG.md"), FIXTURE_CHANGELOG, "utf8");
+  return dir;
+}
+
+function snapshotRows(stdout: string): Record<string, string> {
+  const rows: Record<string, string> = {};
+  for (const line of stdout.split("\n")) {
+    const match = /^(v[\w.]+)\s+(有|无)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line.trim());
+    if (match) rows[match[1]] = match[4];
+  }
+  return rows;
+}
+
+describe("GitHub Release 正文的事实源（轮58）", () => {
+  const text = workflowCode();
+
+  it("真实 release.yml：正文由 sync 脚本从 CHANGELOG 渲染后交给 body_path", () => {
+    expect(releaseBodyProblems(text)).toEqual([]);
+  });
+
+  it("变异对照：重新打开自动注记、删掉 body_path、删掉渲染步骤、路径对不上、删掉 Checkout 都必须判红", () => {
+    expect(releaseBodyProblems(mutateReleaseJob(text, (block) => block.replace("generate_release_notes: false", "generate_release_notes: true")))).toContain(
+      "Create Release 又打开 generate_release_notes：那是 GitHub 按合并 PR 生成的注记，本仓库不发 PR，正文只会剩一行 compare"
+    );
+
+    const noBodyPath = mutateReleaseJob(text, (block) => block.replace("          body_path: ${{ runner.temp }}/release-body.md\n", ""));
+    expect(releaseBodyProblems(noBodyPath)).toContain("Create Release 没有 body_path：正文不再来自 CHANGELOG");
+
+    const noSyncStep = mutateReleaseJob(text, (block) => block.replace("scripts/sync-github-release-notes.mjs", "scripts/some-other-notes-source.mjs"));
+    expect(releaseBodyProblems(noSyncStep).some((problem) => problem.includes("不再调用 scripts/sync-github-release-notes.mjs"))).toBe(true);
+
+    const wrongPath = mutateReleaseJob(text, (block) => block.replace("body_path: ${{ runner.temp }}/release-body.md", "body_path: ${{ github.workspace }}/release-body.md"));
+    expect(releaseBodyProblems(wrongPath).some((problem) => problem.includes("不是同一个文件"))).toBe(true);
+
+    const noCheckout = mutateReleaseJob(text, (block) => block.replace("      - name: Checkout\n        uses: actions/checkout@v4\n\n", ""));
+    expect(releaseBodyProblems(noCheckout)).toContain("release 作业没有 Checkout 步骤，读不到 CHANGELOG.md");
+
+    const hardcodedRepo = mutateReleaseJob(text, (block) => block.replace('--repo="${{ github.repository }}"', `--repo="${REPO}"`));
+    expect(releaseBodyProblems(hardcodedRepo).some((problem) => problem.includes("--repo 没跟随当前仓库"))).toBe(true);
+
+    const hardcodedVersion = mutateReleaseJob(text, (block) => block.replace('--print-body="${VERSION}"', '--print-body="1.9.3"'));
+    expect(releaseBodyProblems(hardcodedVersion).some((problem) => problem.includes("--print-body 不再取"))).toBe(true);
+  });
+});
+
+describe("发布说明的两个消费方同源（轮58）", () => {
+  const changelog = readFileSync(join(PROJECT_ROOT, "CHANGELOG.md"), "utf8");
+
+  it("每个 CHANGELOG 段落都渲染得出正文，且带中文小节与 compare 行", () => {
+    const versions = changelogVersions(changelog);
+    expect(versions.length, "CHANGELOG 解析不出来，守卫口径失效").toBeGreaterThan(5);
+    for (const version of versions) {
+      const rendered = renderReleaseBody(changelog, version, { repo: REPO });
+      expect(rendered, `段落 [${version}] 渲染不出 Release 正文`).not.toBeNull();
+      expect(rendered!.body).toMatch(/^## v/);
+      expect(rendered!.body).toMatch(/^### /m);
+      expect(rendered!.body).toMatch(/^- /m);
+      expect(rendered!.body).toContain(`https://github.com/${REPO}/`);
+    }
+  });
+
+  it("打过 tag 的版本必须在 CHANGELOG 里有段落（CI 浅克隆时这张表可能只剩当前 tag）", () => {
+    for (const tag of localReleaseTags()) {
+      const version = normalizeVersion(tag);
+      if (!version) continue;
+      expect(changelogVersions(changelog).includes(version), `${tag} 打过 tag 但 CHANGELOG 没有段落：Release 正文会抽不出来`).toBe(true);
+    }
+  });
+
+  it("compare 链接的上一个 tag 由段落顺序推导；0.x 没打过 tag，退回 commits 链接不造死链", () => {
+    expect(resolveCompareBase("1.9.1")).toBe("v1.9.1");
+    expect(resolveCompareBase("0.1.0"), "0.x 没有 tag，不能当 compare 基线").toBeNull();
+    expect(resolveCompareBase(null)).toBeNull();
+
+    const latest = renderReleaseBody(changelog, PKG_VERSION, { repo: REPO });
+    expect(latest!.compareBase, "当前版本应当拼出 compare 基线").toBeTruthy();
+    expect(latest!.body).toContain(`**Full Changelog**: https://github.com/${REPO}/compare/${latest!.compareBase}...v${PKG_VERSION}`);
+
+    const firstTagged = renderReleaseBody(changelog, "1.0.0", { repo: REPO });
+    expect(firstTagged!.previousVersion).toBe("0.1.0");
+    expect(firstTagged!.compareBase).toBeNull();
+    expect(firstTagged!.body).toContain(`**Full Changelog**: https://github.com/${REPO}/commits/v1.0.0`);
+  });
+
+  it("应用内纯文本 notes 与 Release 正文的 bullet 一一对应（同源不是口号）", () => {
+    const plain = runNotesScript([PKG_VERSION]);
+    expect(plain.code, plain.stderr).toBe(0);
+    const dir = fixtureDir();
+    const bodyFile = join(dir, "release-body.md");
+    const rendered = runSyncScript([`--print-body=${PKG_VERSION}`, `--out=${bodyFile}`]);
+    expect(rendered.code, rendered.stderr).toBe(0);
+
+    const bullets = (text: string) =>
+      text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => /^[-*] \S/.test(line))
+        // 两边口径的差别就是 markdown 记号：比之前统一剥掉
+        .map((line) => line.replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"));
+    const plainBullets = bullets(plain.stdout);
+    const bodyBullets = bullets(readFileSync(bodyFile, "utf8"));
+    expect(plainBullets.length).toBeGreaterThan(3);
+    expect(bodyBullets).toEqual(plainBullets);
+  });
+
+  it("抽不到段落 ⇒ --print-body 非 0 退出（发版构建宁可红，也不发一行 compare 当说明）", () => {
+    const run = runSyncScript(["--print-body=0.0.1"]);
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain("CHANGELOG");
+    const fixture = runSyncScript(["--print-body=0.9.8", `--changelog=${join(fixtureDir(), "CHANGELOG.md")}`]);
+    expect(fixture.code, "段落抽得出就不该非 0").toBe(0);
+    expect(fixture.stdout, "CHANGELOG 的最后一段没有下一段可依，退回 commits 链接").toContain(`/commits/v0.9.8`);
+  });
+});
+
+describe("Release 正文回填的处置规则（离线快照，一次 API 都不打）", () => {
+  const dir = fixtureDir();
+  const changelogArg = `--changelog=${join(dir, "CHANGELOG.md")}`;
+  const snapshotDir = join(dir, "snapshot");
+  mkdirSync(snapshotDir, { recursive: true });
+  const inSyncBody = runSyncScript([`--print-body=1.9.9`, changelogArg]).stdout;
+
+  const manual = "手写正文：这一版详细说明了功能清单、下载表格与 macOS 暂不可用的说明。";
+  writeFileSync(join(snapshotDir, "v2.0.1.md"), "", "utf8"); // 空正文 ⇒ 写入
+  writeFileSync(join(snapshotDir, "v2.1.0.md"), "**Full Changelog**: https://github.com/o/r/compare/v2.0.1...v2.1.0\n", "utf8"); // 只剩链接 ⇒ 覆盖
+  writeFileSync(join(snapshotDir, "v1.9.9.md"), inSyncBody, "utf8"); // 已与 CHANGELOG 一致 ⇒ 已同步
+  writeFileSync(join(snapshotDir, "v2.0.0.md"), `${manual}\n\n`.repeat(8), "utf8"); // 有段落但线上是手写 ⇒ 默认保留
+  writeFileSync(join(snapshotDir, "v3.3.3.md"), `${manual}\n\n`.repeat(8), "utf8"); // 无段落但线上是手写 ⇒ 保留（别把人写的顶掉）
+  writeFileSync(join(snapshotDir, "v0.9.9.md"), "只有一句话", "utf8"); // 无段落又短 ⇒ 必须报缺段落
+
+  it("--list 把处置分开：写入 / 覆盖 / 已同步 / 保留手写 / 缺段落", () => {
+    const run = runSyncScript(["--list", `--bodies-dir=${snapshotDir}`, changelogArg]);
+    expect(run.code, "有缺段落就该非 0，逼人去补 CHANGELOG").not.toBe(0);
+    expect(snapshotRows(run.stdout)).toMatchObject({
+      "v2.0.1": "写入",
+      "v2.1.0": "覆盖",
+      "v1.9.9": "已同步",
+      "v2.0.0": "保留手写",
+      "v3.3.3": "保留手写",
+      "v0.9.9": "缺段落",
+    });
+  });
+
+  it("手写正文默认不动；--force 只覆盖抽得出段落的，抽不出段落的要当场报缺段落", () => {
+    const forced = runSyncScript(["--list", "--force", `--bodies-dir=${snapshotDir}`, changelogArg]);
+    const rows = snapshotRows(forced.stdout);
+    expect(rows["v2.0.0"], "有段落的手写正文，--force 要能覆盖").toBe("覆盖");
+    expect(rows["v3.3.3"], "force 的语义是正文只认 CHANGELOG：抽不到段落就必须报缺段落，不能静默留在旧正文上").toBe("缺段落");
+    expect(rows["v1.9.9"], "force 不该把已同步的重新写一遍").toBe("已同步");
+    expect(forced.code).not.toBe(0);
+  });
+
+  it("覆盖的依据要说真话：线上有内容就不能写成「只剩 compare 行」", () => {
+    // 回填是不可逆的对外写入，操作者靠这张表判断"覆盖掉的是不是一行空话"。
+    // v1.4.2 线上有 188 字符的英文说明（够不上手写正文的阈值），旧文案把它和
+    // 只剩 compare 行的版本混成一句话——表格上看不出异常，实际顶掉的是真人写的内容。
+    const rendered = renderReleaseBody(FIXTURE_CHANGELOG, "2.0.1", { repo: REPO });
+    expect(rendered, "夹具里的段落必须渲染得出正文").not.toBeNull();
+
+    const onlyCompare = planRelease({
+      rendered,
+      existingBody: "**Full Changelog**: https://github.com/o/r/compare/v2.0.0...v2.0.1",
+    });
+    expect(onlyCompare.action).toBe("update");
+    expect(onlyCompare.reason, "确实只剩 compare 行时才许这么说").toBe("线上正文只剩 compare 行");
+
+    const shortNotes = ["英文三条说明", "- build dmg", "- fix icons", "", "x".repeat(150)].join("\n");
+    const short = planRelease({ rendered, existingBody: shortNotes });
+    expect(short.action).toBe("update");
+    expect(short.existingChars, "夹具正文要落在「有内容但未达手写篇幅」这一档").toBeGreaterThan(0);
+    expect(short.existingChars).toBeLessThan(200);
+    expect(short.reason, "有线上内容就必须报出字符数，不能谎称只剩 compare 行").toContain(`${short.existingChars} 字符`);
+    expect(short.reason).not.toContain("只剩 compare 行");
+  });
+
+  it("空正文的依据是「线上正文是空的」，别再和只剩 compare 行混用", () => {
+    const rendered = renderReleaseBody(FIXTURE_CHANGELOG, "2.0.1", { repo: REPO });
+    const added = planRelease({ rendered, existingBody: "   \n  " });
+    expect(added.action).toBe("add");
+    expect(added.reason).toBe("线上正文是空的");
+  });
+
+  it("--bodies-dir 只许配 --list：写入的备份与回读必须对着线上", () => {
+    const run = runSyncScript(["--apply", `--bodies-dir=${snapshotDir}`, changelogArg]);
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain("--bodies-dir 只能配 --list");
+  });
+
+  it("参数口径：模式互斥、未知参数、--print-body 不给版本号都得非 0", () => {
+    expect(runSyncScript(["--list", "--apply"]).code).not.toBe(0);
+    expect(runSyncScript(["--nope=1"]).code).not.toBe(0);
+    expect(runSyncScript(["--print-body="]).code).not.toBe(0);
+    expect(runSyncScript(["--help"]).code).toBe(0);
+  });
+
+  it("renderMarkdownBody 保留行内 markdown，但 extractReleaseNotes 必须剥掉（两个口径是刻意的）", () => {
+    const dir2 = fixtureDir();
+    const file = join(dir2, "with-marks.md");
+    writeFileSync(file, "## [2.5.0] - 2026-12-01\n\n### Added\n- 支持 **粗体** 与 `code` 和 [链接](https://example.com)\n\n## [2.4.0] - 2026-01-01\n\n- 无关\n", "utf8");
+    const plain = runNotesScript(["2.5.0", `--changelog=${file}`]);
+    expect(plain.stdout.trim()).toBe("新增\n- 支持 粗体 与 code 和 链接");
+    const body = runSyncScript([`--print-body=2.5.0`, `--changelog=${file}`]);
+    expect(body.stdout).toContain("- 支持 **粗体** 与 `code` 和 [链接](https://example.com)");
   });
 });

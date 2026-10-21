@@ -112,7 +112,7 @@ else
   bad "版本号或发版契约的守卫/单测有红，见上面用例名"
 fi
 
-echo ">> 5) 发版说明能真的抽出来（update.json 的 notes 是直接给用户看的文字）"
+echo ">> 5) 发版说明能真的抽出来（update.json 的 notes 与 GitHub Release 正文都是给用户看的文字）"
 NOTES_OUT="$(node scripts/extract-release-notes.mjs "$VERSION" 2>/dev/null)" || NOTES_OUT=""
 if [ -n "$NOTES_OUT" ]; then
   ok "CHANGELOG 的 [$VERSION] 段落抽出 $(printf '%s\n' "$NOTES_OUT" | wc -l) 行发行说明"
@@ -123,6 +123,22 @@ if grep -q -- "extract-release-notes.mjs" .github/workflows/release.yml; then
   ok "release.yml 的 notes 走 extract-release-notes.mjs（不再读尚未创建的 Release）"
 else
   bad "release.yml 不再调用 extract-release-notes.mjs：更新说明会退回「发行版 x.y.z」"
+fi
+
+# GitHub Release 正文与上面同源（轮58）：本仓库不走 PR 流程，GitHub 的自动注记只会剩一行 compare 链接
+BODY_OUT="$(node scripts/sync-github-release-notes.mjs --print-body="$VERSION" 2>/dev/null)" || BODY_OUT=""
+if printf '%s' "$BODY_OUT" | grep -q '^### ' && printf '%s' "$BODY_OUT" | grep -q '^\*\*Full Changelog\*\*: '; then
+  ok "CHANGELOG 的 [$VERSION] 段落能渲染成 Release 正文（$(printf '%s\n' "$BODY_OUT" | wc -l) 行，含 compare 链接）"
+else
+  bad "渲染不出 [$VERSION] 的 Release 正文：releases 页又会只剩一行链接，先补齐 CHANGELOG 段落"
+fi
+if grep -q -- "sync-github-release-notes.mjs" .github/workflows/release.yml && grep -q -- "body_path:" .github/workflows/release.yml; then
+  ok "release.yml 的 Release 正文走 sync 脚本 + body_path"
+else
+  bad "release.yml 不再由 sync 脚本渲染正文／没有 body_path：GitHub Release 会退回自动注记（只剩一行 compare）"
+fi
+if grep -q -- "generate_release_notes: true" .github/workflows/release.yml; then
+  bad "release.yml 又打开了 generate_release_notes：自动注记会把 CHANGELOG 渲染的正文顶掉"
 fi
 
 if [ "$SKIP_BUNDLE" -eq 1 ]; then
