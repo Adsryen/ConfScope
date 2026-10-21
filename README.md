@@ -8,79 +8,141 @@
   <strong>多配置中心统一管理 · 智能对比 · 安全变更 · 治理洞察</strong>
 </p>
 
-ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置中心管理工具。当前已支持 Nacos、Apollo、Consul 和本地快照来源，覆盖配置浏览、对比、审计、备份恢复、安全变更计划和真实环境冒烟测试。
+<p align="center">
+  <a href="https://github.com/Adsryen/ConfScope/releases">下载</a> ·
+  <a href="CHANGELOG.md">更新日志</a> ·
+  <a href="#界面预览">界面预览</a> ·
+  <a href="#开发与构建">开发与构建</a>
+</p>
+
+ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置中心管理工具，支持 Nacos
+（自建与阿里云 MSE）、Apollo、Consul 以及本地/WebDAV 快照来源，覆盖配置浏览、差异对比、一致性
+审计、备份恢复与安全变更计划。
+
+它要解决的不是「能不能改配置」，而是这三件更容易出事的事：改之前两份配置到底差在哪、改之后
+写进去的还是不是我看到的那份、改砸了从哪儿退回去。
+
+## 界面预览
+
+截图由 `tests/retest/shots/` 从本地 Docker 里的合成配置自动生成（数据来源见
+[`scripts/retest-data/README.md`](scripts/retest-data/README.md)），不含任何真实环境信息；
+界面改版后重跑一次取证脚本即可对齐，不需要人手截。
+
+### 配置浏览：行号、语法高亮与右侧缩略图
+
+左侧按命名空间/分组浏览配置项，右侧正文带行号与语法高亮，最右侧是类编辑器的缩略图，长文件
+靠它定位比拖滚动条快。
+
+<p align="center">
+  <img src=".github/assets/配置浏览.png" alt="配置浏览：行号、语法高亮与缩略图" />
+</p>
+
+### 配置浏览：`Ctrl+F` 就地查找
+
+在正文里按 `Ctrl+F` 直接开查找栏，支持区分大小写与全词匹配；命中词标红，当前命中所在整行高亮，
+缩略图上同步标出命中位置，栏内给出「第 n/N 处」计数与上下条切换。
+
+<p align="center">
+  <img src=".github/assets/配置浏览-文内查找.png" alt="配置浏览：Ctrl+F 文内查找" />
+</p>
+
+### 配置浏览：跨配置内容搜索
+
+切到「内容」模式后按正文搜索整个命名空间，左侧列出每个命中配置及其命中片段（命中词标红），
+右侧正文里的命中同样标红并高亮所在行；命中项可勾选后进入批量替换。
+
+<p align="center">
+  <img src=".github/assets/配置浏览-内容搜索.png" alt="配置浏览：跨配置内容搜索" />
+</p>
+
+### 配置对比：批量差异与跨项内容搜索
+
+变更走五步：**确认方向 → 加载并对比 → 选择变更 → 生成并审核变更计划（dry-run，不会写入） →
+执行、验证与晋级**。文件列表支持按内容搜索，命中处数按左右两侧分别计数（如 `A 2 · B 3`）并标出
+所在行，点一下就能跳到那一行。
+
+<p align="center">
+  <img src=".github/assets/配置对比.png" alt="配置对比：批量差异与跨项内容搜索" />
+</p>
+
+### 配置矩阵：多环境一致性审计
+
+多环境一致性矩阵、忽略规则、名称归一化和批量差异审计，支持按状态筛选、排序与脱敏导出。
+
+<p align="center">
+  <img src=".github/assets/配置矩阵.png" alt="配置矩阵：多环境一致性审计" />
+</p>
 
 ## 支持的配置中心
 
 | 配置中心 | 状态 | 当前能力 |
 | --- | --- | --- |
-| Nacos | 已支持 | v1/v3 自适配，自建 Nacos + 阿里云 MSE；支持浏览、历史、Diff、审计、安全写入、删除、ApplyPlan |
-| Apollo | 已支持 | OpenAPI 适配；支持连接测试、浏览、Diff、审计、导出；通过 ApplyPlan 受控写入 properties namespace 并 release |
-| Consul | 已支持 | KV 适配；支持连接测试、浏览、Diff、审计、导出；通过 ApplyPlan 受控创建、更新、删除文本 KV，并使用 ModifyIndex/CAS 防护 |
-| 本地快照 | 已支持 | 本地目录只读 provider，可参与浏览、Diff、审计、回滚来源 |
+| Nacos | 已支持 | v1/v3 自适配，自建 Nacos 与阿里云 MSE；浏览、内容搜索、版本级历史、Diff、审计、受控写入与删除、ApplyPlan |
+| Apollo | 已支持 | OpenAPI 适配；连接测试、浏览、Diff、审计、导出；通过 ApplyPlan 受控写入 properties namespace 并 release |
+| Consul | 已支持 | KV 适配；连接测试、浏览、Diff、审计、导出；通过 ApplyPlan 受控创建、更新、删除文本 KV，并用 ModifyIndex/CAS 防护 |
+| 本地快照 | 已支持 | 本地目录只读 provider，可参与浏览、Diff、审计与回滚来源 |
 | WebDAV 快照 | 已支持 | 配置快照 `.cssnapshot` 上传、远端列表、导入、Diff |
 
-> Nacos / Apollo / Consul 的写入都必须经过 ApplyPlan、dry-run、before backup 和生产确认。直接 publish/delete 绑定会被阻断；本地快照始终只读。
-
-## 界面预览
-
-### 配置浏览
-
-<p align="center">
-  <img src=".github/assets/配置浏览.png" alt="配置浏览" />
-</p>
-
-### 配置对比
-
-<p align="center">
-  <img src=".github/assets/配置对比.png" alt="配置对比" />
-</p>
-
-### 配置矩阵
-
-<p align="center">
-  <img src=".github/assets/配置矩阵.png" alt="配置矩阵" />
-</p>
+> 所有写入都必须经过 ApplyPlan、dry-run、before 快照与生产目标确认；直接 publish/delete 的绑定
+> 会被阻断，本地快照始终只读。
+>
+> 历史能力按 provider 实际能给的决定入口：版本级历史只有 Nacos（含 MSE 的 Nacos 兼容协议）拿得到，
+> Apollo/Consul/本地快照不显示点不动的「历史变更」；命名空间级的中心历史目前所有 provider 都拿不到，
+> 操作历史页就不发这个请求。
 
 ## 核心特性
 
 | 模块 | 说明 |
 | --- | --- |
-| 连接与来源管理 | 按项目、环境、来源管理多套配置中心连接；支持 Nacos/Apollo/Consul/local snapshot |
-| 配置浏览 | 命名空间、Apollo App/Cluster/Namespace、Consul KV prefix、本地快照统一浏览 |
-| 历史与 Diff | Nacos 历史版本查看；支持历史对比、线上对比、跨来源对比和本地快照对比 |
-| 配置矩阵审计 | 多环境/多来源审计，支持忽略规则、差异定位、脱敏导出 |
-| 安全变更计划 | ApplyPlan dry-run、before backup、生产目标确认、沙箱验证、推广和回滚链路 |
+| 连接与来源管理 | 按项目、环境、来源管理多套配置中心连接；Nacos/Apollo/Consul/本地快照统一入口 |
+| 配置浏览 | 命名空间、Apollo App/Cluster/Namespace、Consul KV prefix、本地快照目录统一浏览；行号、语法高亮、缩略图、`Ctrl+F` 就地查找与命中定位 |
+| 内容搜索 | 跨配置按正文搜索，命中片段与处数一并给出，命中项可勾选进入批量替换 |
+| 差异对比 | 单文件与批量对比、行级与键级差异、按差异块跳转、跨项内容搜索与 A/B 分侧命中计数、导出差异 |
+| 配置矩阵审计 | 多环境/多来源一致性矩阵、忽略规则、名称归一化、差异定位、CSV/JSON 脱敏导出 |
+| 安全变更计划 | ApplyPlan dry-run、before 备份、生产目标确认、沙箱验证、推广与回滚链路；浏览页的新建、编辑覆盖、删除与历史回滚也统一物化成变更计划入口，没有绕过 dry-run 的直写路径 |
+| 执行安全 | 执行前最后一刻复检目标内容指纹，线上被别人改过就中止而不是覆盖；写入后逐项回读，报出「已确认 / 有漂移 / 读不到」三态，半截失败也回读已写入的部分；失败记录仍带写前快照，可据此构造回退入口 |
+| 留痕与消息 | 会话审计日志 `audit-trail.jsonl` 记录对比、审计与执行三类会话的全过程；长任务的完成与失败汇总进消息中心，不打断当前操作 |
 | 备份恢复 | 应用数据 `.csbackup` 本地/WebDAV 备份恢复；配置快照 `.cssnapshot` 本地/WebDAV 同步 |
-| SSH 隧道 | 支持可复用 SSH profile，覆盖 SSH 连接测试和 Nacos over SSH |
-| 凭据安全 | Windows 下支持小凭据迁移到系统凭据库，localStorage 保存 `secretRef`；`.csbackup` 仍保留跨机器迁移能力 |
-| 真实环境测试 | Docker Nacos/Apollo fixture/Consul/WebDAV/SSH + Windows native Wails smoke 覆盖主流程 |
+| SSH 隧道 | 可复用 SSH profile，覆盖 SSH 连接测试与 Nacos over SSH |
+| 凭据安全 | Windows 下小凭据迁移到系统凭据库，数据文件里只存 `secretRef`；备份包仍支持跨机器迁移 |
+| 数据位置 | 便携数据目录（`CONFSCOPE_DATA_DIR`），设置页直接展示各类数据落在哪里 |
+| 应用更新 | 应用内检查更新，更新说明与 GitHub Release 正文同源（都取自 CHANGELOG 同一段落） |
+| 界面 | 中文/英文文案，环境名推断出统一色调档（dev/test/staging/canary/prod/local），键盘可达性与读屏语义持续收敛 |
+| 真实环境测试 | Docker Nacos/Apollo/Consul/WebDAV/SSH fixture + Windows native Wails smoke 覆盖主流程 |
 
-## 安全与备份边界
+## 数据与凭据边界
 
-- `.csbackup` 是迁移电脑的主路径：备份包加密，恢复时写回可用的本地数据。
-- Windows 小凭据迁移覆盖 Nacos password/token、Aliyun MSE AK/SK、Apollo token、Consul token、WebDAV password。
-- SSH private key、SSH passphrase 等大 secret 暂未迁移到安全存储，已拆成后续 `windows-large-secret-protection` 任务线。
-- `.csbackup` / `.cssnapshot` 包密码是一次性输入，不会持久化。
-- macOS Keychain / Linux Secret Service 尚未实现；非 Windows 平台仍走兼容回退。
+- 主数据落在 `[数据根]/app-data/confscope-data.json`：Go 侧原子写并读回校验，文件损坏时隔离为
+  `.corrupt-<时间戳>` 并回退浏览器缓存重新水合，不会静默覆盖。浏览器 localStorage 只是热缓存。
+- 数据根默认在可执行文件旁的 `ConfScopeData`，可用环境变量 `CONFSCOPE_DATA_DIR` 重定向；
+  设置页展示连接、备份、快照、审计日志各自的落点。
+- 会话审计日志在 `[数据根]/audit-trail.jsonl`，「清理缓存」只清缓存并从主数据文件重新水合，
+  不修改数据文件。
+- `.csbackup` 是换电脑的主路径：备份包加密，恢复时写回可用的本地数据；包密码一次性输入，不持久化。
+- Windows 小凭据迁移覆盖 Nacos password/token、阿里云 MSE AK/SK、Apollo token、Consul token、
+  WebDAV password。
+- SSH private key、SSH passphrase 等大 secret 尚未迁移到安全存储，拆在后续
+  `windows-large-secret-protection` 任务线。
+- macOS Keychain 与 Linux Secret Service 尚未实现，非 Windows 平台走兼容回退。
 
 ## 技术栈
 
-- Wails 2 + Go
-- React 18 + TypeScript + Vite 5
-- Go 后端直连配置中心 OpenAPI / HTTP API
-- localStorage 本地持久化，配合加密备份包和 Windows Credential Manager
-- Playwright + Vitest + Go test + Docker smoke
+- Wails v2.13 + Go 1.25（后端直连各配置中心 OpenAPI / HTTP API）
+- React 18 + TypeScript 5 + Vite 5
+- 主数据文档由 Go 侧原子写 + 读回校验，前端经 `src/lib/appDataDoc.ts` 水合与 debounce 推送
+- 测试：Vitest（单测 + 静态守卫 + 数据兼容护栏）、Playwright（e2e / retest 真机回归 / Docker smoke）、
+  Go test
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js >= 18
-- pnpm >= 8
-- Go >= 1.22
-- Wails CLI v2
-- Docker（运行 smoke 测试时需要）
+- Node.js 20（CI 用 20）
+- pnpm 10（`package.json` 的 `packageManager` 为准）
+- Go 1.25 及以上
+- Wails CLI v2.13（`go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0`）
+- Linux 桌面构建需要 `libwebkit2gtk-4.1-dev`、`libgtk-3-dev`
+- Docker（跑真实环境回归与 smoke 时需要）
 
 ### 安装
 
@@ -89,105 +151,161 @@ git clone https://github.com/Adsryen/ConfScope.git
 cd ConfScope
 
 pnpm install
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
 wails doctor
 ```
 
-### 开发
+### 开发与构建
 
-```bash
-pnpm dev        # 启动 Wails 桌面应用
-pnpm dev:web    # 仅启动前端，适合 UI 调试
+Windows：
+
+```powershell
+pnpm dev              # scripts/dev-portable-data.ps1：先备份便携数据目录，再注入 CONFSCOPE_DATA_DIR 起 wails dev
+pnpm build:win        # NSIS 安装包
+scripts\build-latest.ps1              # 一键：依赖 + 前端构建（含生产守卫）+ wails build
+scripts\build-latest.ps1 -SkipFrontend  # 只改了 Go 侧时快速重编
+scripts\build-latest.ps1 -Launch        # 构建后直接启动
+scripts\build-latest.ps1 -ForceClean    # 删掉 node_modules 重装（跨系统构建后链接损坏时用）
 ```
 
-### 构建
+Linux / WSL：
 
 ```bash
-pnpm build      # 打包当前系统桌面应用
-pnpm build:win  # Windows 下打包 NSIS 安装包
+CONFSCOPE_DATA_DIR=$PWD/portable/ConfScopeData pnpm dev:plain   # wails dev
+pnpm build                                                       # 当前平台桌面应用
+bash scripts/build-latest.sh                                     # 同上的一键链路
+bash scripts/build-latest.sh --skip-frontend                     # 只改了 Go 侧
+bash scripts/build-latest.sh --clean                             # Windows 侧构建过、本侧链接损坏时重建
 ```
 
-### 发布产物（GitHub Actions）
+`pnpm dev:web` 只起 Vite（`:1420`），没有 Go 绑定，仅供 UI 调试与真实环境回归使用。
 
-推送 `v*` tag 后，Release workflow 会构建并上传：
-
-| 平台 | 产物 |
-| --- | --- |
-| Windows amd64 | `ConfScope.exe` |
-| Linux amd64 | `confscope-linux-amd64.tar.gz` / `.deb` / `.rpm` |
-| macOS arm64 | `ConfScope-darwin-arm64.dmg` |
-| macOS amd64 | `ConfScope-darwin-amd64.dmg` |
-
-也可在 Actions 中用 **workflow_dispatch** 手动试跑构建（只上传 artifact，不创建正式 Release）。
-
-> macOS DMG 当前未做 Apple 代码签名与公证。首次打开若被 Gatekeeper 拦截，可在 Finder 中对应用「右键 → 打开」确认一次。
+> Windows 与 WSL 若共用同一个 `node_modules`，跨系统构建后另一侧的原生链接可能损坏，
+> 报错时用对应侧的 clean 参数（`-ForceClean` / `--clean`）重建。
+>
+> 生产 bundle 里出现测试脚手架字符串会让 `pnpm build:web` 直接失败（`scripts/check-production-bundle.mjs`），
+> 这是刻意设的闸门，不要绕过。
 
 ### 测试
 
 ```bash
 go test ./... -count=1
 pnpm exec tsc --noEmit
-pnpm test
-pnpm build:web
-pnpm test:smoke
-pnpm test:smoke:native
+pnpm lint
+pnpm test                       # Vitest：src 单测 + tests/ux 静态守卫 + tests/compat 数据护栏
+pnpm build:web                  # 前端构建 + 生产 bundle 守卫
+
+pnpm test:e2e                   # Playwright e2e
+npx playwright test -c tests/retest/playwright.config.ts   # retest：双 Nacos + SSH 真机回归
+pnpm test:smoke                 # Docker 全量冒烟
+pnpm test:smoke:native          # Windows native Wails 冒烟
+
+npx playwright test -c tests/retest/shots/playwright.config.ts  # 重拍本文件顶部截图（产物在 shots/out/）
 ```
+
+retest 与截图取证都依赖 `scripts/retest-data/` 的合成数据，跑之前先按
+[`scripts/retest-data/README.md`](scripts/retest-data/README.md) 起好容器。
+
+## 发布产物与下载
+
+从 [Releases](https://github.com/Adsryen/ConfScope/releases) 下载对应平台的产物，
+版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+
+推送 `v*` tag 后，Release workflow 会先跑门禁（类型检查、静态守卫、Go vet/test、版本注入证据、
+发布前校验），再构建并上传：
+
+| 平台 | 产物 |
+| --- | --- |
+| Windows amd64 | `ConfScope.exe` |
+| Linux amd64 | `confscope-linux-amd64.tar.gz` / `confscope-linux-amd64.deb` / `confscope-linux-amd64.rpm` |
+| macOS arm64 | `ConfScope-darwin-arm64.dmg` |
+| macOS amd64 | `ConfScope-darwin-amd64.dmg` |
+
+Release 正文由 CHANGELOG 对应版本段落渲染（`scripts/sync-github-release-notes.mjs`），与应用内
+「检查更新」看到的说明同源。也可在 Actions 里用 **workflow_dispatch** 手动试跑构建（只上传
+artifact，不创建正式 Release）。
+
+> macOS DMG 未做 Apple 代码签名与公证。首次打开被 Gatekeeper 拦下时，在 Finder 里对应用
+> 「右键 → 打开」确认一次。
 
 ## 项目结构
 
 ```text
 ConfScope/
-├── app.go / app_*.go              # Wails 绑定与应用服务
-├── internal/                      # Go 后端模块
-│   ├── nacos/                     # Nacos API
-│   ├── apollo/                    # Apollo OpenAPI
-│   ├── consul/                    # Consul KV API
-│   ├── appbackup/                 # .csbackup 加密备份与 WebDAV
-│   ├── snapshotwebdav/            # .cssnapshot WebDAV 同步
-│   ├── securestore/               # Windows Credential Manager 封装
-│   └── ssh/                       # SSH 连接与隧道
+├── main.go                          # Wails 入口
+├── internal/                        # Go 后端模块
+│   ├── nacos/ apollo/ consul/       # 各配置中心 API 适配
+│   ├── provider/                    # provider 统一抽象与能力口径
+│   ├── app/                         # Wails 绑定与应用服务：主数据文档、数据位置、审计写入
+│   ├── audit/                       # 会话审计日志（audit-trail.jsonl）
+│   ├── export/                      # CSV/JSON 导出与脱敏
+│   ├── appbackup/ snapshotwebdav/   # .csbackup 加密备份 / .cssnapshot WebDAV 同步
+│   ├── securestore/                 # Windows 凭据库封装
+│   ├── portabledata/                # 便携数据目录与 CONFSCOPE_DATA_DIR
+│   ├── ssh/                         # SSH 连接与隧道
+│   ├── task/                        # 长任务与进度
+│   └── updatecheck/                 # 应用内检查更新
 ├── src/
-│   ├── api/                       # 前端 Wails API wrapper
-│   ├── components/                # React 页面与组件
-│   ├── lib/                       # Diff、ApplyPlan、备份、凭据迁移等领域逻辑
-│   ├── store/                     # localStorage store
-│   └── locales/                   # 中英文文案
+│   ├── api/                         # 前端 Wails 绑定 wrapper
+│   ├── components/                  # 页面与组件（浏览器、对比、矩阵、变更计划、设置等）
+│   ├── lib/                         # Diff、ApplyPlan、执行安全、内容搜索、数据文档等领域逻辑
+│   ├── store/                       # 前端状态与缓存
+│   ├── locales/                     # 中英文文案
+│   └── styles.css                   # 样式
+├── scripts/
+│   ├── build-latest.sh / .ps1       # 一键出包
+│   ├── dev-portable-data.ps1        # Windows 开发启动（便携数据目录 + 先备份）
+│   ├── check-production-bundle.mjs  # 生产 bundle 守卫
+│   ├── changelogSection.mjs         # 发布说明唯一解析出口
+│   ├── sync-github-release-notes.mjs# CHANGELOG → GitHub Release 正文
+│   ├── verify-release-version.sh    # 发布前闸门
+│   └── retest-data/                 # 合成数据生成与发布
 ├── tests/
-│   ├── compat/                    # 数据迁移兼容护栏
-│   └── smoke/                     # Docker + Playwright 真实环境冒烟
-├── wailsjs/                       # Wails 生成的前端绑定
-└── docs/todo/                     # 路线图与阶段计划
+│   ├── compat/                      # 数据迁移兼容护栏
+│   ├── ux/                          # 静态守卫与交互契约
+│   ├── retest/                      # 真机回归（specs/）与 README 截图取证（shots/）
+│   ├── e2e/                         # Playwright e2e
+│   ├── smoke/                       # Docker 与 native 冒烟
+│   └── fixtures/                    # 测试夹具
+├── wailsjs/                         # Wails 生成的前端绑定
+└── docs/todo/                       # 路线图与阶段计划
 ```
 
 ## 当前路线图
 
 已完成：
 
-- Nacos v1/v3 支持、配置浏览、历史、Diff、审计
-- Apollo OpenAPI 浏览、审计和 ApplyPlan properties 写入
-- Consul KV 浏览、审计和 ApplyPlan CAS 写入
-- 本地快照 provider 与本地数据迁移护栏
-- ApplyPlan 安全写入、沙箱验证、推广、回滚
-- 应用数据本地/WebDAV 备份恢复
-- 配置快照 WebDAV 同步
+- Nacos v1/v3 支持、配置浏览、版本级历史、Diff、审计
+- Apollo OpenAPI 浏览、审计与 ApplyPlan properties 写入
+- Consul KV 浏览、审计与 ApplyPlan CAS 写入
+- 本地快照 provider、`.csbackup` / `.cssnapshot` 备份与 WebDAV 同步
+- ApplyPlan 安全写入、沙箱验证、推广、回滚，以及执行前指纹复检与写后回读
+- 主数据迁出 localStorage、便携数据目录与数据迁移护栏
+- 配置矩阵一致性审计、忽略规则、名称归一化与脱敏导出
+- 会话审计日志与消息中心
+- 浏览器的行号、命中词标红与整行高亮、缩略图、`Ctrl+F` 就地查找
+- 批量对比的跨项内容搜索与 A/B 分侧命中计数、命中定位
+- 历史入口按 provider 能力收口
 - Windows 小凭据 `secretRef` 真实迁移
+- 应用内检查更新，且 Release 正文与 CHANGELOG 同源
 - 容器化全量 smoke 与 Windows native Wails smoke
 
 后续规划：
 
+- 本机版本历史：不依赖中间件与云产品，由程序在拉取到变化内容时自行留存版本
 - Windows 大 secret 保护：SSH privateKey/passphrase/password 的 DPAPI 文件方案
 - v2 平台化数据模型：项目、环境、provider、source 抽象
 - 多 provider 聚合浏览视图
-- 跨 provider 治理矩阵
+- 跨 provider 治理矩阵与治理报告
 - 平台安全模型
 - 跨 provider Apply 策略
-- 治理报告
 
 详细路线见 [platform-governance-roadmap.md](docs/todo/platform-governance-roadmap.md)。
 
 ## 致谢与说明
 
-本项目基于 [Configuration-Center-Browser](https://github.com/iGuos/Configuration-Center-Browser) 的设计思路进行二次开发。原项目提供了 Nacos 配置管理的核心理念和前端交互设计，在此向原作者 [iGuos](https://github.com/iGuos) 表示感谢。
+本项目基于 [Configuration-Center-Browser](https://github.com/iGuos/Configuration-Center-Browser)
+的设计思路进行二次开发。原项目提供了 Nacos 配置管理的核心理念和前端交互设计，在此向原作者
+[iGuos](https://github.com/iGuos) 表示感谢。
 
 主要改进：
 
