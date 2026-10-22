@@ -1,9 +1,22 @@
+// UpdateProxyConfig 是检查与下载共用的代理口径（对齐 internal/updatecheck.ProxyConfig）。
+// 下载必须带上它，否则直连不通的用户查得到版本却下不动包。
+export type UpdateProxyConfig = {
+  httpProxy: string;
+  httpsProxy: string;
+  noProxy: string;
+};
+
 type GoApp = {
   GetAppInfo(): Promise<any>;
   CheckForUpdates(request: any): Promise<any>;
-  DownloadUpdate(downloadURL: string, sha256: string): Promise<string>;
+  DownloadUpdate(downloadURL: string, sha256: string, proxy: UpdateProxyConfig): Promise<string>;
   GetDownloadProgress(): Promise<any>;
-  InstallAndRestart(downloadedFile: string): Promise<void>;
+  LaunchUpdateInstaller(downloadedFile: string): Promise<void>;
+  RevealDownloadedArtifact(downloadedFile: string): Promise<void>;
+  AttachUpdateImage(downloadedFile: string): Promise<void>;
+  UpdateInstallCommand(downloadedFile: string): Promise<string>;
+  ListActiveSSHTunnels(): Promise<string[]>;
+  QuitApplication(): Promise<void>;
   GetCurrentPlatform(): Promise<string>;
   RunCredentialStorePoC(runID: string): Promise<CredentialStorePoCResult>;
   WriteSecureSecret(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
@@ -273,11 +286,24 @@ export const GetAppInfo = () => app().GetAppInfo();
 
 export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
 
-export const DownloadUpdate = (downloadURL: string, sha256: string) => app().DownloadUpdate(downloadURL, sha256);
+export const DownloadUpdate = (downloadURL: string, sha256: string, proxy: UpdateProxyConfig) =>
+  app().DownloadUpdate(downloadURL, sha256, proxy);
 
 export const GetDownloadProgress = () => app().GetDownloadProgress();
 
-export const InstallAndRestart = (downloadedFile: string) => app().InstallAndRestart(downloadedFile);
+// 升级的出路只有交给别人这几条，程序从不覆盖自己的二进制。
+// 传空串表示回落到 Go 侧记住的最后一次下载结果（见 internal/app/app.go）。
+export const LaunchUpdateInstaller = (downloadedFile: string) => app().LaunchUpdateInstaller(downloadedFile);
+
+export const RevealDownloadedArtifact = (downloadedFile: string) => app().RevealDownloadedArtifact(downloadedFile);
+
+export const AttachUpdateImage = (downloadedFile: string) => app().AttachUpdateImage(downloadedFile);
+
+export const UpdateInstallCommand = (downloadedFile: string) => app().UpdateInstallCommand(downloadedFile);
+
+export const ListActiveSSHTunnels = () => app().ListActiveSSHTunnels();
+
+export const QuitApplication = () => app().QuitApplication();
 
 export const GetCurrentPlatform = () => app().GetCurrentPlatform();
 

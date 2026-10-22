@@ -561,13 +561,41 @@ export function createRetestInvoke(): RetestInvoke {
       case "GetCurrentPlatform":
         return "linux";
       case "CheckForUpdates":
-        return { hasUpdate: false, latestVersion: "1.9.2", currentVersion: "1.9.2", sourceName: "", releaseNotes: "", mandatory: false, error: "" };
+        return {
+          hasUpdate: false,
+          latestVersion: "1.9.2",
+          currentVersion: "1.9.2",
+          sourceName: "",
+          releaseNotes: "",
+          mandatory: false,
+          error: "",
+          platformKey: "linux-amd64",
+          fileName: "confscope-linux-amd64.tar.gz",
+          handoff: "reveal",
+          downgraded: false,
+          reason: "",
+        };
       case "GetDownloadProgress":
         // 复测环境无真实下载任务；返回 done 状态，供 About 页轮询使用
         return { downloaded: 0, total: 0, percent: 0, done: true, error: "" };
       case "DownloadUpdate":
         return "no-op";
-      case "InstallAndRestart":
+      // 升级出路四条（与 internal/updatecheck/handoff.go 同名同义）：
+      // 复测环境没有真实产物，一律按"还没有下载好的更新包"这条 Go 侧判据回绝，
+      // 这样任何误起安装程序的调用都会在复测里暴露而不是静默成功。
+      case "LaunchUpdateInstaller":
+        return undefined;
+      case "RevealDownloadedArtifact":
+        return undefined;
+      case "AttachUpdateImage":
+        return undefined;
+      case "UpdateInstallCommand":
+        return "";
+      case "ListActiveSSHTunnels":
+        // 复测桥不建真实隧道：交接闸门读到空表。
+        return [];
+      case "QuitApplication":
+        // 浏览器里没有可退出的进程，交接链路在此止步（断言看事件，不看真退出）。
         return undefined;
       case "NacosDetectVersion": {
         const baseUrl = String(args[0]);

@@ -4,7 +4,13 @@ import {
   GetAppInfo,
   GetCurrentPlatform,
   GetDownloadProgress,
-  InstallAndRestart,
+  LaunchUpdateInstaller,
+  RevealDownloadedArtifact,
+  AttachUpdateImage,
+  UpdateInstallCommand,
+  ListActiveSSHTunnels,
+  QuitApplication,
+  type UpdateProxyConfig,
   ExportConfigSourceFiles,
   SelectConfigSourceExportDirectory,
   SelectLocalSnapshotDirectory,
@@ -30,6 +36,11 @@ export interface CheckUpdatesRequest {
   proxy: ProxySettings;
 }
 
+// 升级出路由 Go 侧选定，前端只认这五个值，不许按文件后缀自己猜形态。
+// installer 起安装程序 / reveal 打开下载位置人工覆盖 / command 复制包管理器命令 /
+// image 挂载 dmg / page 兜底打开下载页。
+export type UpdateHandoff = "installer" | "reveal" | "command" | "image" | "page";
+
 export interface UpdateCheckResult {
   currentVersion: string;
   latestVersion: string;
@@ -43,6 +54,11 @@ export interface UpdateCheckResult {
   mandatory: boolean;
   checkedAt: string;
   error: string;
+  platformKey: string;
+  fileName: string;
+  handoff: UpdateHandoff | "";
+  downgraded: boolean;
+  reason: string;
 }
 
 export interface DownloadProgress {
@@ -95,16 +111,42 @@ export function checkForUpdates(request: CheckUpdatesRequest): Promise<UpdateChe
   return CheckForUpdates(request);
 }
 
-export function downloadUpdate(downloadURL: string, sha256: string): Promise<string> {
-  return DownloadUpdate(downloadURL, sha256);
+// downloadUpdate 必须带代理：检查走代理而下载直连，是"查得到版本却下不动包"的根因。
+export function downloadUpdate(downloadURL: string, sha256: string, proxy: ProxySettings): Promise<string> {
+  return DownloadUpdate(downloadURL, sha256, proxy as UpdateProxyConfig);
 }
 
 export function getDownloadProgress(): Promise<DownloadProgress> {
   return GetDownloadProgress();
 }
 
-export function installAndRestart(downloadedFile: string): Promise<void> {
-  return InstallAndRestart(downloadedFile);
+// 以下四个是"下载完成后"的分流动作，对应 UpdateCheckResult.handoff。
+// 传空串表示让 Go 用它记住的最后一次下载结果。
+export function launchUpdateInstaller(downloadedFile: string): Promise<void> {
+  return LaunchUpdateInstaller(downloadedFile);
+}
+
+export function revealDownloadedArtifact(downloadedFile: string): Promise<void> {
+  return RevealDownloadedArtifact(downloadedFile);
+}
+
+export function attachUpdateImage(downloadedFile: string): Promise<void> {
+  return AttachUpdateImage(downloadedFile);
+}
+
+// 只拿命令文本供复制，程序既不提权也不代跑。
+export function getUpdateInstallCommand(downloadedFile: string): Promise<string> {
+  return UpdateInstallCommand(downloadedFile);
+}
+
+// 交接前的忙碌闸门：隧道表只住在 Go 侧，前端不再另存一份。
+export function listActiveSSHTunnels(): Promise<string[]> {
+  return ListActiveSSHTunnels();
+}
+
+// 唯一的人工闸门落点：前端确认数据已落盘后才允许调用。
+export function quitApplication(): Promise<void> {
+  return QuitApplication();
 }
 
 export function getCurrentPlatform(): Promise<string> {

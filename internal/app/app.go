@@ -162,11 +162,27 @@ func (a *App) GetAppInfo() AppInfo {
 }
 
 // CheckForUpdates 检查 ConfScope 是否有可用新版本。
+//
+// req.Mode / req.PackageFormat 在这里被 Go 侧覆盖：前端传什么都不认。
+// 「该取哪个产物」只能由程序按运行形态算一次，多一处事实源就多一次
+// 「便携版下到安装包 / deb 装的下到 tar.gz」的错配。
 func (a *App) CheckForUpdates(req updatecheck.Request) updatecheck.Result {
 	if req.CurrentVersion == "" {
 		req.CurrentVersion = appVersion
 	}
+	req.Mode, req.PackageFormat = currentRuntimeShape()
 	return updatecheck.Check(context.Background(), req)
+}
+
+// currentRuntimeShape 组装更新链路需要的运行形态事实。
+// 模式判据复用数据根解析器（唯一事实源）：读不到就按便携态处理，
+// 保守出路是「下载 + 人工覆盖」，绝不会误起安装程序。
+func currentRuntimeShape() (portabledata.RuntimeMode, string) {
+	mode := portabledata.RuntimeModePortable
+	if layout, err := currentRuntimeLayout(); err == nil {
+		mode = layout.Mode
+	}
+	return mode, updatecheck.DetectPackageFormat()
 }
 
 // GetCurrentPlatform 返回当前平台标识，如 "windows-amd64"。
@@ -175,8 +191,9 @@ func (a *App) GetCurrentPlatform() string {
 }
 
 // DownloadUpdate 下载更新文件，通过 Wails 事件报告进度。
-// 返回下载后的临时文件路径。
-func (a *App) DownloadUpdate(downloadURL string, sha256 string) (string, error) {
+// 返回下载后的临时文件路径。proxy 必须与检查更新用的一致，
+// 否则「查得到版本却下不动包」的直连不通用户还是走不完链路。
+func (a *App) DownloadUpdate(downloadURL string, sha256 string, proxy updatecheck.ProxyConfig) (string, error) {
 	a.downloadMu.Lock()
 	a.downloadProgress = updatecheck.DownloadProgress{}
 	a.downloadErr = ""
@@ -188,7 +205,7 @@ func (a *App) DownloadUpdate(downloadURL string, sha256 string) (string, error) 
 		ctx = a.ctx
 	}
 
-	filePath, err := updatecheck.Download(ctx, downloadURL, sha256, func(p updatecheck.DownloadProgress) {
+	filePath, err := updatecheck.Download(ctx, downloadURL, sha256, proxy, func(p updatecheck.DownloadProgress) {
 		a.downloadMu.Lock()
 		a.downloadProgress = p
 		a.downloadMu.Unlock()
@@ -220,13 +237,83 @@ func (a *App) GetDownloadProgress() updatecheck.DownloadProgress {
 	return a.downloadProgress
 }
 
-// InstallAndRestart 安装更新并重启应用。
-func (a *App) InstallAndRestart(downloadedFile string) error {
-	exePath, err := os.Executable()
+// LaunchUpdateInstaller 把升级交给 Windows 安装程序（带 /UPDATE 与本次进程 PID），
+// 成功后由前端触发优雅退出。程序不碰自己的二进制 —— 「什么时候可以覆盖」
+// 是安装程序的责任，不是一个隐藏脚本的责任。
+func (a *App) LaunchUpdateInstaller(downloadedFile string) error {
+	path, err := a.downloadedArtifactPath(downloadedFile)
 	if err != nil {
-		return fmt.Errorf("get executable path: %w", err)
+		return err
 	}
-	return updatecheck.InstallAndRestart(downloadedFile, exePath)
+	return updatecheck.LaunchUpdateInstaller(path)
+}
+
+// RevealDownloadedArtifact 打开下载位置，覆盖动作由人来做（便携版/裸产物）。
+func (a *App) RevealDownloadedArtifact(downloadedFile string) error {
+	path, err := a.downloadedArtifactPath(downloadedFile)
+	if err != nil {
+		return err
+	}
+	return updatecheck.RevealDownloadedArtifact(path)
+}
+
+// AttachUpdateImage 挂载 macOS 更新镜像并打开卷窗口，由人拖进 Applications。
+func (a *App) AttachUpdateImage(downloadedFile string) error {
+	path, err := a.downloadedArtifactPath(downloadedFile)
+	if err != nil {
+		return err
+	}
+	return updatecheck.AttachUpdateImage(path)
+}
+
+// UpdateInstallCommand 给出 Linux 包管理器的安装命令供复制。
+// 只给命令，不提权、不代跑：程序不应该在用户看不见的地方拿到 root。
+func (a *App) UpdateInstallCommand(downloadedFile string) string {
+	path, err := a.downloadedArtifactPath(downloadedFile)
+	if err != nil {
+		return ""
+	}
+	_, packageFormat := currentRuntimeShape()
+	return updatecheck.InstallCommandFor(path, packageFormat)
+}
+
+// downloadedArtifactPath 允许前端传空串回落到最后一次下载结果，
+// 这样"重新打开下载位置"不需要前端自己保存路径。
+func (a *App) downloadedArtifactPath(downloadedFile string) (string, error) {
+	candidate := strings.TrimSpace(downloadedFile)
+	if candidate == "" {
+		a.downloadMu.Lock()
+		candidate = a.downloadedFile
+		a.downloadMu.Unlock()
+	}
+	if candidate == "" {
+		return "", errors.New("还没有下载好的更新包")
+	}
+	return candidate, nil
+}
+
+// ListActiveSSHTunnels 返回当前有隧道的连接标识，供升级交接的忙碌闸门点名。
+// 只有隧道表自己知道真有几个隧道：前端另存一份会漂，Go 侧才是事实源。
+func (a *App) ListActiveSSHTunnels() []string {
+	if a.sshMgr == nil {
+		return []string{}
+	}
+	ids := a.sshMgr.ActiveConnectionIDs()
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
+// QuitApplication 优雅退出（升级交接的唯一人工闸门落点）。
+// 走到这里之前前端必须已经落盘主数据：强杀一律禁止，
+// 主数据是 debounce 写的，被强杀等于吃掉最后一次变更。
+func (a *App) QuitApplication() error {
+	if a.ctx == nil {
+		return errors.New("wails runtime is not ready")
+	}
+	runtime.Quit(a.ctx)
+	return nil
 }
 
 func (a *App) SelectLocalSnapshotDirectory() (string, error) {

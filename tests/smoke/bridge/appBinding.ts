@@ -117,12 +117,26 @@ export function createSmokeAppBinding(state: SmokeState): (method: string, args:
           releaseNotes: "",
           mandatory: false,
           error: "",
+          platformKey: "windows-amd64",
+          fileName: "ConfScope-smoke.exe",
+          handoff: "reveal",
+          downgraded: false,
+          reason: "",
         };
       case "DownloadUpdate":
         return join(state.rootDir, "downloads", "ConfScope-smoke.exe");
       case "GetDownloadProgress":
         return { totalBytes: 1, downloadedBytes: 1, percent: 100, done: true, error: "" };
-      case "InstallAndRestart":
+      case "LaunchUpdateInstaller":
+      case "RevealDownloadedArtifact":
+      case "AttachUpdateImage":
+        // 冒烟环境不碰真实进程：出路方法只确认可调用，不做任何自替换动作。
+        return undefined;
+      case "UpdateInstallCommand":
+        return "";
+      case "ListActiveSSHTunnels":
+        return [];
+      case "QuitApplication":
         return undefined;
       case "GetCurrentPlatform":
         return "windows-amd64";

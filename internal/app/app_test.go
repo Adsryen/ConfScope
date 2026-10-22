@@ -77,6 +77,61 @@ func TestCheckForUpdatesUsesAppVersionWhenCurrentVersionIsEmpty(t *testing.T) {
 	}
 }
 
+// 更新链路的运行形态判据只许住在 Go 侧：前端传什么都被覆盖。
+// 这条判据防的是"前端按文件后缀猜形态"这类第二事实源复活。
+func TestCheckForUpdatesOverridesRuntimeShapeFromFrontend(t *testing.T) {
+	server := newAppIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"version":"9.9.9",
+			"platforms":{
+				"linux-amd64":{"downloadUrl":"https://download.example.com/confscope-linux-amd64.tar.gz","sha256":"base"},
+				"linux-amd64-deb":{"downloadUrl":"https://download.example.com/confscope.deb","sha256":"deb"},
+				"windows-amd64-installer":{"downloadUrl":"https://download.example.com/confscope-setup.exe","sha256":"msi"}
+			}
+		}`))
+	}))
+
+	// 伪造"我是 deb 装的安装版"：真机是 go test 的临时二进制，既不是安装形态也没有包格式，
+	// 所以结论必须落回本机平台条目，而不是前端要的 deb 条目。
+	result := NewApp().CheckForUpdates(updatecheck.Request{
+		CurrentVersion: "1.0.0",
+		Mode:           "installed",
+		PackageFormat:  "deb",
+		Sources: []updatecheck.Source{
+			{Name: "test", URL: server.URL + "/update.json"},
+		},
+	})
+
+	if result.Error != "" {
+		t.Fatalf("Error = %q", result.Error)
+	}
+	if result.PlatformKey != updatecheck.CurrentPlatform() {
+		t.Fatalf("PlatformKey = %q, want 本机平台 %q（前端传的形态必须被覆盖）", result.PlatformKey, updatecheck.CurrentPlatform())
+	}
+	if result.Downgraded {
+		t.Fatalf("Downgraded = true, reason = %q", result.Reason)
+	}
+	if result.Handoff != string(updatecheck.HandoffReveal) {
+		t.Fatalf("Handoff = %q, want %q", result.Handoff, updatecheck.HandoffReveal)
+	}
+}
+
+// 出路绑定的三个方法都必须先有下载好的产物，不能拿着空路径去起进程。
+func TestUpdateHandoffBindingsRequireDownloadedArtifact(t *testing.T) {
+	app := NewApp()
+
+	if err := app.LaunchUpdateInstaller(""); err == nil {
+		t.Fatal("LaunchUpdateInstaller(\"\") 应报错")
+	}
+	if err := app.RevealDownloadedArtifact("   "); err == nil {
+		t.Fatal("RevealDownloadedArtifact 空路径应报错")
+	}
+	if got := app.UpdateInstallCommand(""); got != "" {
+		t.Fatalf("UpdateInstallCommand(\"\") = %q, want 空串", got)
+	}
+}
+
 func TestNewAppRegistersNacosProvider(t *testing.T) {
 	app := NewApp()
 

@@ -5,6 +5,7 @@ package ssh
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -71,6 +72,20 @@ func (m *Manager) StopAll() {
 		tunnel.Stop()
 		delete(m.tunnels, connectionId)
 	}
+}
+
+// ActiveConnectionIDs 返回当前有隧道的连接标识（按字典序，界面要稳定可比对）。
+// 升级交接前的忙碌闸门靠它判断"退出会不会掐断正在浏览的隧道"。
+func (m *Manager) ActiveConnectionIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]string, 0, len(m.tunnels))
+	for id := range m.tunnels {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // GetTunnel 获取指定连接的隧道实例。
