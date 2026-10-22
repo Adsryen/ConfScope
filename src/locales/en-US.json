@@ -908,6 +908,7 @@
     "findCaseSensitive": "Match case",
     "findWholeWord": "Match whole word",
     "minimap": "Minimap",
+    "minimapPosition": "Line {line} of {total}",
     "jumpToLine": "Jump to line {line}",
     "saveAsPlan": "Generate change plan",
     "deleteAsPlan": "Generate deletion plan",

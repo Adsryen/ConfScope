@@ -210,6 +210,18 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     return { topPct, heightPct };
   }, [metrics, lines.length, rowHeight, contentHeight]);
 
+  /**
+   * 当前视口顶端的行号（1 起），只给 aria-valuetext 念（轮66 WP-7）。
+   *
+   * 换算沿用画条与视口框那**一把**尺：正文第 L 行的顶边在 padTop + L*rowHeight。
+   * 这里不新起第三个换算，也不读 DOM——行号层与命中层本来就按这个式子排。
+   * 量不到几何（首帧 / jsdom）时给 null：宁可不念，也不要念一个假的「第 1 行」。
+   */
+  const topVisibleLine = useMemo(() => {
+    if (rowHeight <= 0 || lines.length <= 0 || metrics.scrollHeight <= 0) return null;
+    return clamp(Math.floor((metrics.scrollTop - padTop) / rowHeight) + 1, 1, lines.length);
+  }, [metrics.scrollTop, metrics.scrollHeight, padTop, rowHeight, lines.length]);
+
   useEffect(() => {
     const mm = surfaceRef.current;
     if (!mm || typeof ResizeObserver === "undefined") return;
@@ -228,6 +240,24 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
     <div
       className="code-minimap"
       ref={surfaceRef}
+      /*
+       * 这条控件原先在辅助技术里是「一个 66×N 的无名方块」：只有 pointer 事件，
+       * 既没有角色也没有名字，读屏用户既不知道它是什么，也不知道它此刻指向哪儿（轮66 WP-7）。
+       * 语义按它**实际是什么**声明：抽象滚动条（role=scrollbar），值 = 视口顶边在全文里的百分比，
+       * valuetext 直接念行号——这正是用户想要的「跳到第 3800 行」那个信息。
+       *
+       * 刻意不给 tabIndex：键盘滚动本来就归正文那层（.code-area / textarea 的方向键与 PageUp/PageDown，
+       * 由 tests/ux/scrollableReadOnlyRegionsNeedKeyboardAccess 钉住），这里再加一个 Tab 停靠点，
+       * 等于在滚动区里插第二个键盘焦点层；而 pointerdown 里那句 preventDefault 也是同一口径——
+       * 点缩略图不许把焦点从键盘层挪走，否则方向键当场失效。两者别互相"补齐"。
+       */
+      role="scrollbar"
+      aria-orientation="vertical"
+      aria-label={t("config.minimap")}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(viewport ? viewport.topPct : 0)}
+      aria-valuetext={topVisibleLine === null ? undefined : t("config.minimapPosition", { line: topVisibleLine, total: lines.length })}
       title={t("config.minimap")}
       onPointerDown={(e) => {
         // 只认主按钮（轮32 F-31），且这一句必须在 preventDefault 之前：右键落在这里先跳一次行，
@@ -254,8 +284,9 @@ export default function CodeMinimap({ containerRef, syncScroll, lines, hitLineAr
         draggingRef.current = false;
       }}
     >
-      <canvas className="code-minimap-canvas" ref={canvasRef} />
-      {viewport && <div className="code-minimap-viewport" style={{ top: `${viewport.topPct}%`, height: `${viewport.heightPct}%` }} />}
+      {/* 画布与视口框是纯视觉的：语义已经挂在外层那条 scrollbar 上，这里不再重复播报。 */}
+      <canvas className="code-minimap-canvas" ref={canvasRef} aria-hidden="true" />
+      {viewport && <div className="code-minimap-viewport" aria-hidden="true" style={{ top: `${viewport.topPct}%`, height: `${viewport.heightPct}%` }} />}
     </div>
   );
 }

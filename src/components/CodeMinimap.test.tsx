@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, fireEvent, render } from "../test/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { padTopForFindBar } from "../lib/codeScroll";
 import CodeMinimap, { MINIMAP_W } from "./CodeMinimap";
@@ -441,5 +441,46 @@ describe("CodeMinimap 换屏 / 改缩放之后必须重画（轮32 F-32）", () 
     const canvas = mm.querySelector("canvas") as HTMLCanvasElement;
     expect(rects.length, "读不到 matchMedia 就把绘制整条废掉是回归").toBeGreaterThan(0);
     expect(canvas.width, "兜底路径也要按 dpr=3 摆画布").toBe(MINIMAP_W * 3);
+  });
+});
+
+describe("CodeMinimap 的辅助技术语义（轮66 WP-7）", () => {
+  beforeEach(() => {
+    // 本文件其余用例不断文案，这一组要念出名字与位置，显式钉住中文，免得跟着 jsdom 的 navigator.language 漂
+    localStorage.setItem("locale", "zh-CN");
+  });
+
+  /**
+   * 缺陷长什么样：这条控件只有 pointer 事件，在辅助技术里是「一个 66×N 的无名方块」——
+   * 读屏既念不出它是什么，也念不出它此刻指向哪一行，而这恰好是它的唯一信息量。
+   * 口径：按它实际是什么声明（抽象滚动条），值给视口百分比，valuetext 直接念行号。
+   */
+  it("念得出「这是什么」和「此刻在第几行」", () => {
+    // 正文第 20 行（0 起）的顶边对齐视口上缘 ⇒ 行号层念 21
+    const { mm } = mountMinimap({ scrollTop: PAD_TOP + 20 * ROW_H });
+    expect(mm).toHaveAttribute("role", "scrollbar");
+    expect(mm).toHaveAttribute("aria-orientation", "vertical");
+    expect(mm).toHaveAccessibleName("缩略图");
+    expect(mm.getAttribute("aria-valuetext")).toContain("第 21 行");
+    expect(mm.getAttribute("aria-valuetext")).toContain(`共 ${LINE_COUNT} 行`);
+    expect(mm).toHaveAttribute("aria-valuemin", "0");
+    expect(mm).toHaveAttribute("aria-valuemax", "100");
+    expect(Number(mm.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    // 画布与视口框是纯视觉的，不再重复播报一遍
+    expect(mm.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
+    expect(mm.querySelector(".code-minimap-viewport")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("键盘滚动仍归正文那层：缩略图不是第二个 Tab 停靠点", () => {
+    const { mm } = mountMinimap({ scrollTop: PAD_TOP + 20 * ROW_H });
+    // 挂 tabIndex 会把焦点从 .code-area / textarea 抢走，方向键与 PageUp/PageDown 当场失效
+    // （pointerdown 里那句 preventDefault 就是为同一件事，见本文件顶部与 CodeView.tsx）
+    expect(mm).not.toHaveAttribute("tabindex");
+  });
+
+  it("量不到几何的首帧不念假行号，也不谎报位置", () => {
+    const { mm } = mountMinimap({ metrics: { scrollTop: 0, scrollHeight: 0, clientHeight: 0 } });
+    expect(mm.getAttribute("aria-valuetext")).toBeNull();
+    expect(mm).toHaveAttribute("aria-valuenow", "0");
   });
 });
