@@ -11,7 +11,8 @@ import {
   buildPromotionEntryFromVerification,
   buildRollbackEntryFromApplyRecord,
   canBuildRollbackEntry,
-  fingerprintsForCurrentPlanTargets,
+  executableItemsForRecord,
+  fingerprintsForCurrentTargets,
 } from "../lib/applyFollowup";
 import {
   loadOperationHistory,
@@ -39,6 +40,13 @@ import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentCha
 interface Props {
   connections: Connection[];
   onStartApply?: (payload: ApplyEntryPayload) => void;
+  /**
+   * 要定位的操作记录 id（轮66 WP-2）：变更计划页半截写入后跳过来时带上。
+   * 只做「解筛 + 选中 + 滚到可见」，不改任何存档数据；用完由 onFocusConsumed 清掉，
+   * 免得用户之后自己进这页又被拽回那条记录。
+   */
+  focusRecordId?: string | null;
+  onFocusConsumed?: () => void;
 }
 
 const OPERATION_LABELS: Record<OperationType, string> = {
@@ -81,7 +89,7 @@ function findVerification(verifications: ApplyVerification[], record: OperationR
   return verifications.find((verification) => verification.planId === record.planId && verification.applyHistoryId === record.id) ?? null;
 }
 
-export default function OperationHistoryView({ connections, onStartApply }: Props) {
+export default function OperationHistoryView({ connections, onStartApply, focusRecordId, onFocusConsumed }: Props) {
   const { t } = useTranslation();
 
   // 本地操作记录
@@ -102,10 +110,15 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const [followupBusy, setFollowupBusy] = useState<string | null>(null);
   const [followupError, setFollowupError] = useState<FollowupError | null>(null);
   const [promotionTargets, setPromotionTargets] = useState<Record<string, string>>({});
+  // 带记录 id 跳过来、但本地历史里已经找不到那条（被清理过 / 记录本来在中心侧）时的说明。
+  const [focusMissingId, setFocusMissingId] = useState<string | null>(null);
 
-  // 加载本地记录
+  // 加载本地记录。loaded 标记是给跨页定位用的：本地历史空不空得等读完了才算数，
+  // 只看「数组为空」会把「刚挂载还没读」和「真的被清理过」混成一种情况（轮66 WP-2）。
+  const [localRecordsLoaded, setLocalRecordsLoaded] = useState(false);
   useEffect(() => {
     setLocalRecords(loadOperationHistory());
+    setLocalRecordsLoaded(true);
   }, []);
 
   // 从配置中心拉取历史（选择连接时触发）。
@@ -187,6 +200,45 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
   const listScroll = useScrollMemory("history.scroll.list", allRecords.length);
 
   const selectedVisibleRecord = selectedRecord && allRecords.some((record) => record.id === selectedRecord.id) ? selectedRecord : null;
+
+  /**
+   * 跨页定位（轮66 WP-2）。分两步是不得已：本地历史在挂载 effect 里才读进来，
+   * 第一轮渲染时 allRecords 还是空的，直接判「找不到」会把正常跳转误报成记录丢失。
+   *
+   * 第一步：记录到手后，只解**挡住它**的那几项筛选（连接/类型/dataId），其余筛选原样留着——
+   * 用户自己选的口径不该被一次跳转清空。然后选中它。
+   * 第二步：等它真的出现在筛选后的列表里，再把行滚进可见区并通知调用方消费掉。
+   * 列表项靠 data-record-id 认领，用 dataset 比对而不是属性选择器拼 id：记录 id 含
+   * `_`、数字都无所谓，但把外部值直接塞进选择器迟早撞转义问题。
+   */
+  useEffect(() => {
+    if (!focusRecordId || !localRecordsLoaded) return;
+    const record = localRecords.find((item) => item.id === focusRecordId);
+    if (!record) {
+      setFocusMissingId(focusRecordId);
+      onFocusConsumed?.();
+      return;
+    }
+    if (filterConnection && filterConnection !== record.connectionId) setFilterConnection("");
+    if (filterType && filterType !== record.type) setFilterType("");
+    if (filterDataId && !record.dataId.includes(filterDataId)) setFilterDataId("");
+    setFocusMissingId(null);
+    setSelectedRecord(record);
+  }, [focusRecordId, localRecords, localRecordsLoaded, filterConnection, filterType, filterDataId, setFilterConnection, setFilterType, setFilterDataId, setSelectedRecord, onFocusConsumed]);
+
+  const focusRowVisible = focusRecordId ? allRecords.some((record) => record.id === focusRecordId) : false;
+  const listRef = listScroll.ref;
+  useEffect(() => {
+    if (!focusRecordId || !focusRowVisible) return;
+    const container = listRef.current;
+    const row = container
+      ? Array.from(container.querySelectorAll<HTMLElement>("[data-record-id]")).find((element) => element.dataset.recordId === focusRecordId)
+      : null;
+    // 先判可用性再滚：jsdom 没有 scrollIntoView（与 DiffView 定位命中行同一口径），
+    // 不加这道判空会在测试里直接抛错，把「定位」这件事从断言里挤掉。
+    if (row && typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" });
+    onFocusConsumed?.();
+  }, [focusRecordId, focusRowVisible, listRef, onFocusConsumed]);
   const failedCount = allRecords.filter((record) => record.result === "failure").length;
   const sourceCount = new Set(allRecords.map((record) => record.connectionId)).size;
   // 详情正文与错误两块 <pre> 在切换记录时复用同一节点，不归零就停在上一份记录的偏移处（轮13 波29 / R49）。
@@ -252,7 +304,9 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
         sandboxConnectionId: sandboxConnection.id,
         sandboxConnectionName: sandboxConnection.name,
         sandboxNamespace: record.targetNamespace ?? plan.target.namespace ?? record.namespace,
-        verifiedTargetFingerprints: await fingerprintsForCurrentPlanTargets(plan, sandboxConnection, { getConfigDocument }),
+        verifiedTargetFingerprints: await fingerprintsForCurrentTargets(executableItemsForRecord(plan, record), sandboxConnection, {
+          getConfigDocument,
+        }),
       });
       setVerifications(loadApplyVerifications());
       toast(t("operationHistory.sandboxVerified"), "success");
@@ -421,6 +475,13 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
           {centerNoteText}
         </div>
       )}
+      {/* 从变更计划页跳过来却没找到记录：讲明白「你要定位的那条不在本地历史里」，
+          不能让玩家对着一个空列表自己猜跳转到底成没成。 */}
+      {focusMissingId && (
+        <div className="history-center-note" role="note">
+          {t("operationHistory.focusRecordMissing", { id: focusMissingId })}
+        </div>
+      )}
       {loading && (
         <div className="history-loading" role="status" aria-live="polite">
           {t("common.loading")}
@@ -439,6 +500,7 @@ export default function OperationHistoryView({ connections, onStartApply }: Prop
             allRecords.map((record) => (
               <button
                 key={record.id}
+                data-record-id={record.id}
                 className={`data-list-item op-history-item ${selectedVisibleRecord?.id === record.id ? "active" : ""}`}
                 onClick={() => setSelectedRecord(selectedVisibleRecord?.id === record.id ? null : record)}
               >

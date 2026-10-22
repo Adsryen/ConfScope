@@ -215,6 +215,8 @@ export default function App() {
   const [pendingApplyEntry, setPendingApplyEntry] = useState<ApplyEntryPayload | null>(null);
   // stepper 导航回退到对比页时的聚焦提示
   const [diffFocusStep, setDiffFocusStep] = useState<WorkflowStepId | null>(null);
+  // 变更计划页半截写入后跳来操作历史时要定位的记录（轮66 WP-2）：只由跳转写入，历史页消费完即清。
+  const [historyFocusRecordId, setHistoryFocusRecordId] = useState<string | null>(null);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（BackupView / AuditView → DiffView）。轮46：只由跳转设置，
@@ -495,6 +497,17 @@ export default function App() {
     setMode("apply");
   };
 
+  /**
+   * 半截写入后的回退出口（轮66 WP-2）：带着本次记录 id 去操作历史。
+   * 这颗按钮只出现在执行已收口的失败态，不存在在途写入，所以不必走计划页
+   * 「执行中别离开」那道确认（attemptBack）；离开时计划页卸载，回不去第 5 步是既成事实，
+   * 但历史页那条记录本身就带着错误详情与备份快照回退入口，比留在原地更管用。
+   */
+  const openHistoryAtRecord = (recordId: string) => {
+    setHistoryFocusRecordId(recordId);
+    setMode("history");
+  };
+
   const applyReturnTarget = pendingApplyEntry ? applyReturnMode(pendingApplyEntry) : "browse";
 
   // 配置对比保活范围（轮44 R1 / D3）：与 .browse-cache 同构——第一次进对比页才挂载，
@@ -733,7 +746,12 @@ export default function App() {
               onStartApply={startApply}
             />
           ) : mode === "history" ? (
-            <OperationHistoryView connections={connections} onStartApply={startApply} />
+            <OperationHistoryView
+              connections={connections}
+              onStartApply={startApply}
+              focusRecordId={historyFocusRecordId}
+              onFocusConsumed={() => setHistoryFocusRecordId(null)}
+            />
           ) : mode === "backup" ? (
             <BackupView onNavigateToDiff={navigateBackupToDiff} onStartApply={startApply} />
           ) : mode === "tasks" ? (
@@ -750,6 +768,7 @@ export default function App() {
             <ApplyPlanView
               entry={pendingApplyEntry}
               connections={diffConnections}
+              onOpenHistory={openHistoryAtRecord}
               onBack={(focusStep) => {
                 // 只有回程目标是 diff 才递聚焦步：对比页现在常驻挂载，focusStep 落到
                 // 看不见的那一棵 = 替别的页面抢焦点（DiffView 里另有 active 闸门兜底）。

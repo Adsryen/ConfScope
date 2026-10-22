@@ -139,14 +139,46 @@ function endpoint(connection: Connection): BuildApplyPlanInput["source"] {
   };
 }
 
-function planRef(connection: Connection): BuildApplyPlanInput["items"][number]["ref"] {
+function planRef(connection: Connection, dataId = "app.yaml"): BuildApplyPlanInput["items"][number]["ref"] {
   return {
     provider: connection.provider ?? "nacos",
     connectionId: connection.id,
     namespace: "public",
     group: "DEFAULT_GROUP",
-    dataId: "app.yaml",
+    dataId,
     key: "__document",
+  };
+}
+
+/** 备份快照本体：configs 就是本次执行写前的现场。 */
+function beforeApplySnapshot(configs: ReturnType<typeof snapshotConfig>[]) {
+  return {
+    id: "snap-before-1",
+    path: "C:\\snapshots\\snap-before-1",
+    name: "before apply",
+    description: "",
+    createdAt: "2026-07-06T00:00:00.000Z",
+    updatedAt: "2026-07-06T00:00:00.000Z",
+    source: {
+      provider: "nacos",
+      connectionId: sandboxConn.id,
+      connectionName: sandboxConn.name,
+      namespace: "public",
+      namespaceId: "public",
+    },
+    configs,
+  };
+}
+
+/** 备份快照里的一项：写前目标内容。 */
+function snapshotConfig(dataId: string) {
+  return {
+    namespace: "public",
+    dataId,
+    group: "DEFAULT_GROUP",
+    content: "server:\n  port: 9090",
+    configType: "text",
+    updateTime: "2026-07-06T00:00:00.000Z",
   };
 }
 
@@ -163,7 +195,7 @@ function planValue(content: string): BuildApplyPlanInput["items"][number]["sourc
   };
 }
 
-function savedApplyPlan() {
+function savedApplyPlan(dataIds: string[] = ["app.yaml"]) {
   const plan = buildApplyPlan({
     id: "plan-apply-1",
     createdAt: "2026-07-06T00:00:00.000Z",
@@ -177,13 +209,11 @@ function savedApplyPlan() {
       targetLabel: "Sandbox / public",
       selectedCount: 1,
     },
-    items: [
-      {
-        ref: planRef(sandboxConn),
-        sourceValue: planValue("server:\n  port: 8080"),
-        targetValue: planValue("server:\n  port: 9090"),
-      },
-    ],
+    items: dataIds.map((dataId) => ({
+      ref: planRef(sandboxConn, dataId),
+      sourceValue: planValue("server:\n  port: 8080"),
+      targetValue: planValue("server:\n  port: 9090"),
+    })),
   });
   saveApplyPlan(plan);
   return plan;
@@ -249,22 +279,7 @@ describe("OperationHistoryView", () => {
       source: "nacos",
       updateTime: "2026-07-06T00:00:00.000Z-v1",
     });
-    snapshotMocks.getSnapshot.mockResolvedValue({
-      id: "snap-before-1",
-      path: "C:\\snapshots\\snap-before-1",
-      name: "before apply",
-      description: "",
-      createdAt: "2026-07-06T00:00:00.000Z",
-      updatedAt: "2026-07-06T00:00:00.000Z",
-      source: {
-        provider: "nacos",
-        connectionId: sandboxConn.id,
-        connectionName: sandboxConn.name,
-        namespace: "public",
-        namespaceId: "public",
-      },
-      configs: [],
-    });
+    snapshotMocks.getSnapshot.mockResolvedValue(beforeApplySnapshot([snapshotConfig("app.yaml")]));
     nacosMocks.publishConfig.mockResolvedValue(undefined);
   });
 
@@ -477,6 +492,58 @@ describe("OperationHistoryView", () => {
     expect(onStartApply.mock.calls[0][0]).toMatchObject({ sourceType: "rollback", source: { connectionId: "snapshot:snap-before-1" } });
   });
 
+  // R66-WP9：planId 指向完整计划，执行时只勾一部分。回退入口必须只带本次执行的位置，
+  // 否则没写过的配置在回退计划里判成删除，用户点下去就是删生产。
+  it("narrows rollback to the locations recorded on the apply record", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    snapshotMocks.getSnapshot.mockResolvedValue(beforeApplySnapshot([snapshotConfig("app.yaml"), snapshotConfig("gateway.yaml")]));
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([followupApplyRecord({ appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }] })])
+    );
+    const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
+
+    await waitFor(() => {
+      expect(onStartApply).toHaveBeenCalledTimes(1);
+    });
+    expect(onStartApply.mock.calls[0][0].items.map((item: { dataId: string }) => item.dataId)).toEqual(["app.yaml"]);
+  });
+
+  it("narrows legacy rollback records to what the backup snapshot covers", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
+    const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
+
+    await waitFor(() => {
+      expect(onStartApply).toHaveBeenCalledTimes(1);
+    });
+    // 默认快照只覆盖了 app.yaml，gateway.yaml 没进备份 = 本次没动过，绝不能出现在回退计划里。
+    expect(onStartApply.mock.calls[0][0].items.map((item: { dataId: string }) => item.dataId)).toEqual(["app.yaml"]);
+  });
+
+  it("refuses rollback when the backup snapshot covers nothing from the run", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    snapshotMocks.getSnapshot.mockResolvedValue(beforeApplySnapshot([]));
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
+    const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
+
+    const detail = await screen.findByRole("alert");
+    expect(detail.textContent).toContain("snap-before-1");
+    expect(onStartApply).not.toHaveBeenCalled();
+  });
+
   it("keeps sandbox verification and promotion off partially failed apply records", async () => {
     localStorage.setItem("locale", "en-US");
     savedApplyPlan();
@@ -647,6 +714,140 @@ describe("OperationHistoryView", () => {
     expect(nacosMocks.listHistory).not.toHaveBeenCalled();
 
     expect(await screen.findByText("permission denied")).toBeDefined();
+  });
+
+  // 轮66 WP-2：变更计划页半截写入后跳到这页，必须落在本次记录上。
+  // 旧行为是「跳过来了，列表还被上次的筛选挡着」，用户读到的是空列表，以为记录丢了。
+  it("带着记录 id 跳进来时点亮本次记录，并只解挡路的那几项筛选", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "apply-fail-1",
+          type: "apply",
+          result: "failure",
+          timestamp: "2026-07-06T12:00:00Z",
+          connectionId: sandboxConn.id,
+          connectionName: sandboxConn.name,
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+          planId: "plan-apply-1",
+          backupSnapshotId: "snap-before-1",
+          backupSnapshotName: "before apply",
+          error: "Nacos returned 500",
+          rollbackable: false,
+        },
+        {
+          id: "publish-other",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-05T10:00:00Z",
+          connectionId: devConn.id,
+          connectionName: devConn.name,
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "other.yaml",
+        },
+      ])
+    );
+
+    // 先记住一组恰好把目标记录挡掉的筛选（连接筛到 Dev + dataId 筛 other），模拟用户上次留下的口径
+    const first = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[devConn, sandboxConn]} />
+      </I18nProvider>
+    );
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: devConn.id } });
+    fireEvent.change(screen.getByPlaceholderText("输入 dataId 筛选"), { target: { value: "other" } });
+    first.unmount();
+
+    const onFocusConsumed = vi.fn();
+    render(
+      <I18nProvider>
+        <OperationHistoryView
+          connections={[devConn, sandboxConn]}
+          focusRecordId="apply-fail-1"
+          onFocusConsumed={onFocusConsumed}
+        />
+      </I18nProvider>
+    );
+
+    // 详情面板就是本次记录：错误原文得在屏上，用户才知道失败原因去哪儿复核
+    expect(await screen.findByText("Nacos returned 500")).toBeDefined();
+    const row = document.querySelector('[data-record-id="apply-fail-1"]');
+    expect(row).not.toBeNull();
+    expect(row?.className).toContain("active");
+    // 只解挡路的两项：连接回到「全部」、dataId 清空；没设过的类型筛选不该被动
+    expect((screen.getAllByRole("combobox")[0] as HTMLSelectElement).value).toBe("");
+    expect((screen.getAllByRole("combobox")[1] as HTMLSelectElement).value).toBe("");
+    expect((screen.getByPlaceholderText("输入 dataId 筛选") as HTMLInputElement).value).toBe("");
+    await waitFor(() => expect(onFocusConsumed).toHaveBeenCalledTimes(1));
+  });
+
+  it("带着的记录 id 在本地历史里找不到时说明原因并消费掉请求", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "publish-keep",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-05T10:00:00Z",
+          connectionId: devConn.id,
+          connectionName: devConn.name,
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "other.yaml",
+        },
+      ])
+    );
+
+    const onFocusConsumed = vi.fn();
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[devConn]} focusRecordId="ghost-record" onFocusConsumed={onFocusConsumed} />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByText(translate("operationHistory.focusRecordMissing", { id: "ghost-record" }))).toBeDefined();
+    // 说明只在本次跳转有效：消费后不留在页面上反复提示，也不该把别的记录选中
+    await waitFor(() => expect(onFocusConsumed).toHaveBeenCalledTimes(1));
+    expect((screen.getAllByRole("combobox")[1] as HTMLSelectElement).value).toBe("");
+  });
+
+  it("没带记录 id 时不碰任何筛选（普通进页面不该被拽走口径）", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "publish-keep2",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-05T10:00:00Z",
+          connectionId: devConn.id,
+          connectionName: devConn.name,
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "other.yaml",
+        },
+      ])
+    );
+    const first = render(
+      <I18nProvider>
+        <OperationHistoryView connections={[devConn, sandboxConn]} />
+      </I18nProvider>
+    );
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "publish" } });
+    first.unmount();
+
+    render(
+      <I18nProvider>
+        <OperationHistoryView connections={[devConn, sandboxConn]} focusRecordId={null} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText("other.yaml")).toBeDefined();
+    expect((screen.getAllByRole("combobox")[1] as HTMLSelectElement).value).toBe("publish");
   });
 
   it("列表滚动位置写回并在重新挂载后恢复（R27）", async () => {

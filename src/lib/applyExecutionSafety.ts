@@ -1,6 +1,7 @@
 // 应用执行安全合同：在真实写入前准备 before 备份和操作历史输入。
 import type { ApplyPlan, ApplyPlanItem } from "./applyPlan";
 import type { OperationRecord, OperationResult } from "../store/operationHistory";
+import { appliedLocationsFromItems } from "./applyRecordScope";
 import { errorText } from "./errorText";
 import { translate } from "../locales";
 
@@ -162,6 +163,9 @@ export function buildApplyOperationHistoryInput(
     beforeContent: params.beforeContent,
     planId: plan.id,
     planSummary: planSummary(plan),
+    // 完整计划里用户可能只勾了一部分执行（轮66 R66-WP9）：这里记下本次真正执行的项，
+    // 回退和晋升才有「本次现场」这条边界可依。
+    appliedLocations: appliedLocationsFromItems(executableItems(plan)),
     backupSnapshotId: params.backup.snapshotId,
     backupSnapshotName: params.backup.snapshotName,
     taskId: params.taskId,

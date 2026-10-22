@@ -5,12 +5,13 @@ import type { Connection } from "../store/connections";
 import type { ApplyVerification } from "../store/applyVerifications";
 import type { OperationRecord } from "../store/operationHistory";
 import { translate } from "../locales";
-import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type BuildApplyPlanInput } from "./applyPlan";
+import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type ApplyPlanItem, type BuildApplyPlanInput } from "./applyPlan";
 import {
   buildPromotionEntryFromVerification,
   buildRollbackEntryFromApplyRecord,
   canBuildRollbackEntry,
-  fingerprintsForCurrentPlanTargets,
+  executableItemsForRecord,
+  fingerprintsForCurrentTargets,
   type ApplyFollowupDeps,
 } from "./applyFollowup";
 
@@ -149,11 +150,30 @@ function document(content: string, version = "v1"): ConfigDocument {
   };
 }
 
+/**
+ * 写前备份快照的形态：把给定执行项的当前目标内容当作备份内容存进去。
+ * 真实链路就是这样（collectApplyBackupConfigs 只覆盖本次执行的项），
+ * 老记录没有 appliedLocations 时，回退范围就靠这份覆盖来收口（轮66 R66-WP9）。
+ */
+function snapshotCovering(items: ApplyPlanItem[], id: string): Snapshot {
+  return snapshot({
+    id,
+    configs: items.map((item) => ({
+      namespace: item.ref.namespace,
+      dataId: item.ref.dataId,
+      group: item.ref.group,
+      content: item.targetValue.content ?? "",
+      configType: "text",
+      updateTime: item.targetValue.updateTime ?? "",
+    })),
+  });
+}
+
 function deps(applyPlan = plan(), getConfigDocument: ApplyFollowupDeps["getConfigDocument"] = vi.fn()): ApplyFollowupDeps {
   return {
     connections: [sourceConn, sandboxConn, prodConn],
     getApplyPlan: vi.fn((id) => (id === applyPlan.id ? applyPlan : null)),
-    getSnapshot: vi.fn(async (id) => snapshot({ id })),
+    getSnapshot: vi.fn(async (id) => snapshotCovering(applyPlan.items, id)),
     getConfigDocument,
   };
 }
@@ -270,7 +290,7 @@ describe("apply follow-up entry builders", () => {
     const applyPlan = plan();
     const getConfigDocument = vi.fn(async () => document("server:\n  port: 8080", "sandbox-v2"));
 
-    const fingerprints = await fingerprintsForCurrentPlanTargets(applyPlan, sandboxConn, deps(applyPlan, getConfigDocument));
+    const fingerprints = await fingerprintsForCurrentTargets(executableItemsForRecord(applyPlan, record()), sandboxConn, deps(applyPlan, getConfigDocument));
 
     expect(getConfigDocument).toHaveBeenCalledWith(sandboxConn, "public", "app.yaml", "DEFAULT_GROUP");
     expect(fingerprints).toEqual([
@@ -297,7 +317,7 @@ describe("apply follow-up entry builders", () => {
       throw new Error("404 not found");
     });
 
-    const fingerprints = await fingerprintsForCurrentPlanTargets(applyPlan, sandboxConn, deps(applyPlan, getConfigDocument));
+    const fingerprints = await fingerprintsForCurrentTargets(executableItemsForRecord(applyPlan, record()), sandboxConn, deps(applyPlan, getConfigDocument));
 
     expect(fingerprints).toEqual([
       {
@@ -321,5 +341,93 @@ describe("apply follow-up entry builders", () => {
     expect(result.entry.items[0].sourceRef).toEqual(applyPlan.items[0].ref);
     expect(result.entry.items[0].targetRef).toMatchObject({ connectionId: prodConn.id, dataId: "app.yaml" });
     expect(result.entry.origin).toEqual({ mode: "promote", returnMode: "history" });
+  });
+});
+
+describe("rollback scope follows what one execution actually wrote (R66-WP9)", () => {
+  function location(dataId: string, key = "__document") {
+    return { namespace: "public", group: "DEFAULT_GROUP", dataId, key };
+  }
+
+  /** 完整计划 3 项：执行时用户只勾了其中 1 项，planId 仍然指向这份完整计划。 */
+  function multiPlan(dataIds = ["app.yaml", "cache.yaml", "gateway.yaml"]): ApplyPlan {
+    return plan({
+      items: dataIds.map((dataId, index) => ({
+        ref: ref(sandboxConn, dataId),
+        sourceValue: value(`server:\n  port: 80${index}`, `src-${dataId}`),
+        targetValue: value(`server:\n  port: 90${index}`, `tgt-${dataId}`),
+      })),
+    });
+  }
+
+  it("keeps untouched plan items out of the rollback entry", async () => {
+    const applyPlan = multiPlan();
+    const result = await buildRollbackEntryFromApplyRecord(
+      record({ appliedLocations: [location("app.yaml")] }),
+      deps(applyPlan)
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    // 没勾选、没写入、也没进备份的 cache.yaml / gateway.yaml 一旦被收进回退计划，
+    // 快照里没有旧内容就会判成删除，用户点执行就是删生产配置。
+    expect(result.entry.items.map((item) => item.dataId)).toEqual(["app.yaml"]);
+  });
+
+  it("falls back to backup snapshot coverage for records without a location list", async () => {
+    const applyPlan = multiPlan();
+    const covered = deps(applyPlan);
+    const result = await buildRollbackEntryFromApplyRecord(record(), {
+      ...covered,
+      getSnapshot: vi.fn(async (id) => snapshotCovering(applyPlan.items.filter((item) => item.ref.dataId === "app.yaml"), id)),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    expect(result.entry.items.map((item) => item.dataId)).toEqual(["app.yaml"]);
+  });
+
+  it("still rolls back configs this run created but the snapshot has no copy of", async () => {
+    const applyPlan = multiPlan();
+    // 本次新建的 cache.yaml：写前目标上不存在，因此备份快照里没有它。
+    const covered = deps(applyPlan);
+    const result = await buildRollbackEntryFromApplyRecord(record({ appliedLocations: [location("cache.yaml")] }), {
+      ...covered,
+      getSnapshot: vi.fn(async (id) => snapshotCovering([], id)),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    expect(result.entry.items.map((item) => item.dataId)).toEqual(["cache.yaml"]);
+  });
+
+  it("refuses a rollback entry when nothing from the run is covered by the scene", async () => {
+    const applyPlan = multiPlan();
+    await expect(
+      buildRollbackEntryFromApplyRecord(record({ appliedLocations: [location("removed.yaml")] }), deps(applyPlan))
+    ).resolves.toMatchObject({
+      ok: false,
+      error: "apply_followup_failed",
+      detail: translate("apply.followupNoBackedUpItems", { id: "snap-before-1" }),
+    });
+  });
+
+  it("narrows promotion to the same run so unverified configs are not pushed to production", async () => {
+    const applyPlan = multiPlan();
+    const scoped: ApplyPlanItem[] = [applyPlan.items[0]];
+    const verify = {
+      ...verification(applyPlan),
+      verifiedTargetFingerprints: [{ itemId: scoped[0].id, fingerprint: fingerprintApplyPlanValue(scoped[0].ref, value("server:\n  port: 800")) }],
+    };
+    const result = await buildPromotionEntryFromVerification(
+      record({ appliedLocations: [location("app.yaml")] }),
+      verify,
+      prodConn,
+      deps(applyPlan, vi.fn(async () => document("server:\n  port: 800")))
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    expect(result.entry.items.map((item) => item.dataId)).toEqual(["app.yaml"]);
   });
 });

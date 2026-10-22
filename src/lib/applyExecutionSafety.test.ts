@@ -100,6 +100,26 @@ describe("buildApplyOperationHistoryInput", () => {
     });
   });
 
+  it("记录本次执行覆盖的位置，回退和晋升据此收口（R66-WP9）", () => {
+    const applyPlan = plan([
+      { ref: { ...baseRef, dataId: "changed.yaml" }, sourceValue: value(true, "new"), targetValue: value(true, "old") },
+      { ref: { ...baseRef, dataId: "same.yaml" }, sourceValue: value(true, "same"), targetValue: value(true, "same") },
+      { ref: { ...baseRef, dataId: "removed.yaml", key: "__document" }, sourceValue: value(false, ""), targetValue: value(true, "old") },
+    ]);
+
+    const result = buildApplyOperationHistoryInput(applyPlan, {
+      result: "success",
+      backup: { snapshotId: "snap-before-1", snapshotName: "before apply", backedUpCount: 2, missingBeforeCount: 0 },
+      taskId: "task-1",
+    });
+
+    // skip 项不进现场清单；key 级项保留 key，文档级保留 __document。
+    expect(result.appliedLocations).toEqual([
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "changed.yaml", key: "server.port" },
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "removed.yaml", key: "__document" },
+    ]);
+  });
+
   it("maps rollback plans to restore operation history", () => {
     const applyPlan = plan(
       [{ ref: { ...baseRef, key: "__document" }, sourceValue: value(true, "old"), targetValue: value(true, "new") }],

@@ -147,6 +147,12 @@ describe("loadOperationHistory", () => {
           },
           backupSnapshotId: "snap-before-1",
           backupSnapshotName: "prod_before_apply",
+          appliedLocations: [
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" },
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "cache.yaml", key: "ttl" },
+            { namespace: "public", group: "DEFAULT_GROUP" },
+            "不是对象",
+          ],
           taskId: "task-apply-1",
           sourceConnectionId: "conn-dev",
           sourceConnectionName: "dev",
@@ -195,6 +201,31 @@ describe("loadOperationHistory", () => {
       beforeContent: "old: true",
       afterContent: "new: true",
     });
+    // 执行现场清单必须能原样读回来：回退入口是在重启后点的，字段被归一化器丢掉
+    // 就等于退回「按完整计划回退」，那条误删路径又活了（轮66 R66-WP9）。
+    expect(record.appliedLocations).toEqual([
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" },
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "cache.yaml", key: "ttl" },
+    ]);
+  });
+
+  it("老记录没有执行现场清单时保持 undefined，回退退到备份快照覆盖", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "apply-legacy",
+          type: "apply",
+          result: "success",
+          timestamp: "2026-07-06T12:00:00Z",
+          connectionId: "conn-prod",
+          planId: "plan-1",
+          backupSnapshotId: "snap-before-1",
+        },
+      ])
+    );
+
+    expect(loadOperationHistory()[0].appliedLocations).toBeUndefined();
   });
 
   it("忽略损坏的 apply 摘要字段但保留记录和旧 publish 记录", () => {

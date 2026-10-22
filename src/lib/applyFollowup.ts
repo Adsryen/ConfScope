@@ -12,6 +12,10 @@ import {
   type ApplyPlanValueInput,
 } from "./applyPlan";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "./applyEntry";
+import {
+  restrictItemsByAppliedLocations,
+  restrictItemsToSnapshotCoverage,
+} from "./applyRecordScope";
 import { detectFormat, type Format } from "./format";
 import { normalizeConfig } from "./normalize";
 import { snapshotConnectionId } from "./snapshotConnection";
@@ -42,6 +46,32 @@ function isMissingConfigError(error: unknown): boolean {
 
 function executableItems(plan: ApplyPlan): ApplyPlanItem[] {
   return plan.items.filter((item) => !item.blocked && item.action !== "skip" && item.action !== "parse_error");
+}
+
+/**
+ * 本次执行的作用范围（轮66 R66-WP9）。
+ *
+ * planId 指向完整计划，执行时用户可能只勾选了一部分，所以任何从记录出发的后续动作
+ * （回退、标记沙箱验证、晋升生产）都得先按记录里的位置清单收口，
+ * 否则会把用户没动过的配置一起拖进写入。老记录没有清单时保持原行为。
+ */
+export function executableItemsForRecord(plan: ApplyPlan, record: OperationRecord): ApplyPlanItem[] {
+  const executable = executableItems(plan);
+  return record.appliedLocations ? restrictItemsByAppliedLocations(executable, record.appliedLocations) : executable;
+}
+
+/**
+ * 回退范围 = 本次写入过的位置。
+ *
+ * 新记录按 appliedLocations 收口：清单里既有写前就存在的项（快照里有旧内容，回退=覆盖回去），
+ * 也有本次新建的项（快照里没有，回退=删掉），两种都能还原到写前状态。
+ * 老记录没有清单，退到备份快照的覆盖范围兜底——快照装的是本次写前的现场，
+ * 快照里没有又无法证明本次动过的配置，宁可漏回退也绝不能判成删除。
+ * 两条路都收不到项就说明没有可回退的现场，直接拒掉入口，不能放出一个全是删除的计划。
+ */
+function rollbackItemsForRecord(plan: ApplyPlan, record: OperationRecord, snapshot: Snapshot): ApplyPlanItem[] {
+  if (record.appliedLocations) return restrictItemsByAppliedLocations(executableItems(plan), record.appliedLocations);
+  return restrictItemsToSnapshotCoverage(executableItems(plan), snapshot);
 }
 
 function toEntryRef(ref: ApplyPlanRef): ApplyEntryRef {
@@ -130,7 +160,11 @@ export async function buildRollbackEntryFromApplyRecord(
   if (!targetConnection) return fail(translate("apply.followupTargetConnectionMissing", { id: plan.target.connectionId }));
 
   const sourceConnectionId = snapshotConnectionId(snapshot.id);
-  const items = executableItems(plan).map((item) => {
+  const scopedItems = rollbackItemsForRecord(plan, record, snapshot);
+  if (scopedItems.length === 0) {
+    return fail(translate("apply.followupNoBackedUpItems", { id: record.backupSnapshotId }));
+  }
+  const items = scopedItems.map((item) => {
     const targetRef = toEntryRef(item.targetRef ?? item.ref);
     const sourceRef: ApplyEntryRef = {
       ...targetRef,
@@ -221,13 +255,14 @@ function missingValue(ref: ApplyPlanRef): ApplyPlanValueInput {
   return { exists: false, fingerprint: fingerprintApplyPlanValue(ref, { exists: false }) };
 }
 
-export async function fingerprintsForCurrentPlanTargets(
-  plan: ApplyPlan,
+/** 当前目标内容指纹；items 必须是本次执行范围内的项，调用方用 executableItemsForRecord 收口。 */
+export async function fingerprintsForCurrentTargets(
+  items: ApplyPlanItem[],
   sandboxConnection: Connection,
   deps: Pick<ApplyFollowupDeps, "getConfigDocument">
 ): Promise<Array<{ itemId: string; fingerprint: string }>> {
   const fingerprints: Array<{ itemId: string; fingerprint: string }> = [];
-  for (const item of executableItems(plan)) {
+  for (const item of items) {
     const ref = item.targetRef ?? item.ref;
     let current: ApplyPlanValueInput;
     try {
@@ -246,17 +281,17 @@ export async function fingerprintsForCurrentPlanTargets(
 }
 
 async function verifySandboxStillMatches(
-  plan: ApplyPlan,
   verification: ApplyVerification,
   sandboxConnection: Connection,
-  deps: ApplyFollowupDeps
+  deps: ApplyFollowupDeps,
+  items: ApplyPlanItem[]
 ): Promise<string | null> {
   const verifiedByItemId = new Map(verification.verifiedTargetFingerprints.map((item) => [item.itemId, item.fingerprint]));
   const currentByItemId = new Map(
-    (await fingerprintsForCurrentPlanTargets(plan, sandboxConnection, deps)).map((item) => [item.itemId, item.fingerprint])
+    (await fingerprintsForCurrentTargets(items, sandboxConnection, deps)).map((item) => [item.itemId, item.fingerprint])
   );
   const staleItems: string[] = [];
-  for (const item of executableItems(plan)) {
+  for (const item of items) {
     // R55-B5：以前这里直接 join item.id——`provider|conn|ns|group|dataId|key` 的拼接串
     // 甩进「沙箱配置在验证后已变化，变化项：…」的句子中间，用户根本读不出是哪一份配置。
     // itemId 仍然是比对用的键，只有拿去显示的那一层换成人读标签。
@@ -291,13 +326,13 @@ export async function buildPromotionEntryFromVerification(
   if (!sandboxConnection) return fail(translate("apply.followupSandboxConnectionMissing", { id: verification.sandboxConnectionId }));
 
   try {
-    const drift = await verifySandboxStillMatches(plan, verification, sandboxConnection, deps);
+    const drift = await verifySandboxStillMatches(verification, sandboxConnection, deps, executableItemsForRecord(plan, record));
     if (drift) return fail(drift);
   } catch (error) {
     return fail(translate("apply.followupVerifySandboxFailed", { detail: errorText(error) }));
   }
 
-  const items = executableItems(plan).map((item) => {
+  const items = executableItemsForRecord(plan, record).map((item) => {
     const sourceRef = toEntryRef(item.targetRef ?? item.ref);
     const targetRef: ApplyEntryRef = {
       ...sourceRef,

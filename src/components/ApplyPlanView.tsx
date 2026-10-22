@@ -43,6 +43,12 @@ interface Props {
   entry: ApplyEntryPayload | null;
   connections: Connection[];
   onBack: (focusStep?: WorkflowStepId) => void;
+  /**
+   * 跳到操作历史并定位本次执行留下的记录（轮66 WP-2）。
+   * 失败文案承诺「可在操作历史用本次备份快照回退」，这个回调就是把承诺接上的那只手；
+   * 不传（比如脱离 App 单独渲染）就不摆按钮，不放一个点了没反应的空入口。
+   */
+  onOpenHistory?: (recordId: string) => void;
 }
 
 type DraftState =
@@ -471,6 +477,8 @@ function ConfirmationPanel({
   executionTask,
   executionSucceeded,
   writeVerification,
+  executeHistoryId,
+  onOpenHistory,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
@@ -491,6 +499,9 @@ function ConfirmationPanel({
   executionSucceeded: boolean;
   /** 写后回读结论（R55-B2）：dry-run 与没落笔的失败都是 null——没验证过就别装作验证过。 */
   writeVerification: ApplyWriteVerification | null;
+  /** 本次执行写进操作历史的记录 id；拿不到就没有回退入口可指。 */
+  executeHistoryId: string | null;
+  onOpenHistory?: (recordId: string) => void;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
@@ -644,11 +655,24 @@ function ConfirmationPanel({
               })}
         </div>
       )}
+      {/* 轮66 WP-2：上面那句「可在操作历史用本次备份快照回退」是页面上唯一的线索，
+          而侧边栏那一格「操作历史」并不属于这段提示，用户读完得自己猜去哪条记录里找现场。
+          半截写入 = 改动已经在目标上生效，出口必须比文案更显眼，所以直接给一颗跳转按钮。
+          只在真拿到本次记录 id 时出现；也不塞进上面那块——它带 aria-live，
+          交互节点放进去会让读屏把按钮连文案重播一遍。 */}
+      {executeError && executeProgress && executeProgress.completedWrites > 0 && executeHistoryId && onOpenHistory && (
+        <div className="apply-rollback-entry">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenHistory(executeHistoryId)}>
+            {t("apply.openHistoryToRollback")}
+          </button>
+          <span className="apply-rollback-entry-hint">{t("apply.openHistoryToRollbackHint")}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function ApplyPlanView({ entry, connections, onBack }: Props) {
+export default function ApplyPlanView({ entry, connections, onBack, onOpenHistory }: Props) {
   const { t } = useTranslation();
   const [draftState, setDraftState] = useState<DraftState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState("");
@@ -668,6 +692,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
   const [executeError, setExecuteError] = useState<string | null>(null);
   // 失败时的「已写入几项 / 第几项断的」（R55-A2）：跟着 executeError 一起清，避免留旧数
   const [executeProgress, setExecuteProgress] = useState<ApplyExecutionProgress | null>(null);
+  // 本次执行落到操作历史的记录 id（轮66 WP-2）：回退入口要指着这条记录，同样跟着 executeError 一起清
+  const [executeHistoryId, setExecuteHistoryId] = useState<string | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
   // 写后回读结论（R55-B2）：跟着执行态一起重置，换一次执行不能留着上一轮的结论
   const [writeVerification, setWriteVerification] = useState<ApplyWriteVerification | null>(null);
@@ -795,6 +821,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteProgress(null);
+    setExecuteHistoryId(null);
     setExecuteNotice(null);
     setWriteVerification(null);
     buildDraft();
@@ -948,6 +975,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     });
     if (selectedItemIds.length === 0) {
       setExecuteNotice(null);
+      setExecuteHistoryId(null);
       setExecuteError(t("apply.noSelectedItems"));
       return;
     }
@@ -963,6 +991,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteProgress(null);
+    setExecuteHistoryId(null);
     setExecuteNotice(null);
     setWriteVerification(null);
     // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
@@ -1062,6 +1091,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
       if (!result.ok) {
         setExecuteError(result.error);
         setExecuteProgress(result.progress ?? null);
+        setExecuteHistoryId(resultHistoryId ?? null);
         auditSessionEvent(session, {
           kind: "apply_error",
           result: "failure",
@@ -1114,6 +1144,7 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
     } catch (error) {
       setExecuteError(errorText(error));
       setExecuteProgress(null);
+      setExecuteHistoryId(null);
       auditSessionEvent(session, {
         kind: "apply_error",
         result: "failure",
@@ -1244,6 +1275,8 @@ export default function ApplyPlanView({ entry, connections, onBack }: Props) {
               executionTask={executionTask}
               executionSucceeded={executionSucceeded}
               writeVerification={writeVerification}
+              executeHistoryId={executeHistoryId}
+              onOpenHistory={onOpenHistory}
               onConfirmedChange={setConfirmed}
               onConfirmationTextChange={setConfirmationText}
               onExecute={() => runPlan(false)}

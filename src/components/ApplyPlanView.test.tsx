@@ -260,14 +260,18 @@ function stagedEntryPayload(): ApplyEntryPayload {
   };
 }
 
-function renderView(entry: ApplyEntryPayload | null = entryPayload, connections: Connection[] = [sourceConn, targetConn]) {
+function renderView(
+  entry: ApplyEntryPayload | null = entryPayload,
+  connections: Connection[] = [sourceConn, targetConn],
+  onOpenHistory = vi.fn()
+) {
   const onBack = vi.fn();
   render(
     <I18nProvider>
-      <ApplyPlanView entry={entry} connections={connections} onBack={onBack} />
+      <ApplyPlanView entry={entry} connections={connections} onBack={onBack} onOpenHistory={onOpenHistory} />
     </I18nProvider>
   );
-  return { onBack };
+  return { onBack, onOpenHistory };
 }
 
 describe("ApplyPlanView", () => {
@@ -1149,6 +1153,104 @@ describe("ApplyPlanView", () => {
     expect(partial).toHaveTextContent("No item reached the target, so there is nothing to roll back");
     expect(partial).toHaveTextContent("item 1 failed: public/DEFAULT_GROUP/common.yml");
     expect(partial).not.toHaveTextContent("rolled back with this run");
+  });
+
+  // 轮66 WP-2：失败文案里那句「可在操作历史用本次备份快照回退」原本是唯一线索，
+  // 页面上连一颗按钮都没有——半截改动已经生效在目标上，出口必须能一步点到。
+  it("gives a one-click route to the operation history when the failed run is recorded", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-partial-2",
+      historyId: "history-partial-2",
+      error: "write failed: HTTP 500 on app.yaml",
+      progress: { completedWrites: 2, totalWrites: 3, failedIndex: 3, failedRef: "public/DEFAULT_GROUP/app.yaml" },
+    });
+
+    const onOpenHistory = vi.fn();
+    renderView(entryPayload, [sourceConn, safeTargetConn], onOpenHistory);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    // 先等执行收口（异步 setState 要由 findByRole 的 act 包一层才会刷新到界面）
+    expect(await screen.findByRole("alert")).toHaveTextContent("write failed: HTTP 500");
+    const entry = await waitFor(() => document.querySelector(".apply-rollback-entry"));
+    expect(entry).not.toBeNull();
+    // 入口不许塞进 aria-live 那块提示里，否则读屏把按钮再念一遍
+    expect(document.querySelector(".apply-partial-write .apply-rollback-entry")).toBeNull();
+    fireEvent.click(within(entry as Element as HTMLElement).getByRole("button", { name: /operation history/i }));
+    expect(onOpenHistory).toHaveBeenCalledWith("history-partial-2");
+  });
+
+  it("keeps the rollback route off when nothing was actually written", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    // 一项都没落 → 没有需要回退的东西；即使执行器给了记录 id 也不许放出回退入口
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-zero-2",
+      historyId: "history-zero-2",
+      error: "Nacos returned 403: accessKeyId can't be null",
+      progress: { completedWrites: 0, totalWrites: 1, failedIndex: 1, failedRef: "public/DEFAULT_GROUP/common.yml" },
+    });
+
+    const onOpenHistory = vi.fn();
+    renderView(entryPayload, [sourceConn, safeTargetConn], onOpenHistory);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    await waitFor(() => expect(document.querySelector(".apply-partial-write")).not.toBeNull());
+    expect(document.querySelector(".apply-rollback-entry")).toBeNull();
+    expect(onOpenHistory).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rollback route off when the failed run gives no history record id", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    // 真落了内容、但执行器没给记录 id（旧数据 / 异常出口）：同样不许摆一颗点了没反应的按钮
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-partial-3",
+      error: "write failed: HTTP 500 on app.yaml",
+      progress: { completedWrites: 1, totalWrites: 2, failedIndex: 2, failedRef: "public/DEFAULT_GROUP/app.yaml" },
+    });
+
+    const onOpenHistory = vi.fn();
+    renderView(entryPayload, [sourceConn, safeTargetConn], onOpenHistory);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    await waitFor(() => expect(document.querySelector(".apply-partial-write")).not.toBeNull());
+    expect(document.querySelector(".apply-rollback-entry")).toBeNull();
+    expect(onOpenHistory).not.toHaveBeenCalled();
   });
 
   it("keeps the partial-write notice off the screen when execution gives no progress", async () => {

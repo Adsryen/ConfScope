@@ -8085,6 +8085,27 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.6;
 }
 
+/* 半截写入的回退出口（轮66 WP-2）：紧贴上面那条黄色提示，视觉上是同一段结论的续句，
+   但必须是提示块之外的兄弟节点——那块带 aria-live，把按钮塞进去会被读屏重播一遍。
+   按钮 24px 高（轮44 R88 的最小命中高度口径），说明文字跟在按钮后一行排，窄行自动折。 */
+.apply-rollback-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.apply-rollback-entry .btn {
+  min-height: 24px;
+}
+
+.apply-rollback-entry-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .apply-execution-notice {
   padding: 8px 10px;
   color: var(--green);

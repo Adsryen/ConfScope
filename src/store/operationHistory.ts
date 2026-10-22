@@ -34,6 +34,20 @@ export interface OperationPlanSummary {
   targetLabel: string;
 }
 
+/**
+ * 本次执行覆盖的配置位置：用户勾选执行的那一组项（轮66 R66-WP9）。
+ *
+ * 回退/晋升的作用范围必须以它为准：planId 指向的是完整计划，用户执行时只勾选了一部分，
+ * 没勾选项既没被备份也不该被回退——否则回退计划会把它们判成删除。
+ * 老记录没有这个字段，读到时按 undefined 处理（回退退到备份快照覆盖范围）。
+ */
+export interface AppliedConfigLocation {
+  namespace: string;
+  group: string;
+  dataId: string;
+  key?: string;
+}
+
 /** 操作记录 */
 export interface OperationRecord {
   id: string;
@@ -59,6 +73,7 @@ export interface OperationRecord {
   planId?: string; // ApplyPlan 快照 ID
   planSummary?: OperationPlanSummary; // ApplyPlan 展示摘要
   backupSnapshotId?: string; // 写入前备份快照 ID
+  appliedLocations?: AppliedConfigLocation[]; // 本次执行覆盖的配置位置（回退/晋升的作用范围）
   backupSnapshotName?: string; // 写入前备份快照名称
   taskId?: string; // 任务中心 ID
   sourceConnectionId?: string; // 应用源连接 ID
@@ -142,6 +157,26 @@ function normalizeOperationPlanSummary(value: unknown): OperationPlanSummary | u
   return { scope, total, create, overwrite, delete: deleted, skip, parseError, blocked, sourceLabel, targetLabel };
 }
 
+/** 位置清单读盘校验：缺字段的条目丢掉，整体不是数组当作没有这个字段。 */
+function normalizeAppliedLocations(value: unknown): AppliedConfigLocation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const locations: AppliedConfigLocation[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const raw = entry as Partial<AppliedConfigLocation>;
+    const dataId = stringValue(raw.dataId);
+    const group = stringValue(raw.group);
+    if (!dataId || group === undefined) continue;
+    locations.push({
+      namespace: stringValue(raw.namespace) ?? "public",
+      group,
+      dataId,
+      key: stringValue(raw.key),
+    });
+  }
+  return locations;
+}
+
 function normalizeOperationRecord(value: unknown): OperationRecord | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Partial<OperationRecord>;
@@ -179,6 +214,7 @@ function normalizeOperationRecord(value: unknown): OperationRecord | null {
     planId: stringValue(raw.planId),
     planSummary: normalizeOperationPlanSummary(raw.planSummary),
     backupSnapshotId: stringValue(raw.backupSnapshotId),
+    appliedLocations: normalizeAppliedLocations(raw.appliedLocations),
     backupSnapshotName: stringValue(raw.backupSnapshotName),
     taskId: stringValue(raw.taskId),
     sourceConnectionId: stringValue(raw.sourceConnectionId),
