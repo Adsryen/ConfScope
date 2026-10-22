@@ -2,6 +2,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"path/filepath"
 
 	"confscope/internal/app"
 	"confscope/internal/portabledata"
@@ -20,6 +22,13 @@ var assets embed.FS
 // main 启动 Wails 桌面应用并绑定 Go 后端服务。
 func main() {
 	appInstance := app.NewApp()
+	// 先把「数据落在哪个目录、命中哪一档、为什么」写进日志：
+	// 用户看不到数据时第一手证据是日志，不是猜（轮62 验收 3）。
+	if layout, layoutErr := portabledata.LayoutFor(mustExePath()); layoutErr == nil {
+		portabledata.LogRuntimeLayout(layout)
+	} else {
+		println("Resolve runtime layout error:", layoutErr.Error())
+	}
 	webviewDataPath, err := portabledata.PrepareWebviewData()
 	if err != nil {
 		println("Prepare portable data error:", err.Error())
@@ -53,4 +62,15 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+}
+
+// mustExePath 取当前可执行文件路径；取不到时退回占位路径，
+// 让解析链仍能给出「exe 同级 ConfScopeData」这一档而不是整体失败。
+func mustExePath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		println("Get executable path error:", err.Error())
+		return filepath.Join(".", "ConfScope")
+	}
+	return exePath
 }

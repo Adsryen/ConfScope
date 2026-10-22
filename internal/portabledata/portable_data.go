@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const DataDirName = "ConfScopeData"
@@ -59,7 +58,7 @@ func PrepareWebviewDataFor(exePath string, appData string) (string, error) {
 		return target, fmt.Errorf("create portable webview data directory: %w", err)
 	}
 	for _, source := range legacyWebviewUserDataPaths(appData) {
-		if samePath(source, target) || !hasDirectoryEntries(source) {
+		if !migratableSource(source, target) {
 			continue
 		}
 		if err := copyDirectory(source, target); err != nil {
@@ -87,20 +86,13 @@ func preparePortableDirectoryFromLegacy(target string, source string, label stri
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return target, fmt.Errorf("create portable %s directory: %w", label, err)
 	}
-	if samePath(source, target) || !hasDirectoryEntries(source) {
+	if !migratableSource(source, target) {
 		return target, nil
 	}
 	if err := copyDirectory(source, target); err != nil {
 		return target, fmt.Errorf("migrate legacy %s from %s: %w", label, source, err)
 	}
 	return target, nil
-}
-
-func DataRootFor(exePath string) string {
-	if configuredRoot := strings.TrimSpace(os.Getenv(DataDirEnvName)); configuredRoot != "" {
-		return filepath.Clean(configuredRoot)
-	}
-	return filepath.Join(filepath.Dir(exePath), DataDirName)
 }
 
 func legacyWebviewUserDataPaths(appData string) []string {
@@ -133,6 +125,17 @@ func hasDirectoryEntries(path string) bool {
 	return err == nil && len(entries) > 0
 }
 
+// migratableSource 判候选旧目录能不能作为 target 的迁移源：
+// 既不能相同，也不能是 target 的祖先——祖先会被 WalkDir 拷进自己的子目录里，
+// 形成递归自拷（legacyWebviewUserDataPaths 的第 3 个候选 %APPDATA%\ConfScope
+// 就是这种形状，一旦数据根落在它下面就会引爆）。
+func migratableSource(source string, target string) bool {
+	if samePath(source, target) || isAncestorDir(source, target) {
+		return false
+	}
+	return hasDirectoryEntries(source)
+}
+
 func samePath(a string, b string) bool {
 	absA, errA := filepath.Abs(a)
 	absB, errB := filepath.Abs(b)
@@ -143,9 +146,29 @@ func samePath(a string, b string) bool {
 }
 
 func copyDirectory(source string, target string) error {
+	return copyDirectoryExcluding(source, target, defaultCopyExcludes())
+}
+
+// defaultCopyExcludes 是随数据根一起搬时必须跳过的运行时契约文件：
+// 指针文件在 OS 配置目录、安装标记在 exe 同级，都不属于用户数据。
+func defaultCopyExcludes() map[string]bool {
+	return map[string]bool{
+		PointerFileName:          true,
+		InstallMarkerFileName:    true,
+		MigrationJournalFileName: true,
+	}
+}
+
+func copyDirectoryExcluding(source string, target string, exclude map[string]bool) error {
+	if isAncestorDir(source, target) || isAncestorDir(target, source) {
+		return fmt.Errorf("拒绝递归复制：源目录 %s 与目标目录 %s 互相包含", source, target)
+	}
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if entry != nil && exclude != nil && !entry.IsDir() && exclude[entry.Name()] {
+			return nil
 		}
 		rel, err := filepath.Rel(source, path)
 		if err != nil {

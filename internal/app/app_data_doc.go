@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	appDataDocDirName       = "app-data"
-	appDataDocFileName      = "confscope-data.json"
 	appDataDocSchemaVersion = 2
 	appDataDocCorruptSuffix = ".corrupt-"
 )
@@ -44,8 +42,10 @@ type AppDataDocumentStatus struct {
 	Error         string           `json:"error"`
 }
 
+// appDataDocPath 是 portabledata.MainDataDocPath 的本地别名：
+// 主数据文件在数据根内的相对位置只在 portabledata 声明一次（轮62 R1）。
 func appDataDocPath(dataRoot string) string {
-	return filepath.Join(dataRoot, appDataDocDirName, appDataDocFileName)
+	return portabledata.MainDataDocPath(dataRoot)
 }
 
 func (a *App) appDataRoot() (string, error) {

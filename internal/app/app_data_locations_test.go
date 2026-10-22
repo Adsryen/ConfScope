@@ -37,6 +37,7 @@ func TestGetDataLocationsWithEnvOverride(t *testing.T) {
 		dataLocKeySnapshots:      filepath.Join(root, portabledata.SnapshotDirName),
 		dataLocKeyRecoveryPoints: filepath.Join(root, portabledata.AppDataRecoveryPointDirName),
 		dataLocKeyAudit:          filepath.Join(root, auditTrailFileNameForTest()),
+		dataLocKeyLogs:           filepath.Join(root, portabledata.LogsDirName),
 	}
 	for _, e := range locs.Entries {
 		byKey[e.Key] = true
@@ -62,6 +63,28 @@ func TestGetDataLocationsWithEnvOverride(t *testing.T) {
 	}
 	if exists[dataLocKeySnapshots] || exists[dataLocKeyRecoveryPoints] {
 		t.Errorf("expected snapshots/recoveryPoints to be absent: %v", exists)
+	}
+
+	// 轮62：只读面板也要能自证运行形态与命中档位。
+	if locs.Source != string(portabledata.RootSourceEnv) {
+		t.Errorf("source = %q, want %q", locs.Source, portabledata.RootSourceEnv)
+	}
+	switch locs.Mode {
+	case string(portabledata.RuntimeModePortable), string(portabledata.RuntimeModeInstalled):
+	default:
+		t.Errorf("mode = %q, want portable|installed", locs.Mode)
+	}
+}
+
+func TestGetDataLocationsExposesRuntimeLayoutNotes(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(portabledata.DataDirEnvName, root)
+	locs := (&App{}).GetDataLocations()
+	if locs.Notes == nil {
+		t.Fatal("notes 必须是空切片而不是 nil，前端直接 map 才不炸")
+	}
+	if locs.DataRoot != root {
+		t.Fatalf("dataRoot = %q, want %q", locs.DataRoot, root)
 	}
 }
 

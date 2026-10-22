@@ -154,6 +154,9 @@ func TestPreparePortableAppDataRecoveryPointDataCopiesLegacyWhenTargetIsEmpty(t 
 	root := t.TempDir()
 	exePath := filepath.Join(root, "portable", "ConfScope.exe")
 	homeDir := filepath.Join(root, "Users", "tester")
+	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll exe dir: %v", err)
+	}
 	legacyFile := filepath.Join(homeDir, ".confscope", "app-data-recovery-points", "recovery.csbackup")
 	if err := os.MkdirAll(filepath.Dir(legacyFile), 0o755); err != nil {
 		t.Fatalf("MkdirAll legacy recovery point: %v", err)

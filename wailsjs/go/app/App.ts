@@ -134,6 +134,13 @@ type GoApp = {
   // 数据位置（设置页展示，可打开文件管理器定位）
   GetDataLocations(): Promise<DataLocations>;
   OpenDataFolder(key: string): Promise<void>;
+  // 数据根运行形态与换根迁移（轮62）
+  GetRuntimeLayout(): Promise<RuntimeLayoutInfo>;
+  SelectDataRootDirectory(): Promise<string>;
+  PlanDataRootMigration(target: string): Promise<DataRootMigrationPlan>;
+  MigrateDataRoot(target: string): Promise<DataRootMigrationResult>;
+  CheckDataRootRollback(): Promise<DataRootRollbackStatus>;
+  RollbackDataRoot(): Promise<DataRootMigrationResult>;
 };
 
 export interface DataLocationEntry {
@@ -146,6 +153,67 @@ export interface DataLocationEntry {
 export interface DataLocations {
   dataRoot: string;
   entries: DataLocationEntry[];
+  mode: string;
+  source: string;
+  notes: string[];
+}
+
+export interface RuntimeLayoutInfo {
+  mode: string;
+  dataRoot: string;
+  source: string;
+  exeDir: string;
+  exeDirWritable: boolean;
+  pointerPath: string;
+  previousRoot: string;
+  osDataDir: string;
+  notes: string[];
+  error: string;
+}
+
+export interface DataRootMigrationPlan {
+  source: string;
+  target: string;
+  mode: string;
+  itemCount: number;
+  totalBytes: number;
+  hasSourceData: boolean;
+  resumable: boolean;
+  reusedItems: number;
+  warnings: string[];
+  requiresRestart: boolean;
+  valid: boolean;
+  error: string;
+}
+
+export interface DataRootMigrationResult {
+  source: string;
+  target: string;
+  itemsCopied: number;
+  itemsReused: number;
+  pointerPath: string;
+  migratedMarker: string;
+  requiresRestart: boolean;
+  restartReason: string;
+  notes: string[];
+  error: string;
+}
+
+export interface MainDataDocSummary {
+  exists: boolean;
+  path: string;
+  savedAt: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface DataRootRollbackStatus {
+  available: boolean;
+  currentRoot: string;
+  previousRoot: string;
+  currentDoc: MainDataDocSummary;
+  previousDoc: MainDataDocSummary;
+  reason: string;
 }
 
 export interface CredentialStorePoCResult {
@@ -399,6 +467,14 @@ export const SaveAppDataDocument = (document: AppDataDocument) => app().SaveAppD
 // 数据位置
 export const GetDataLocations = () => app().GetDataLocations();
 export const OpenDataFolder = (key: string) => app().OpenDataFolder(key);
+
+// 数据根运行形态与换根迁移
+export const GetRuntimeLayout = () => app().GetRuntimeLayout();
+export const SelectDataRootDirectory = () => app().SelectDataRootDirectory();
+export const PlanDataRootMigration = (target: string) => app().PlanDataRootMigration(target);
+export const MigrateDataRoot = (target: string) => app().MigrateDataRoot(target);
+export const CheckDataRootRollback = () => app().CheckDataRootRollback();
+export const RollbackDataRoot = () => app().RollbackDataRoot();
 
 export const TestSnapshotWebDAV = (target: any) => app().TestSnapshotWebDAV(target);
 

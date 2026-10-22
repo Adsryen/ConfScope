@@ -20,6 +20,7 @@ const (
 	dataLocKeySnapshots      = "snapshots"
 	dataLocKeyRecoveryPoints = "recoveryPoints"
 	dataLocKeyAudit          = "audit"
+	dataLocKeyLogs           = "logs"
 )
 
 // DataLocationEntry 是设置页展示的一条数据位置。
@@ -31,9 +32,15 @@ type DataLocationEntry struct {
 }
 
 // DataLocations 是本机数据位置清单（路径解析与展示语义均由 Go 侧负责）。
+//
+// mode/source/notes 是轮62 附加字段：老前端只读 entries/dataRoot，多出来不影响；
+// 新前端据此告诉用户「现在是便携还是安装形态、数据根命中哪一档」。
 type DataLocations struct {
 	DataRoot string              `json:"dataRoot"`
 	Entries  []DataLocationEntry `json:"entries"`
+	Mode     string              `json:"mode"`
+	Source   string              `json:"source"`
+	Notes    []string            `json:"notes"`
 }
 
 func dataLocationEntry(key, path string, isFile bool) DataLocationEntry {
@@ -47,6 +54,7 @@ func (a *App) GetDataLocations() DataLocations {
 	if err != nil {
 		return DataLocations{}
 	}
+	layout := a.GetRuntimeLayout()
 	auditDir := auditDataDir()
 	entries := []DataLocationEntry{
 		dataLocationEntry(dataLocKeyDataRoot, root, false),
@@ -58,7 +66,17 @@ func (a *App) GetDataLocations() DataLocations {
 	if auditDir != "" {
 		entries = append(entries, dataLocationEntry(dataLocKeyAudit, filepath.Join(auditDir, audit.TrailFileName), true))
 	}
-	return DataLocations{DataRoot: root, Entries: entries}
+	// 换根判据的自证据：data-root.log 在解析出根之后才出现，未创建时按「不存在」展示。
+	if root != "" {
+		entries = append(entries, dataLocationEntry(dataLocKeyLogs, filepath.Join(root, portabledata.LogsDirName), false))
+	}
+	return DataLocations{
+		DataRoot: root,
+		Entries:  entries,
+		Mode:     layout.Mode,
+		Source:   layout.Source,
+		Notes:    nonNilStrings(layout.Notes),
+	}
 }
 
 // OpenDataFolder 在系统文件管理器中打开指定数据位置（目录直接打开，文件在目录中定位）。
