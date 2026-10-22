@@ -76,6 +76,22 @@ export function stripComments(text: string): string {
   return out.join("");
 }
 
+/**
+ * 单个文件要不要进静态扫描（`sourceFiles()` 的判据，摊出来才能被用例直接验）。
+ *
+ * `locales` 那条例外是路径级的，交给调用方按 rel 过滤；其余只看文件名。
+ */
+export function isScannedSourceName(name: string): boolean {
+  if (!/\.(ts|tsx)$/.test(name)) return false;
+  if (/\.(test|spec)\.(ts|tsx)$/.test(name)) return false;
+  // Syncthing 的冲突副本（<name>.sync-conflict-<日期>-<设备>）。
+  // 它的后缀仍是 .tsx，但不是 `.test.tsx` 收尾，上面那条排除判据抓不到它，
+  // 于是整份旧代码会被当成源码扫进守卫里，报出一堆「源码里有旧句式」的假红
+  // （轮66 实测：另一台设备把旧仓库同步过来时一次性塞进 59 份，tsc 也被判红）。
+  if (name.includes(".sync-conflict-")) return false;
+  return true;
+}
+
 /** src 下参与扫描的源码文件（相对 PROJECT_ROOT 的路径），排除测试与 locales。 */
 export function sourceFiles(): string[] {
   const walk = (dir: string, acc: string[]): string[] => {
@@ -85,8 +101,7 @@ export function sourceFiles(): string[] {
         walk(rel, acc);
         continue;
       }
-      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
-      if (/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) continue;
+      if (!isScannedSourceName(entry.name)) continue;
       if (rel.startsWith("src/locales/")) continue;
       acc.push(rel);
     }
