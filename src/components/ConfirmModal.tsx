@@ -13,6 +13,11 @@ interface Props {
   onConfirm: () => void;
   onCancel: () => void;
   /**
+   * 正文下的补充要点（如迁移条目数、体积、是否需重启、旧位置保留说明）。
+   * 用途是把「确认前必须看到的事实」结构化摆出来，而不是一整段话糊在 message 里。
+   */
+  details?: string[];
+  /**
    * 宿主页面是否在前台。配置浏览被保活隐藏时，弹层虽然看不见，
    * 但仍会在 Esc 分层注册表里排在高位，并把焦点陷阱伸到其他模式的界面上，
    * 等于替其他模式吃掉按键。传 false 交出这两条职责。
@@ -21,7 +26,7 @@ interface Props {
 }
 
 /** 通用确认弹框(无需输入,用于「放弃未保存修改」等)。 */
-export default function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, onConfirm, onCancel, active = true }: Props) {
+export default function ConfirmModal({ title, message, details, confirmLabel, cancelLabel, danger, onConfirm, onCancel, active = true }: Props) {
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -54,6 +59,13 @@ export default function ConfirmModal({ title, message, confirmLabel, cancelLabel
           <p id={messageId} className="confirm-msg">
             {message}
           </p>
+          {details && details.length > 0 && (
+            <ul className="confirm-details">
+              {details.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="modal-footer">
           {/* 危险动作默认焦点落在「取消」：误按回车只会离开，不会丢数据。 */}

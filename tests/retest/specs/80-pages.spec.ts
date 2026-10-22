@@ -1,6 +1,7 @@
 import { test, expect } from "./retestTest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
+import { RETEST_DATA_ROOT_BASE, setRetestSelectDataRootTarget } from "../bridge/retestBinding";
 import { loadRetestState } from "../state";
 import { navigate, dismissStartupDialog } from "./ui";
 
@@ -225,4 +226,67 @@ test("T-PG-05 设置页: 开发者清理缓存（localStorage + audit-trail）",
   expect(text).not.toContain("cleanup-probe");
 
   await page.screenshot({ path: "results/pg05-clear-cache.png", fullPage: true });
+});
+
+// T-PG-06: 设置页·数据位置：运行形态可见 + 换根迁移/回退（桥内替身，轮62）
+// 为什么要真机跑：Go 侧的解析档位、复制校验、指针写入都有单测，但「设置页有没有把
+// 档位讲清楚、迁移确认后要不要重启、回退入口什么时候出现」只有浏览器里才对得上。
+// 桥里的数据根是内存替身（不碰任何真实目录），文件复制由 internal/portabledata 的单测负责。
+test("T-PG-06 设置页: 数据位置换根迁移与回退", async ({ page, retest }) => {
+  await installRetestBridge(page, retest);
+  setRetestSelectDataRootTarget(`${RETEST_DATA_ROOT_BASE}-moved`);
+
+  await page.goto("/");
+  await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
+  await dismissStartupDialog(page);
+  await navigate(page, "设置");
+  await expect(page.locator(".settings-page")).toBeVisible({ timeout: 15_000 });
+
+  const panel = page.locator("#settings-data-locations");
+  await panel.scrollIntoViewIfNeeded();
+  // ① 运行形态与命中档位必须写在界面上（出问题时第一件要看的就是它）
+  await expect(panel.locator(".settings-data-root-row")).toBeVisible({ timeout: 10_000 });
+  await expect(panel.getByText("便携版（数据随程序目录走）")).toBeVisible();
+  await expect(panel.getByText("环境变量 CONFSCOPE_DATA_DIR")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "更改位置…" })).toBeVisible();
+  // 还没有旧位置：不提供回退入口
+  await expect(panel.getByRole("button", { name: "回退到旧位置" })).toHaveCount(0);
+
+  // ② 更改位置 → 确认框必须摆出「从哪到哪 / 复制多少 / 旧位置不删 / 要重启」
+  await panel.getByRole("button", { name: "更改位置…" }).click();
+  const dialog = page.locator(".modal");
+  await expect(dialog).toBeVisible({ timeout: 10_000 });
+  await expect(dialog.getByText(`从 ${RETEST_DATA_ROOT_BASE} 复制到 ${RETEST_DATA_ROOT_BASE}-moved`)).toBeVisible();
+  await expect(dialog.getByText(/待复制 5 个文件/)).toBeVisible();
+  await expect(dialog.getByText(/旧位置的数据不删除/)).toBeVisible();
+  await expect(dialog.getByText(/需要重启一次应用/)).toBeVisible();
+  await expect(panel.locator(".test-msg.warn")).toHaveCount(0);
+  await dialog.locator(".modal-footer .btn-primary").click({ timeout: 10_000 });
+
+  // ③ 迁移写完指针：出现待重启横幅（不是成功绿），列表与档位跟着变
+  await expect(panel.locator(".test-msg.warn")).toBeVisible({ timeout: 10_000 });
+  await expect(panel.locator(".test-msg.warn")).toContainText("重启");
+  await expect(panel.locator(".settings-setting-row").filter({ hasText: "数据根目录" })).toContainText(`${RETEST_DATA_ROOT_BASE}-moved`);
+  await expect(panel.getByText("应用内选定的数据位置")).toBeVisible();
+  await expect(panel.getByText(new RegExp(`MIGRATED:${RETEST_DATA_ROOT_BASE}`))).toBeVisible();
+  // 有了旧位置，回退入口才出现
+  await expect(panel.getByRole("button", { name: "回退到旧位置" })).toBeVisible();
+
+  // ④ 回退：只改指针，确认框要把两侧主数据文件摆出来供人比对
+  await panel.getByRole("button", { name: "回退到旧位置" }).click();
+  await expect(dialog.getByText(/只把数据位置指回上一次的位置/)).toBeVisible();
+  await expect(dialog.getByText(/当前位置主数据文件/)).toBeVisible();
+  await expect(dialog.getByText(/旧位置主数据文件/)).toBeVisible();
+  await dialog.locator(".modal-footer .btn-primary").click({ timeout: 10_000 });
+  await expect(panel.locator(".settings-setting-row").filter({ hasText: "数据根目录" })).toContainText(RETEST_DATA_ROOT_BASE, { timeout: 10_000 });
+  await expect(panel.getByRole("button", { name: "回退到旧位置" })).toHaveCount(0);
+
+  // ⑤ 目标非法（选了当前根）：Go 侧判据拒绝，原地报错且不弹确认框、更不写指针
+  setRetestSelectDataRootTarget(RETEST_DATA_ROOT_BASE);
+  await panel.getByRole("button", { name: "更改位置…" }).click();
+  await expect(panel.locator(".inline-error")).toBeVisible({ timeout: 10_000 });
+  await expect(panel.locator(".inline-error")).toContainText("目标目录与当前数据根相同");
+  await expect(page.locator(".modal")).toHaveCount(0);
+
+  await page.screenshot({ path: "results/pg06-data-root.png", fullPage: true });
 });

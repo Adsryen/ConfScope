@@ -30,6 +30,9 @@ const WIRED = /<InlineError\b/g;
 const SHORT_HINT_SITES = [
   "src/components/SettingsView.tsx|settings.openFolderFailed",
   "src/components/SettingsView.tsx|settings.clearCacheFailed",
+  // 轮62：换根失败与「打开文件夹失败」同一族——都是一句带原因的短提示，
+  // 套 InlineError 会凭空多出复制按钮和详情区；就地显示在面板底部即可读。
+  "src/components/SettingsView.tsx|settings.dataRootActionFailed",
 ];
 /** 裸容器块：用来区分「短提示」与「又手抄了一整套结构」。 */
 const RAW_BLOCK = /<div className="inline-error[^"]*" role="alert">([\s\S]{0,400}?)<\/div>/g;

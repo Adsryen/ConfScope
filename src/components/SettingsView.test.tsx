@@ -47,6 +47,13 @@ vi.mock("../store/operationHistory", async (importOriginal) => {
 const dataLocMocks = vi.hoisted(() => ({
   GetDataLocations: vi.fn(),
   OpenDataFolder: vi.fn(),
+  // 轮62：数据根运行形态与换根迁移
+  GetRuntimeLayout: vi.fn(),
+  SelectDataRootDirectory: vi.fn(),
+  PlanDataRootMigration: vi.fn(),
+  MigrateDataRoot: vi.fn(),
+  CheckDataRootRollback: vi.fn(),
+  RollbackDataRoot: vi.fn(),
 }));
 
 vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
@@ -55,6 +62,12 @@ vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
     ...actual,
     GetDataLocations: dataLocMocks.GetDataLocations,
     OpenDataFolder: dataLocMocks.OpenDataFolder,
+    GetRuntimeLayout: dataLocMocks.GetRuntimeLayout,
+    SelectDataRootDirectory: dataLocMocks.SelectDataRootDirectory,
+    PlanDataRootMigration: dataLocMocks.PlanDataRootMigration,
+    MigrateDataRoot: dataLocMocks.MigrateDataRoot,
+    CheckDataRootRollback: dataLocMocks.CheckDataRootRollback,
+    RollbackDataRoot: dataLocMocks.RollbackDataRoot,
   };
 });
 
@@ -68,6 +81,67 @@ const testDataLocations = {
     { key: "recoveryPoints", path: "/tmp/confscope-retest/data/app-data-recovery-points", isFile: false, exists: false },
     { key: "audit", path: "/tmp/confscope-retest/data/audit-trail.jsonl", isFile: true, exists: true },
   ],
+};
+
+// 轮62：运行形态替身。installed + os-user-data 是最常出问题的组合（deb/rpm 装完写不出主数据文件），
+// 所以默认让它命中「系统用户数据目录」这一档，界面必须把判定依据讲清楚。
+const testRuntimeLayout = {
+  mode: "installed",
+  dataRoot: "/home/ryen/.local/share/confscope",
+  source: "os-user-data",
+  exeDir: "/usr/bin",
+  exeDirWritable: false,
+  pointerPath: "",
+  previousRoot: "",
+  osDataDir: "/home/ryen/.local/share/confscope",
+  notes: [],
+  error: "",
+};
+
+const testRollbackUnavailable = {
+  available: false,
+  currentRoot: testRuntimeLayout.dataRoot,
+  previousRoot: "",
+  currentDoc: { exists: true, path: `${testRuntimeLayout.dataRoot}/app-data/confscope-data.json`, savedAt: "", sizeBytes: 0, sha256: "" },
+  previousDoc: { exists: false, path: "", savedAt: "", sizeBytes: 0, sha256: "" },
+  reason: "no previous root",
+};
+
+const testRollbackAvailable = {
+  ...testRollbackUnavailable,
+  available: true,
+  previousRoot: "/opt/confscope/ConfScopeData",
+  currentDoc: { exists: true, path: `${testRuntimeLayout.dataRoot}/app-data/confscope-data.json`, savedAt: "2026-10-22T01:02:03.000Z", sizeBytes: 2048, sha256: "a" },
+  previousDoc: { exists: true, path: "/opt/confscope/ConfScopeData/app-data/confscope-data.json", savedAt: "2026-10-01T08:00:00.000Z", sizeBytes: 4096, sha256: "b" },
+  reason: "",
+};
+
+const testMigrationPlan = {
+  source: testRuntimeLayout.dataRoot,
+  target: "/mnt/bigdisk/confscope-data",
+  mode: "installed",
+  itemCount: 5,
+  totalBytes: 1572864,
+  hasSourceData: true,
+  resumable: false,
+  reusedItems: 0,
+  warnings: [],
+  requiresRestart: true,
+  valid: true,
+  error: "",
+};
+
+const testMigrationResult = {
+  source: testMigrationPlan.source,
+  target: testMigrationPlan.target,
+  itemsCopied: 5,
+  itemsReused: 0,
+  pointerPath: "/home/ryen/.config/ConfScope/data-root.json",
+  migratedMarker: `${testMigrationPlan.source}/MIGRATED-20261022T010203.marker`,
+  requiresRestart: true,
+  restartReason: "Data location moved. Restart to apply it.",
+  notes: [],
+  error: "",
 };
 
 class MemoryStorage {
@@ -101,6 +175,18 @@ describe("SettingsView", () => {
     dataLocMocks.GetDataLocations.mockResolvedValue(testDataLocations);
     dataLocMocks.OpenDataFolder.mockReset();
     dataLocMocks.OpenDataFolder.mockResolvedValue(undefined);
+    dataLocMocks.GetRuntimeLayout.mockReset();
+    dataLocMocks.GetRuntimeLayout.mockResolvedValue(testRuntimeLayout);
+    dataLocMocks.CheckDataRootRollback.mockReset();
+    dataLocMocks.CheckDataRootRollback.mockResolvedValue(testRollbackUnavailable);
+    dataLocMocks.SelectDataRootDirectory.mockReset();
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue("");
+    dataLocMocks.PlanDataRootMigration.mockReset();
+    dataLocMocks.PlanDataRootMigration.mockResolvedValue(testMigrationPlan);
+    dataLocMocks.MigrateDataRoot.mockReset();
+    dataLocMocks.MigrateDataRoot.mockResolvedValue(testMigrationResult);
+    dataLocMocks.RollbackDataRoot.mockReset();
+    dataLocMocks.RollbackDataRoot.mockResolvedValue(testMigrationResult);
     historyMocks.clearOperationHistory.mockReset();
     cacheMocks.clearAppCache.mockReset();
     cacheMocks.clearAppCache.mockResolvedValue(0);
@@ -297,4 +383,107 @@ describe("SettingsView", () => {
     expect(await screen.findByText("Data locations are not available in this environment.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
   });
+  // ── 轮62：数据根运行形态与换根迁移 ──
+  it("shows runtime mode, decided source, and notes in the data locations panel", async () => {
+    dataLocMocks.GetRuntimeLayout.mockResolvedValue({ ...testRuntimeLayout, notes: ["指针文件已损坏，已隔离为 data-root.json.corrupt-1"] });
+    renderSettings("en-US");
+
+    expect(await screen.findByText("Runtime Mode & Data Root")).toBeInTheDocument();
+    expect(screen.getByText("Installed (data belongs to the current user)")).toBeInTheDocument();
+    expect(screen.getByText("OS per-user data directory")).toBeInTheDocument();
+    expect(screen.getByText(/指针文件已损坏/)).toBeInTheDocument();
+    // 无旧位置时不提供回退入口（点了也没有东西可退）
+    expect(screen.queryByRole("button", { name: "Back to previous location" })).not.toBeInTheDocument();
+  });
+
+  it("asks for a target, shows the plan, and only migrates after confirming", async () => {
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue(testMigrationPlan.target);
+    renderSettings("en-US");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
+
+    const dialog = await screen.findByRole("dialog");
+    // 确认框必须把「从哪到哪、复制多少、旧位置留不留、要不要重启」摆出来
+    expect(within(dialog).getByText(`From ${testMigrationPlan.source} to ${testMigrationPlan.target}`)).toBeInTheDocument();
+    expect(within(dialog).getByText(/5 files to copy/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/The old location is kept/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/One restart is required/)).toBeInTheDocument();
+    expect(dataLocMocks.MigrateDataRoot).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(dataLocMocks.MigrateDataRoot).toHaveBeenCalledWith(testMigrationPlan.target));
+    expect(await screen.findByText("Data location moved. Restart to apply it.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does nothing when the directory picker is cancelled", async () => {
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue("");
+    renderSettings("en-US");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
+
+    await waitFor(() => expect(dataLocMocks.SelectDataRootDirectory).toHaveBeenCalled());
+    expect(dataLocMocks.PlanDataRootMigration).not.toHaveBeenCalled();
+    expect(dataLocMocks.MigrateDataRoot).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the plan rejection inline instead of opening a confirm dialog", async () => {
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue("/home/ryen/.local/share");
+    dataLocMocks.PlanDataRootMigration.mockResolvedValue({ ...testMigrationPlan, valid: false, error: "目标位置在当前数据位置内部，会造成递归嵌套" });
+    renderSettings("en-US");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Operation failed: 目标位置在当前数据位置内部，会造成递归嵌套");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(dataLocMocks.MigrateDataRoot).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failed migration without pretending the move succeeded", async () => {
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue(testMigrationPlan.target);
+    dataLocMocks.MigrateDataRoot.mockResolvedValue({ ...testMigrationResult, requiresRestart: false, restartReason: "", error: "目标位置已存在另一份主数据文件" });
+    renderSettings("en-US");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("目标位置已存在另一份主数据文件");
+    expect(screen.queryByText(testMigrationResult.restartReason)).not.toBeInTheDocument();
+  });
+
+  it("rolls back to the previous root with both data file summaries shown", async () => {
+    dataLocMocks.CheckDataRootRollback.mockResolvedValue(testRollbackAvailable);
+    renderSettings("en-US");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Back to previous location" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Only points the data root back/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Main data file here/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Main data file there/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(dataLocMocks.RollbackDataRoot).toHaveBeenCalled());
+    expect(await screen.findByText(/Restart to apply it|需要重启/)).toBeInTheDocument();
+  });
+
+  it("degrades without crashing when the runtime layout binding is absent", async () => {
+    // 旧 Go 二进制没有新方法：调用同步抛错，界面仍要能列出数据位置
+    dataLocMocks.GetRuntimeLayout.mockImplementation(() => {
+      throw new Error("GetRuntimeLayout is not a function");
+    });
+    dataLocMocks.CheckDataRootRollback.mockImplementation(() => {
+      throw new Error("CheckDataRootRollback is not a function");
+    });
+    renderSettings("en-US");
+
+    expect(await screen.findByText("Data root")).toBeInTheDocument();
+    expect(screen.queryByText("Runtime Mode & Data Root")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change location..." })).not.toBeInTheDocument();
+  });
+
 });

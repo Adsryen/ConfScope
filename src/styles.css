@@ -1007,6 +1007,38 @@ textarea {
   flex-shrink: 0;
 }
 
+/* 轮62：运行形态行。判定依据与备注可能很长（迁移备注带路径），所以整行顶对齐，
+   右侧按钮保持不被挤走——和 R80 那条数据文件行同一口径。 */
+.settings-setting-row.settings-data-root-row {
+  align-items: flex-start;
+}
+
+.settings-data-root-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.settings-data-root-facts code {
+  color: var(--text-hi);
+  font-size: 12px;
+}
+
+.settings-data-root-notes {
+  margin: 6px 0 0;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .settings-proxy-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5078,6 +5110,11 @@ button.diff-workflow-step-btn:hover {
 .test-msg.err {
   background: var(--diff-del-bg);
 }
+/* 「写完但还没生效」的提示档：绿色是成功，琥珀色是待重启，两者不能混。 */
+.test-msg.warn {
+  color: var(--amber-h);
+  background: rgba(215, 186, 125, 0.12);
+}
 .test-trace {
   display: flex;
   flex-direction: column;
@@ -5386,6 +5423,22 @@ button.diff-workflow-step-btn:hover {
   font-size: 13px;
   color: var(--text);
   line-height: 1.6;
+}
+/* ConfirmModal 正文下的事实清单：比正文小一档、左侧竖线收拢，避免和主提示抢视觉层级。 */
+.confirm-details {
+  margin: 8px 0 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+}
+.confirm-details li {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  word-break: break-all;
 }
 .alert-list {
   margin: 0;
@@ -8510,6 +8563,8 @@ button.diff-workflow-step-btn:hover {
 
 /* 设置页：数据目录路径（报错时第一个要被抄走的东西） */
 .settings-data-location-path,
+.settings-data-root-facts,
+.settings-data-root-notes,
 
 /* 消息中心正文 */
 .message-text {

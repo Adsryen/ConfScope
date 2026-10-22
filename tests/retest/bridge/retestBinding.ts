@@ -46,6 +46,191 @@ function appDataDocStatus(document: Record<string, unknown> | null) {
   };
 }
 
+// ── 数据根运行形态与换根迁移（轮62）的桥内替身 ─────────────────────────────
+// 为什么放内存而不是落盘：同 appDataDoc，retest 禁止写正式数据目录（数据纪律第 3 条）；
+// 真实的路径解析五档优先级、逐文件校验复制、指针与 marker 写入由
+// internal/portabledata/{runtime_layout,data_root_migration}_test.go 负责，桥里只镜像
+// 「前端能不能调通这套绑定 + 迁移确认后 root 是否真的换了 + 是否需要重启」这条 UI 链路。
+// 校验判据与 Go 侧 planDataRootMigration 保持最小镜像（空/相对/同根/互相包含）。
+export const RETEST_DATA_ROOT_BASE = "/tmp/confscope-retest/data";
+
+interface RetestDataRootState {
+  root: string;
+  previousRoot: string;
+  mode: string;
+  source: string;
+  migrations: number;
+  rollbacks: number;
+}
+
+let dataRootState: RetestDataRootState = {
+  root: RETEST_DATA_ROOT_BASE,
+  previousRoot: "",
+  mode: "portable",
+  source: "env",
+  migrations: 0,
+  rollbacks: 0,
+};
+
+// 目录选择器在 retest 里没有原生弹层：用例通过 setRetestSelectDataRootTarget 预置「用户会选哪个目录」，
+// 未预置时返回一个固定的新根（够跑通「换根 → 需重启 → 回退」这条主链路）。
+let pendingDataRootTarget: string | null = null;
+
+export function setRetestSelectDataRootTarget(target: string | null): void {
+  pendingDataRootTarget = target;
+}
+
+export function resetRetestDataRoot(): void {
+  pendingDataRootTarget = null;
+  dataRootState = {
+    root: RETEST_DATA_ROOT_BASE,
+    previousRoot: "",
+    mode: "portable",
+    source: "env",
+    migrations: 0,
+    rollbacks: 0,
+  };
+}
+
+export function retestDataRootSnapshot(): RetestDataRootState {
+  return { ...dataRootState };
+}
+
+function retestMainDocSummary(root: string) {
+  return {
+    exists: root !== "",
+    path: `${root}/app-data/confscope-data.json`,
+    savedAt: root === "" ? "" : new Date().toISOString(),
+    sizeBytes: root === "" ? 0 : 2048,
+    sha256: root === "" ? "" : `retest-sha-${root}`,
+  };
+}
+
+function retestRuntimeLayout() {
+  return {
+    mode: dataRootState.mode,
+    dataRoot: dataRootState.root,
+    source: dataRootState.source,
+    exeDir: "/tmp/confscope-retest/exe",
+    exeDirWritable: true,
+    pointerPath: `${dataRootState.root}/data-root.json`,
+    previousRoot: dataRootState.previousRoot,
+    osDataDir: "/tmp/confscope-retest/os-data",
+    notes: dataRootState.previousRoot ? [`MIGRATED:${dataRootState.previousRoot}`] : [],
+    error: "",
+  };
+}
+
+/** 与 Go 侧 buildMigrationPlan 同判据的最小镜像（含同样的中文措辞），只拦 UI 最容易踩中的四种。 */
+function retestValidateDataRootTarget(target: string): string {
+  const trimmed = target.trim().replace(/[\\/]+$/, "");
+  if (trimmed === "") return "请先选择目标目录";
+  if (!trimmed.startsWith("/")) return `目标必须是绝对路径：${trimmed}`;
+  if (trimmed === dataRootState.root) return `目标目录与当前数据根相同：${trimmed}`;
+  if (trimmed.startsWith(`${dataRootState.root}/`)) return `目标不能在当前数据根内部，否则会把目录拷进自己的子目录：${trimmed}`;
+  if (dataRootState.root.startsWith(`${trimmed}/`)) return `当前数据根在目标目录内部，换根后路径会自我包含：${trimmed}`;
+  return "";
+}
+
+function retestPlanDataRootMigration(target: string) {
+  const trimmed = target.trim().replace(/[\\/]+$/, "");
+  const err = retestValidateDataRootTarget(trimmed);
+  return {
+    source: dataRootState.root,
+    target: trimmed,
+    mode: dataRootState.mode,
+    itemCount: err ? 0 : 5,
+    totalBytes: err ? 0 : 20480,
+    hasSourceData: err ? false : true,
+    resumable: false,
+    reusedItems: 0,
+    warnings: ["复测桥为内存替身，不会真实复制文件"],
+    requiresRestart: true,
+    valid: err === "",
+    error: err,
+  };
+}
+
+function retestMigrateDataRoot(target: string) {
+  const plan = retestPlanDataRootMigration(target);
+  if (!plan.valid) {
+    return {
+      source: plan.source,
+      target: plan.target,
+      itemsCopied: 0,
+      itemsReused: 0,
+      pointerPath: "",
+      migratedMarker: "",
+      requiresRestart: false,
+      restartReason: "",
+      notes: [],
+      error: plan.error,
+    };
+  }
+  dataRootState.previousRoot = plan.source;
+  dataRootState.root = plan.target;
+  dataRootState.source = "user-choice";
+  dataRootState.migrations += 1;
+  return {
+    source: plan.source,
+    target: plan.target,
+    itemsCopied: plan.itemCount,
+    itemsReused: 0,
+    pointerPath: `${plan.target}/data-root.json`,
+    migratedMarker: `${plan.source}/MIGRATED-retest.marker`,
+    requiresRestart: true,
+    restartReason: "数据位置已切换，需重启应用后新位置才会生效",
+    notes: [`已在旧位置留下迁移标记：${plan.source}`],
+    error: "",
+  };
+}
+
+function retestCheckDataRootRollback() {
+  const available = dataRootState.previousRoot !== "";
+  return {
+    available,
+    currentRoot: dataRootState.root,
+    previousRoot: dataRootState.previousRoot,
+    currentDoc: retestMainDocSummary(dataRootState.root),
+    previousDoc: retestMainDocSummary(available ? dataRootState.previousRoot : ""),
+    reason: available ? "" : "没有可回退的旧数据位置",
+  };
+}
+
+function retestRollbackDataRoot() {
+  if (dataRootState.previousRoot === "") {
+    return {
+      source: dataRootState.root,
+      target: "",
+      itemsCopied: 0,
+      itemsReused: 0,
+      pointerPath: "",
+      migratedMarker: "",
+      requiresRestart: false,
+      restartReason: "",
+      notes: [],
+      error: "没有可回退的旧数据位置",
+    };
+  }
+  const from = dataRootState.root;
+  dataRootState.root = dataRootState.previousRoot;
+  dataRootState.previousRoot = "";
+  dataRootState.source = "user-choice";
+  dataRootState.rollbacks += 1;
+  return {
+    source: from,
+    target: dataRootState.root,
+    itemsCopied: 0,
+    itemsReused: 0,
+    pointerPath: `${dataRootState.root}/data-root.json`,
+    migratedMarker: "",
+    requiresRestart: true,
+    restartReason: "已回退到旧数据位置，需重启应用后生效",
+    notes: [],
+    error: "",
+  };
+}
+
 function endpointFor(baseUrl: string): NacosEndpoint | null {
   const state = loadRetestState();
   for (const key of ["a", "b"] as const) {
@@ -889,27 +1074,45 @@ export function createRetestInvoke(): RetestInvoke {
         return null;
       }
       case "GetDataLocations": {
-        // 模拟 Go GetDataLocations：retest 数据根固定路径（仅展示用）
-        const root = "/tmp/confscope-retest/data";
+        // 模拟 Go GetDataLocations：数据根来自桥内替身（迁移后会变，见 dataRootState）
+        const root = dataRootState.root;
         const entry = (key: string, path: string, isFile: boolean) => ({ key, path, isFile, exists: true });
         return {
           dataRoot: root,
+          mode: dataRootState.mode,
+          source: dataRootState.source,
+          notes: dataRootState.previousRoot ? [`MIGRATED:${dataRootState.previousRoot}`] : [],
           entries: [
             entry("dataRoot", root, false),
             entry("appDataFile", `${root}/app-data/confscope-data.json`, true),
             entry("webview", `${root}/webview`, false),
             entry("snapshots", `${root}/snapshots`, false),
             entry("recoveryPoints", `${root}/app-data-recovery-points`, false),
+            entry("logs", `${root}/logs`, false),
             entry("audit", `${root}/audit-trail.jsonl`, true),
           ],
         };
       }
       case "OpenDataFolder":
         // retest 无文件管理器：仅校验白名单 key，模拟成功
-        if (!["dataRoot", "appDataFile", "webview", "snapshots", "recoveryPoints", "audit"].includes(String(args[0]))) {
+        if (!["dataRoot", "appDataFile", "webview", "snapshots", "recoveryPoints", "logs", "audit"].includes(String(args[0]))) {
           throw new Error(`unknown data location key: ${args[0]}`);
         }
         return null;
+      case "GetRuntimeLayout":
+        // 模拟 Go GetRuntimeLayout：运行形态/命中档位/当前数据根
+        return retestRuntimeLayout();
+      case "SelectDataRootDirectory":
+        // retest 无原生目录选择器：返回用例预置的目录，没预置就给一个固定的新根
+        return pendingDataRootTarget ?? `${RETEST_DATA_ROOT_BASE}-moved`;
+      case "PlanDataRootMigration":
+        return retestPlanDataRootMigration(String(args[0] ?? ""));
+      case "MigrateDataRoot":
+        return retestMigrateDataRoot(String(args[0] ?? ""));
+      case "CheckDataRootRollback":
+        return retestCheckDataRootRollback();
+      case "RollbackDataRoot":
+        return retestRollbackDataRoot();
       case "GetAppDataDocument":
         appDataDoc.gets += 1;
         return appDataDocStatus(appDataDoc.document);

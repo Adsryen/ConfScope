@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, resetRetestAppDataDoc, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
+import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -67,11 +67,20 @@ const WAILS_METHODS = [
   "ClearAuditTrail",
   "GetDataLocations",
   "OpenDataFolder",
+  // 数据根运行形态与换根迁移（轮62）：桥内内存替身，见 retestBinding
+  "GetRuntimeLayout",
+  "SelectDataRootDirectory",
+  "PlanDataRootMigration",
+  "MigrateDataRoot",
+  "CheckDataRootRollback",
+  "RollbackDataRoot",
 ] as const;
 
 export async function installRetestBridge(page: Page, state: RetestState): Promise<void> {
   // 每个用例一份干净的文档替身（等价于空数据目录），避免同 worker 内用例互相喂数据。
   resetRetestAppDataDoc();
+  // 数据根替身同样每用例重置：避免上一个用例迁移后的 root 泄漏到下一个用例。
+  resetRetestDataRoot();
   // 审计落盘恢复（node 侧）：retestBinding 为浏览器兼容不再直接 import node:fs，
   // 改由本 node 专属文件注入 sink，写回 /tmp 的 audit-trail.jsonl（只追加）。
   setRetestAuditLineSink((line) => {

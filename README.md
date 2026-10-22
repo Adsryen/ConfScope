@@ -105,7 +105,7 @@ ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置�
 | 备份恢复 | 应用数据 `.csbackup` 本地/WebDAV 备份恢复；配置快照 `.cssnapshot` 本地/WebDAV 同步 |
 | SSH 隧道 | 可复用 SSH profile，覆盖 SSH 连接测试与 Nacos over SSH |
 | 凭据安全 | Windows 下小凭据迁移到系统凭据库，数据文件里只存 `secretRef`；备份包仍支持跨机器迁移 |
-| 数据位置 | 便携数据目录（`CONFSCOPE_DATA_DIR`），设置页直接展示各类数据落在哪里 |
+| 数据位置 | 数据根按运行形态解析（便携版随程序目录走，安装版落系统用户数据目录），设置页展示命中档位与各类数据落点，并支持换根迁移与回退 |
 | 应用更新 | 应用内检查更新，更新说明与 GitHub Release 正文同源（都取自 CHANGELOG 同一段落） |
 | 界面 | 中文/英文文案，环境名推断出统一色调档（dev/test/staging/canary/prod/local），键盘可达性与读屏语义持续收敛 |
 | 真实环境测试 | Docker Nacos/Apollo/Consul/WebDAV/SSH fixture + Windows native Wails smoke 覆盖主流程 |
@@ -114,8 +114,13 @@ ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置�
 
 - 主数据落在 `[数据根]/app-data/confscope-data.json`：Go 侧原子写并读回校验，文件损坏时隔离为
   `.corrupt-<时间戳>` 并回退浏览器缓存重新水合，不会静默覆盖。浏览器 localStorage 只是热缓存。
-- 数据根默认在可执行文件旁的 `ConfScopeData`，可用环境变量 `CONFSCOPE_DATA_DIR` 重定向；
-  设置页展示连接、备份、快照、审计日志各自的落点。
+- 数据根由一条五档解析链决定，顺序固定：`CONFSCOPE_DATA_DIR` 显式覆盖 → 应用内选定的位置 →
+  安装包写入的 `install.json` 标记（安装态落系统用户数据目录）→ 采纳已有数据的旧根（老便携用户
+  零迁移）→ 按可写性兜底（exe 目录可写则随程序走，只读目录则落系统用户数据目录）。便携 zip 不带
+  安装标记，行为与今天完全一致。
+- 设置页「数据位置」展示当前运行形态、命中档位与判定依据，以及主数据、缓存、快照、备份、日志、
+  审计各自的落点；可以在这里换数据根：先预览将复制几项多大，确认后复制并逐项校验、最后才写位置
+  指针，旧根原样保留不删（只落 `MIGRATED-` 标记），换根或回退都需重启一次应用才全量生效。
 - 会话审计日志在 `[数据根]/audit-trail.jsonl`，「清理缓存」只清缓存并从主数据文件重新水合，
   不修改数据文件。
 - `.csbackup` 是换电脑的主路径：备份包加密，恢复时写回可用的本地数据；包密码一次性输入，不持久化。
@@ -240,7 +245,7 @@ ConfScope/
 │   ├── export/                      # CSV/JSON 导出与脱敏
 │   ├── appbackup/ snapshotwebdav/   # .csbackup 加密备份 / .cssnapshot WebDAV 同步
 │   ├── securestore/                 # Windows 凭据库封装
-│   ├── portabledata/                # 便携数据目录与 CONFSCOPE_DATA_DIR
+│   ├── portabledata/                # 数据根五档解析链与换根迁移（唯一事实源）
 │   ├── ssh/                         # SSH 连接与隧道
 │   ├── task/                        # 长任务与进度
 │   └── updatecheck/                 # 应用内检查更新

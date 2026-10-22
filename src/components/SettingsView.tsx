@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearAppCache } from "../lib/cacheCleanup";
 import { formatDateTime } from "../lib/formatDateTime";
+import { formatBytes } from "../lib/formatBytes";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
 import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
@@ -11,11 +12,33 @@ import AppDataBackupPanel from "./AppDataBackupPanel";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
-import { GetDataLocations, OpenDataFolder, type DataLocations } from "../../wailsjs/go/app/App";
+import {
+  CheckDataRootRollback,
+  GetDataLocations,
+  GetRuntimeLayout,
+  MigrateDataRoot,
+  OpenDataFolder,
+  PlanDataRootMigration,
+  RollbackDataRoot,
+  SelectDataRootDirectory,
+  type DataLocations,
+  type DataRootRollbackStatus,
+  type RuntimeLayoutInfo,
+} from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
 import { scrollBehavior } from "../lib/motion";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+
+/** 数据根命中档位的展示标签键（Go 侧 RootSource 的稳定字面量，逐档一条 i18n）。 */
+const DATA_ROOT_SOURCE_KEYS: Record<string, string> = {
+  env: "settings.dataRootSourceEnv",
+  "user-choice": "settings.dataRootSourceUserChoice",
+  "install-marker": "settings.dataRootSourceInstallMarker",
+  "legacy-adoption": "settings.dataRootSourceLegacyAdoption",
+  "exe-adjacent": "settings.dataRootSourceExeAdjacent",
+  "os-user-data": "settings.dataRootSourceOsUserData",
+};
 
 export default function SettingsView() {
   const { t } = useTranslation();
@@ -37,10 +60,22 @@ export default function SettingsView() {
   const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
   const [openFolderBusy, setOpenFolderBusy] = useState(false);
   const [openFolderError, setOpenFolderError] = useState("");
-  // 危险操作二次确认：走应用内 ConfirmModal，不用原生 confirm()
-  // （WebView2 里原生对话框跟随系统浅色、破坏主题，且同步阻塞主线程）。
-  const [pendingConfirm, setPendingConfirm] = useState<{ title: string; message: string; action: () => void } | null>(null);
-  const askConfirm = (title: string, message: string, action: () => void) => setPendingConfirm({ title, message, action });
+  // 轮62：数据根运行形态（便携/安装 + 命中哪一档解析规则）与换根迁移状态。
+  const [runtimeLayout, setRuntimeLayout] = useState<RuntimeLayoutInfo | null>(null);
+  const [rollbackStatus, setRollbackStatus] = useState<DataRootRollbackStatus | null>(null);
+  const [dataRootBusy, setDataRootBusy] = useState(false);
+  const [dataRootError, setDataRootError] = useState("");
+  // 迁移/回退写完指针后的「需重启」提示：数据目录没真的换，别让界面假装已经换好了。
+  const [restartNotice, setRestartNotice] = useState("");
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    title: string;
+    message: string;
+    details?: string[];
+    danger?: boolean;
+    action: () => void;
+  } | null>(null);
+  const askConfirm = (title: string, message: string, action: () => void, details?: string[], danger = true) =>
+    setPendingConfirm({ title, message, details, danger, action });
   const panelsRef = useRef<HTMLDivElement | null>(null);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -91,25 +126,46 @@ export default function SettingsView() {
     };
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    try {
-      GetDataLocations()
-        .then((locs) => {
-          if (alive && locs && Array.isArray(locs.entries) && locs.entries.length > 0) {
-            setDataLocations(locs);
-          }
-        })
-        .catch(() => {
-          // 绑定缺失（降级环境）时区块显示不可用提示，不报错
-        });
-    } catch {
-      // 绑定对象缺失该方法（同步异常，如前后端版本错配）同样降级，不整树崩溃
-    }
-    return () => {
-      alive = false;
+  // 数据位置、运行形态、能否回退三者同源（都跟着当前数据根走），所以一起刷一次：
+  // 迁移或回退写完指针后只刷列表，界面上会出现「新列表 + 旧回退入口」这种自相矛盾的组合。
+  // 降级环境（没有原生绑定）逐个吞掉异常，区块自行显示不可用提示，不整树崩溃。
+  const surfacesAliveRef = useRef(true);
+  const refreshDataSurfaces = useCallback(() => {
+    // 每个绑定各自包一次 try：降级构建里 window.go 整个没有、旧 Go 二进制里根本没有新方法，
+    // 这两种都是同步抛异常（.catch 接不住），缺哪个就只让哪块信息缺席，不能带走整个设置页。
+    const safeCall = <T,>(call: () => Promise<T>, apply: (value: T) => void) => {
+      try {
+        void call()
+          .then((value) => {
+            if (surfacesAliveRef.current && value) apply(value);
+          })
+          .catch(() => undefined);
+      } catch {
+        // 绑定缺失：对应区块保持未加载态，按不可用降级显示
+      }
     };
+    safeCall(GetDataLocations, (locs) => {
+      if (Array.isArray(locs.entries) && locs.entries.length > 0) {
+        setDataLocations(locs);
+      }
+    });
+    safeCall(GetRuntimeLayout, (info) => {
+      if (!info.error) {
+        setRuntimeLayout(info);
+      }
+    });
+    safeCall(CheckDataRootRollback, (status) => {
+      setRollbackStatus(status);
+    });
   }, []);
+
+  useEffect(() => {
+    surfacesAliveRef.current = true;
+    refreshDataSurfaces();
+    return () => {
+      surfacesAliveRef.current = false;
+    };
+  }, [refreshDataSurfaces]);
 
   const scrollToSection = (id: string) => {
     const container = panelsRef.current;
@@ -147,6 +203,117 @@ export default function SettingsView() {
       setOpenFolderError(errorText(e));
     } finally {
       setOpenFolderBusy(false);
+    }
+  };
+
+  // 换数据根：选目录 → 让 Go 侧算一次迁移计划 → 把计划里的事实摆进确认框 → 用户点「应用」才真动。
+  // 分两步是因为「目标位置能不能迁」必须在原生侧判（同根、互相包含、已有另一份数据、不可写），
+  // 前端自己拼规则就会出现两边判得不一样；判据只在 Go 侧一处。
+  const runChangeDataRoot = async () => {
+    if (dataRootBusy) return;
+    setDataRootError("");
+    setDataRootBusy(true);
+    try {
+      const target = ((await SelectDataRootDirectory()) ?? "").trim();
+      // 取消目录选择：原生绑定返回空串，此时什么都不改，也不报「目标位置为空」。
+      if (target === "") return;
+      const plan = await PlanDataRootMigration(target);
+      if (!plan) {
+        setDataRootError(t("settings.dataRootPlanUnavailable"));
+        return;
+      }
+      if (!plan.valid) {
+        setDataRootError(plan.error || t("settings.dataRootPlanUnavailable"));
+        return;
+      }
+      const details = [
+        t("settings.dataRootMigrateFromTo", { from: plan.source, to: plan.target }),
+        t("settings.dataRootMigrateItems", {
+          count: plan.itemCount,
+          size: formatBytes(plan.totalBytes),
+        }),
+        t("settings.dataRootMigrateKeepsSource"),
+        t("settings.dataRootMigrateRestartNote"),
+      ];
+      if (plan.reusedItems > 0) {
+        details.push(t("settings.dataRootMigrateReused", { count: plan.reusedItems }));
+      }
+      for (const warning of plan.warnings ?? []) {
+        details.push(warning);
+      }
+      askConfirm(t("settings.dataRootMigrateTitle"), t("settings.dataRootMigrateMessage"), () => {
+        void runMigrateDataRoot(plan.target);
+      }, details, false);
+    } catch (e) {
+      setDataRootError(errorText(e));
+    } finally {
+      setDataRootBusy(false);
+    }
+  };
+
+  const runMigrateDataRoot = async (target: string) => {
+    setDataRootError("");
+    setDataRootBusy(true);
+    try {
+      const result = await MigrateDataRoot(target);
+      if (!result) {
+        setDataRootError(t("settings.dataRootPlanUnavailable"));
+        return;
+      }
+      if (result.error) {
+        // Go 侧失败时不写指针也不删旧根，界面回到「还没迁」的状态，只把原因显示出来。
+        setDataRootError(result.error);
+        return;
+      }
+      setRestartNotice(result.restartReason || t("settings.dataRootRestartPending"));
+      refreshDataSurfaces();
+    } catch (e) {
+      setDataRootError(errorText(e));
+    } finally {
+      setDataRootBusy(false);
+    }
+  };
+
+  // 回退只改指针、不碰任何数据，所以两侧的主数据文件摘要都要摆出来：
+  // 用户真正要比的是「旧位置那份是不是我还认的那份」。
+  const askRollbackDataRoot = () => {
+    if (!rollbackStatus?.available) return;
+    const details = [
+      t("settings.dataRootRollbackFromTo", { from: rollbackStatus.currentRoot, to: rollbackStatus.previousRoot }),
+      t("settings.dataRootRollbackCurrentDoc", {
+        savedAt: formatDateTime(rollbackStatus.currentDoc.savedAt) || t("settings.dataRootDocNone"),
+        size: formatBytes(rollbackStatus.currentDoc.sizeBytes),
+      }),
+      t("settings.dataRootRollbackPreviousDoc", {
+        savedAt: formatDateTime(rollbackStatus.previousDoc.savedAt) || t("settings.dataRootDocNone"),
+        size: formatBytes(rollbackStatus.previousDoc.sizeBytes),
+      }),
+      t("settings.dataRootRollbackRestartNote"),
+    ];
+    askConfirm(t("settings.dataRootRollbackTitle"), t("settings.dataRootRollbackMessage"), () => {
+      void runRollbackDataRoot();
+    }, details, false);
+  };
+
+  const runRollbackDataRoot = async () => {
+    setDataRootError("");
+    setDataRootBusy(true);
+    try {
+      const result = await RollbackDataRoot();
+      if (!result) {
+        setDataRootError(t("settings.dataRootPlanUnavailable"));
+        return;
+      }
+      if (result.error) {
+        setDataRootError(result.error);
+        return;
+      }
+      setRestartNotice(result.restartReason || t("settings.dataRootRestartPending"));
+      refreshDataSurfaces();
+    } catch (e) {
+      setDataRootError(errorText(e));
+    } finally {
+      setDataRootBusy(false);
     }
   };
 
@@ -346,6 +513,41 @@ export default function SettingsView() {
               <h4>{t("settings.dataLocations")}</h4>
               <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
             </div>
+            {/* 运行形态：便携版跟着 exe 走、安装版落系统用户数据目录，出问题时第一件要看的就是
+                「它到底命中了哪一档解析规则」，所以档位、判定依据和备注都摆在这一层，不藏进 tooltip。 */}
+            {runtimeLayout && (
+              <div className="settings-setting-row settings-data-root-row">
+                <div>
+                  <strong>{t("settings.dataRootRuntime")}</strong>
+                  <div className="settings-data-root-facts">
+                    <span>
+                      {t("settings.dataRootMode")}：<code>{t(`settings.dataRootMode${runtimeLayout.mode.charAt(0).toUpperCase()}${runtimeLayout.mode.slice(1)}`)}</code>
+                    </span>
+                    <span>
+                      {t("settings.dataRootSource")}：
+                      <code>{t(DATA_ROOT_SOURCE_KEYS[runtimeLayout.source] ?? "settings.dataRootSourceUnknown")}</code>
+                    </span>
+                  </div>
+                  {(runtimeLayout.notes?.length ?? 0) > 0 && (
+                    <ul className="settings-data-root-notes">
+                      {runtimeLayout.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="settings-data-location-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={dataRootBusy} onClick={() => void runChangeDataRoot()}>
+                    {t("settings.dataRootChange")}
+                  </button>
+                  {rollbackStatus?.available && (
+                    <button type="button" className="btn btn-ghost btn-sm" disabled={dataRootBusy} onClick={askRollbackDataRoot}>
+                      {t("settings.dataRootRollback")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {dataLocations ? (
               <div className="settings-data-locations">
                 {dataLocations.entries.map((entry) => (
@@ -378,6 +580,16 @@ export default function SettingsView() {
               </div>
             ) : (
               <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>
+            )}
+            {restartNotice && (
+              <div className="test-msg warn" {...statusMessageProps("info")}>
+                <span className="test-msg-text">{restartNotice}</span>
+              </div>
+            )}
+            {dataRootError && (
+              <div className="inline-error" role="alert">
+                {t("settings.dataRootActionFailed", { error: dataRootError })}
+              </div>
             )}
             {openFolderError && (
               <div className="inline-error" role="alert">
@@ -422,7 +634,8 @@ export default function SettingsView() {
         <ConfirmModal
           title={pendingConfirm.title}
           message={pendingConfirm.message}
-          danger
+          details={pendingConfirm.details}
+          danger={pendingConfirm.danger !== false}
           onConfirm={() => {
             const action = pendingConfirm.action;
             setPendingConfirm(null);
