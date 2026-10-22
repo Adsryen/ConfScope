@@ -37,7 +37,11 @@ export default function DiffWorkflowCard({ currentStep, completed = false, onSte
   };
 
   return (
-    <nav className="diff-workflow-card" aria-label={t("diff.workflowTitle")}>
+    /* tabIndex={0}：窄视口下这一步条是横向滚动容器（轮66 WP-1），而「还没轮到」的步骤是纯 span，
+       键盘落点够不着——第一步时整条里一个可聚焦子孙都没有，Tab 一按就跨过去，第 5 步对键盘
+       用户等于不存在。容器自己可聚焦后横轴能滚到底。命名靠 nav 这个 landmark 自带的可访问名，
+       不再套 role="region"（那会把导航地标降级成正文区块）。 */
+    <nav className="diff-workflow-card" tabIndex={0} aria-label={t("diff.workflowTitle")}>
       <ol className="diff-workflow-steps">
         {WORKFLOW_STEP_IDS.map((step, index) => {
           const status = stepStatus(step);

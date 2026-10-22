@@ -116,6 +116,12 @@ const NON_PRE_REGISTRY: Record<string, { accessible: number; total: number }> = 
   // 单列差异正文：轮49 接查找条时从遗留名单提上来（关栏要把焦点还给这一层，
   // 少了 tabIndex={0} 那句 bodyRef.focus() 就是空操作，方向键 / PageUp 当场失效）
   "src/components/UnifiedDiff.tsx|udiff": { accessible: 1, total: 1 },
+  // 工作流步骤条：轮66 WP-1 让它在窄视口下横向可滚，本波补上「容器自己能被 Tab 到达」。
+  // accessible 记 0 不是「还没做」—— tabIndex={0} 已经补上，焦点环由下面的 FOCUS_RING_CLASSES 守住；
+  // 判定函数只认 role="region" 这一种命名方式，那是给裸 div/pre 这类隐式 generic 准备的（部分读屏会忽略
+  // 它们身上的 aria-label），而这里是 <nav>，导航地标自带可访问名，再套 role="region" 反而把地标降级成
+  // 正文区块。别为了凑成 1 去改角色。
+  "src/components/DiffWorkflowCard.tsx|diff-workflow-card": { accessible: 0, total: 1 },
 };
 
 /**
@@ -157,6 +163,16 @@ const LEGACY_NON_PRE_CLASSES = new Set([
   "ssh-manager-page",
   "ssh-profile-list",
 ]);
+
+/**
+ * 「靠地标自带可访问名」的滚动容器：判定函数只认 role="region"，认不出它们，登记表里只能记
+ * accessible: 0。这一格不是逃票口——它们必须自己带 tabIndex={0}，焦点环也必须画得出来，
+ * 两样都在这里钉死；哪天真的补上 role="region"，就把它挪回 NON_PRE_REGISTRY 的口径。
+ */
+const LANDMARK_SCROLLERS: Record<string, string> = {
+  // 轮66：窄视口下横向可滚的工作流步骤条，容器是 <nav>（导航地标自带名字，不该降级成 region）
+  "src/components/DiffWorkflowCard.tsx|diff-workflow-card": "nav",
+};
 
 function scanFile(relPath: string, stripped: string) {
   const preSites: Site[] = [];
@@ -211,6 +227,7 @@ const FOCUS_RING_CLASSES = [
   "match-side-scroll",
   "diff-body",
   "udiff",
+  "diff-workflow-card",
 ];
 
 /** 该类的 :focus-visible 里有没有真的画 outline（值为 none 等于没画）。 */
@@ -274,6 +291,22 @@ describe("只读滚动区必须能被键盘到达", () => {
       unregisteredKeys.length,
       "未登记的非 pre 滚动站点一条都没扫到，说明扫描又退回了「静默丢弃」"
     ).toBeGreaterThanOrEqual(LEGACY_NON_PRE_CLASSES.size);
+  });
+
+  it("地标命名的滚动容器必须自己可聚焦且画得出焦点环", () => {
+    const found = scanAll().otherSites;
+    for (const [key, landmarkTag] of Object.entries(LANDMARK_SCROLLERS)) {
+      const hits = found.filter((site) => site.id.split("|").slice(0, 2).join("|") === key);
+      expect(hits.length, `${key} 没在扫描里出现，登记表是僵尸`).toBe(1);
+      const site = hits[0];
+      expect(/tabIndex=\{0\}/.test(site.attrs), `${key} 丢了 tabIndex={0}，键盘又滚不动了`).toBe(true);
+      expect(site.tag, `${key} 的可访问名靠 <${landmarkTag}> 地标，换成别的元素要重新回答命名`).toBe(landmarkTag);
+      expect(site.accessible, `${key} 已经带上 role="region" 了，请改回 NON_PRE_REGISTRY 的 accessible 口径`).toBe(false);
+    }
+    const missingRing = Object.keys(LANDMARK_SCROLLERS)
+      .map((key) => key.split("|")[1])
+      .filter((cls) => !focusRingFor(cls));
+    expect(missingRing, `这些地标滚动区可达但不可见：${missingRing.join(", ")}`).toEqual([]);
   });
 
   it("aria-labelledby 指向的 id 在本文件真的挂上了", () => {

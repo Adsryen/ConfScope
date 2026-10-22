@@ -2863,8 +2863,16 @@ textarea {
   min-width: 0;
   padding: 2px 0;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
+  /* 只收横轴是不够的：守卫口径要求「自滚动容器显式声明 overscroll-behavior」，
+     一设 overflow-x:auto，纵轴的 visible 就按 auto 算，两轴都成了滚动轴，链式外溢同理。 */
+  overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+
+/* 步骤条现在是键盘落点（见 DiffWorkflowCard 的 tabIndex），能被 Tab 到达就得看得见。 */
+.diff-workflow-card:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
 }
 
 /* 步骤条本体不许再收缩：原来的 min-width:0 就是「宁可裁也不换行」的那道口子，
