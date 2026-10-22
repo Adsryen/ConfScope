@@ -113,7 +113,7 @@ func (c *Client) getTextOnce(baseURL, path string, query url.Values, accessToken
 		if attempt == 0 && shouldRetryWithNacosContext(baseURL, path, resp.StatusCode) {
 			continue
 		}
-		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text)), resp.StatusCode
+		return "", c.statusError(resp.StatusCode, req, text), resp.StatusCode
 	}
 	return "", fmt.Errorf("请求失败"), 404
 }
@@ -211,9 +211,18 @@ func (c *Client) sendFormOnce(method, baseURL, path string, query url.Values, fo
 		if attempt == 0 && shouldRetryWithNacosContext(baseURL, path, resp.StatusCode) {
 			continue
 		}
-		return "", fmt.Errorf("Nacos 返回 %d，请求 %s: %s", resp.StatusCode, requestPath(req), truncate(text)), resp.StatusCode
+		return "", c.statusError(resp.StatusCode, req, text), resp.StatusCode
 	}
 	return "", fmt.Errorf("请求失败"), 404
+}
+
+// statusError 把非 2xx 响应转成错误：403 且报文明显在要 AccessKey 时翻译成
+// 可执行动作（ErrAccessKeyRejected），其余照旧带上状态码、请求路径和响应体。
+func (c *Client) statusError(statusCode int, req *http.Request, body string) error {
+	if statusCode == http.StatusForbidden && asksForAccessKey(body) {
+		return fmt.Errorf("%w: %s（请求 %s）", ErrAccessKeyRejected, c.accessKeyAdvice(), requestPath(req))
+	}
+	return fmt.Errorf("Nacos 返回 %d，请求 %s: %s", statusCode, requestPath(req), truncate(body))
 }
 
 func readBody(resp *http.Response) (string, error) {

@@ -314,3 +314,142 @@ func TestNacosProviderGetsPublishesDeletesAndReadsHistory(t *testing.T) {
 		t.Fatalf("unexpected history detail: %+v", detail)
 	}
 }
+
+// ── 轮65 WP-A：签名判定改成「凭据驱动 + 一处事实源」 ──
+//
+// 真机 403（2026-10-22 第 5 步执行变更）的形态是：AK/SK 填在连接里，但
+// distribution/authType 两个下拉没配对 → 旧判据不签名 → 匿名请求 → 服务端把
+// "accessKeyId can't be null" 原文甩到界面。判据只能有一个，四个消费点共用。
+
+func TestNacosRequestSignRequested(t *testing.T) {
+	cases := []struct {
+		name    string
+		profile ConnectionProfile
+		want    bool
+	}{
+		{
+			name:    "声明 MSE + AK/SK，凭据为空（轮60 的报错通路）",
+			profile: ConnectionProfile{Distribution: DistributionAliyunMSE, AuthType: AuthAliyunAKSK},
+			want:    true,
+		},
+		{
+			name:    "声明 MSE + AK/SK，凭据齐全",
+			profile: ConnectionProfile{Distribution: DistributionAliyunMSE, AuthType: AuthAliyunAKSK, AccessKeyID: "ak", AccessKeySecret: "sk"},
+			want:    true,
+		},
+		{
+			name:    "没标记 MSE/AK-SK，但 AK/SK 都填了（真机 403 的形态）",
+			profile: ConnectionProfile{Distribution: DistributionOpenSource, AuthType: AuthNone, AccessKeyID: "ak", AccessKeySecret: "sk"},
+			want:    true,
+		},
+		{
+			name:    "只选了认证方式没选发行版，凭据齐全",
+			profile: ConnectionProfile{Distribution: DistributionOpenSource, AuthType: AuthAliyunAKSK, AccessKeyID: "ak", AccessKeySecret: "sk"},
+			want:    true,
+		},
+		{
+			name:    "只填 AccessKey 没填 SecretKey：签不出来，保持匿名",
+			profile: ConnectionProfile{AccessKeyID: "ak"},
+			want:    false,
+		},
+		{
+			name:    "凭据只剩空格：按没填处理",
+			profile: ConnectionProfile{AccessKeyID: "  ", AccessKeySecret: "\t"},
+			want:    false,
+		},
+		{
+			name:    "开源 Nacos 账号密码连接：不签名",
+			profile: ConnectionProfile{Distribution: DistributionOpenSource, AuthType: AuthNacosPassword},
+			want:    false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nacosRequestSignRequested(tc.profile); got != tc.want {
+				t.Fatalf("nacosRequestSignRequested = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNacosProviderSignsWithoutMSEMarkers(t *testing.T) {
+	server := newProviderIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/cs/configs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		// namespace/group 的归一与签名必须同一判据：public→空 tenant、空 group→DEFAULT_GROUP，
+		// 签名 resource 就得是实际发出去的那个 group。
+		if q.Get("tenant") != "" {
+			t.Fatalf("tenant = %q, want omitted/empty; query: %s", q.Get("tenant"), r.URL.RawQuery)
+		}
+		if q.Get("group") != "DEFAULT_GROUP" {
+			t.Fatalf("group = %q, want DEFAULT_GROUP; query: %s", q.Get("group"), r.URL.RawQuery)
+		}
+		if r.Header.Get("Spas-AccessKey") != "ak-test" {
+			t.Fatalf("missing Spas-AccessKey header: connection has AK/SK but is not marked MSE")
+		}
+		if r.Header.Get("Timestamp") == "" {
+			t.Fatalf("missing Timestamp header")
+		}
+		wantSignature := expectedProviderMSESignature("sk-test", "", "DEFAULT_GROUP", r.Header.Get("Timestamp"))
+		if r.Header.Get("Spas-Signature") != wantSignature {
+			t.Fatalf("Spas-Signature = %q, want %q", r.Header.Get("Spas-Signature"), wantSignature)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount":0,"pageNumber":1,"pagesAvailable":0,"pageItems":[]}`))
+	}))
+
+	p := NewNacosProvider(nacos.NewClient())
+	_, err := p.ListConfigs(ConnectionProfile{
+		ID:              "conn-unmarked-mse",
+		Provider:        ProviderNacos,
+		BaseURL:         server.URL,
+		APIVersion:      "v1",
+		Distribution:    DistributionOpenSource,
+		AuthType:        AuthNone,
+		AccessKeyID:     "ak-test",
+		AccessKeySecret: "sk-test",
+	}, ListConfigsRequest{
+		Namespace: "public",
+		Group:     "",
+		DataID:    "app",
+		PageNo:    1,
+		PageSize:  20,
+	})
+	if err != nil {
+		t.Fatalf("ListConfigs returned error: %v", err)
+	}
+}
+
+func TestNacosProviderTestsUnmarkedMSEConnectionWithConfigList(t *testing.T) {
+	var probed []string
+	server := newProviderIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probed = append(probed, r.URL.Path)
+		if r.Header.Get("Spas-AccessKey") != "ak-test" {
+			t.Fatalf("%s 没带 Spas-AccessKey：探活接口也必须走同一个签名判据", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"totalCount":0,"pageNumber":1,"pagesAvailable":0,"pageItems":[]}`))
+	}))
+
+	p := NewNacosProvider(nacos.NewClient())
+	if err := p.TestConnection(ConnectionProfile{
+		ID:              "conn-unmarked-mse",
+		Provider:        ProviderNacos,
+		BaseURL:         server.URL,
+		APIVersion:      "v1",
+		Distribution:    DistributionOpenSource,
+		AuthType:        AuthNone,
+		AccessKeyID:     "ak-test",
+		AccessKeySecret: "sk-test",
+	}); err != nil {
+		t.Fatalf("TestConnection returned error: %v", err)
+	}
+	for _, path := range probed {
+		if path == "/v1/console/namespaces" {
+			t.Fatal("带 AK/SK 的连接仍在探开源命名空间接口：TestConnection 没有和签名判据共用事实源")
+		}
+	}
+}

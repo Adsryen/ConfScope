@@ -27,6 +27,7 @@ import {
 import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
+import { nacosAuthUsesAccessKey, nacosRequestSignRequested } from "../lib/nacosSigning";
 import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
 import { effectiveProvider } from "../lib/configCapabilities";
 import { errorText } from "../lib/errorText";
@@ -258,7 +259,8 @@ const versionCache = new Map<string, ApiVersion>();
 /** 探测并缓存连接的 Nacos API 版本（v1=1.x/2.x，v3=3.x）。 */
 export async function getVersion(conn: Connection): Promise<ApiVersion> {
   if (conn.sourceType === "local-snapshot") return "v1";
-  if (conn.authType === "aliyun-aksk") return "v1";
+  // 走 AccessKey 的连接（含只填了 AK/SK 没配对下拉的真机形态）没有开源 v3 console 接口。
+  if (nacosAuthUsesAccessKey(conn)) return "v1";
   const hit = versionCache.get(conn.baseUrl);
   if (hit) return hit;
   const baseUrl = await resolveBaseUrl(conn);
@@ -510,7 +512,7 @@ export async function testConnection(conn: Connection): Promise<LoginResult> {
       await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, credentialConn.consulToken ?? "", ""));
       return { accessToken: "", tokenTtl: 0, globalAdmin: false };
     }
-    if (conn.authType === "aliyun-aksk") {
+    if (nacosAuthUsesAccessKey(conn)) {
       const apiVersion = await getVersion(conn);
       const baseUrl = await resolveBaseUrl(conn);
       await configCenterTestConnection(toConnectionProfile(credentialConn, baseUrl, "", apiVersion));
@@ -542,7 +544,7 @@ export async function listConfigs(
     const normalizedGroup =
       providerForConnection(conn) === "apollo" || providerForConnection(conn) === "consul"
         ? providerGroupForConnection(conn, group)
-        : conn.distribution === "aliyun-mse" && conn.authType === "aliyun-aksk" && !group
+        : !group && nacosRequestSignRequested(profile)
           ? "DEFAULT_GROUP"
           : group;
     const page = await configCenterListConfigs(profile, { namespace, dataId, group: normalizedGroup, pageNo, pageSize });

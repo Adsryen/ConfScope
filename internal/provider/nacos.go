@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"confscope/internal/nacos"
@@ -186,7 +187,8 @@ func (p *NacosProvider) GetHistoryDetail(profile ConnectionProfile, ref ConfigRe
 
 func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
 	client := p.clientFor(profile)
-	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK {
+	if nacosRequestSignRequested(profile) {
+		// 要签名的连接（阿里云 MSE）没有开源的 console 命名空间接口，探活只能走配置列表。
 		_, err := client.ListConfigs(profile.BaseURL, "", "v1", "", "", "DEFAULT_GROUP", 1, 1)
 		return err
 	}
@@ -194,30 +196,49 @@ func (p *NacosProvider) TestConnection(profile ConnectionProfile) error {
 	return err
 }
 
+// nacosRequestSignRequested 是「这个连接的请求要不要带阿里云 MSE（Spas）签名」的唯一判据。
+//
+// 命中任意一条即签名：
+//  1. 连接声明了「阿里云 MSE + AK/SK」。即使凭据还没填也要走签名通路——由 nacos 包在
+//     发请求前报 ErrMSEAuthMissing（轮60），不允许静默退化成匿名请求。
+//  2. 连接里 AccessKey/SecretKey 都填齐了。服务端要不要签名取决于请求里有没有
+//     AccessKey，不取决于用户把哪两个下拉配成了一对（2026-10-22 真机 403
+//     "accessKeyId can't be null" 就是这个形态：AK/SK 填了，标记没配）。
+//
+// namespace/group 的归一、探活走哪个接口、要不要挂签名，必须共用这一个判据：
+// 各写一处枚举比较，就会出现「签名的 resource 和实际发出去的参数不是同一个」，
+// 那是另一颗更难查的 403。
+func nacosRequestSignRequested(profile ConnectionProfile) bool {
+	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK {
+		return true
+	}
+	return strings.TrimSpace(profile.AccessKeyID) != "" && strings.TrimSpace(profile.AccessKeySecret) != ""
+}
+
 func (p *NacosProvider) clientFor(profile ConnectionProfile) *nacos.Client {
 	base := p.client
 	if profile.UseProxy {
 		base = nacos.NewClientWithProxy()
 	}
-	if profile.Distribution != DistributionAliyunMSE || profile.AuthType != AuthAliyunAKSK {
+	if !nacosRequestSignRequested(profile) {
 		return base
 	}
 	return base.WithMSEAuth(nacos.MSEAuth{
-		AccessKeyID:     profile.AccessKeyID,
-		AccessKeySecret: profile.AccessKeySecret,
-		SecurityToken:   profile.SecurityToken,
+		AccessKeyID:     strings.TrimSpace(profile.AccessKeyID),
+		AccessKeySecret: strings.TrimSpace(profile.AccessKeySecret),
+		SecurityToken:   strings.TrimSpace(profile.SecurityToken),
 	})
 }
 
 func normalizeMSERequestNamespace(profile ConnectionProfile, namespace string) string {
-	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK && namespace == "public" {
+	if nacosRequestSignRequested(profile) && namespace == "public" {
 		return ""
 	}
 	return namespace
 }
 
 func normalizeMSERequestGroup(profile ConnectionProfile, group string) string {
-	if profile.Distribution == DistributionAliyunMSE && profile.AuthType == AuthAliyunAKSK && group == "" {
+	if nacosRequestSignRequested(profile) && group == "" {
 		return "DEFAULT_GROUP"
 	}
 	return group
