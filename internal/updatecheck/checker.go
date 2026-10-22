@@ -24,6 +24,41 @@ import (
 
 const officialManifestURL = "https://github.com/Adsryen/ConfScope/releases/latest/download/update.json"
 
+// officialRepoReleasePrefix 是「本仓库 Release 产物」的公共地址前缀，
+// 从官方清单地址推导，避免仓库 slug 在两处各写一遍。
+var officialRepoReleasePrefix = func() string {
+	index := strings.Index(officialManifestURL, "/releases/")
+	if index < 0 {
+		return ""
+	}
+	return officialManifestURL[:index+len("/releases/")]
+}()
+
+// mirrorAssetURL 按「这次是命中哪个源才拿到清单的」改写产物下载地址。
+//
+// 内置镜像源的形态都是 <镜像前缀> + 官方清单地址，所以前缀能直接复用到产物上。
+// 改写只在三个条件都成立时发生：源是带前缀的镜像形态、产物确实指向本仓库 Release、
+// 产物地址还没被拼过前缀。sha256 永远沿用清单原值——镜像要是换了包，
+// 校验就会失败（fail closed），不会静默装上一个来路不明的包。
+func mirrorAssetURL(sourceURL, assetURL string) string {
+	if sourceURL == "" || assetURL == "" {
+		return assetURL
+	}
+	prefix := strings.TrimSuffix(sourceURL, officialManifestURL)
+	if prefix == "" || prefix == sourceURL {
+		// 官方源本身（没有前缀），或不是「<前缀>+官方清单」形态的自建源。
+		return assetURL
+	}
+	if officialRepoReleasePrefix == "" || !strings.HasPrefix(assetURL, officialRepoReleasePrefix) {
+		// 指向别处的产物地址，硬拼镜像前缀只会拼出一个 404。
+		return assetURL
+	}
+	if strings.HasPrefix(assetURL, prefix) {
+		return assetURL
+	}
+	return prefix + assetURL
+}
+
 var DefaultSources = []Source{
 	{Name: "GitHub 官方", URL: officialManifestURL},
 	{Name: "gh.llkk.cc 国内加速", URL: "https://gh.llkk.cc/" + officialManifestURL},
@@ -149,7 +184,9 @@ func Check(ctx context.Context, req Request) Result {
 		result.LatestVersion = manifest.Version
 		result.SourceName = source.Name
 		result.SourceURL = source.URL
-		result.DownloadURL = picked.Asset.DownloadURL
+		// 命中哪个源就从哪个源下载产物：以前只把清单取回来，产物仍是官方原址，
+		// 靠镜像才检查成功的用户点「下载并安装」照样连不上 GitHub。
+		result.DownloadURL = mirrorAssetURL(source.URL, picked.Asset.DownloadURL)
 		result.ReleaseNotes = manifest.Notes
 		result.PublishedAt = manifest.PublishedAt
 		result.SHA256 = picked.Asset.SHA256
@@ -161,7 +198,8 @@ func Check(ctx context.Context, req Request) Result {
 		result.Reason = picked.Reason
 		result.HasUpdate = CompareVersions(manifest.Version, current) > 0
 
-		if result.HasUpdate && !isHTTPS(picked.Asset.DownloadURL) {
+		if result.HasUpdate && !isHTTPS(result.DownloadURL) {
+			// 校验的是真正要下载的那条地址（可能被镜像前缀改写过），不是清单原值。
 			result.Error = "更新下载地址必须使用 HTTPS"
 		}
 		return result
