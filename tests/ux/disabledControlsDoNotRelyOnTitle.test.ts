@@ -22,6 +22,27 @@
  *
  * 扫描口径：只看标签头里的**字面属性**。`{...busyProps()}` 这类展开属性看不见（`disabled` 由
  * helper 决定时，title 通常也是同一处 helper 给的，属于运行时语义，静态守卫不猜）。
+ *
+ * ## 轮66 复验：别再用「包一层 span」重做这件事
+ *
+ * 轮66 有人提议把全站 14 处 `disabled` + `title` 的 title 挪到包裹按钮的 `.btn-guard` 上，
+ * 以为这样鼠标就收得到解释。用今天的 Chromium 重跑了同一支探针（`/tmp/cs/tooltip-probe.cjs`，
+ * xvfb + headed chromium 149.0.7827.55，`import -window root` 抓屏比 md5，正反序各一轮）：
+ * | 构造 | 命中节点 | 提示 |
+ * |---|---|---|
+ * | `disabled` 按钮自带 title | 按钮 | 不弹 |
+ * | `.btn-guard` 式 `span[title]` 紧贴包 disabled 按钮 | 按钮 | 不弹 |
+ * | 带 padding 的 `span[title]` 包 disabled 按钮（鼠标落在按钮中心） | 按钮 | 不弹 |
+ * | 同上 + 子元素 `pointer-events:none`（鼠标落在 padding 里） | **带 title 的 span** | 仍不弹 |
+ * | `aria-disabled="true"` + title | 按钮 | 弹 |
+ * | 启用按钮 + title | 按钮 | 弹 |
+ * ⇒ 挪 title 是**把死代码从一个口袋搬进另一个口袋**：命中节点已经是带 title 的祖先了都不弹，
+ * 说明 Blink 在这条路径上放弃得比「跳过 disabled 自身」更彻底。要真让用户看到理由，
+ * 只有两条活路（本仓已有先例）：理由写进按钮文字/紧邻可见文案（`ApplyPlanView` 的
+ * `apply-blocker-hint` 清单就是这么做的），或摘掉原生 `disabled` 改 `aria-disabled` 并给
+ * handler 补早退闸。因此轮66 **撤销**了那批 wrapper 重构，只保留途中查出来的真缺陷：
+ * 两颗只有 `⟳` 符号的按钮（`DiffView` 重新匹配 / `ConfigBrowser` 刷新内容）补了 `aria-label`
+ * ——按 W3C accname，有文本内容时 title 不参与取名，它们此前的可访问名就是「⟳」。
  */
 import { describe, expect, it } from "vitest";
 import { readScannedSource, sourceFiles } from "./scanUtils";
@@ -45,7 +66,8 @@ const BASELINE: Record<string, string[]> = {
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportCurrentList") } aria-',
     '<button className="btn btn-ghost btn-sm browser-icon-btn" title={ sourceExporting ? t("config.exportInFlight") : t("config.exportSourceFilesToDirector',
     '<button className="btn btn-ghost btn-sm snapshot-action-btn" onClick={createSnapshot} disabled={snapshotSaving || listLoading} title={snapshotSaving ?',
-    '<button className="btn btn-ghost btn-sm" onClick={() => selected && openConfig(selected)} title={t("config.refreshContent")} disabled={contentLoading}',
+    // 轮66：这两颗 ⟳ 只有符号文本，补了 aria-label（键随标签头变化）
+    '<button className="btn btn-ghost btn-sm" onClick={() => selected && openConfig(selected)} title={t("config.refreshContent")} aria-label={t("config.ref',
   ],
   "src/components/CopyButton.tsx": [
     '<button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} title={t("common.copyToClipboard")}>',
@@ -54,9 +76,7 @@ const BASELINE: Record<string, string[]> = {
     '<button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>',
   ],
   "src/components/DiffView.tsx": [
-    '<button type="button" className="btn btn-ghost btn-sm" onClick={() => doMatch()} disabled={matchLoading} title={t("diff.refreshMatch")} >',
-  ],
-  "src/components/HistoryView.tsx": [
+    '<button type="button" className="btn btn-ghost btn-sm" onClick={() => doMatch()} disabled={matchLoading} title={t("diff.refreshMatch")} aria-label={t(',
   ],
   "src/components/MessageCenter.tsx": [
     '<button className="message-icon-btn" onClick={clearErrors} disabled={items.length === 0} title={t("messageCenter.clear")} aria-label={t("messageCenter',

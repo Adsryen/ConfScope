@@ -23,7 +23,9 @@ const SRC = join(PROJECT_ROOT, "src");
  * 按钮里可能出现的纯符号文本。`-` 放在末尾，避免它被当成区间起点把数字字母全吞进来。
  * `‹ › « »` 是分页/滚动条里常见的箭头，R29 补进来；`⌃ ⌄` 是折叠箭头，提前防一手。
  */
-const SYMBOL_CHARS = "×✕✖⨯xX<>+−…↑↓⌄‹›«»⌃-";
+// `⟳ ↻` 是刷新按钮的写法（轮66 WP-4）：这两颗在移除 disabled 上的 title 之前，
+// 可访问名只有 title 兜底过一眼，实际 accname 取的是内容「⟳」——读屏念不出意义。
+const SYMBOL_CHARS = "×✕✖⨯xX<>+−…↑↓⌄‹›«»⌃⟳↻-";
 /**
  * `>` 与 `</button>` 之间只有符号。两侧用 `\s*` 而不是只吃空格，是因为属性一多 JSX 就折行：
  * 「>\n  ×\n</button>」才是站点的常态写法，只守单行等于没守。
@@ -123,6 +125,15 @@ describe("符号按钮必须有可读名", () => {
 });
 
 describe("守卫自身不会漏掉 R29 那两类写法", () => {
+  it("刷新按钮 ⟳ 在扫描范围内（轮66 WP-4：title 挪到外层后它只剩符号名）", () => {
+    const buttons = findSymbolButtons(`<button className="btn btn-ghost btn-sm" onClick={doMatch} disabled={loading}>\n  ⟳\n</button>`);
+    expect(buttons.map((button) => button.text)).toEqual(["⟳"]);
+    expect(buttons[0].hasAccessibleName).toBe(false);
+
+    const labelled = findSymbolButtons(`<button className="btn btn-ghost btn-sm" aria-label="重新匹配" disabled>⟳</button>`);
+    expect(labelled[0].hasAccessibleName).toBe(true);
+  });
+
   it("分页箭头 ‹ › 在扫描范围内，且 title-only 判不合格", () => {
     const source = `
       <div>

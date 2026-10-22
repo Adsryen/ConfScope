@@ -1384,6 +1384,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                         className="btn btn-ghost btn-sm"
                         onClick={() => selected && openConfig(selected)}
                         title={t("config.refreshContent")}
+                        aria-label={t("config.refreshContent")}
                         disabled={contentLoading}
                       >
                         ⟳

@@ -2510,6 +2510,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                     onClick={() => doMatch()}
                     disabled={matchLoading}
                     title={t("diff.refreshMatch")}
+                    aria-label={t("diff.refreshMatch")}
                   >
                     ⟳
                   </button>
