@@ -3852,6 +3852,18 @@ button.diff-workflow-step-btn:hover {
   border-right: 1px solid var(--border);
 }
 
+/* 轮66：并排 diff 的串侧守卫。两侧正文在同一行的兄弟节点里（左行号 → 左 cell → 合并箭头 →
+   右行号 → 右 cell），而选区取的是文档序区间不是视觉列区间 ⇒ 只沿左栏往下拖 3 行，
+   实测也会选中右侧 2 行、173 字符，复制出来两栏粘成一坨。
+   做法是把「非起手侧」临时置为不可选：引擎对 user-select:none 的子树是高亮与复制文本
+   **同时**剔除（本仓库的行号槽一直靠这条），所以区间本身不用动，块与块之间的换行也还在。
+   这两个类由 lib/sideSelectionGuard 在 pointerdown 上同步写，不进 React state。 */
+.diff-body.side-select-left .diff-cell.right,
+.diff-body.side-select-right .diff-cell.left {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .diff-row.add .diff-cell.right {
   background: var(--diff-add-bg);
 }

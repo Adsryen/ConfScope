@@ -4,6 +4,7 @@ import { type RowType, diffLines } from "../lib/diff";
 import { Format } from "../lib/format";
 import { highlightLine } from "../lib/highlight";
 import { useWheelSurface } from "../lib/useWheelColumnResolver";
+import { installSideSelectionGuard } from "../lib/sideSelectionGuard";
 import { markHighlightedHtml } from "../lib/codeLines";
 import {
   baseIndexForSide,
@@ -267,6 +268,18 @@ export default function DiffPanel({
   // 归零之后紧接着把首个命中行拉进视口——否则左栏写着「第 25 行」，点进来却永远停在文件开头。
   // 定位口径整个待在 useFindLayer 里（与改词那条出口同一出处），本文件不许自己写 scrollTop。
   useScrollResetOnContentChange(bodyRef, [leftText, rightText], find.locateFirstExternalHit);
+
+  /**
+   * 串侧守卫（轮66）：只沿左栏往下拖 3 行也会把右侧卷进选区（实测左起左止命中右 2 格、173 字符），
+   * 因为每行的左右两格是兄弟节点而选区按文档序取区间。这里把「鼠标起手的那一侧」写进
+   * `.diff-body` 的类，另一侧临时 user-select:none —— 引擎对不可选子树是高亮和复制文本
+   * 一起剔除的，行号槽一直靠这条。装卸都跟着这块正文走，单配置与批量两块面板各装各的。
+   */
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    return installSideSelectionGuard(body);
+  }, []);
 
   // 换内容同时收起查找栏，防止旧关键词污染新内容。
   // 这里**不许**改成调用 closeFind：换文件是用户在列表里点出来的，焦点该留在他点的位置；
