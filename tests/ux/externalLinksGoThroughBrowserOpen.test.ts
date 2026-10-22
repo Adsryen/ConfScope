@@ -120,7 +120,9 @@ describe("外链走系统浏览器的单一出口（波41 R66）", () => {
 
   it("关于页的 4 个外链站点仍然走出口（下载页 + GitHub + 反馈 + 作者）", () => {
     const source = readScannedSource("src/components/About.tsx");
-    expect(source).toMatch(/void openExternalLink\(url\)/);
+    // 命令式那处（下载页/Release 页）只钉「确实走出口且只有一处」，不钉变量名：
+    // 轮62 起它是 releasePageUrl，上一版把 url 写进判据里，改个局部变量名就能让它自红。
+    expect(occurrences(/\bvoid openExternalLink\(/g, source).length, "关于页的命令式外链必须走 openExternalLink 出口").toBe(1);
     expect(occurrences(COMPONENT_USE, source).length).toBe(3);
   });
 });

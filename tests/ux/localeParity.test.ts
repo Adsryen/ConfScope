@@ -58,6 +58,11 @@ const dynamicTables: { label: string; keys: string[] }[] = [
     ).map((v) => `settings.dataLoc${capitalize(v)}`),
   },
   {
+    // 更新交接面板的出路说明：`about.handoff.${handoffKey}`，档位来自 TS 联合类型
+    label: "about.handoff.* ← UpdateHandoff",
+    keys: unionMembers("src/api/app.ts", /export type UpdateHandoff\s*=\s*([^;]+);/).map((v) => `about.handoff.${v}`),
+  },
+  {
     // 变更计划的动作标签与摘要
     label: "apply.actions.* / apply.summary.* ← ApplyPlanAction",
     keys: unionMembers("src/lib/applyPlan.ts", /export type ApplyPlanAction\s*=\s*([^;]+);/).flatMap((v) => [

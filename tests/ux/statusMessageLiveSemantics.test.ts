@@ -32,10 +32,11 @@ interface Site {
   spread: string;
 }
 
-/** 本波接线的 21 处站点。 */
+/** 波33 接线的 21 处站点；轮62 关于页更新面板多出一种「交接失败」提示，登记后共 22 处。 */
 const SITES: Site[] = [
   { file: "src/components/About.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
-  { file: "src/components/About.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
+  // 2 处：主错误提示 + 更新交接面板的错误提示（轮62），两处都展开 error 语义
+  { file: "src/components/About.tsx", marker: 'className="test-msg err"', count: 2, spread: ERROR },
   { file: "src/components/AuditView.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
   { file: "src/components/ConfigEditor.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
   { file: "src/components/DeleteConfirm.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
@@ -141,7 +142,7 @@ function describeHead(entry: { file: string; marker: string }, line: number, hea
 describe("状态提示的播报语义（波33 R54）", () => {
   const files = sourceFiles();
 
-  it("站点名单钉死 21 处，且每条都展开 statusMessageProps", () => {
+  it("站点名单钉死 22 处，且每条都展开 statusMessageProps", () => {
     const violations: string[] = [];
     for (const site of SITES) {
       const found = heads(site.file, site.marker);
@@ -158,7 +159,7 @@ describe("状态提示的播报语义（波33 R54）", () => {
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
     expect(SITES).toHaveLength(16);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(21);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(22);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {

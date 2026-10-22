@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  attachUpdateImage,
   checkForUpdates,
   downloadUpdate,
   getAppInfo,
   getDownloadProgress,
+  getUpdateInstallCommand,
+  launchUpdateInstaller,
+  listActiveSSHTunnels,
+  quitApplication,
+  revealDownloadedArtifact,
   type AppInfo,
   type DownloadProgress,
   type UpdateCheckResult,
+  type UpdateHandoff,
 } from "../api/app";
+import { getTaskManager } from "../lib/taskmanager";
+import { pushAppDataDocument } from "../lib/appDataDoc";
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
 import CopyButton from "./CopyButton";
@@ -25,7 +34,16 @@ interface AboutProps {
   embedded?: boolean;
 }
 
-type UpdatePhase = "idle" | "checking" | "upToDate" | "updateAvailable" | "downloading" | "downloaded" | "error";
+/*
+ * 更新链路只有一条：检查 → 下载 → 校验 → 交接。
+ *
+ * 为什么没有"下载"这一步的独立按钮：轮62 之前用户点完检查还得再点下载、点完下载
+ * 还得自己找文件，四步里有三步是人在替程序做决定；现在一次点击走到底，
+ * 唯一保留的人工闸门是 ready 阶段的"现在是否退出"（只有 Windows 安装版会用到）。
+ * verifying 不是假状态：Go 侧的 done 事件只在校验通过后才发（fail closed），
+ * 进度到 100% 而 done 未到，就是真在校验。
+ */
+type UpdatePhase = "idle" | "checking" | "upToDate" | "updateAvailable" | "downloading" | "verifying" | "ready" | "error";
 
 interface WailsRuntime {
   EventsOn?: (eventName: string, callback: (progress: DownloadProgress) => void) => void;
@@ -46,6 +64,12 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  // 交接三件事实：落盘路径（Go 给的，不猜）、包管理器命令（Go 拼的，不抄）、忙碌闸门读数（点退出时才查）
+  const [artifactPath, setArtifactPath] = useState("");
+  const [handoffCommand, setHandoffCommand] = useState("");
+  const [busyReasons, setBusyReasons] = useState<string[]>([]);
+  const [handoffError, setHandoffError] = useState("");
+  const [quitting, setQuitting] = useState(false);
 
   // Esc 关闭弹框改用分层注册表：散装监听会在冒泡阶段抢 Esc，
   // 连带关掉它下面的弹层（下拉/确认框），一次 Esc 只该关最内层。
@@ -79,22 +103,26 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
   // 监听 Wails 下载进度事件 + 轮询 fallback
   useEffect(() => {
-    if (updatePhase !== "downloading") return;
+    if (updatePhase !== "downloading" && updatePhase !== "verifying") return;
 
     let cleanup: (() => void) | undefined;
+
+    const applyProgress = (p: DownloadProgress) => {
+      setDownloadProgress(p);
+      if (p.error) {
+        setErrorMessage(p.error);
+        setUpdatePhase("error");
+        return;
+      }
+      // done 只在校验通过后由 Go 发出：以它为准切到交接面板
+      if (p.done) setUpdatePhase("ready");
+      else if (p.percent >= 100) setUpdatePhase("verifying");
+    };
 
     // 尝试使用 Wails 事件系统
     const runtime = (window as WindowWithRuntime).runtime;
     if (runtime?.EventsOn) {
-      const handler = (p: DownloadProgress) => {
-        setDownloadProgress(p);
-        if (p.done) setUpdatePhase("downloaded");
-        if (p.error) {
-          setErrorMessage(p.error);
-          setUpdatePhase("error");
-        }
-      };
-      runtime.EventsOn("update:download-progress", handler);
+      runtime.EventsOn("update:download-progress", applyProgress);
       cleanup = () => {
         if (runtime.EventsOff) runtime.EventsOff("update:download-progress");
       };
@@ -104,14 +132,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     const timer = setInterval(async () => {
       try {
         const p = await getDownloadProgress();
-        setDownloadProgress(p);
-        if (p.done) {
-          setUpdatePhase("downloaded");
-          if (timer) clearInterval(timer);
-        }
-        if (p.error) {
-          setErrorMessage(p.error);
-          setUpdatePhase("error");
+        applyProgress(p);
+        if (p.done || p.error) {
           if (timer) clearInterval(timer);
         }
       } catch {
@@ -125,54 +147,94 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     };
   }, [updatePhase]);
 
-  const runUpdateCheck = useCallback(async () => {
-    setUpdatePhase("checking");
-    setUpdateResult(null);
-    setErrorMessage("");
-    const settings = loadSettings();
-    try {
-      updateUpdateSettings({ lastCheckAt: new Date().toISOString() });
-      const result = await checkForUpdates({
-        currentVersion: appInfo.version,
-        sources: appInfo.updateSources,
-        proxy: settings.proxy,
-      });
-      setUpdateResult(result);
-      // 保存检查状态（lastCheckAt 已在检查入口记录）
-      updateUpdateSettings({
-        lastSeenVersion: result.latestVersion || "",
-      });
-      if (result.error) {
-        setErrorMessage(result.error);
+  const startDownload = useCallback(
+    async (result: UpdateCheckResult) => {
+      if (!result.downloadUrl) return;
+      setUpdatePhase("downloading");
+      setDownloadProgress(null);
+      setErrorMessage("");
+      setArtifactPath("");
+      setHandoffCommand("");
+      setBusyReasons([]);
+      try {
+        const settings = loadSettings();
+        // 代理必须与检查同源：过去下载直连，直连不通的人查得到版本却下不动包
+        const path = await downloadUpdate(result.downloadUrl, result.sha256, settings.proxy);
+        setArtifactPath(path);
+        if (result.handoff === "command") {
+          setHandoffCommand(await getUpdateInstallCommand(path));
+        }
+        setUpdatePhase("ready");
+      } catch (e) {
+        const msg = errorText(e);
+        setErrorMessage(msg);
         setUpdatePhase("error");
         reportError({
-          title: t("about.updateCheckFailed"),
+          title: t("about.updateDownloadFailed"),
           source: t("about.updateTitle"),
-          message: result.error,
+          message: msg,
+          mergeKey: "update:download",
+        });
+      }
+    },
+    [t]
+  );
+
+  // 检查更新。autoDownload 区分"人按了按钮"和"页面自己开局顺手查了一次"：
+  // 前者一路走到交接面板（用户要的就是这个），后者停在 updateAvailable——
+  // 被动触发就悄悄吃掉几十 MB 流量，是拿用户的账单替程序省事。
+  const runUpdateCheck = useCallback(
+    async (options: { autoDownload?: boolean } = {}) => {
+      setUpdatePhase("checking");
+      setUpdateResult(null);
+      setErrorMessage("");
+      setBusyReasons([]);
+      const settings = loadSettings();
+      try {
+        updateUpdateSettings({ lastCheckAt: new Date().toISOString() });
+        const result = await checkForUpdates({
+          currentVersion: appInfo.version,
+          sources: appInfo.updateSources,
+          proxy: settings.proxy,
+        });
+        setUpdateResult(result);
+        updateUpdateSettings({
+          lastSeenVersion: result.latestVersion || "",
+        });
+        if (result.error) {
+          setErrorMessage(result.error);
+          setUpdatePhase("error");
+          reportError({
+            title: t("about.updateCheckFailed"),
+            source: t("about.updateTitle"),
+            message: result.error,
+            mergeKey: "update:check",
+          });
+        } else if (result.hasUpdate) {
+          if (!result.mandatory && settings.update.skipVersion === result.latestVersion) {
+            setUpdatePhase("upToDate");
+          } else if (options.autoDownload && result.downloadUrl) {
+            await startDownload(result);
+          } else {
+            setUpdatePhase("updateAvailable");
+          }
+        } else {
+          setUpdatePhase("upToDate");
+        }
+      } catch (e) {
+        const msg = errorText(e);
+        setErrorMessage(msg);
+        setUpdatePhase("error");
+        reportError({
+          title: t("about.updateCheckError"),
+          source: t("about.updateTitle"),
+          message: msg,
           mergeKey: "update:check",
         });
-      } else if (result.hasUpdate) {
-        // 如果已忽略此版本且非 mandatory，跳过提示
-        if (!result.mandatory && settings.update.skipVersion === result.latestVersion) {
-          setUpdatePhase("upToDate");
-        } else {
-          setUpdatePhase("updateAvailable");
-        }
-      } else {
-        setUpdatePhase("upToDate");
       }
-    } catch (e) {
-      const msg = errorText(e);
-      setErrorMessage(msg);
-      setUpdatePhase("error");
-      reportError({
-        title: t("about.updateCheckError"),
-        source: t("about.updateTitle"),
-        message: msg,
-        mergeKey: "update:check",
-      });
-    }
-  }, [appInfo.version, appInfo.updateSources, t]);
+    },
+    [appInfo.updateSources, appInfo.version, startDownload, t]
+  );
 
   const skipVersion = useCallback(() => {
     if (!updateResult?.latestVersion) return;
@@ -191,40 +253,202 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     }
   }, [appInfoLoaded, runUpdateCheck, updatePhase]);
 
-  const startDownload = useCallback(async () => {
-    if (!updateResult?.downloadUrl) return;
-    setUpdatePhase("downloading");
-    setDownloadProgress(null);
-    setErrorMessage("");
-    try {
-      await downloadUpdate(updateResult.downloadUrl, updateResult.sha256);
-      setUpdatePhase("downloaded");
-    } catch (e) {
-      const msg = errorText(e);
-      setErrorMessage(msg);
-      setUpdatePhase("error");
-      reportError({
-        title: t("about.updateDownloadFailed"),
-        source: t("about.updateTitle"),
-        message: msg,
-        mergeKey: "update:download",
-      });
-    }
-  }, [updateResult, t]);
-
-  // 桌面 webview 里 window.open 开不出窗口（R66），统一交给外链出口：
+  // 桌面 webview 里 window.open 开不出窗口（R66），外链一律走共享出口：
   // 有 Wails 运行时就走系统浏览器，都不行时复制链接并提示，不再「点了没反应」。
-  const openDownloadPage = useCallback(() => {
-    const url = updateResult?.downloadUrl || updateResult?.sourceUrl;
-    if (!url) return;
-    void openExternalLink(url);
-  }, [updateResult]);
+
+  // 交接面板的说明文案按出路取，一条出路一句话，不把五种步骤糊在同一个框里。
+  const handoffKey = (updateResult?.handoff || "page") as UpdateHandoff;
+
+  // 官方 Release 页：manifest 的 sourceUrl 指向 update.json，直接打开给用户只看得到 JSON。
+  const releasePageUrl = useMemo(() => {
+    const source = updateResult?.sourceUrl || "";
+    const match = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/releases\/.*$/.exec(source);
+    if (match) return `${match[1]}/releases`;
+    return "https://github.com/Adsryen/ConfScope/releases";
+  }, [updateResult?.sourceUrl]);
+
+  const openReleasePage = useCallback(() => {
+    void openExternalLink(releasePageUrl);
+  }, [releasePageUrl]);
+
+  // 忙碌闸门的三个事实源，全都取既有的唯一出口：任务表（写入还在跑）、
+  // 隧道表（在 Go 侧）、主数据落盘（pushAppDataDocument 的成功与否）。
+  const collectBusyReasons = useCallback(async (): Promise<string[]> => {
+    const reasons: string[] = [];
+    const running = getTaskManager()
+      .listTasks()
+      .filter((task) => task.status === "running" || task.status === "pending");
+    for (const task of running) {
+      reasons.push(t("about.busyTask", { name: task.name }));
+    }
+    try {
+      const tunnels = await listActiveSSHTunnels();
+      if (tunnels.length > 0) {
+        reasons.push(t("about.busyTunnels", { count: tunnels.length, ids: tunnels.join(", ") }));
+      }
+    } catch {
+      // 读不到隧道表（非桌面运行时）：不拿它当理由，交给后面的落盘与退出步骤去报真错
+    }
+    return reasons;
+  }, [t]);
+
+  // 唯一的人工闸门：现在退出并交给安装程序。
+  // 顺序是硬的——先确认没有在写的任务与隧道，再强制落盘，最后才允许退出；
+  // 落盘失败绝不退出（主数据是 debounce 写的，带着未落盘的改动退出等于吃掉最后一次变更）。
+  const quitAndInstall = useCallback(async () => {
+    if (quitting) return;
+    setBusyReasons([]);
+    setHandoffError("");
+    const reasons = await collectBusyReasons();
+    if (reasons.length > 0) {
+      setBusyReasons(reasons);
+      return;
+    }
+    const flushed = await pushAppDataDocument({ report: false });
+    if (!flushed) {
+      setBusyReasons([t("about.busyDataFlush")]);
+      return;
+    }
+    setQuitting(true);
+    try {
+      await launchUpdateInstaller(artifactPath);
+      await quitApplication();
+    } catch (e) {
+      setQuitting(false);
+      setHandoffError(`${errorText(e)}｜${t("about.manualQuitHint")}`);
+    }
+  }, [artifactPath, collectBusyReasons, quitting, t]);
+
+  const runHandoff = useCallback(
+    async (action: (path: string) => Promise<void>) => {
+      setHandoffError("");
+      try {
+        await action(artifactPath);
+      } catch (e) {
+        setHandoffError(errorText(e));
+      }
+    },
+    [artifactPath]
+  );
+
+  // 进度条：downloading / verifying / ready 共用同一个结构（role + aria 值不能少）
+  const renderProgress = (label: string) => (
+    <div className="update-downloading">
+      <div
+        className="update-progress-bar"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={downloadProgress?.percent ?? 0}
+      >
+        <div className="update-progress-fill" style={{ width: `${downloadProgress?.percent ?? 0}%` }} />
+      </div>
+      <div className="update-progress-text">
+        {(downloadProgress?.total ?? 0) > 0
+          ? `${((downloadProgress?.downloaded ?? 0) / 1024 / 1024).toFixed(1)} MB / ${((downloadProgress?.total ?? 0) / 1024 / 1024).toFixed(1)} MB`
+          : label}
+        <span className="update-progress-pct">{downloadProgress?.percent ?? 0}%</span>
+      </div>
+    </div>
+  );
+
+  // 交接面板：一条出路一套动作。安装版给"退出并安装"闸门，其余给人工步骤。
+  const renderHandoffPanel = () => {
+    const result = updateResult;
+    if (!result) return null;
+    const sizeText =
+      (downloadProgress?.total ?? 0) > 0 ? `${((downloadProgress?.total ?? 0) / 1024 / 1024).toFixed(1)} MB` : "";
+
+    return (
+      <div className="update-handoff">
+        <div className="test-msg ok" {...statusMessageProps("success")}>
+          <span className="test-msg-text">{t("about.downloadComplete")}</span>
+        </div>
+        <div className="update-handoff-meta">
+          <div className="update-handoff-line">
+            <span className="update-handoff-label">{t("about.handoffArtifact")}</span>
+            <code className="update-artifact-path" title={artifactPath || result.fileName}>
+              {artifactPath || result.fileName || "-"}
+            </code>
+          </div>
+          {sizeText && (
+            <div className="update-handoff-line">
+              <span className="update-handoff-label">{t("about.handoffSize")}</span>
+              <span>{sizeText}</span>
+            </div>
+          )}
+          {result.downgraded && <div className="update-handoff-note">{t("about.downgradedNotice")}</div>}
+          <div className="update-handoff-note">{t(`about.handoff.${handoffKey}`)}</div>
+        </div>
+
+        {handoffKey === "installer" && (
+          <div className="update-actions">
+            <button className="btn btn-primary btn-sm" onClick={quitAndInstall} disabled={quitting}>
+              {quitting ? t("about.quitting") : t("about.quitAndInstall")}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => void runHandoff(revealDownloadedArtifact)}>
+              {t("about.revealFolder")}
+            </button>
+          </div>
+        )}
+
+        {handoffKey === "reveal" && (
+          <div className="update-actions">
+            <button className="btn btn-primary btn-sm" onClick={() => void runHandoff(revealDownloadedArtifact)}>
+              {t("about.revealFolder")}
+            </button>
+          </div>
+        )}
+
+        {handoffKey === "command" && (
+          <div className="update-handoff-command">
+            <code title={handoffCommand}>{handoffCommand || t("about.noHandoffCommand")}</code>
+            {handoffCommand && <CopyButton text={handoffCommand} />}
+          </div>
+        )}
+
+        {handoffKey === "image" && (
+          <div className="update-actions">
+            <button className="btn btn-primary btn-sm" onClick={() => void runHandoff(attachUpdateImage)}>
+              {t("about.mountImage")}
+            </button>
+          </div>
+        )}
+
+        {handoffKey === "page" && (
+          <div className="update-actions">
+            <button className="btn btn-primary btn-sm" onClick={openReleasePage}>
+              {t("about.openDownload")}
+            </button>
+          </div>
+        )}
+
+        {busyReasons.length > 0 && (
+          <div className="update-busy" role="alert">
+            <div className="update-busy-title">{t("about.busyBlocked")}</div>
+            <ul className="update-busy-list">
+              {busyReasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {handoffError && (
+          <div className="test-msg err" {...statusMessageProps("error")}>
+            <span className="test-msg-text">{handoffError}</span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderUpdateSection = () => {
     switch (updatePhase) {
       case "idle":
         return (
-          <button className="btn btn-primary btn-sm" onClick={runUpdateCheck}>
+          <button className="btn btn-primary btn-sm" onClick={() => void runUpdateCheck({ autoDownload: true })}>
             {t("about.checkUpdate")}
           </button>
         );
@@ -242,7 +466,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
             <div className="test-msg ok" {...statusMessageProps("success")}>
               <span className="test-msg-text">{t("about.noUpdate")}</span>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={runUpdateCheck}>
+            <button className="btn btn-ghost btn-sm" onClick={() => void runUpdateCheck({ autoDownload: true })}>
               {t("about.checkUpdate")}
             </button>
           </>
@@ -262,13 +486,21 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
                 )}
               </div>
             </div>
+            {/* 清单里没有适配本机的产物时「下载并安装」是无从谈起的：
+                这一档只能人去 Release 页挑，摆一颗点了没反应的按钮正是本文件在删的东西。 */}
+            {!updateResult!.downloadUrl && (
+              <div className="update-handoff-note">{t("about.handoff.page")}</div>
+            )}
             <div className="update-actions">
-              <button className="btn btn-primary btn-sm" onClick={startDownload}>
-                {t("about.downloadUpdate")}
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={runUpdateCheck}>
-                {t("about.checkUpdate")}
-              </button>
+              {updateResult!.downloadUrl ? (
+                <button className="btn btn-primary btn-sm" onClick={() => void startDownload(updateResult!)}>
+                  {t("about.downloadAndInstall", { version: updateResult!.latestVersion })}
+                </button>
+              ) : (
+                <button className="btn btn-primary btn-sm" onClick={openReleasePage}>
+                  {t("about.openDownload")}
+                </button>
+              )}
               {!updateResult!.mandatory && (
                 <button className="btn btn-ghost btn-sm" onClick={skipVersion}>
                   {t("about.skipVersion")}
@@ -279,40 +511,13 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         );
 
       case "downloading":
-        return (
-          <div className="update-downloading">
-            <div
-              className="update-progress-bar"
-              role="progressbar"
-              aria-label={t("about.downloadingUpdate")}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={downloadProgress?.percent ?? 0}
-            >
-              <div className="update-progress-fill" style={{ width: `${downloadProgress?.percent ?? 0}%` }} />
-            </div>
-            <div className="update-progress-text">
-              {(downloadProgress?.total ?? 0) > 0
-                ? `${((downloadProgress?.downloaded ?? 0) / 1024 / 1024).toFixed(1)} MB / ${((downloadProgress?.total ?? 0) / 1024 / 1024).toFixed(1)} MB`
-                : t("about.downloadingUpdate")}
-              <span className="update-progress-pct">{downloadProgress?.percent ?? 0}%</span>
-            </div>
-          </div>
-        );
+        return renderProgress(t("about.downloadingUpdate"));
 
-      case "downloaded":
-        return (
-          <>
-            <div className="test-msg ok" {...statusMessageProps("success")}>
-              <span className="test-msg-text">{t("about.downloadComplete")}</span>
-            </div>
-            {(updateResult?.downloadUrl || updateResult?.sourceUrl) && (
-              <button className="btn btn-primary btn-sm" onClick={openDownloadPage}>
-                {t("about.openDownload")}
-              </button>
-            )}
-          </>
-        );
+      case "verifying":
+        return renderProgress(t("about.verifyingUpdate"));
+
+      case "ready":
+        return renderHandoffPanel();
 
       case "error":
         return (
@@ -321,7 +526,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
               <span className="test-msg-text">{errorMessage}</span>
             </div>
             <div className="update-actions">
-              <button className="btn btn-primary btn-sm" onClick={runUpdateCheck}>
+              <button className="btn btn-primary btn-sm" onClick={() => void runUpdateCheck({ autoDownload: true })}>
                 {t("common.retry")}
               </button>
               {/* 用共享 CopyButton：复制成功/失败都有反馈（轮6 R51，原来是 fire-and-forget） */}
