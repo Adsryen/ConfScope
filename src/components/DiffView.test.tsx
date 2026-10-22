@@ -9,6 +9,7 @@ import DiffView from "./DiffView";
 import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
 import { publishConfigChange } from "../lib/configChangeBus";
+import { listAuditSessions } from "../lib/auditSessionLog";
 
 const apiMocks = vi.hoisted(() => ({
   listNamespaces: vi.fn(),
@@ -2407,5 +2408,346 @@ describe("DiffView 批量对比的跨项内容搜索（轮55 C线）", () => {
     expect(await screen.findByText("已生成 3 个文件对比")).toBeInTheDocument();
     expect(searchBox().value).toBe("");
     expect(document.querySelector(".batch-diff-search-tools")).toBeNull();
+  });
+});
+
+// ── 轮60 B线：第三步「选择变更」支持人工微调右侧目标内容 ──────────────────────
+// 诉求：跨环境同步时左值常常不能原样落到右（内网地址、密码、namespace、开关默认值都不同）。
+// 这一组钉的是四件事：手写文本走既有物化通道进计划、非法文本存不下来、手写后行级挑块标记失效、
+// 以及结果过期时不许拿旧基线上的字迹去写生产。
+describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([]);
+  });
+
+  const batchParams = {
+    leftConnId: "left-nacos",
+    rightConnId: "right-nacos",
+    left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+    right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "" },
+    autoCompare: true,
+  };
+  const singleParams = {
+    leftConnId: "left-nacos",
+    rightConnId: "right-nacos",
+    left: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+    right: { tenant: "shared", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+    autoCompare: true,
+  };
+
+  function tuneTextarea(): HTMLTextAreaElement | null {
+    return document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement | null;
+  }
+
+  /** 确认弹层与抽屉都有「Cancel」，取按钮时按 .modal-footer 限定。 */
+  function modalButton(name: string): HTMLButtonElement | null {
+    return (
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-footer button")).find(
+        (button) => button.textContent === name,
+      ) ?? null
+    );
+  }
+
+  function tuneErrorText(): string {
+    return document.querySelector(".diff-tune-panel .apply-edit-errors")?.textContent ?? "";
+  }
+
+  /** 批量：两侧同名一个文件，正文可差出多行，便于「先挑块再手写」。 */
+  function renderBatchTune(leftText: string, rightText: string) {
+    const onStartApply = vi.fn();
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) => (conn.id === "left-nacos" ? leftText : rightText));
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView connections={[leftApplyConn, rightApplyConn]} initialParams={batchParams} onStartApply={onStartApply} />
+      </I18nProvider>
+    );
+    return { onStartApply };
+  }
+
+  /** 单配置：直接进结果区，不经过匹配列表。 */
+  function renderSingleTune(leftText: string, rightText: string) {
+    const onStartApply = vi.fn();
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) => (conn.id === "left-nacos" ? leftText : rightText));
+    localStorage.setItem("locale", "en-US");
+    render(
+      <I18nProvider>
+        <DiffView connections={[leftApplyConn, rightApplyConn]} initialParams={singleParams} onStartApply={onStartApply} />
+      </I18nProvider>
+    );
+    return { onStartApply };
+  }
+
+  const planItems = (onStartApply: ReturnType<typeof vi.fn>) =>
+    (onStartApply.mock.calls[0][0] as { items: Record<string, unknown>[] }).items;
+
+  it("carries the hand-tuned right body into the plan and marks it as manual", async () => {
+    const { onStartApply } = renderBatchTune(
+      "server:\n  port: 8080\nname: demo",
+      "server:\n  port: 9090\nname: demo"
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    expect(await screen.findByText("Generated 1 file comparisons")).toBeInTheDocument();
+
+    // 先整块挑过来，再在挑完的基础上手写——这就是用户描述的真实顺序
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    const editor = tuneTextarea();
+    expect(editor).not.toBeNull();
+    // seed = 挑块后的右侧预览正文
+    expect(editor!.value).toBe("server:\n  port: 8080\nname: demo");
+
+    fireEvent.change(editor!, { target: { value: "server:\n  port: 7001\nname: demo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    // R6：正文一改，行号就不再指向挑过的内容，标记必须失效而且要说清为什么
+    expect(await screen.findByText(/previous row-level picks were cleared/)).toBeInTheDocument();
+    expect(screen.getByText("Manually tuned")).toBeInTheDocument();
+    expect(screen.getByText("1 files queued for the right target")).toBeInTheDocument();
+    // 用户要看得见自己写的落到结果里
+    expect(document.body.textContent).toContain("port: 7001");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(planItems(onStartApply)[0]).toMatchObject({
+      dataId: "app.yaml",
+      manualTuned: true,
+      sourceValueOverride: {
+        exists: true,
+        value: "server:\n  port: 7001\nname: demo",
+        valueType: "text",
+        format: "YAML",
+        parseStatus: "ok",
+        content: "server:\n  port: 7001\nname: demo",
+      },
+    });
+  });
+
+  it("refuses to save blank or unparsable tuned content, so it can never reach the plan", async () => {
+    const { onStartApply } = renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+
+    fireEvent.change(tuneTextarea()!, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+    await waitFor(() => expect(tuneErrorText()).toContain("Content cannot be empty"));
+    expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
+
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: [8080\n  bad: }" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+    await waitFor(() => expect(tuneErrorText()).toContain("YAML"));
+    expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument();
+    expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
+
+    // 非法文本进不了计划：这一项仍然是纯引用（没有物化 override）
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(planItems(onStartApply)[0]).not.toHaveProperty("sourceValueOverride");
+  });
+
+  it("does not count a tune that lands back on the original right content as a change", async () => {
+    const { onStartApply } = renderBatchTune(
+      "server:\n  port: 8080\nname: demo",
+      "server:\n  port: 9090\nname: demo"
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    // 手写回右侧原本的内容 ⇒ 等价于没改
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 9090\nname: demo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    // 挑块被手写覆盖，手写又与右侧原文一致 ⇒ 这一项没变更
+    await waitFor(() => expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(planItems(onStartApply)[0]).not.toHaveProperty("sourceValueOverride");
+  });
+
+  it("restores the original right content and drops the change again", async () => {
+    const { onStartApply } = renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+    expect(await screen.findByText("1 files queued for the right target")).toBeInTheDocument();
+
+    // R7：还原丢掉的是手写的正文，找不回来 ⇒ 必须先问一句
+    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    expect(await screen.findByText(/cannot be recovered/)).toBeInTheDocument();
+    // 反悔：字迹、徽标、抽屉都保持原样，什么都没发生
+    fireEvent.click(modalButton("Cancel")!);
+    await waitFor(() => expect(document.querySelector(".modal-footer")).toBeNull());
+    expect(screen.getByText("Manually tuned")).toBeInTheDocument();
+    expect(tuneTextarea()).not.toBeNull();
+    expect(document.body.textContent).toContain("port: 7001");
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    fireEvent.click(modalButton("Discard and restore")!);
+    await waitFor(() => expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument());
+    expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
+    expect(tuneTextarea()).toBeNull();
+    expect(document.body.textContent).toContain("port: 9090");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
+    expect(planItems(onStartApply)[0]).not.toHaveProperty("sourceValueOverride");
+  });
+
+  it("does not ask to restore when the tune landed back on the server original", async () => {
+    renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    // 手写回与服务端原文一字不差 ⇒ 没有可丢的东西
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 9090" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    await waitFor(() => expect(tuneTextarea()).toBeNull());
+    expect(document.querySelector(".modal-footer")).toBeNull();
+  });
+
+  it("collapsing the drawer never discards the hand-written body", async () => {
+    renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001\n# 手写的第三行" } });
+    // 没保存就收起：这是长文本守门允许「取消」不设确认的前提——字迹必须还在
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.querySelector(".modal-footer")).toBeNull();
+    expect(tuneTextarea()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    expect(tuneTextarea()!.value).toBe("server:\n  port: 7001\n# 手写的第三行");
+    // 收起不等于落进计划：没保存的草稿不影响要写出去的正文
+    expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
+  });
+
+  it("records the manual tune in the compare session without the config body", async () => {
+    const { onStartApply } = renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "password: hunter2-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    // createAuditSession 用 unshift：[0] 才是本次对比的会话，历史用例的排在后面
+    const events = (listAuditSessions()[0]?.events ?? []).filter((event) => event.kind === "diff_manual_tune");
+    expect(events.length).toBeGreaterThan(0);
+    const payload = JSON.parse(events[events.length - 1].payload ?? "{}") as Record<string, unknown>;
+    expect(payload).toMatchObject({ action: "tune", scope: "batch", dataId: "app.yaml", group: "DEFAULT_GROUP" });
+    expect(payload.charCount).toBe("password: hunter2-secret".length);
+    // 正文只在计划里留一份：对比会话不得再抄一遍明文配置
+    expect(events[events.length - 1].payload).not.toContain("hunter2-secret");
+    expect(onStartApply).not.toHaveBeenCalled();
+  });
+
+  it("tunes the right side of a single config and carries it into the plan", async () => {
+    const { onStartApply } = renderSingleTune("server:\n  port: 8080", "server:\n  port: 9090");
+    await screen.findByText("8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    await waitFor(() => expect(document.body.textContent).toContain("port: 7001"));
+    expect(screen.getByText("Manually tuned")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan" }));
+    const payload = onStartApply.mock.calls[0][0] as { scope: string; items: Record<string, unknown>[] };
+    expect(payload.scope).toBe("config");
+    expect(payload.items[0]).toMatchObject({
+      manualTuned: true,
+      sourceValueOverride: { content: "server:\n  port: 7001", format: "YAML", exists: true },
+    });
+  });
+
+  it("locks the single-config plan entry once the compare result goes stale", async () => {
+    const { onStartApply } = renderSingleTune("server:\n  port: 8080", "server:\n  port: 9090");
+    await screen.findByText("8080");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    await act(async () => {
+      publishConfigChange({ connectionId: "right-nacos", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+
+    const planButton = (await screen.findByRole("button", { name: "Enter Configuration Change Plan" })) as HTMLButtonElement;
+    await waitFor(() => expect(planButton).toBeDisabled());
+    expect(planButton.closest(".btn-guard")).toHaveAttribute(
+      "title",
+      "The compare result is stale and a manually tuned body is in play. Re-run the comparison to confirm the baseline before entering the change plan."
+    );
+    // 被程序化点击也不放行：过期基线上的手写字等于拿旧内容去写生产
+    fireEvent.click(planButton);
+    expect(onStartApply).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unsaved tune attached to the file it was written for", async () => {
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 2,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [
+        { dataId: "a.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+        { dataId: "b.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ],
+    });
+    apiMocks.getConfig.mockImplementation(async (_conn: Connection, _tenant: string, dataId: string) =>
+      dataId === "a.yaml" ? "name: a\nport: 1" : "name: b\nport: 2"
+    );
+    localStorage.setItem("locale", "en-US");
+    const onStartApply = vi.fn();
+    render(
+      <I18nProvider>
+        <DiffView connections={[leftApplyConn, rightApplyConn]} initialParams={batchParams} onStartApply={onStartApply} />
+      </I18nProvider>
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (2)" }));
+    await screen.findByText("Generated 2 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: /b\.yaml/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "half written on b" } });
+
+    // 切到另一项：抽屉必须收起。挂在面板自己的 state 上时，b 的半截正文会显示在 a 上，
+    // 在 a 上点保存就把 b 的内容写进 a 的计划（轮7 R60 钉过的同一颗坑）。
+    fireEvent.click(screen.getByRole("button", { name: /a\.yaml/ }));
+    expect(tuneTextarea()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /b\.yaml/ }));
+    expect(tuneTextarea()!.value).toBe("half written on b");
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter Configuration Change Plan (1 files)" }));
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    const items = planItems(onStartApply);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ dataId: "b.yaml", manualTuned: true });
+    expect((items[0].sourceValueOverride as { content: string }).content).toBe("half written on b");
   });
 });

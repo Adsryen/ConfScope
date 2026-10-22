@@ -319,10 +319,11 @@ describe("DiffView 的取数闸门（轮44 R2：看不见 ≠ 没挂载，但翻
     const src = readScannedSource(DIFF);
     expect(src).toContain("active?: boolean;");
     expect(src).toMatch(/DiffView\(\{ active = true,/);
-    // 4 处 = 左右两颗 SourcePicker（轮44）+ 轮48 两个 DiffPanel（批量 / 单文件）。
-    // DiffPanel 那两个必须收到 active：Ctrl+F 监听与所有权标记都按它挂卸，
+    // 7 处 = 左右两颗 SourcePicker（轮44）+ 两个 DiffPanel（轮48，批量 / 单文件）
+    // + 轮60 两个 TargetTunePanel（批量 / 单文件）+ 丢弃确认的 ConfirmModal（沿用同一闸门）。
+    // DiffPanel / TargetTunePanel 那几个必须收到 active：Ctrl+F 监听、Esc 分层与所有权标记都按它挂卸，
     // 少了这一步，被保活隐藏的对比页会在前台视图按 Ctrl+F 时把按键抢走。
-    expect(src.match(/active=\{active\}/g)?.length).toBe(4);
+    expect(src.match(/active=\{active\}/g)?.length).toBe(7);
   });
 
   it("focusStep 消费也要过 active 闸门（隐藏子树里不抢焦点）", () => {

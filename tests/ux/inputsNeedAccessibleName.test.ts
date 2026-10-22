@@ -192,6 +192,7 @@ describe("输入控件必须有不消失的可访问名", () => {
     const counts: Record<string, number> = {};
     for (const s of components) counts[s.name] = (counts[s.name] ?? 0) + 1;
     // 数量钉死：加调用点要先把名字写好，再回来把数字改上去
-    expect(counts).toEqual({ Combobox: 2, NumberField: 4, CodeEditor: 3 });
+    // CodeEditor 第 4 处 = 轮60 微调抽屉，调用点已显式传 ariaLabel={t("diff.manualTuneAria")}
+    expect(counts).toEqual({ Combobox: 2, NumberField: 4, CodeEditor: 4 });
   });
 });

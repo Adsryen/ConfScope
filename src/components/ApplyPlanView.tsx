@@ -237,6 +237,7 @@ function PlanItemList({
             </span>
             <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
             {item.blocked && <span className="apply-blocked">{t("apply.blocked")}</span>}
+            {item.manualTuned && <span className="tune-badge" title={t("apply.manualTunedHint")}>{t("apply.manualTuned")}</span>}
           </label>
         );
       })}
@@ -314,6 +315,12 @@ function ItemDetail({
       </div>
       <div className="apply-detail-meta">
         <span>{t("apply.actionLine", { action: actionLabel(t, item.action) })}</span>
+        {/* 人工干预可追溯（轮60 R4）：第三步手写的微调、第四步改过目标内容，都算人工干预。 */}
+        {item.manualTuned && (
+          <span className="tune-badge" title={t("apply.manualTunedHint")}>
+            {t("apply.manualTuned")}
+          </span>
+        )}
         {item.blockReason && <span>{t("apply.blockReasonLine", { reason: blockReasonLabel(t, item.blockReason) })}</span>}
         {canEdit && !edit && (
           <button className="btn btn-ghost btn-sm" type="button" onClick={startEdit}>

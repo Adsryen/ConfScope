@@ -58,6 +58,12 @@ export interface ApplyPlanItem {
   blockReason?: string;
   sourceFingerprint: string;
   targetFingerprint: string;
+  /**
+   * 将写入目标的内容含人工干预（第三步手写的微调文本，或第四步「编辑目标内容」的结果），
+   * 不是「左侧原样搬过来」。批量合并与人工微调都带 sourceValueOverride，两者在计划里
+   * 无法靠 override 区分，所以这个标记必须显式传下来（轮60 可追溯性要求）。
+   */
+  manualTuned?: boolean;
 }
 
 export interface ApplyPlanSummary {
@@ -97,6 +103,8 @@ export interface BuildApplyPlanItemInput {
   targetRef?: ApplyPlanRef;
   sourceValue: ApplyPlanValueInput;
   targetValue: ApplyPlanValueInput;
+  /** 见 ApplyPlanItem.manualTuned：入口带过来的人工微调标记。 */
+  manualTuned?: boolean;
   sourceFingerprint?: string;
   targetFingerprint?: string;
   intent?: ApplyPlanIntent;
@@ -257,6 +265,7 @@ export function withEditedAfterValue(item: ApplyPlanItem, content: string): Appl
   }
   return {
     ...item,
+    manualTuned: true,
     afterValue,
     action,
     blocked,
@@ -367,6 +376,7 @@ export function buildApplyPlan(input: BuildApplyPlanInput): ApplyPlan {
       action: classified.action,
       blocked,
       ...(blockReason ? { blockReason } : {}),
+      ...(item.manualTuned ? { manualTuned: true } : {}),
       sourceFingerprint: item.sourceFingerprint ?? fingerprintApplyPlanValue(sourceRef, sourceValue),
       targetFingerprint: item.targetFingerprint ?? fingerprintApplyPlanValue(targetRef, targetValue),
     };
@@ -585,6 +595,7 @@ function parseItem(value: unknown): ApplyPlanItem | null {
     action,
     blocked,
     ...(typeof value.blockReason === "string" ? { blockReason: value.blockReason } : {}),
+    ...(value.manualTuned === true ? { manualTuned: true } : {}),
     sourceFingerprint,
     targetFingerprint,
   };

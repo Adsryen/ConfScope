@@ -52,7 +52,13 @@ describe("保存快捷键只认一个出口（波27 R47）", () => {
       .filter((file) => file !== EDITOR && file !== LIB)
       .map((file) => ({ file, hits: countMatches(WIRING, readScannedSource(file)) }))
       .filter((entry) => entry.hits > 0);
-    expect(wired.map((entry) => entry.file).sort()).toEqual(["src/components/ConfigBrowser.tsx", "src/components/ConfigEditor.tsx"]);
+    // 轮60 第三步人工微调也真有保存动作（Ctrl+S = 保存这份手写正文），两个宿主一起入清单
+    expect(wired.map((entry) => entry.file).sort()).toEqual([
+      "src/components/ConfigBrowser.tsx",
+      "src/components/ConfigEditor.tsx",
+      "src/components/DiffView.tsx",
+      "src/components/TargetTunePanel.tsx",
+    ]);
     expect(countMatches(WIRING, sourceFiles().map(readScannedSource).join("\n"))).toBeGreaterThanOrEqual(2);
   });
 

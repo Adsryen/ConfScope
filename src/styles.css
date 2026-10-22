@@ -7690,6 +7690,55 @@ button.diff-workflow-step-btn:hover {
   max-height: 420px;
 }
 
+/* ── 第三步「人工微调右侧目标内容」（轮60 B线）──────────────────────────────
+   抽屉本体复用第四步的 .apply-edit-* 视觉语言，这里只补三件事：
+   面板在 diff 结果上方时不要那么高、微调解释条、徽标与开关按钮。 */
+/* 微调抽屉直接复用 .apply-edit-panel 的外距与排版，这里只补差异。
+   刻意不重写 margin-bottom：同特异度互相覆盖要靠文档顺序决胜，是 R83 明令禁止的写法。 */
+.diff-tune-panel .apply-edit-editor {
+  height: 300px;
+}
+
+/* 微调后的连带后果（行级挑选标记被清）——提示级信息，走黄色而不是红色：
+   没有出错，只是用户的下一次点击含义变了。不自带 .field-hint：那是灰色辅助说明语义，
+   且两个同特异度类都声明 color 会撞上 R83 顺序守卫（字号行距在这里自己写全）。 */
+.diff-tune-notice {
+  padding: 7px 9px;
+  border: 1px solid rgba(220, 220, 170, 0.3);
+  border-left: 3px solid var(--yellow);
+  border-radius: 6px;
+  color: var(--yellow);
+  background: rgba(220, 220, 170, 0.07);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* 「这一项将写入的内容是人手写的」：批量结果头、单配置入口、第四步列表与详情共用一颗。 */
+.tune-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 177, 73, 0.45);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: #ffcf87;
+  background: rgba(255, 177, 73, 0.12);
+}
+
+.tune-toggle {
+  flex-shrink: 0;
+}
+
+.tune-toggle.active {
+  color: #9ad7ff;
+  border-color: rgba(79, 195, 247, 0.42);
+  background: rgba(79, 195, 247, 0.14);
+}
+
 .apply-diff-preview {
   flex: 1;
   min-height: 0;

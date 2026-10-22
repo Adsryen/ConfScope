@@ -5,6 +5,7 @@ import { environmentTone, environmentSortWeight, type EnvironmentTone } from "..
 import { scrollBehavior } from "../lib/motion";
 import { diffLines } from "../lib/diff";
 import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
+import { validateConfig } from "../lib/validate";
 import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
 import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
@@ -35,6 +36,8 @@ import CopyButton from "./CopyButton";
 import DiffPanel, { type MergeActionAvailability, type MergeActionDirection } from "./DiffPanel";
 import DiffWorkflowCard, { type WorkflowStepId } from "./DiffWorkflowCard";
 import Select from "./Select";
+import TargetTunePanel, { type TargetTuneDraft } from "./TargetTunePanel";
+import ConfirmModal from "./ConfirmModal";
 import { createAuditSession, auditSessionEvent, endAuditSession, type AuditSession } from "../lib/auditSessionLog";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -156,6 +159,20 @@ function sortedLinesDoc(content: string): string {
 
 function mergeSelectionKey(dataId: string, rowIndex: number): string {
   return `${dataId}::${rowIndex}`;
+}
+
+/**
+ * 人工微调抽屉的草稿键（轮60 B线）。
+ *
+ * 草稿一律住在宿主 DiffView 而不是抽屉自己的 useState：以前编辑态挂在明细组件内部，
+ * 切换选中项时不会重置，A 文件写了一半的正文会显示在 B 文件上，保存就把 A 的内容
+ * 塞进 B 的计划（轮7 R60 钉过的坑）。按文件建键，切走再回来还是那一半正文。
+ */
+const SINGLE_TUNE_KEY = "diff:single";
+const BATCH_TUNE_PREFIX = "diff:batch:";
+
+function batchTuneKey(dataId: string): string {
+  return `${BATCH_TUNE_PREFIX}${dataId}`;
 }
 
 function preferredNewline(text: string): string {
@@ -796,6 +813,26 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   const [mergePreviews, setMergePreviews] = useState<Record<string, MergePreviewText>>({});
   const [mergeSelectionScope, setMergeSelectionScope] = useState<MergeSelectionScope>("block");
   /**
+   * 第三步「人工微调右侧目标内容」（轮60 B线）。
+   * - tuneEditingKey：当前哪一块处于编辑态（同一时刻只编辑一份正文）。
+   * - tuneDrafts：编辑中的正文 + 行内错误，按文件存。
+   * - singleTune：单配置模式**已保存**的微调文本。批量模式的已保存文本就是
+   *   mergePreviews 的 rightText，不另开一份——同一份「将写入什么」不许有两个来源。
+   * - tunedDataIds：哪些文件被手写过。挑块合并与人工微调都带 sourceValueOverride，
+   *   计划里只能靠这个标记区分两者（R4 可追溯）。
+   */
+  const [tuneEditingKey, setTuneEditingKey] = useState<string | null>(null);
+  const [tuneDrafts, setTuneDrafts] = useState<Record<string, TargetTuneDraft>>({});
+  const [singleTune, setSingleTune] = useState<TargetTuneDraft | null>(null);
+  const [tunedDataIds, setTunedDataIds] = useState<Set<string>>(new Set());
+  const [tuneNotice, setTuneNotice] = useState<string | null>(null);
+  /**
+   * 待确认的微调丢弃（轮60 R7）：还原 = 永久丢掉手写的正文，按本项目口径必须先问一句
+   * （与 ConfigBrowser 的 guardNav、第四步的 discardEdits 同一不变式）。
+   * 收起抽屉不走这里——那条路不销毁草稿。
+   */
+  const [tuneDiscardPending, setTuneDiscardPending] = useState<{ scope: "single" | "batch"; dataId: string } | null>(null);
+  /**
    * 跨项内容搜索（轮55 C线）：input 是框里的即时值，term 是落进命中层的那一颗。
    * 分两颗是因为扫描要吃整批正文（不能每键一次），而 diff 标红必须与列表同一帧说同一句话。
    */
@@ -888,6 +925,40 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setOnlyHitItems(false);
   }, []);
 
+  /**
+   * 微调状态整体归零：换来源、重新对比、回到匹配列表都必须走这里。
+   *
+   * 手写正文的基线是「这一次对比的右侧长什么样」。基线一换，草稿和「哪些文件被手写过」
+   * 就全部失去意义，留着等于把上一轮的文本带进下一轮的计划。
+   */
+  const resetTuneState = useCallback(() => {
+    setTuneEditingKey(null);
+    setTuneDrafts({});
+    setSingleTune(null);
+    setTunedDataIds(new Set());
+    setTuneNotice(null);
+    setTuneDiscardPending(null);
+  }, []);
+
+  /** 只清批量侧的微调痕迹（「重置预览」按钮用）：单配置那颗微调结果与此无关，不能顺手抹掉。 */
+  const resetBatchTuneDrafts = useCallback(() => {
+    setTuneEditingKey((current) => (current && current.startsWith(BATCH_TUNE_PREFIX) ? null : current));
+    setTuneDrafts((current) => {
+      const next: Record<string, TargetTuneDraft> = {};
+      let changed = false;
+      for (const [key, draft] of Object.entries(current)) {
+        if (key.startsWith(BATCH_TUNE_PREFIX)) {
+          changed = true;
+          continue;
+        }
+        next[key] = draft;
+      }
+      return changed ? next : current;
+    });
+    setTunedDataIds(new Set());
+    setTuneNotice(null);
+  }, []);
+
   const onContentSearchChange = (value: string) => {
     setContentSearchInput(value);
     if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
@@ -943,13 +1014,14 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setBatchOnlyChanges(new Set());
     setMergeSelections({});
     setMergePreviews({});
+    resetTuneState();
     setLeftLoaded(null);
     setRightLoaded(null);
     setLeftFailed(false);
     setRightFailed(false);
     setNotice(null);
     clearContentSearch();
-  }, [clearContentSearch]);
+  }, [clearContentSearch, resetTuneState]);
 
   useEffect(() => {
     if (batchResults.length === 0) {
@@ -1158,6 +1230,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setFailedItems([]);
     setMergeSelections({});
     setMergePreviews({});
+    resetTuneState();
     setLeftFailed(false);
     setRightFailed(false);
 
@@ -1404,6 +1477,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setBatchOnlyChanges(new Set());
     setMergeSelections({});
     setMergePreviews({});
+    resetTuneState();
 
     const results: BatchResult[] = [];
     const failedItems: { dataId: string; error: string; leftGroup: string; rightGroup: string }[] = [];
@@ -1628,6 +1702,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     setBatchOnlyChanges(new Set());
     setMergeSelections({});
     setMergePreviews({});
+    resetTuneState();
   };
 
   const retryCurrentCompare = () => {
@@ -1649,15 +1724,22 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   const leftText = ready ? prepareText(leftLoaded) : "";
   const rightText = ready ? prepareText(rightLoaded) : "";
   const diffFormat = mode === "key" ? "TEXT" : leftLoaded?.format !== "TEXT" ? leftLoaded?.format : rightLoaded?.format;
+  /**
+   * 单配置模式「右侧现在到底是什么内容」的唯一口径（轮60 R1）：
+   * 结果面板、重复键警告、进入计划三处都读这一份，用户才看得见自己写的东西真的落进了结果。
+   */
+  const effectiveSingleRightText = singleTune ? singleTune.content : rightText;
+  /** diffFormat 在类型上可空（两侧都没加载时），微调的校验与格式化需要一个确定的格式。 */
+  const singleTuneFormat: Format = diffFormat ?? "TEXT";
   const singleWarnings = useMemo(() => {
     if (!ready || diffFormat !== "YAML") return [] as string[];
     const warnings: string[] = [];
     const leftWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideLeft", leftLoaded.label, leftText);
-    const rightWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideRight", rightLoaded.label, rightText);
+    const rightWarn = buildDuplicateKeyWarning(t, "diff.duplicateSideRight", rightLoaded.label, effectiveSingleRightText);
     if (leftWarn) warnings.push(leftWarn);
     if (rightWarn) warnings.push(rightWarn);
     return warnings;
-  }, [ready, diffFormat, leftLoaded, rightLoaded, leftText, rightText, t]);
+  }, [ready, diffFormat, leftLoaded, rightLoaded, leftText, effectiveSingleRightText, t]);
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
   const currentWorkflowStep: WorkflowStepId =
@@ -1669,8 +1751,227 @@ export default function DiffView({ active = true, connections, onConnectionsChan
           ? "compare"
           : "choose";
 
+  // ── 人工微调右侧目标内容（轮60 B线）──────────────────────────────────────
+  //
+  // 只有一条写入通道：微调结果最终仍变成计划项的 sourceValueOverride（与挑块合并同一条），
+  // 第三步不直接写服务端，也不另开一套校验/持久化/审计。非法文本存不下来——保存是唯一出口，
+  // 校验不过就留在编辑态报行内错误（与第四步 commitEdit 同一不变式，R5）。
+
+  const tuneErrorsFor = (content: string, format: Format): string[] => {
+    // validateConfig 对空串放行（浏览态允许清空），这里必须自己拦：空白正文进计划等于要删空目标。
+    if (!content.trim()) return [t("diff.manualTuneBlank")];
+    return validateConfig(content, format);
+  };
+
+  /**
+   * 微调动作进审计会话：只记定位、长度、行数与被清掉的挑块标记数，**不记正文**。
+   * 正文在随后的变更计划（apply_session_start）里已经有一份完整现场，重复抄进对比会话
+   * 只会让含凭据的配置在 jsonl 里多落一次。
+   */
+  const auditTuneEvent = (fields: {
+    action: "tune" | "reset";
+    scope: "single" | "batch";
+    dataId: string;
+    group: string;
+    content: string;
+    clearedMarks: number;
+  }) => {
+    const session = auditSessionRef.current;
+    if (!session) return;
+    auditSessionEvent(session.id, {
+      kind: "diff_manual_tune",
+      scope: fields.scope,
+      step: "plan",
+      dataId: fields.dataId,
+      group: fields.group,
+      payload: JSON.stringify({
+        action: fields.action,
+        scope: fields.scope,
+        dataId: fields.dataId,
+        group: fields.group,
+        charCount: fields.content.length,
+        lineCount: fields.content.length === 0 ? 0 : fields.content.split(/\r?\n/).length,
+        clearedMergeMarks: fields.clearedMarks,
+      }),
+    });
+  };
+
+  const openTuneEditor = (key: string, seed: string) => {
+    setTuneDrafts((current) => (current[key] ? current : { ...current, [key]: { content: seed, errors: [] } }));
+    setTuneNotice(null);
+    setTuneEditingKey(key);
+  };
+
+  const writeTuneDraft = (key: string, next: TargetTuneDraft) => {
+    setTuneDrafts((current) => ({ ...current, [key]: next }));
+  };
+
+  const dropTuneDraft = (key: string) => {
+    setTuneDrafts((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  /** 抽屉里的「取消」只是收起编辑态：草稿留在宿主，已保存的微调结果不受影响。 */
+  const closeTuneEditor = () => {
+    setTuneEditingKey(null);
+    setTuneNotice(null);
+  };
+
+  /** 批量：切换选中文件时抽屉跟着收起（草稿不丢，切回来接着写）。 */
+  const selectedBatchTuneKey = selectedBatchItem ? batchTuneKey(selectedBatchItem.dataId) : null;
+  const batchTuneOpen =
+    Boolean(selectedBatchItem) && tuneEditingKey === selectedBatchTuneKey && selectedBatchItem.presence !== "right-only";
+  const singleTuneOpen = tuneEditingKey === SINGLE_TUNE_KEY;
+
+  const handleBatchTune = (item: BatchResult) => {
+    const key = batchTuneKey(item.dataId);
+    if (tuneEditingKey === key) {
+      closeTuneEditor();
+      return;
+    }
+    openTuneEditor(key, mergePreviewForItem(item, mergePreviews).rightText);
+  };
+
+  const commitBatchTune = (item: BatchResult) => {
+    const key = batchTuneKey(item.dataId);
+    const draft = tuneDrafts[key];
+    if (!draft) return;
+    const errors = tuneErrorsFor(draft.content, item.format);
+    if (errors.length > 0) {
+      writeTuneDraft(key, { ...draft, errors });
+      return;
+    }
+    const prefix = `${item.dataId}::`;
+    const clearedMarks = Object.keys(mergeSelections).filter((rowKey) => rowKey.startsWith(prefix)).length;
+    setMergePreviews((current) => ({
+      ...current,
+      [item.dataId]: { ...mergePreviewForItem(item, current), rightText: draft.content },
+    }));
+    // R6：正文一改，行级挑块标记的行号就指向别处。留着会让用户以为「这几行还是从左边挑的」，
+    // 而下一步是真要写进生产的——清空 + 一句解释，比默默错位安全。
+    if (clearedMarks > 0) {
+      setMergeSelections((current) => {
+        const next: Record<string, MergeSelectionDirection> = {};
+        for (const [rowKey, direction] of Object.entries(current)) {
+          if (!rowKey.startsWith(prefix)) next[rowKey] = direction;
+        }
+        return next;
+      });
+    }
+    setTunedDataIds((current) => (current.has(item.dataId) ? current : new Set(current).add(item.dataId)));
+    writeTuneDraft(key, { content: draft.content, errors: [] });
+    // 保存后**留在**编辑态：抽屉收起的话，R6 那句「行级挑选标记已清空」的解释会跟着一起消失，
+    // 而用户下一次点箭头时恰恰需要它。收起交给「完成微调」/Esc。
+    setTuneNotice(clearedMarks > 0 ? t("diff.manualTuneMarksCleared") : null);
+    const matchGroup =
+      (matchResults ?? []).find((match) => match.dataId === item.dataId)?.rightGroup ?? right.group ?? "DEFAULT_GROUP";
+    auditTuneEvent({ action: "tune", scope: "batch", dataId: item.dataId, group: matchGroup, content: draft.content, clearedMarks });
+  };
+
+  /** 这一项当前的右侧最终正文是否已偏离服务端原文（含没保存的手写字迹）。 */
+  const batchTuneIsDirty = (item: BatchResult) => {
+    if (mergePreviewForItem(item, mergePreviews).rightText !== item.rightText) return true;
+    const draft = tuneDrafts[batchTuneKey(item.dataId)];
+    return Boolean(draft && draft.content !== item.rightText);
+  };
+
+  /** 真正执行丢弃：预览整条删掉，落回 item 自己的右侧正文。 */
+  const discardBatchTune = (item: BatchResult) => {
+    const key = batchTuneKey(item.dataId);
+    const matchGroup =
+      (matchResults ?? []).find((match) => match.dataId === item.dataId)?.rightGroup ?? right.group ?? "DEFAULT_GROUP";
+    setMergePreviews((current) => {
+      if (!current[item.dataId]) return current;
+      const next = { ...current };
+      delete next[item.dataId];
+      return next;
+    });
+    setTunedDataIds((current) => {
+      if (!current.has(item.dataId)) return current;
+      const next = new Set(current);
+      next.delete(item.dataId);
+      return next;
+    });
+    dropTuneDraft(key);
+    setTuneNotice(null);
+    setTuneEditingKey(null);
+    auditTuneEvent({ action: "reset", scope: "batch", dataId: item.dataId, group: matchGroup, content: item.rightText, clearedMarks: 0 });
+  };
+
+  /** R7：还原 = 撤掉微调并回到「右侧原内容」。有字迹先问，没改过直接收。 */
+  const resetBatchTune = (item: BatchResult) => {
+    if (batchTuneIsDirty(item)) {
+      setTuneDiscardPending({ scope: "batch", dataId: item.dataId });
+      return;
+    }
+    discardBatchTune(item);
+  };
+
+  const toggleSingleTune = () => {
+    if (singleTuneOpen) {
+      closeTuneEditor();
+      return;
+    }
+    openTuneEditor(SINGLE_TUNE_KEY, singleTune ? singleTune.content : rightText);
+  };
+
+  const commitSingleTune = () => {
+    const draft = tuneDrafts[SINGLE_TUNE_KEY];
+    if (!draft) return;
+    const errors = tuneErrorsFor(draft.content, singleTuneFormat);
+    if (errors.length > 0) {
+      writeTuneDraft(SINGLE_TUNE_KEY, { ...draft, errors });
+      return;
+    }
+    setSingleTune({ content: draft.content, errors: [] });
+    writeTuneDraft(SINGLE_TUNE_KEY, { content: draft.content, errors: [] });
+    // 同批量：保存不收抽屉，收起由「完成微调」/Esc 负责（见 commitBatchTune 的注释）。
+    setTuneNotice(null);
+    auditTuneEvent({
+      action: "tune",
+      scope: "single",
+      dataId: right.dataId.trim(),
+      group: right.group || "DEFAULT_GROUP",
+      content: draft.content,
+      clearedMarks: 0,
+    });
+  };
+
+  const discardSingleTune = () => {
+    setSingleTune(null);
+    dropTuneDraft(SINGLE_TUNE_KEY);
+    setTuneNotice(null);
+    setTuneEditingKey(null);
+    auditTuneEvent({
+      action: "reset",
+      scope: "single",
+      dataId: right.dataId.trim(),
+      group: right.group || "DEFAULT_GROUP",
+      content: rightText,
+      clearedMarks: 0,
+    });
+  };
+
+  /** 同批量：手写的正文一旦被还原就找不回来，先经确认。 */
+  const resetSingleTune = () => {
+    const draft = tuneDrafts[SINGLE_TUNE_KEY];
+    const dirty = effectiveSingleRightText !== rightText || Boolean(draft && draft.content !== rightText);
+    if (dirty) {
+      setTuneDiscardPending({ scope: "single", dataId: right.dataId.trim() });
+      return;
+    }
+    discardSingleTune();
+  };
+
   const startSingleApply = () => {
     if (!ready || !onStartApply) return;
+    // R5：结果过期还带着手写正文进计划 = 拿旧基线上的字迹去写生产。纯引用路径不受影响
+    // （计划生成时按 ref 现读并自判新鲜度），被锁的只有物化出来的这一份。
+    if (resultStale && singleTune) return;
     const source = applyEntryEndpointFromSource(left, connections);
     const target = applyEntryEndpointFromSource(right, connections);
     const sourceRef = applyEntryItemFromSource(left, connections, left.dataId.trim(), left.group);
@@ -1681,6 +1982,21 @@ export default function DiffView({ active = true, connections, onConnectionsChan
       sourceRef,
       targetRef,
     };
+    if (singleTune) {
+      // 与批量合并同一条物化通道（R3）；sourceFingerprint 仍由 applyPlanDraft 用实时读到的
+      // 原始来源计算，人工文本不参与新鲜度基线，所以这不是绕过守卫。
+      const normalized = normalizeConfig(singleTune.content, singleTuneFormat);
+      item.sourceValueOverride = {
+        exists: true,
+        value: singleTune.content,
+        valueType: "text",
+        format: diffFormat,
+        parseStatus: normalized.parseStatus,
+        ...(normalized.parseError ? { parseError: normalized.parseError } : {}),
+        content: singleTune.content,
+      };
+      item.manualTuned = true;
+    }
 
     onStartApply({
       sourceType: "diff",
@@ -1768,6 +2084,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
           ...targetRef,
           sourceRef,
           targetRef,
+          // 手写与挑块合并都带 override，计划里只能靠这颗标记分得开（R4）。
+          ...(tunedDataIds.has(item.dataId) ? { manualTuned: true } : {}),
           sourceValueOverride: {
             exists: true,
             value: mergedText,
@@ -1810,7 +2128,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   // 直接带进计划等于拿旧值去写，而计划页看到的是自己生成的 diff，用户没有第二次机会发现。
   // 纯引用路径不受影响——计划生成时按 ref 现读并做新鲜度校验，过期了会自己报 stale。
   // 所以这里只锁草稿这一条，并说清楚「重新对比」是唯一的出路（R55-A7）。
-  const enterPlanBlockedByStaleMerge = resultStale && hasMergePreviewDraft;
+  const enterPlanBlockedByStaleMerge = resultStale && (hasMergePreviewDraft || Boolean(singleTune));
+  const singleApplyBlockedByStaleTune = resultStale && Boolean(singleTune);
 
   const startApplyFromCurrentDiff = () => {
     if (enterPlanBlockedByStaleMerge) return;
@@ -2012,6 +2331,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                   onClick={() => {
                     setMergeSelections({});
                     setMergePreviews({});
+                    resetBatchTuneDrafts();
                   }}
                   disabled={!hasMergePreviewDraft}
                 >
@@ -2087,9 +2407,35 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                   </button>
                 )}
                 {!matchResults && ready && onStartApply && (
-                  <button className="btn btn-ghost" onClick={startSingleApply}>
-                    {t("diff.startApply")}
-                  </button>
+                  <span className="merge-plan-actions">
+                    <button
+                      type="button"
+                      className={`btn btn-ghost${singleTuneOpen ? " active" : ""}`}
+                      aria-pressed={singleTuneOpen}
+                      onClick={toggleSingleTune}
+                    >
+                      {singleTuneOpen ? t("diff.manualTuneEditing") : t("diff.manualTune")}
+                    </button>
+                    {singleTune && (
+                      <span className="tune-badge" title={t("diff.manualTuneBadgeHint")}>
+                        {t("diff.manualTuneBadge")}
+                      </span>
+                    )}
+                    {singleApplyBlockedByStaleTune ? (
+                      <>
+                        <span className="btn-guard" title={t("diff.enterPlanBlockedStaleTune")}>
+                          <button className="btn btn-ghost" onClick={startSingleApply} disabled aria-disabled>
+                            {t("diff.startApply")}
+                          </button>
+                        </span>
+                        <span className="merge-plan-blocker">{t("diff.enterPlanBlockedStaleTune")}</span>
+                      </>
+                    ) : (
+                      <button className="btn btn-ghost" onClick={startSingleApply}>
+                        {t("diff.startApply")}
+                      </button>
+                    )}
+                  </span>
                 )}
                 {matchLoading && matchScan > 0 && <div className="diff-loadok">{t("diff.matchScanning", { count: matchScan })}</div>}
                 {matchGaps.length > 0 && (
@@ -2363,6 +2709,11 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                             <span className={`batch-diff-presence ${selectedBatchItem.presence}`}>
                               {matchPresenceLabel(selectedBatchItem.presence)}
                             </span>
+                            {tunedDataIds.has(selectedBatchItem.dataId) && (
+                              <span className="tune-badge" title={t("diff.manualTuneBadgeHint")}>
+                                {t("diff.manualTuneBadge")}
+                              </span>
+                            )}
                           </div>
                           <div className="batch-diff-main-meta">
                             <span className="batch-diff-main-label" title={selectedBatchItem.leftLabel}>
@@ -2372,8 +2723,38 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                             <span className="batch-diff-main-label" title={selectedBatchItem.rightLabel}>
                               {selectedBatchItem.rightLabel}
                             </span>
+                            {selectedBatchItem.presence === "right-only" ? (
+                              <span className="btn-guard" title={t("diff.manualTuneUnavailableRightOnly")}>
+                                <button type="button" className="btn btn-ghost btn-sm tune-toggle" disabled>
+                                  {t("diff.manualTune")}
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`btn btn-ghost btn-sm tune-toggle${batchTuneOpen ? " active" : ""}`}
+                                aria-pressed={batchTuneOpen}
+                                onClick={() => handleBatchTune(selectedBatchItem)}
+                              >
+                                {batchTuneOpen ? t("diff.manualTuneEditing") : t("diff.manualTune")}
+                              </button>
+                            )}
                           </div>
                         </div>
+                        {batchTuneOpen && tuneDrafts[selectedBatchTuneKey as string] && (
+                          <TargetTunePanel
+                            label={selectedBatchItem.rightLabel}
+                            format={selectedBatchItem.format}
+                            active={active}
+                            draft={tuneDrafts[selectedBatchTuneKey as string]}
+                            onDraftChange={(next) => writeTuneDraft(batchTuneKey(selectedBatchItem.dataId), next)}
+                            onSave={() => commitBatchTune(selectedBatchItem)}
+                            onCancel={closeTuneEditor}
+                            onReset={() => resetBatchTune(selectedBatchItem)}
+                            resetDisabled={!tunedDataIds.has(selectedBatchItem.dataId) && !mergePreviews[selectedBatchItem.dataId]}
+                            notice={tuneNotice ?? undefined}
+                          />
+                        )}
                         <DiffPanel
                           leftLabel={selectedBatchItem.leftLabel}
                           rightLabel={selectedBatchItem.rightLabel}
@@ -2412,15 +2793,32 @@ export default function DiffView({ active = true, connections, onConnectionsChan
             )}
 
             {!matchResults && ready ? (
-              <DiffPanel
-                leftLabel={leftLoaded.label}
-                rightLabel={rightLoaded.label}
-                leftText={leftText}
-                rightText={rightText}
-                format={diffFormat}
-                active={active}
-                warnings={singleWarnings}
-              />
+              <>
+                {singleTuneOpen && tuneDrafts[SINGLE_TUNE_KEY] && (
+                  <TargetTunePanel
+                    label={rightLoaded.label}
+                    format={singleTuneFormat}
+                    active={active}
+                    draft={tuneDrafts[SINGLE_TUNE_KEY]}
+                    onDraftChange={(next) => writeTuneDraft(SINGLE_TUNE_KEY, next)}
+                    onSave={commitSingleTune}
+                    onCancel={closeTuneEditor}
+                    onReset={resetSingleTune}
+                    resetDisabled={!singleTune}
+                    notice={undefined}
+                  />
+                )}
+                <DiffPanel
+                  leftLabel={leftLoaded.label}
+                  rightLabel={rightLoaded.label}
+                  leftText={leftText}
+                  // 微调后显示人写的那一份，不是服务端原文：用户要看得见自己写的落到结果里（R1）。
+                  rightText={effectiveSingleRightText}
+                  format={diffFormat}
+                  active={active}
+                  warnings={singleWarnings}
+                />
+              </>
             ) : !matchResults && !ready ? (
               <div className="pad-msg big">
                 {t("diff.selectHint")}
@@ -2431,6 +2829,30 @@ export default function DiffView({ active = true, connections, onConnectionsChan
           </div>
         </div>
       </div>
+      {/*
+        丢弃手写正文的二次确认（轮60 R7）。danger 档：这一步之后手写的字迹找不回来，
+        服务端原文会重新成为要写出去的内容。走应用内 ConfirmModal，不用原生 confirm()。
+      */}
+      {tuneDiscardPending && (
+        <ConfirmModal
+          danger
+          active={active}
+          title={t("diff.manualTuneDiscardTitle")}
+          message={t("diff.manualTuneDiscardMessage")}
+          confirmLabel={t("diff.manualTuneDiscardConfirm")}
+          onConfirm={() => {
+            const pending = tuneDiscardPending;
+            setTuneDiscardPending(null);
+            if (pending.scope === "single") {
+              discardSingleTune();
+              return;
+            }
+            const item = batchResults.find((row) => row.dataId === pending.dataId);
+            if (item) discardBatchTune(item);
+          }}
+          onCancel={() => setTuneDiscardPending(null)}
+        />
+      )}
     </div>
   );
 }

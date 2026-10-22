@@ -29,6 +29,11 @@ export interface ApplyEntryItem extends ApplyEntryRef {
   targetRef?: ApplyEntryRef;
   /** 可选的物化来源值：用于生成安全本地计划，同时不改变当前来源快照校验合同。 */
   sourceValueOverride?: ApplyPlanValueInput;
+  /**
+   * 物化文本是人手写的（第三步「微调」），不是整块从左挑到右的合并结果。
+   * 两种情况都会带 sourceValueOverride，计划里必须靠这个标记才分得开（轮60 R4）。
+   */
+  manualTuned?: boolean;
 }
 
 export interface ApplyEntryRangeSummary {
