@@ -18,7 +18,8 @@
  * 4. 矩阵每个 (platform, goarch) 都能在 platforms 里查到；downloadUrl 末段 == fileName
  *    == sha256sum 实参末段 == release 作业 files 里的路径末段（被哈希的就是被发布的那一个）；
  * 5. notes 必须来自 scripts/extract-release-notes.mjs（不得再回 gh release view，也不得留占位兜底）；
- * 6. 该脚本对真实 CHANGELOG 抽出多行 bullet 且无 markdown 残留，段落缺失/正文为空必须非 0 退出；
+ * 6. 该脚本对真实 CHANGELOG 抽出多行 bullet 且无 markdown 残留，段落缺失/正文为空必须非 0 退出，
+ *    小节标题一律中文（轮64：判据从「必须有新增和修复」改成「不许漏英文」，另用夹具把八类映射逐项覆盖）；
  * 7. （轮58）GitHub Release 正文也只能来自 CHANGELOG：release 作业必须先用
  *    scripts/sync-github-release-notes.mjs 渲染 body_path 指向的那份文件，且不能再把
  *    generate_release_notes 打开——那是按"合并进来的 PR"汇总的自动注记，本仓库不走 PR 流程，
@@ -260,6 +261,31 @@ function runNotesScript(args: string[]): { code: number; stdout: string; stderr:
     const failure = error as { status?: number; stdout?: string; stderr?: string };
     return { code: failure.status ?? -1, stdout: failure.stdout ?? "", stderr: failure.stderr ?? "" };
   }
+}
+
+/**
+ * 规则 6 的小节标题口径（轮64 收紧前先看这条原先为什么会红）：
+ * 抽取脚本把 `### Added` 这类英文标题按 scripts/changelogSection.mjs 的 SECTION_LABELS 映射成
+ * 中文标签（界面是中文应用），映射不到就 `?? heading` 原样输出——于是更新弹窗里会凭空多出一行
+ * "Hotfix"。原先这条守卫写成「必须同时出现 新增 和 修复」，把两件事混成一件：
+ * 真实意图是「标题不许漏英文」，而「每个版本都得凑出新增与修复」并不成立——
+ * 1.9.6 是纯安全闸门版，只有「安全 / 工程」两节，硬塞一节空的「修复」就是把 CHANGELOG
+ * 写成给测试看的样子。拆成两条：① 任一版本的说明都不得出现未映射的标题；
+ * ② 八类小节的映射用离线夹具逐项覆盖，新增类漏映射同样判红。
+ * @returns 问题清单，空数组代表通过
+ */
+function notesLabelProblems(notes: string): string[] {
+  const problems: string[] = [];
+  // 标题行的形态：非空、不是 bullet、不是续行缩进
+  const labels = notes
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() && !line.startsWith("- ") && !line.startsWith(" ") && line !== "");
+  if (labels.length === 0) problems.push("抽不出任何小节标题");
+  for (const label of labels) {
+    if (/^[A-Za-z][A-Za-z ]*$/.test(label.trim())) problems.push(`小节标题没映射成中文：${label.trim()}`);
+  }
+  return problems;
 }
 
 /** 规则 3 + 4：清单契约。返回问题清单，变异对照靠它判红。 */
@@ -515,10 +541,37 @@ describe("发布说明抽取脚本（真实 CHANGELOG 的可执行证据）", ()
     }
   });
 
-  it("小节标题按中文口径给出（界面是中文应用）", () => {
-    const notes = runNotesScript([pkgVersion]).stdout;
-    expect(notes).toMatch(/^新增$/m);
-    expect(notes).toMatch(/^修复$/m);
+  it("真实 CHANGELOG 的小节标题不漏英文（界面是中文应用）", () => {
+    const run = runNotesScript([pkgVersion]);
+    expect(run.code, run.stderr).toBe(0);
+    expect(notesLabelProblems(run.stdout), run.stdout).toEqual([]);
+  });
+
+  it("八类小节的映射逐项覆盖，未收录的标题必须被查出（变异对照）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "confscope-notes-labels-"));
+    const file = join(dir, "CHANGELOG.md");
+    const coverage = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Engineering", "Technical"];
+    const expected = ["新增", "变更", "废弃", "移除", "修复", "安全", "工程", "技术"];
+    writeFileSync(
+      file,
+      `# Changelog\n\n## [9.9.9] - 2026-01-01\n\n${coverage.map((h) => `### ${h}\n- 该小节的条目\n`).join("\n")}`,
+      "utf8"
+    );
+    const full = runNotesScript(["9.9.9", `--changelog=${file}`]);
+    expect(full.code, full.stderr).toBe(0);
+    for (const label of expected) expect(full.stdout, `缺少中文标签 ${label}`).toMatch(new RegExp(`^${label}$`, "m"));
+    expect(notesLabelProblems(full.stdout), full.stdout).toEqual([]);
+
+    // 变异对照：加一个 SECTION_LABELS 里没有的标题，英文会漏进中文界面，判据必须抓到
+    writeFileSync(
+      file,
+      `# Changelog\n\n## [9.9.9] - 2026-01-01\n\n${coverage.map((h) => `### ${h}\n- 该小节的条目\n`).join("\n")}
+### Hotfix\n- 未收录的小节\n`,
+      "utf8"
+    );
+    const leaked = runNotesScript(["9.9.9", `--changelog=${file}`]);
+    expect(leaked.code, leaked.stderr).toBe(0);
+    expect(notesLabelProblems(leaked.stdout), leaked.stdout).toContain("小节标题没映射成中文：Hotfix");
   });
 
   it("版本段落不存在 ⇒ 非 0 退出（宁可发版构建红，也不发占位文案）", () => {
