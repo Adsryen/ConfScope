@@ -131,6 +131,8 @@ describe("发布产物名与 release.yml 一致", () => {
   it("README 提到的每个资产名都在 workflow 里出现", () => {
     const assets = [
       "ConfScope.exe",
+      // 轮62：安装版是 Windows 的推荐形态，产物名跟着 update.json 的 windows-amd64-installer 条目
+      "confscope-windows-amd64-installer.exe",
       "confscope-linux-amd64.tar.gz",
       "confscope-linux-amd64.deb",
       "confscope-linux-amd64.rpm",

@@ -218,12 +218,25 @@ retest 与截图取证都依赖 `scripts/retest-data/` 的合成数据，跑之�
 推送 `v*` tag 后，Release workflow 会先跑门禁（类型检查、静态守卫、Go vet/test、版本注入证据、
 发布前校验），再构建并上传：
 
-| 平台 | 产物 |
-| --- | --- |
-| Windows amd64 | `ConfScope.exe` |
-| Linux amd64 | `confscope-linux-amd64.tar.gz` / `confscope-linux-amd64.deb` / `confscope-linux-amd64.rpm` |
-| macOS arm64 | `ConfScope-darwin-arm64.dmg` |
-| macOS amd64 | `ConfScope-darwin-amd64.dmg` |
+| 平台 | 产物 | 形态 |
+| --- | --- | --- |
+| Windows amd64 | `confscope-windows-amd64-installer.exe` | **安装版（推荐）**：每用户 NSIS，装到 `%LOCALAPPDATA%\Programs\ConfScope`，免管理员权限，控制面板可卸载 |
+| Windows amd64 | `ConfScope.exe` | 便携版：单文件放哪跑哪，数据默认落在 exe 同级 `ConfScopeData` |
+| Linux amd64 | `confscope-linux-amd64.tar.gz` / `confscope-linux-amd64.deb` / `confscope-linux-amd64.rpm` | 裸二进制 / 系统包 |
+| macOS arm64 | `ConfScope-darwin-arm64.dmg` | 挂载后拖进 Applications |
+| macOS amd64 | `ConfScope-darwin-amd64.dmg` | 同上 |
+
+两种 Windows 形态只差**数据根默认落在哪**（见上文「数据与凭据边界」），配置与凭据的写法完全相同：
+安装版由安装程序在 exe 同级写 `install.json` 标记，数据落系统用户数据目录；便携版没有标记，数据随
+exe 走。从便携版换到安装版不会丢数据——解析链先采纳已有数据的旧根，设置页里也能显式换根迁移。
+
+升级也按形态分流（**程序永不替换自己的二进制**，这一步永远交给人或安装程序）：
+
+- 安装版：关于页「下载并安装 v{x.y.z}」→ 下载 → 按 `update.json` 里的 sha256 校验（不过就中止）→
+  起安装程序并优雅退出；安装程序有界等待旧进程退出后覆盖同一位置，不强杀、不碰数据；
+- 便携版与 Linux 裸二进制 / tar.gz：下载完成后「打开所在文件夹」，由你把新文件覆盖旧文件；
+- `.deb` / `.rpm`：界面给出对应安装命令与复制按钮，由你在终端执行（程序不提权、也不代跑）；
+- macOS：下载 dmg 后挂载，由你把 App 拖进 Applications。
 
 Release 正文由 CHANGELOG 对应版本段落渲染（`scripts/sync-github-release-notes.mjs`），与应用内
 「检查更新」看到的说明同源。也可在 Actions 里用 **workflow_dispatch** 手动试跑构建（只上传

@@ -68,6 +68,23 @@ jobs:
           go vet ./internal/...
           go test ./internal/...
 
+      # Windows 安装包脚本的语法闸门（轮62）。project.nsi 是手写的，而它过去只在
+      # Windows 的 wails build -nsis 里第一次被编译——CI 从来不产安装包，等于从来没验证过，
+      # 语法错/宏顺序错/语言表缺失都要等到出包作业才炸。这里用发行版自带的 nsis 包
+      # （和 wails 调用的同一支 makensis）在 Linux 上把它编译一遍。
+      # 判据是硬的：装不到 makensis 就红，脚本没真吐出安装包也红——
+      # check-windows-installer.sh 找不到 makensis 时是 SKIP + exit 0，不能让它蒙过去。
+      - name: Validate Windows installer script (makensis)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nsis
+          command -v makensis >/dev/null
+          rm -f build/bin/confscope-windows-amd64-installer.exe
+          bash scripts/check-windows-installer.sh
+          test -f build/bin/confscope-windows-amd64-installer.exe
+
       # 可执行证据：注入必须真的落进 internal/app（本轮线上事故的形态），不是只 grep 文本
       - name: Version injection evidence
         shell: bash
@@ -128,6 +145,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev
 
+      # wails build -nsis 靠 PATH 上的 makensis；找不到时 v2.13.0 只打一行
+      # "Warning: Cannot create installer: makensis not found" 然后 return nil
+      # ——构建全绿、一个安装包都没有（本线最大的静默失败点）。所以这里显式装、
+      # 显式定位，下面 Build 前再钉一次 PATH，产物存在性在上传前硬断言。
+      - name: Install NSIS (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          choco install nsis -y --no-progress
+          NSIS_BIN="$(find "/c/Program Files (x86)/NSIS" "/c/Program Files/NSIS" -maxdepth 1 -name makensis.exe 2>/dev/null | head -n 1 || true)"
+          if [ -z "${NSIS_BIN}" ]; then
+            echo "ERROR: choco 装完找不到 makensis.exe" >&2
+            ls -la "/c/Program Files (x86)" || true
+            exit 1
+          fi
+          "${NSIS_BIN}" -VERSION
+          # GITHUB_PATH 要 Windows 形态的路径，bash 里的 /c/... 追加进去下一步用不了
+          cygpath -w "$(dirname "${NSIS_BIN}")" | tr -d '\r' >> "${GITHUB_PATH}"
+
       - name: Install Wails CLI
         shell: bash
         run: |
@@ -146,16 +183,40 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          set -euo pipefail
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
+            INSTALLER_VERSION="${VERSION}"
           else
             VERSION="dev-${GITHUB_SHA::7}"
+            # 非 tag 构建（workflow_dispatch）也要一个能过 VIProductVersion 的四段式数字，
+            # 否则 makensis 直接在 "VIProductVersion "${INFO_PRODUCTVERSION}.0"" 上编译失败。
+            INSTALLER_VERSION="0.0.0"
           fi
           echo "Building ConfScope version=${VERSION} GOARCH=${GOARCH}"
+          NSIS_FLAG=""
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            # 安装包的版本号走的是另一条通道：wails 用自带模板渲染
+            # build/windows/installer/wails_tools.nsh，把 wails.json 的 info.productVersion
+            # 注入成 INFO_PRODUCTVERSION，再进 VIProductVersion / 卸载条目的 DisplayVersion /
+            # install.json 的 version 字段。ldflags 只改 Go 里的 appVersion，改不到这里，
+            # 所以每次出包都要按 tag 对齐一次，否则安装程序属性里永远是仓库里那个旧值。
+            # wails.json 只在构建期被改，不落库（提交里仍是发版时写死的当前版本）。
+            jq --arg v "${INSTALLER_VERSION}" '.info.productVersion = $v' wails.json > wails.json.tmp
+            mv wails.json.tmp wails.json
+            grep -q "\"productVersion\": \"${INSTALLER_VERSION}\"" wails.json
+            command -v makensis >/dev/null || {
+              echo "ERROR: makensis 不在 PATH，-nsis 会让 wails 只打 Warning 就返回成功" >&2
+              exit 1
+            }
+            NSIS_FLAG="-nsis"
+          fi
+
           # -X 的目标必须是变量真实所在的包路径：77fa451 把 appVersion 从 package main
           # 迁到 confscope/internal/app，写 main.appVersion 会被链接器静默忽略，
           # 产物里永远是 "dev"（钉在 tests/ux/buildVersionSymbolResolvesToGoDeclaration）。
-          wails build -clean -ldflags "-X confscope/internal/app.appVersion=${VERSION}"
+          # shellcheck disable=SC2086
+          wails build -clean ${NSIS_FLAG} -ldflags "-X confscope/internal/app.appVersion=${VERSION}"
         env:
           GOARCH: ${{ matrix.goarch }}
 
@@ -215,6 +276,26 @@ jobs:
           name: ConfScope-windows-amd64
           path: build/bin/ConfScope.exe
           # 产物没编出来要在上传这一步就红；默认的 warn 会把它推到下游 sha256sum 才炸
+          if-no-files-found: error
+
+      # -nsis 静默失败的最后一道兜底（见上面 Install NSIS 的注释）：exe 编出来不代表
+      # 安装包也编出来了。这里不写 || true，也不做「有就传没有就跳过」的容错——
+      # 没有安装包就等于这一版的 Windows 用户点「下载并安装」时只会拿到一行提示。
+      - name: Assert Windows installer exists
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la build/bin
+          test -f build/bin/confscope-windows-amd64-installer.exe
+          du -h build/bin/confscope-windows-amd64-installer.exe
+
+      - name: Upload artifact (Windows installer)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ConfScope-windows-amd64-installer
+          path: build/bin/confscope-windows-amd64-installer.exe
           if-no-files-found: error
 
       # Linux 打包原始二进制 + .deb + .rpm
@@ -361,8 +442,9 @@ jobs:
           echo "release notes for ${VERSION} (${#NOTES} chars):"
           echo "${NOTES}"
 
-          # Windows
+          # Windows：裸 exe（便携形态）+ NSIS 安装程序（每用户安装形态）
           WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe" | awk '{print $1}')
+          WIN_INSTALLER_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64-installer/confscope-windows-amd64-installer.exe" | awk '{print $1}')
 
           # Linux
           LINUX_TAR_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz" | awk '{print $1}')
@@ -380,6 +462,7 @@ jobs:
             --arg notes "${NOTES}" \
             --arg publishedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg winSha256 "${WIN_SHA256}" \
+            --arg winInstallerSha256 "${WIN_INSTALLER_SHA256}" \
             --arg linuxTarSha256 "${LINUX_TAR_SHA256}" \
             --arg linuxDebSha256 "${LINUX_DEB_SHA256}" \
             --arg linuxRpmSha256 "${LINUX_RPM_SHA256}" \
@@ -396,6 +479,11 @@ jobs:
                   downloadUrl: "\($downloadBase)/ConfScope.exe",
                   sha256: $winSha256,
                   fileName: "ConfScope.exe"
+                },
+                "windows-amd64-installer": {
+                  downloadUrl: "\($downloadBase)/confscope-windows-amd64-installer.exe",
+                  sha256: $winInstallerSha256,
+                  fileName: "confscope-windows-amd64-installer.exe"
                 },
                 "linux-amd64": {
                   downloadUrl: "\($downloadBase)/confscope-linux-amd64.tar.gz",
@@ -478,6 +566,7 @@ jobs:
           body_path: ${{ runner.temp }}/release-body.md
           files: |
             artifacts/ConfScope-windows-amd64/ConfScope.exe
+            artifacts/ConfScope-windows-amd64-installer/confscope-windows-amd64-installer.exe
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm
