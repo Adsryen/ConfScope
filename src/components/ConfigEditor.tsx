@@ -92,6 +92,7 @@ export default function ConfigEditor({ conn, namespace, onClose, active = true, 
     setError(null);
     const entry = buildDirectWriteExitEntry({
       conn,
+      t,
       namespace,
       group: group.trim() || "DEFAULT_GROUP",
       dataId: dataId.trim(),

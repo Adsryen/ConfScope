@@ -12,7 +12,8 @@
 //   - 删除配置 → 删除（期望内容 = 不存在，`classify()` 对 `!source.exists && target.exists` 给出 delete）
 //   - 历史回滚 → 覆盖（来源=该历史版本正文）
 // 先例与同一合同：`buildContentReplaceApplyEntry`（批量替换）、`buildRollbackEntryFromApplyRecord`（回退）。
-import { connectionDisplayLabel, type Connection } from "../store/connections";
+import { type Connection } from "../store/connections";
+import { connectionLabel } from "./defaultNameCopy";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "./applyEntry";
 import { fingerprintApplyPlanValue, type ApplyPlanValueInput } from "./applyPlan";
 import { detectFormat, type Format } from "./format";
@@ -25,6 +26,8 @@ export type DirectWriteIntent = "edit" | "create" | "delete" | "rollback";
 
 export interface DirectWriteExitInput {
   conn: Connection;
+  /** 计划里的连接名/端点标签是给人看的，内置默认名要按当前语言翻（见 lib/defaultNameCopy）。 */
+  t: (key: string) => string;
   namespace: string;
   group: string;
   dataId: string;
@@ -85,7 +88,7 @@ export function buildDirectWriteExitEntry(input: DirectWriteExitInput): ApplyEnt
 
   const conn = input.conn;
   const provider = conn.provider ?? "nacos";
-  const connectionName = conn.name || connectionDisplayLabel(conn);
+  const connectionName = conn.name || connectionLabel(conn, input.t);
   const namespace = input.namespace;
   const group = input.group.trim() || "DEFAULT_GROUP";
   const format = input.format ?? detectFormat(dataId, "", input.desiredContent ?? "");

@@ -18,6 +18,7 @@ import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
+import { connectionLabel } from "../lib/defaultNameCopy";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import { createSnapshotFromConfigs } from "../api/snapshot";
 import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../api/app";
@@ -181,7 +182,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
    */
   const canWrite = isWritableConfigTarget(conn);
   const canStartReplacement = Boolean(onStartApply) && canWrite;
-  const connectionName = conn.name || connectionDisplayLabel(conn);
+  const connectionName = conn.name || connectionLabel(conn, t);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
   const targetConnections = useMemo(
@@ -204,7 +205,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     connectionId: conn.id,
     connectionName,
     namespace: tenant,
-    label: `${connectionDisplayLabel(conn)} / ${namespaceLabel}`,
+    label: `${connectionLabel(conn, t)} / ${namespaceLabel}`,
   };
   const metadataItems =
     isLocalSnapshot && metadata
@@ -675,13 +676,13 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
 
   const startContentReplaceApply = () => {
     if (!targetConnection || !onStartApply) return;
-    const targetLabel = `${connectionDisplayLabel(targetConnection)} / ${targetNamespace || "public"}`;
+    const targetLabel = `${connectionLabel(targetConnection, t)} / ${targetNamespace || "public"}`;
     const entry = buildContentReplaceApplyEntry({
       source: sourceEndpoint,
       target: {
         provider: targetConnection.provider ?? "nacos",
         connectionId: targetConnection.id,
-        connectionName: targetConnection.name || connectionDisplayLabel(targetConnection),
+        connectionName: targetConnection.name || connectionLabel(targetConnection, t),
         namespace: targetNamespace,
         label: targetLabel,
       },
@@ -717,6 +718,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     }
     const entry = buildDirectWriteExitEntry({
       conn,
+      t,
       namespace: tenant,
       group: selected.group,
       dataId: selected.dataId,
@@ -786,6 +788,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     if (!selected) return;
     const entry = buildDirectWriteExitEntry({
       conn,
+      t,
       namespace: tenant,
       group: selected.group,
       dataId: selected.dataId,
@@ -1567,8 +1570,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 </span>
                 <div className="browser-target-scope">
                   <span>{t("config.applyTarget")}</span>
-                  <strong title={targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}>
-                    {targetConnection ? connectionDisplayLabel(targetConnection) : t("config.noApplyTarget")}
+                  <strong title={targetConnection ? connectionLabel(targetConnection, t) : t("config.noApplyTarget")}>
+                    {targetConnection ? connectionLabel(targetConnection, t) : t("config.noApplyTarget")}
                   </strong>
                 </div>
               </div>
@@ -1579,7 +1582,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   placeholder={t("config.noApplyTarget")}
                   options={targetConnections.map((candidate) => ({
                     value: candidate.id,
-                    label: `${connectionDisplayLabel(candidate)}${
+                    label: `${connectionLabel(candidate, t)}${
                       candidate.id === conn.id
                         ? ` · ${t("config.sourceDefault")}`
                         : isSandboxEnvironment(candidate)

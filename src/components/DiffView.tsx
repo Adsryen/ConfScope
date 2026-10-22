@@ -11,12 +11,11 @@ import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
   Connection,
-  connectionDisplayLabel,
   connectionEnvironmentName,
   connectionProjectName,
-  connectionSourceName,
   updateConnection,
 } from "../store/connections";
+import { connectionLabel, environmentLabel, localizeDefaultName, sourceLabel } from "../lib/defaultNameCopy";
 import { useSettings } from "../lib/useSettings";
 import { loadDiffViewPreferences, saveDiffViewPreferences, type DiffViewSourcePreference } from "../store/diffPreferences";
 import { isCompleteDiffSourcePair, type DiffJumpParams } from "../lib/diffJump";
@@ -317,14 +316,14 @@ function environmentHint(t: (key: string) => string, name: string): string {
     local: "diff.environmentHintLocal",
     other: "diff.environmentHintOther",
   };
-  return `${name} · ${t(keyByTone[environmentTone(name)])}`;
+  return `${localizeDefaultName(name, t)} · ${t(keyByTone[environmentTone(name)])}`;
 }
 
 function EnvironmentBadge({ name }: { name: string }) {
   const { t } = useTranslation();
   return (
     <span className={`env-badge env-${environmentTone(name)}`} title={environmentHint(t, name)}>
-      {name || t("diff.environmentUnknown")}
+      {localizeDefaultName(name, t) || t("diff.environmentUnknown")}
     </span>
   );
 }
@@ -332,11 +331,11 @@ function EnvironmentBadge({ name }: { name: string }) {
 function sourceSummary(source: Source, connections: Connection[], autoMatch: string, t: (key: string) => string): string {
   const conn = connections.find((item) => item.id === source.connId);
   const isLocal = conn?.sourceType === "local-snapshot";
-  const path = conn ? connectionSourceName(conn) : source.connId;
+  const path = conn ? sourceLabel(conn, t) : source.connId;
   const label = isLocal
     ? `${t("connection.sourceTypeSnapshot")} / ${path}`
     : conn
-      ? `${connectionEnvironmentName(conn)} / ${path}`
+      ? `${environmentLabel(conn, t)} / ${path}`
       : source.connId;
   const namespace = source.tenant || "public";
   const group = source.group.trim() || "DEFAULT_GROUP";
@@ -344,7 +343,11 @@ function sourceSummary(source: Source, connections: Connection[], autoMatch: str
   return `${label} / ${namespace} / ${group} / ${dataId}`;
 }
 
-function applyEntryEndpointFromSource(source: Source, connections: Connection[]): ApplyEntryEndpoint | null {
+function applyEntryEndpointFromSource(
+  source: Source,
+  connections: Connection[],
+  t: (key: string) => string
+): ApplyEntryEndpoint | null {
   const conn = connections.find((item) => item.id === source.connId);
   if (!conn) return null;
   const namespace = source.tenant;
@@ -354,7 +357,7 @@ function applyEntryEndpointFromSource(source: Source, connections: Connection[])
     connectionId: conn.id,
     connectionName: conn.name || conn.sourceName || conn.id,
     namespace,
-    label: `${connectionDisplayLabel(conn)} / ${namespaceLabel}`,
+    label: `${connectionLabel(conn, t)} / ${namespaceLabel}`,
   };
 }
 
@@ -371,8 +374,8 @@ function applyEntryItemFromSource(source: Source, connections: Connection[], dat
   };
 }
 
-function sourceOptionLabel(conn: Connection): string {
-  const source = connectionSourceName(conn);
+function sourceOptionLabel(conn: Connection, t: (key: string) => string): string {
+  const source = sourceLabel(conn, t);
   const remark = conn.name?.trim();
   return remark && remark !== source ? `${source} (${remark})` : source;
 }
@@ -497,13 +500,13 @@ function SourcePicker({
   const snapshotPath = conn?.localPath || conn?.baseUrl || "";
   const selectedEnvironment = conn ? connectionEnvironmentName(conn) : "";
   const environmentNames = sortEnvironments(uniqueValues(projectConnections.map((item) => connectionEnvironmentName(item))));
-  const environmentOptions = environmentNames.map((value) => ({ value, label: value }));
+  const environmentOptions = environmentNames.map((value) => ({ value, label: localizeDefaultName(value, t) }));
   const sourceConnections = selectedEnvironment
     ? projectConnections.filter((item) => connectionEnvironmentName(item) === selectedEnvironment)
     : projectConnections;
   const sourceOptions = [...sourceConnections]
-    .sort((a, b) => compareText(sourceOptionLabel(a), sourceOptionLabel(b)))
-    .map((item) => ({ value: item.id, label: sourceOptionLabel(item) }));
+    .sort((a, b) => compareText(sourceOptionLabel(a, t), sourceOptionLabel(b, t)))
+    .map((item) => ({ value: item.id, label: sourceOptionLabel(item, t) }));
 
   useEffect(() => {
     if (!conn) return;
@@ -528,7 +531,7 @@ function SourcePicker({
         onLoadErrorRef.current?.();
         reportError({
           title: t("diff.namespaceLoadFailed"),
-          source: conn ? `${connectionDisplayLabel(conn)} / ${title}` : title,
+          source: conn ? `${connectionLabel(conn, t)} / ${title}` : title,
           message,
           detail: message,
           mergeKey: `diff:namespace:${conn?.id || source.connId}`,
@@ -585,7 +588,7 @@ function SourcePicker({
         onLoadErrorRef.current?.();
         reportError({
           title: t("diff.configListLoadFailed"),
-          source: conn ? `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${title}` : title,
+          source: conn ? `${connectionLabel(conn, t)} / ${source.tenant || "public"} / ${title}` : title,
           message,
           detail: message,
           mergeKey: `diff:configs:${conn?.id || source.connId}:${source.tenant || "public"}`,
@@ -879,7 +882,11 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     () => connections.filter((item) => connectionProjectName(item) === activeProject),
     [connections, activeProject]
   );
-  const projectOptions = useMemo(() => projectNames.map((value) => ({ value, label: value })), [projectNames]);
+  // 项目下拉：value 是存档里的 raw 名（切换项目靠它匹配），label 才本地化。
+  const projectOptions = useMemo(
+    () => projectNames.map((value) => ({ value, label: localizeDefaultName(value, t) })),
+    [projectNames, t]
+  );
 
   useEffect(() => {
     if (!activeProject) return;
@@ -1172,7 +1179,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     const content = await getConfig(conn, source.tenant, id, group);
 
     return {
-      label: `${connectionDisplayLabel(conn)} / ${source.tenant || "public"} / ${id}`,
+      label: `${connectionLabel(conn, t)} / ${source.tenant || "public"} / ${id}`,
       content,
       format: detectFormat(id, "", content),
     };
@@ -1379,8 +1386,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
       direction: "left->right",
       left: sourceSummary(left, connections, "", t),
       right: sourceSummary(right, connections, "", t),
-      source: { connId: left.connId, name: connectionSourceName(connections.find((item) => item.id === left.connId) ?? ({} as Connection)), namespace: left.tenant, dataId: left.dataId, group: left.group },
-      target: { connId: right.connId, name: connectionSourceName(connections.find((item) => item.id === right.connId) ?? ({} as Connection)), namespace: right.tenant, dataId: right.dataId, group: right.group },
+      source: { connId: left.connId, name: sourceLabel(connections.find((item) => item.id === left.connId) ?? ({} as Connection), t), namespace: left.tenant, dataId: left.dataId, group: left.group },
+      target: { connId: right.connId, name: sourceLabel(connections.find((item) => item.id === right.connId) ?? ({} as Connection), t), namespace: right.tenant, dataId: right.dataId, group: right.group },
       dataId: left.dataId || right.dataId,
     });
     const [leftResult, rightResult] = await Promise.allSettled([loadOne(left), loadOne(right)]);
@@ -1465,8 +1472,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
       direction: "left->right",
       left: sourceSummary(left, connections, "", t),
       right: sourceSummary(right, connections, "", t),
-      source: { connId: left.connId, name: connectionSourceName(connections.find((item) => item.id === left.connId) ?? ({} as Connection)), namespace: left.tenant, dataId: "", group: left.group },
-      target: { connId: right.connId, name: connectionSourceName(connections.find((item) => item.id === right.connId) ?? ({} as Connection)), namespace: right.tenant, dataId: "", group: right.group },
+      source: { connId: left.connId, name: sourceLabel(connections.find((item) => item.id === left.connId) ?? ({} as Connection), t), namespace: left.tenant, dataId: "", group: left.group },
+      target: { connId: right.connId, name: sourceLabel(connections.find((item) => item.id === right.connId) ?? ({} as Connection), t), namespace: right.tenant, dataId: "", group: right.group },
     });
 
     setBatchLoading(true);
@@ -1972,8 +1979,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     // R5：结果过期还带着手写正文进计划 = 拿旧基线上的字迹去写生产。纯引用路径不受影响
     // （计划生成时按 ref 现读并自判新鲜度），被锁的只有物化出来的这一份。
     if (resultStale && singleTune) return;
-    const source = applyEntryEndpointFromSource(left, connections);
-    const target = applyEntryEndpointFromSource(right, connections);
+    const source = applyEntryEndpointFromSource(left, connections, t);
+    const target = applyEntryEndpointFromSource(right, connections, t);
     const sourceRef = applyEntryItemFromSource(left, connections, left.dataId.trim(), left.group);
     const targetRef = applyEntryItemFromSource(right, connections, right.dataId.trim(), right.group);
     if (!source || !target || !sourceRef || !targetRef) return;
@@ -2014,8 +2021,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const startBatchApply = () => {
     if (!onStartApply || batchResults.length === 0) return;
-    const source = applyEntryEndpointFromSource(left, connections);
-    const target = applyEntryEndpointFromSource(right, connections);
+    const source = applyEntryEndpointFromSource(left, connections, t);
+    const target = applyEntryEndpointFromSource(right, connections, t);
     if (!source || !target) return;
 
     const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));
@@ -2050,8 +2057,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const startMergeDraftApply = () => {
     if (!onStartApply || batchResults.length === 0) return;
-    const source = applyEntryEndpointFromSource(left, connections);
-    const target = applyEntryEndpointFromSource(right, connections);
+    const source = applyEntryEndpointFromSource(left, connections, t);
+    const target = applyEntryEndpointFromSource(right, connections, t);
     if (!source || !target) return;
 
     const matchByDataId = new Map((matchResults ?? []).map((item) => [item.dataId, item]));

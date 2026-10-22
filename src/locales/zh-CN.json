@@ -784,7 +784,10 @@
     "removeSSH": "移除 SSH 配置",
     "revealPassword": "显示密码",
     "hide": "隐藏",
-    "show": "显示"
+    "show": "显示",
+    "defaultProjectName": "默认项目",
+    "defaultEnvironmentName": "未分组",
+    "defaultSourceName": "默认来源"
   },
   "config": {
     "total": "共 {count} 项",
@@ -899,7 +902,6 @@
     "findClose": "关闭查找",
     "findCloseKey": "关闭查找（Esc）",
     "findCount": "第 {current}/{total} 处",
-
     "findCountCapped": "第 {current}/{max}+ 处",
     "findCountCappedHint": "命中太多，只标红前 {max} 处，方向键也只在这些命中里跳。换个更长的词能缩小范围",
     "findNone": "无匹配",

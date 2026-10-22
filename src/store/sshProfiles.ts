@@ -1,5 +1,6 @@
 import type { SSHConfig } from "./connections";
-import { connectionDisplayLabel, loadConnections } from "./connections";
+import { type Connection, loadConnections } from "./connections";
+import { connectionLabel } from "../lib/defaultNameCopy";
 import { SSH_DEFAULT_PORT } from "../lib/ports";
 
 export interface SSHProfile {
@@ -114,10 +115,15 @@ export function countSSHProfileReferences(id: string): number {
   return loadConnections().filter((conn) => conn.sshProfileId === id).length;
 }
 
-export function listSSHProfileReferences(id: string): string[] {
+/**
+ * 引用该隧道的连接清单（删除/改动前的拦截面板要展示）。
+ * 传入 t 才会把内置默认名翻成当前语言；不传就只给机器名（conn.id 之外仍可能露中文哨兵，
+ * 所以调用方一律传 t —— 守卫 tests/ux/defaultSentinelsMustNotReachRenderUntranslated 盯着展示位）。
+ */
+export function listSSHProfileReferences(id: string, t: (key: string) => string): string[] {
   return loadConnections()
     .filter((conn) => conn.sshProfileId === id)
-    .map(connectionDisplayLabel);
+    .map((conn: Connection) => connectionLabel(conn, t));
 }
 
 export function getSSHProfile(id?: string): SSHProfile | undefined {

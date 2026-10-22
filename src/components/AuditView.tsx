@@ -6,6 +6,7 @@ import { environmentTone } from "../lib/envTone";
 import { normalizeConfig, type ConfigEntry, type ParseStatus } from "../lib/normalize";
 import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } from "../lib/audit";
 import { useTranslation } from "../i18n";
+import { environmentLabel, localizeDefaultName } from "../lib/defaultNameCopy";
 import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
@@ -79,21 +80,21 @@ function envKey(s: EnvSource): string {
   return `${s.conn.id}:${s.namespace}`;
 }
 
-function envLabel(s: EnvSource): string {
-  return `${connectionEnvironmentName(s.conn)} / ${s.conn.name || s.conn.sourceName} / ${s.namespace || "public"}`;
+function envLabel(s: EnvSource, t: (key: string) => string): string {
+  return `${environmentLabel(s.conn, t)} / ${s.conn.name || s.conn.sourceName} / ${s.namespace || "public"}`;
 }
 
-function envShortLabel(s: EnvSource): string {
-  return `${connectionEnvironmentName(s.conn)} / ${s.namespace || "public"}`;
+function envShortLabel(s: EnvSource, t: (key: string) => string): string {
+  return `${environmentLabel(s.conn, t)} / ${s.namespace || "public"}`;
 }
 
-function applyEntryEndpoint(env: EnvSource): ApplyEntryEndpoint {
+function applyEntryEndpoint(env: EnvSource, t: (key: string) => string): ApplyEntryEndpoint {
   return {
     provider: env.conn.provider ?? "nacos",
     connectionId: env.conn.id,
     connectionName: env.conn.name || env.conn.sourceName || env.conn.id,
     namespace: env.namespace,
-    label: envLabel(env),
+    label: envLabel(env, t),
   };
 }
 
@@ -320,8 +321,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     onStartApply({
       sourceType: "audit",
       scope: "key",
-      source: applyEntryEndpoint(baselineEnv),
-      target: applyEntryEndpoint(targetEnv),
+      source: applyEntryEndpoint(baselineEnv, t),
+      target: applyEntryEndpoint(targetEnv, t),
       items: [item],
       rangeSummary: applyEntryRiskSummary([item], selectedRow.status === "ignored" ? 1 : 0),
       origin: {
@@ -329,7 +330,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         returnMode: "audit",
       },
     });
-  }, [selectedRow, baseline, envSources, envIds, onStartApply]);
+  }, [selectedRow, baseline, envSources, envIds, onStartApply, t]);
 
   const applyNormalize = useCallback(
     (name: string): string => {
@@ -399,7 +400,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       kind: "audit_run_start",
       scope: "audit",
       selectedCount: envSources.length,
-      left: envSources.map((env) => envLabel(env)).join(" | "),
+      left: envSources.map((env) => envLabel(env, t)).join(" | "),
     });
 
     try {
@@ -430,11 +431,11 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               entriesList.push({ dataId: item.dataId, entries: [{ key: "__parse__", value: t("audit.configLoadFailedValue"), valueType: "text" as const, sourcePath: "__parse__", parseStatus: "error" as ParseStatus }], format: "TEXT" });
             }
           }
-          gaps.push(...describeConfigListGaps(listResult, t).map((gap) => `${envShortLabel(env)}: ${gap}`));
+          gaps.push(...describeConfigListGaps(listResult, t).map((gap) => `${envShortLabel(env, t)}: ${gap}`));
           for (const item of entriesList) {
             sources.push({
               envId: envKey(env),
-              label: envLabel(env),
+              label: envLabel(env, t),
               providerType: env.conn.provider ?? "nacos",
               namespace: env.namespace,
               group: env.group || "DEFAULT_GROUP",
@@ -445,7 +446,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         } catch (e) {
           // 作废信号继续上抛，由外层静默处理，不能污染本轮 errors
           if (isStaleRequestError(e)) throw e;
-          errors.push(`${envShortLabel(env)}: ${errorText(e)}`);
+          errors.push(`${envShortLabel(env, t)}: ${errorText(e)}`);
         }
       }
 
@@ -558,7 +559,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             <Select
               className="wide"
               value={selectedProject}
-              options={projectNames.map((n) => ({ value: n, label: n }))}
+              options={projectNames.map((n) => ({ value: n, label: localizeDefaultName(n, t) }))}
               onChange={setSelectedProject}
             />
           </label>
@@ -570,9 +571,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <div className="audit-env-head">
                 <span
                   className={`env-badge env-${environmentTone(connectionEnvironmentName(env.conn))}`}
-                  title={connectionEnvironmentName(env.conn)}
+                  title={localizeDefaultName(connectionEnvironmentName(env.conn), t)}
                 >
-                  {connectionEnvironmentName(env.conn)}
+                  {localizeDefaultName(connectionEnvironmentName(env.conn), t)}
                 </span>
                 <span className="audit-env-name">{env.conn.name || env.conn.sourceName}</span>
                 {envSources.length > 2 && (
@@ -865,7 +866,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <div className="audit-cell key">{t("audit.configItem")}</div>
               {envSources.map((env) => (
                 <div key={envKey(env)} className={`audit-cell env ${baseline === envKey(env) ? "baseline" : ""}`}>
-                  <div className="audit-env-label">{envShortLabel(env)}</div>
+                  <div className="audit-env-label">{envShortLabel(env, t)}</div>
                   {baseline !== envKey(env) && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setBaseline(envKey(env))}>
                       {t("audit.setBaseline")}
@@ -951,7 +952,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               return (
                 <div key={envId} className="audit-detail-env">
                   <div className="audit-detail-env-label" id={envLabelId}>
-                    {env ? envShortLabel(env) : envId}
+                    {env ? envShortLabel(env, t) : envId}
                   </div>
                   <pre className="audit-detail-value" tabIndex={0} role="region" aria-labelledby={envLabelId} ref={resetRef}>
                     {cell?.exists ? cell.value : t("audit.detailMissing")}

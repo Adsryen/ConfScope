@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Connection,
-  connectionDisplayLabel,
   connectionEnvironmentName,
   connectionProjectName,
   connectionSourceName,
@@ -27,6 +26,7 @@ import StartupDialog from "./components/StartupDialog";
 import ApplyPlanView from "./components/ApplyPlanView";
 import type { WorkflowStepId } from "./components/DiffWorkflowCard";
 import { reportError, reportMessage } from "./lib/errorCenter";
+import { connectionLabel, localizeDefaultName } from "./lib/defaultNameCopy";
 import { closeAllPopovers } from "./lib/popoverBus";
 import { useMountOnceVisible } from "./lib/keepAlive";
 import { useBlockNativeSaveShortcut } from "./lib/saveShortcut";
@@ -379,7 +379,7 @@ export default function App() {
         setNamespaces([]);
         reportError({
           title: t("app.namespaceLoadFailed"),
-          source: connectionDisplayLabel(activeConn),
+          source: connectionLabel(activeConn, t),
           message,
           detail: message,
           actionLabel: t("common.retry"),
@@ -549,7 +549,7 @@ export default function App() {
     const duplicated = sourceNameCounts[sourceName] > 1;
     return {
       value: conn.id,
-      label: duplicated ? `${sourceName} · ${conn.name}` : sourceName,
+      label: duplicated ? `${localizeDefaultName(sourceName, t)} · ${conn.name}` : localizeDefaultName(sourceName, t),
     };
   });
   const selectBrowseProject = (project: string) => {
@@ -568,7 +568,7 @@ export default function App() {
       <div className="page-header">
         <div>
           <h3>{t("app.title")}</h3>
-          <div className="page-subtitle">{activeConn ? connectionDisplayLabel(activeConn) : t("app.selectConnection")}</div>
+          <div className="page-subtitle">{activeConn ? connectionLabel(activeConn, t) : t("app.selectConnection")}</div>
         </div>
         <div className="page-actions browse-scope-bar">
           <div className="browse-scope-field">
@@ -577,7 +577,7 @@ export default function App() {
               value={activeProject}
               disabled={connections.length === 0}
               title={t("connection.project")}
-              options={browseProjects.map((project) => ({ value: project, label: project }))}
+              options={browseProjects.map((project) => ({ value: project, label: localizeDefaultName(project, t) }))}
               onChange={selectBrowseProject}
             />
           </div>
@@ -587,7 +587,7 @@ export default function App() {
               value={activeEnvironment}
               disabled={browseProjectConnections.length === 0}
               title={t("connection.environment")}
-              options={browseEnvironments.map((environment) => ({ value: environment, label: environment }))}
+              options={browseEnvironments.map((environment) => ({ value: environment, label: localizeDefaultName(environment, t) }))}
               onChange={selectBrowseEnvironment}
             />
           </div>

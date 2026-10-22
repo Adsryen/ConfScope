@@ -27,6 +27,7 @@ const EDITED = "server:\n  port: 8080\n  timeout: 30s\n";
 function input(overrides: Partial<DirectWriteExitInput> = {}): DirectWriteExitInput {
   return {
     conn: conn(),
+    t: (key: string) => key,
     namespace: "dev",
     group: "RETEST-PROD",
     dataId: "svc-billing.yaml",

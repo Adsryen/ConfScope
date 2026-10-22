@@ -68,7 +68,7 @@ export default function SSHManagerView({ connections }: Props) {
   const referencedProfileIds = new Set(connections.map((conn) => conn.sshProfileId).filter(Boolean));
   const referencedProfiles = profiles.filter((profile) => referencedProfileIds.has(profile.id)).length;
   const inlineSSHCount = connections.filter((conn) => conn.sshConfig && !conn.sshProfileId).length;
-  const selectedRefs = draft.id ? listSSHProfileReferences(draft.id) : [];
+  const selectedRefs = draft.id ? listSSHProfileReferences(draft.id, t) : [];
   const activeRefs = blockedRefs.length > 0 ? blockedRefs : selectedRefs;
   const currentProfile = draft.id ? profiles.find((profile) => profile.id === draft.id) : undefined;
   const draftTitle = draft.name.trim() || currentProfile?.name || t('settings.newSSHProfile');
@@ -121,7 +121,7 @@ export default function SSHManagerView({ connections }: Props) {
       return;
     }
     if (draft.id && !pendingSaveImpact) {
-      const refs = listSSHProfileReferences(draft.id);
+      const refs = listSSHProfileReferences(draft.id, t);
       if (refs.length > 0) {
         setBlockedRefs(refs);
         setPendingSaveImpact(true);
@@ -145,7 +145,7 @@ export default function SSHManagerView({ connections }: Props) {
   };
 
   const remove = (profile: SSHProfile) => {
-    const refs = listSSHProfileReferences(profile.id);
+    const refs = listSSHProfileReferences(profile.id, t);
     if (refs.length > 0) {
       setDraft({
         id: profile.id,
@@ -243,7 +243,7 @@ export default function SSHManagerView({ connections }: Props) {
           <div className="ssh-profile-list">
             {profiles.length === 0 && <div className="settings-empty">{t('settings.noSSHProfiles')}</div>}
             {profiles.map((profile) => {
-              const refs = listSSHProfileReferences(profile.id);
+              const refs = listSSHProfileReferences(profile.id, t);
               // 端点一行摆三个字段，窄列表里必然截断 → title 用同一段文本兜住全文
               const endpoint = `${profile.config.username}@${profile.config.host}:${profile.config.port || 22}`;
               return (

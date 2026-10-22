@@ -32,6 +32,7 @@ export type ConfigSourceType = "nacos" | "local-snapshot";
 
 export const DEFAULT_PROJECT_NAME = "默认项目";
 export const DEFAULT_ENVIRONMENT_NAME = "未分组";
+export const DEFAULT_SOURCE_NAME = "默认来源";
 
 export interface Connection {
   id: string;
@@ -194,7 +195,7 @@ export function connectionEnvironmentName(conn: Pick<Connection, "environmentNam
 }
 
 export function connectionSourceName(conn: Pick<Connection, "sourceName" | "name">): string {
-  return conn.sourceName?.trim() || conn.name?.trim() || "默认来源";
+  return conn.sourceName?.trim() || conn.name?.trim() || DEFAULT_SOURCE_NAME;
 }
 
 export function connectionDisplayLabel(conn: Connection): string {

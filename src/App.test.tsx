@@ -1170,4 +1170,41 @@ describe("App", () => {
     expect(localStorage.getItem("cs.diffViewPreferences")).toBe(prefsBefore);
   });
 
+
+  // 轮66 WP-3：内置默认名（默认项目 / 未分组 / 默认来源）既是存档值又是分组匹配键，
+  // 不能改常量，只能在展示层判哨兵再翻译。这条是端到端的兜底：
+  // 上面的静态守卫只看同行写法，变量传递（projectNames → Select 的 label）它看不见。
+  it("keeps built-in default names out of the English UI", async () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "conn-default",
+          name: "",
+          // 三个归属字段整个缺席 = 老存档，读取时兜底成中文哨兵，正是最容易漏译的形态
+          sourceType: "nacos",
+          provider: "nacos",
+          distribution: "opensource",
+          authType: "none",
+          baseUrl: "http://dev.example.com/nacos",
+          defaultNamespace: "",
+        },
+      ])
+    );
+    localStorage.setItem("cs.ui", JSON.stringify({ mode: "browse", connId: "conn-default" }));
+
+    const { container } = render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+
+    expect(await screen.findByText("Default Project / Ungrouped / Default Source")).toBeInTheDocument();
+
+    const rendered = container.textContent ?? "";
+    for (const leak of ["默认项目", "未分组", "默认来源"]) {
+      expect(rendered, `英文界面漏出中文默认名「${leak}」`).not.toContain(leak);
+    }
+  });
+
 });

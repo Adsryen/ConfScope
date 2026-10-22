@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useRef, useState } from "react";
-import { Connection, connectionDisplayLabel } from "../store/connections";
+import { Connection } from "../store/connections";
 import {
   formatTime,
   getHistoryDetail,
@@ -13,6 +13,7 @@ import { busyProps } from "../lib/busyRegion";
 import { reportError } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { useTranslation } from "../i18n";
+import { connectionLabel } from "../lib/defaultNameCopy";
 import CodeView from "./CodeView";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
@@ -105,7 +106,7 @@ export default function HistoryView({
   const [generatingPlan, setGeneratingPlan] = useState(false);
 
   const histReqId = useRef(0);
-  const sourceLabel = `${connectionDisplayLabel(conn)} / ${tenant || "public"} / ${group} / ${dataId}`;
+  const sourceLabel = `${connectionLabel(conn, t)} / ${tenant || "public"} / ${group} / ${dataId}`;
   // 只读连接与本地快照没有可写的计划目标：不出「生成回滚计划」这颗永远走不通的按钮（R42-8）。
   const canRollback = isWritableConfigTarget(conn);
 
@@ -235,6 +236,7 @@ export default function HistoryView({
       const text = await ensureContent(targetVersion);
       const entry = buildDirectWriteExitEntry({
         conn,
+        t,
         namespace: tenant,
         group,
         dataId,

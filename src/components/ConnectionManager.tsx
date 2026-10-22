@@ -17,6 +17,7 @@ import { loadSSHProfiles, normalizeSSHConfig, sshProfileLabel, upsertSSHProfile,
 import { clearToken, listNamespaces, testConnection, type Namespace } from "../api/nacos";
 import { selectLocalSnapshotDirectory, validateLocalSnapshotDirectory, type LocalSnapshotValidation } from "../api/app";
 import { useTranslation } from "../i18n";
+import { localizeDefaultName, sourceLabel } from "../lib/defaultNameCopy";
 import CopyButton from "./CopyButton";
 import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
@@ -1159,13 +1160,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     >
                       <div className="conn-item-main">
                         <div className="conn-item-name">
-                          {connectionSourceName(c)}
+                          {sourceLabel(c, t)}
                           {c.isDefaultSource && <span className="conn-ssh-badge">{t("connection.defaultSource")}</span>}
                           <span
                             className={`env-badge env-${environmentTone(connectionEnvironmentName(c))}`}
-                            title={connectionEnvironmentName(c)}
+                            title={localizeDefaultName(connectionEnvironmentName(c), t)}
                           >
-                            {connectionEnvironmentName(c)}
+                            {localizeDefaultName(connectionEnvironmentName(c), t)}
                           </span>
                           {c.provider === "nacos" && <span className="conn-provider-badge nacos">Nacos</span>}
                           {c.provider === "apollo" && <span className="conn-provider-badge apollo">Apollo</span>}
