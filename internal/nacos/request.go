@@ -95,7 +95,9 @@ func (c *Client) getTextOnce(baseURL, path string, query url.Values, accessToken
 		if version == apiV3 && accessToken != "" {
 			req.Header.Set("accessToken", accessToken)
 		}
-		c.applyMSEAuth(req, requestNamespace(query, nil), requestGroup(query, nil))
+		if err := c.applyMSEAuth(req, requestNamespace(query, nil), requestGroup(query, nil)); err != nil {
+			return "", err, 0
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
 			return "", fmt.Errorf("请求失败: %w", err), 0
@@ -184,7 +186,9 @@ func (c *Client) sendFormOnce(method, baseURL, path string, query url.Values, fo
 		if version == apiV3 && accessToken != "" {
 			req.Header.Set("accessToken", accessToken)
 		}
-		c.applyMSEAuth(req, requestNamespace(query, form), requestGroup(query, form))
+		if err := c.applyMSEAuth(req, requestNamespace(query, form), requestGroup(query, form)); err != nil {
+			return "", err, 0
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
 			switch method {

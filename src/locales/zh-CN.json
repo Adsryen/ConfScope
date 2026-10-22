@@ -306,6 +306,7 @@
     "planStale": "配置在计划生成后又变了，请重新生成计划。过期项：{items}",
     "writeConflictDetected": "写入前最后一刻复检发现目标已被改动，这一项已停止，未覆盖任何内容：{ref}",
     "progressPartial": "已写入 {completed}/{total} 项，第 {failedIndex} 项失败：{ref}。此前写入的项已在目标生效，可在操作历史用本次备份快照回退。",
+    "progressNothingWritten": "本次没有任何配置写入目标，无需回退：第 {failedIndex} 项失败：{ref}。",
     "planTaskName": "变更计划 {id}",
     "safetyBlockedItems": "变更计划中有 {count} 项被阻断，无法执行。",
     "safetyMissingBeforeSnapshot": "以下变更项缺少变更前快照：{items}"

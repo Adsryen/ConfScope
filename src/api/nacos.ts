@@ -1,8 +1,6 @@
 import {
-  NacosDeleteConfigFromApplyPlan,
   NacosDetectVersion,
   NacosLogin,
-  NacosPublishConfigFromApplyPlan,
   CreateSSHTunnel,
   GetSSHTunnelLocalPort,
   StopSSHTunnel,
@@ -303,25 +301,6 @@ export function clearToken(connId: string, baseUrl?: string) {
   if (baseUrl) versionCache.delete(baseUrl);
   closeTunnel(connId);
 }
-
-/** 包一层「403 自动重登重试」+ 自动注入 apiVersion。 */
-async function withAuth<T>(conn: Connection, call: (token: string, apiVersion: ApiVersion) => Promise<T>): Promise<T> {
-  return withTunnelReconnect(conn, async () => {
-    const apiVersion = await getVersion(conn);
-    const token = await getToken(conn);
-    try {
-      return await call(token, apiVersion);
-    } catch (e) {
-      const msg = errorText(e);
-      if (conn.username && (msg.includes("403") || msg.includes("token") || msg.includes("code=403"))) {
-        const fresh = await getToken(conn, true);
-        return await call(fresh, apiVersion);
-      }
-      throw e;
-    }
-  });
-}
-
 
 async function withProfile<T>(conn: Connection, call: (profile: ConnectionProfile) => Promise<T>): Promise<T> {
   return withTunnelReconnect(conn, async () => {
@@ -717,19 +696,18 @@ export async function publishConfigFromApplyPlan(
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotPublishReadonly"));
   }
-  if ((conn.provider ?? "nacos") !== "nacos") {
-    return withProfile(conn, (profile) =>
-      configCenterPublishConfigFromApplyPlan(profile, {
-        ref: toConfigRef(conn, namespace, dataId, group),
-        content,
-        format: configType,
-      })
-    );
-  }
-  return withAuth(conn, async (accessToken, apiVersion) => {
-    const baseUrl = await resolveBaseUrl(conn);
-    return NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
-  });
+  // 轮60：所有 provider 的写入都走 withProfile + ConfigCenter 绑定。
+  // 以前 nacos 特判走 NacosPublishConfigFromApplyPlan(baseUrl, accessToken, ...) 这条遗留绑定，
+  // 签名里没有 AK/SK 的位置，MSE 连接只能发出匿名写请求，被服务端挡成
+  // 403 accessKeyId can't be null，而读链路（带 profile、会签名）一切正常——
+  // 读写两套 profile 组装就是这个 bug 的根因类别。
+  return withProfile(conn, (profile) =>
+    configCenterPublishConfigFromApplyPlan(profile, {
+      ref: toConfigRef(conn, namespace, dataId, group),
+      content,
+      format: configType,
+    })
+  );
 }
 
 export async function publishConfigRefFromApplyPlan(
@@ -766,13 +744,7 @@ export async function deleteConfigFromApplyPlan(conn: Connection, namespace: str
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotDeleteReadonly"));
   }
-  if ((conn.provider ?? "nacos") !== "nacos") {
-    return withProfile(conn, (profile) => configCenterDeleteConfigFromApplyPlan(profile, toConfigRef(conn, namespace, dataId, group)));
-  }
-  return withAuth(conn, async (accessToken, apiVersion) => {
-    const baseUrl = await resolveBaseUrl(conn);
-    return NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group);
-  });
+  return withProfile(conn, (profile) => configCenterDeleteConfigFromApplyPlan(profile, toConfigRef(conn, namespace, dataId, group)));
 }
 
 export async function deleteConfigRefFromApplyPlan(conn: Connection, ref: ConfigRef): Promise<void> {

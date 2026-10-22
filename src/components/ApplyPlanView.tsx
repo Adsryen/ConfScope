@@ -623,12 +623,18 @@ function ConfirmationPanel({
       )}
       {executeError && executeProgress && (
         <div className="apply-partial-write" {...statusMessageProps("info")}>
-          {t("apply.progressPartial", {
-            completed: executeProgress.completedWrites,
-            total: executeProgress.totalWrites,
-            failedIndex: executeProgress.failedIndex ?? "?",
-            ref: executeProgress.failedRef ?? "",
-          })}
+          {executeProgress.completedWrites > 0
+            ? t("apply.progressPartial", {
+                completed: executeProgress.completedWrites,
+                total: executeProgress.totalWrites,
+                failedIndex: executeProgress.failedIndex ?? "?",
+                ref: executeProgress.failedRef ?? "",
+              })
+            : /* 一项都没写成功时不能暗示「已有内容生效/可回退」（轮60 真机 403 的第一次失败就是这个形态） */
+              t("apply.progressNothingWritten", {
+                failedIndex: executeProgress.failedIndex ?? "?",
+                ref: executeProgress.failedRef ?? "",
+              })}
         </div>
       )}
     </div>

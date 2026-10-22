@@ -21,7 +21,10 @@ const timeout = 15 * time.Second
 type Client struct {
 	http    *http.Client
 	mseAuth MSEAuth
-	clock   func() time.Time
+	// mseAuthRequired 表示这个客户端被明确配置为「阿里云 MSE + AK/SK」连接：
+	// 签名是强制项，凭据不完整时报错而不是匿名发出。
+	mseAuthRequired bool
+	clock           func() time.Time
 }
 
 // NewClient 创建 Nacos HTTP 客户端。
@@ -58,11 +61,13 @@ func NewClientWithProxy() *Client {
 
 func (c *Client) SetMSEAuth(auth MSEAuth) {
 	c.mseAuth = auth
+	c.mseAuthRequired = true
 }
 
 func (c *Client) WithMSEAuth(auth MSEAuth) *Client {
 	next := *c
 	next.mseAuth = auth
+	next.mseAuthRequired = true
 	if next.clock == nil {
 		next.clock = time.Now
 	}

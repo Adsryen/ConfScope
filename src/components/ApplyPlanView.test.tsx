@@ -1119,6 +1119,38 @@ describe("ApplyPlanView", () => {
     await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
   });
 
+  // 轮60：MSE 匿名写 403 的第一次失败就是「一项都没落」，此时不能给回退暗示。
+  it("stops hinting at rollback when nothing was actually written", async () => {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+        targetId: "conn-stage",
+        targetLabel: "Staging / public",
+      }),
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-zero-1",
+      error: "Nacos returned 403: accessKeyId can't be null",
+      progress: { completedWrites: 0, totalWrites: 1, failedIndex: 1, failedRef: "public/DEFAULT_GROUP/common.yml" },
+    });
+
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("accessKeyId");
+    const partial = document.querySelector(".apply-partial-write");
+    expect(partial).not.toBeNull();
+    expect(partial).toHaveTextContent("No item reached the target, so there is nothing to roll back");
+    expect(partial).toHaveTextContent("item 1 failed: public/DEFAULT_GROUP/common.yml");
+    expect(partial).not.toHaveTextContent("rolled back with this run");
+  });
+
   it("keeps the partial-write notice off the screen when execution gives no progress", async () => {
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
       ok: true,

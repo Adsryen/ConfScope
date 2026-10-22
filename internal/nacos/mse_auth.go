@@ -4,11 +4,19 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrMSEAuthMissing 是「连接声明走阿里云 MSE AK/SK 鉴权，但凭据不完整」的错误。
+//
+// 以前这种情况会静默退化成匿名请求，被服务端挡在 403 accessKeyId can't be null，
+// 用户看到的是一句无法自查的服务端报错（轮60 真机 403）。现在在发出请求前
+// 就失败，并把补救动作写在消息里。
+var ErrMSEAuthMissing = errors.New("MSE 连接缺少 AccessKey/SecretKey：请在连接设置中重新填写阿里云 AccessKey 后重试")
 
 type MSEAuth struct {
 	AccessKeyID     string
@@ -20,9 +28,14 @@ func (a MSEAuth) enabled() bool {
 	return a.AccessKeyID != "" && a.AccessKeySecret != ""
 }
 
-func (c *Client) applyMSEAuth(req *http.Request, namespace string, group string) {
+// applyMSEAuth 给请求加 MSE 签名头。一旦被标注为 MSE 连接（mseAuthRequired），
+// 凭据不完整就是配置错误：直接返回错误，不允许退化成匿名请求。
+func (c *Client) applyMSEAuth(req *http.Request, namespace string, group string) error {
 	if !c.mseAuth.enabled() {
-		return
+		if c.mseAuthRequired {
+			return ErrMSEAuthMissing
+		}
+		return nil
 	}
 	namespace = normalizeMSENamespace(namespace)
 	clock := c.clock
@@ -36,6 +49,7 @@ func (c *Client) applyMSEAuth(req *http.Request, namespace string, group string)
 	if c.mseAuth.SecurityToken != "" {
 		req.Header.Set("Spas-SecurityToken", c.mseAuth.SecurityToken)
 	}
+	return nil
 }
 
 func signMSERequest(secret string, namespace string, group string, timestamp string) string {

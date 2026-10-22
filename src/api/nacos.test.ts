@@ -795,27 +795,68 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.ConfigCenterDeleteConfig).not.toHaveBeenCalled();
   });
 
-  it("keeps apply-plan writes explicit and routed through dedicated Wails bindings", async () => {
+  // 轮60 回归守卫：写入必须与读取共用同一份 profile 组装。
+  // 以前的 nacos 特判走不带 AK/SK 位置的老绑定，MSE 连接发出匿名写请求 → 403。
+  it("routes apply-plan writes through ConfigCenter bindings with the same profile as reads", async () => {
     const conn = makeConnection("conn-apply-write");
-    goApp.NacosPublishConfigFromApplyPlan.mockResolvedValue(undefined);
-    goApp.NacosDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.ConfigCenterPublishConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.ConfigCenterDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
 
     await expect(publishConfigFromApplyPlan(conn, "public", "app.yaml", "DEFAULT_GROUP", "a: 1", "yaml")).resolves.toBeUndefined();
     await expect(deleteConfigFromApplyPlan(conn, "public", "app.yaml", "DEFAULT_GROUP")).resolves.toBeUndefined();
 
     expect(goApp.NacosPublishConfig).not.toHaveBeenCalled();
     expect(goApp.NacosDeleteConfig).not.toHaveBeenCalled();
-    expect(goApp.NacosPublishConfigFromApplyPlan).toHaveBeenCalledWith(
-      conn.baseUrl,
-      "token-1",
-      "v3",
-      "public",
-      "app.yaml",
-      "DEFAULT_GROUP",
-      "a: 1",
-      "yaml"
-    );
-    expect(goApp.NacosDeleteConfigFromApplyPlan).toHaveBeenCalledWith(conn.baseUrl, "token-1", "v3", "public", "app.yaml", "DEFAULT_GROUP");
+    expect(goApp.NacosPublishConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.NacosDeleteConfigFromApplyPlan).not.toHaveBeenCalled();
+    expect(goApp.ConfigCenterPublishConfigFromApplyPlan).toHaveBeenCalledWith(expectedProfile(conn), {
+      ref: expectedRef(conn),
+      content: "a: 1",
+      format: "yaml",
+    });
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(expectedProfile(conn), expectedRef(conn));
+  });
+
+  it("hydrates MSE credentials into the profile used by apply-plan writes", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-apply-write-mse"),
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      username: "",
+      password: "",
+      accessKeyId: "",
+      accessKeySecret: "",
+      secretRefs: {
+        accessKeyId: { ref: "r-ak", namespace: "connection", ownerId: "conn-apply-write-mse", field: "accessKeyId", migratedAt: "", status: "stored" },
+        accessKeySecret: {
+          ref: "r-sk",
+          namespace: "connection",
+          ownerId: "conn-apply-write-mse",
+          field: "accessKeySecret",
+          migratedAt: "",
+          status: "stored",
+        },
+      },
+    };
+    goApp.ConfigCenterPublishConfigFromApplyPlan.mockResolvedValue(undefined);
+    goApp.ConfigCenterDeleteConfigFromApplyPlan.mockResolvedValue(undefined);
+
+    await publishConfigFromApplyPlan(conn, "ns-a", "common.yml", "DEFAULT_GROUP", "a: 1", "yaml");
+    await deleteConfigFromApplyPlan(conn, "ns-a", "common.yml", "DEFAULT_GROUP");
+
+    const signedProfile = expect.objectContaining({
+      distribution: "aliyun-mse",
+      authType: "aliyun-aksk",
+      accessKeyId: "stored-accessKeyId",
+      accessKeySecret: "stored-accessKeySecret",
+    });
+    expect(goApp.ConfigCenterPublishConfigFromApplyPlan).toHaveBeenCalledWith(signedProfile, {
+      ref: expectedRef(conn, "ns-a", "common.yml", "DEFAULT_GROUP"),
+      content: "a: 1",
+      format: "yaml",
+    });
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(signedProfile, expectedRef(conn, "ns-a", "common.yml", "DEFAULT_GROUP"));
+    expect(goApp.NacosLogin).not.toHaveBeenCalled();
   });
 
   it("routes provider apply-plan ref writes through generic ConfigCenter bindings without dropping keys", async () => {
