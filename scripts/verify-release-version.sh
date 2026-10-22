@@ -42,7 +42,7 @@ bad() { echo "  ✗ $1" >&2; failures=$((failures + 1)); }
 GO_VERSION_FILE="internal/app/app.go"
 INJECT_SYMBOL="confscope/internal/app.appVersion"
 
-echo ">> 1) 版本号三处一致（package.json / CHANGELOG / tag）"
+echo ">> 1) 版本号四处一致（package.json / CHANGELOG / tag / wails.json）"
 PKG_VERSION="$(node -p "require('./package.json').version")"
 if [ -z "$VERSION" ]; then
   VERSION="$PKG_VERSION"
@@ -63,6 +63,18 @@ if [ -z "$UNRELEASED_BODY" ]; then
 else
   bad "CHANGELOG 的 [Unreleased] 还有内容，先并入 [$VERSION]"
 fi
+# wails.json 的 info.productVersion 是 Windows 安装包版本号的第二条通道：wails 用它渲染
+# build/windows/installer/wails_tools.nsh，进而进 VIProductVersion（exe 文件属性）、
+# 卸载条目的 DisplayVersion 和 install.json 的 version。过去只有 CI 用 jq 改写工作副本，
+# 发版提交与本地构建脚本都不碰它，于是仓库里躺着 1.9.5、分支/本地自构建的安装包
+# 属性页也永远显示 1.9.5——三处一致的闸门看不见它，因为它压根不在闸门里。
+WAILS_PRODUCT_VERSION="$(node -p "require('./wails.json').info.productVersion" 2>/dev/null)" || WAILS_PRODUCT_VERSION=""
+if [ "$WAILS_PRODUCT_VERSION" = "$VERSION" ]; then
+  ok "wails.json info.productVersion = $VERSION（安装包文件属性/卸载条目/install.json 取这里）"
+else
+  bad "wails.json 的 info.productVersion 是 ${WAILS_PRODUCT_VERSION:-读不出来}，本次要发的是 $VERSION：发版提交里一起改，否则自构建的安装包属性还是旧版本号"
+fi
+
 if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
   echo "  · tag v$VERSION 已存在（刚发过属正常；重复发布请先删本地 tag 再确认远端）" >&2
 fi

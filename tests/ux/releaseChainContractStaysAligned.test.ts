@@ -463,9 +463,35 @@ describe("发版链路的契约对齐（轮52）", () => {
     expect([...referenced].filter((name) => !declared.includes(name))).toEqual([]);
   });
 
+/**
+ * 「四处一致」里最容易被漏掉的那一处：wails.json 的 info.productVersion。
+ * 它不在 ldflags 通道上，CI 只用 jq 改写工作副本，所以闸门不盯它就永远不会红。
+ */
+function wailsVersionGateProblems(script: string): string[] {
+  const problems: string[] = [];
+  if (!/require\('\.\/wails\.json'\)\.info\.productVersion/.test(script)) {
+    problems.push("闸门不再读 wails.json 的 info.productVersion：安装包版本号漂移不会让任何检查变红");
+  }
+  if (!/\$WAILS_PRODUCT_VERSION" = "\$VERSION/.test(script)) {
+    problems.push("闸门读了 productVersion 却没和待发布版本比较，等于没校");
+  }
+  return problems;
+}
+
   it("发版闸门脚本把本轮守卫也纳入（本地与 CI 同一份判据）", () => {
     const verify = readFileSync(join(PROJECT_ROOT, VERIFY_SCRIPT), "utf8");
     expect(verify).toContain("tests/ux/releaseChainContractStaysAligned.test.ts");
+  });
+
+  it("发版闸门把 wails.json 的 productVersion 算进版本号四处一致（轮65）", () => {
+    const verify = readFileSync(join(PROJECT_ROOT, VERIFY_SCRIPT), "utf8");
+    expect(wailsVersionGateProblems(verify)).toEqual([]);
+
+    const wails = JSON.parse(readFileSync(join(PROJECT_ROOT, "wails.json"), "utf8")) as { info: { productVersion: string } };
+    expect(wails.info.productVersion, "仓库里提交的 info.productVersion 要跟 package.json 一起进发版提交").toBe(PKG_VERSION);
+
+    expect(wailsVersionGateProblems(verify.replace(/'\.\/wails\.json'/, "'./nope.json'")).length).toBeGreaterThan(0);
+    expect(wailsVersionGateProblems(verify.replace('\$WAILS_PRODUCT_VERSION" = "\$VERSION', '\$WAILS_PRODUCT_VERSION" = "0.0.0')).length).toBeGreaterThan(0);
   });
 
   it("变异对照：删掉 preflight 依赖、作业名漂了、上传步骤放宽，都必须判红", () => {
