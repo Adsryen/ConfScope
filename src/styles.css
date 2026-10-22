@@ -4855,6 +4855,13 @@ button.diff-workflow-step-btn:hover {
   gap: 8px;
   margin-left: 8px;
   padding: 4px 6px;
+  /* 轮66 WP-8：整行可点，真机实测 328x20，不达 WCAG 2.2 的 24x24 下限。
+     字号 11 是这个层级的既定视觉（项目名 12 / 环境名 11），所以只把盒子补到 24——
+     全局 box-sizing:border-box，min-height 含了那 4px 上下内缩，文字仍然居中，
+     字形、字号、颜色一律不动，行高 +4px。
+     不用隐形扩击盒：这条行自己就是命中区，扩击要往上下各 2px，正好压进上一组
+     最后一个连接行与 .conn-env-group 的 5px gap 里，会把别人的点击抢走。 */
+  min-height: 24px;
   font-size: 11px;
   color: var(--text-dim);
   border-radius: 5px;
@@ -4873,6 +4880,12 @@ button.diff-workflow-step-btn:hover {
   display: flex;
 }
 .conn-tree-btn {
+  /* 轮66 WP-8：命中区补到 24x24，但走隐形扩击盒而不是把格子改成 24。
+     这三颗钮只在悬停/聚焦时出现（.conn-tree-actions 是 display:none），父行是
+     .conn-group-title(25) 与 .conn-env-title(24) 那种 4~5px 内缩的窄行：
+     格子直接 +2px 会让整行在悬停那一刻被撑高，正是本文件在避免的「显形时行高跳」。
+     余量核对：同排钮之间 gap:3px，左右各扩 1px 还剩 1px 空隙，不会互相贴上。 */
+  position: relative;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -4884,6 +4897,17 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
   font-size: 13px;
 }
+.conn-tree-btn::after {
+  /* 扩击盒必须写成显式 width/height：普查（tests/retest/specs/99-s-target-size.spec.ts
+     判据②）只认「绝对定位 + 有 content + 能算出尺寸」的伪元素，写 inset 它量不出高宽。 */
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  width: 24px;
+  height: 24px;
+}
+
 .conn-tree-btn:hover {
   color: var(--text-hi);
   background: var(--bg3);

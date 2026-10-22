@@ -13,6 +13,7 @@
 //  2. 行内例外：`display:inline` 且落在句子文本里的链接按 WCAG 2.5.8 Inline exception 免，
 //     只允许 EXEMPT 白名单里那一条（新增例外要改 PRD 并写理由）。
 //  3. disabled / 不可见 / 视口外控件不参与（用户点不到也就不构成命中区问题）。
+import type { ElementHandle } from "@playwright/test";
 import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
@@ -29,6 +30,17 @@ const MIN_TARGET = 24;
 
 /** 唯一豁免：关于页页脚 "Made with ❤️ by Adsryen" 里的行内链接（句子内，尺寸由行盒决定）。 */
 const EXEMPT = [{ cls: "about-footer-link-inline-exempt", reason: "页脚句子内的行内链接，WCAG 2.5.8 Inline exception" }];
+
+/**
+ * 静止态 `display: none`、悬停/聚焦才显形的控件容器（轮66 WP-8）。
+ *
+ * 判据③原本写着「不可见控件不参与」，对 disabled 是对的，对这类控件是**漏**：
+ * 普查那一帧没有鼠标悬停，它们量不到，22px 的连接树 +／✎ 就这样一路绿灯。
+ * 触摸屏用户更是只能靠它们办事。所以扫之前先把这些容器强制显形，
+ * 再按真实尺寸判定，并单独计数（下面钉了 >0，免得强制显形的选择器失配变成空转）。
+ * 清单口径：`grep -n "display: none" src/styles.css` 里那些「:hover/:focus-within 时 display:flex」的容器。
+ */
+const HOVER_ONLY_CONTAINERS = [".conn-tree-actions"];
 
 const VIEWS = ["配置浏览", "配置对比", "配置矩阵", "操作历史", "备份快照", "任务中心", "审计日志", "连接管理", "SSH 隧道", "设置", "关于"];
 // 轮44 R88：与对比度普查同一口径，把「必须扫到的状态」写成清单。check() 是 async，
@@ -48,13 +60,23 @@ const DEEP_CHECKS = [
 const EXPECTED_CHECKS = [...VIEWS, ...DEEP_CHECKS];
 
 interface TargetReport {
-  fails: { sel: string; own: string; eff: string; inline: boolean; txt: string }[];
+  /** hover=true 表示这条落在「悬停/聚焦才显形」那一族里，只有显形态那一遍才量得到。 */
+  fails: { sel: string; own: string; eff: string; inline: boolean; hover: boolean; txt: string }[];
   scanned: number;
   exemptHits: number;
+  /** 强制显形后进来的一族控件数（悬停才出现的那批，见 HOVER_ONLY_CONTAINERS）。 */
+  hoverOnly: number;
+  /**
+   * 靠「可聚焦 + 手型光标」这条补充判据才进了普查范围的控件数（轮66 WP-8）。
+   * 建线时 SEL 只有原生交互标签与几个 role，`clickableRowProps()` 那套整行可点
+   * （role="option" / role="group"）一条都不在里面——轮44 补的 min-height 只盖住了按钮，
+   * 行类控件掉在普查的盲区里。这个计数必须 >0，否则「补了判据却什么都没量到」就是假绿。
+   */
+  extended: number;
 }
 
 /** 浏览器侧执行：必须自包含（不能引用外部作用域变量），所以阈值以参数传入。 */
-function scanTargets(minTarget: number): TargetReport {
+function scanTargets({ minTarget, REVEAL }: { minTarget: number; REVEAL: string[] }): TargetReport {
   const R = (el: Element) => el.getBoundingClientRect();
   const cs = (el: Element, pseudo?: string) => getComputedStyle(el, pseudo || null);
   const cls = (el: Element) => {
@@ -73,11 +95,24 @@ function scanTargets(minTarget: number): TargetReport {
   });
 
   const SEL = "button, a[href], input:not([type=hidden]), select, textarea, [role='button'], [role='tab'], [role='checkbox'], [role='switch'], summary";
-  const fails: TargetReport["fails"] = [];
+  // 补充判据：键盘可达（tabindex=0）且画了手型光标的东西就是「能点的东西」，
+  // 不管它自报的 role 是 option、group 还是压根没有 role。反过来，纯滚动容器
+  // （.code-area 是 text 光标、列表容器是 default）不会被误拉进来。
+  const EXTRA = "[tabindex=\"0\"]";
+  const seen = new Set<Element>();
+  Array.from(document.querySelectorAll(SEL)).forEach((el) => seen.add(el));
+  const extendedOf = (el: Element) => cs(el).cursor === "pointer" && !seen.has(el);
+  const extras = Array.from(document.querySelectorAll(EXTRA)).filter(extendedOf);
+  extras.forEach((el) => seen.add(el));
+  const candidates = Array.from(seen);
+  const hoverOnlySel = REVEAL.join(", ");
   let scanned = 0;
   let exemptHits = 0;
+  let extended = extras.length;
+  let hoverOnly = 0;
+  const fails: TargetReport["fails"] = [];
 
-  Array.from(document.querySelectorAll(SEL)).forEach((el) => {
+  candidates.forEach((el) => {
     if (!vis(el)) return;
     if ((el as HTMLButtonElement).disabled) return;
     const own = R(el);
@@ -105,6 +140,8 @@ function scanTargets(minTarget: number): TargetReport {
     const w = Math.round(box.right - box.left);
     const h = Math.round(box.bottom - box.top);
     scanned += 1;
+    const inHoverFamily = Boolean(el.closest(hoverOnlySel));
+    if (inHoverFamily) hoverOnly += 1;
     if (Math.min(w, h) >= minTarget) return;
 
     // ③ 行内例外：句子内的 inline 链接（白名单只有一条，命中就计数，不命中即失败）
@@ -118,11 +155,12 @@ function scanTargets(minTarget: number): TargetReport {
       own: `${Math.round(own.width)}x${Math.round(own.height)}`,
       eff: `${w}x${h}`,
       inline: inlineInText,
+      hover: inHoverFamily,
       txt: (el.textContent || asInput.value || el.getAttribute("aria-label") || asInput.placeholder || "").trim().slice(0, 18),
     });
   });
 
-  return { fails, scanned, exemptHits };
+  return { fails, scanned, exemptHits, extended, hoverOnly };
 }
 
 test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数据状态）", async ({ page, retest }) => {
@@ -133,19 +171,54 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数
   await page.evaluate(() => window.localStorage.setItem("retest.bridge.marker", "1"));
   await dismissStartupDialog(page);
   await page.setViewportSize({ width: 1280, height: 820 });
+  // 显形样式统一由 setReveal 管（轮66 WP-8）：这里再 addStyleTag 一份，
+  // setReveal(false) 只摘自己那一份，静止态那一遍就会永远带着显形态，两遍扫描白做。
 
   const failures: string[] = [];
+  /**
+   * 「悬停显形」那段调试样式：加/摘都走这里，保证每个状态都先回到静止态再扫。
+   *
+   * 为什么一个状态要扫两遍（轮66 WP-8）：强制显形会让宿主行变高（连接树标题静止态实测
+   * 328x20，显形后被 22 的按钮撑到 30），只扫显形态就把「鼠标没悬停时那 20px」这条真实
+   * 命中区盖掉了；反过来只扫静止态，那几颗 display:none 的 +／✎ 又永远量不到。
+   * 所以两遍都要：静止态判整页，显形态只判这一族新冒出来的控件。
+   */
+  let revealHandle: ElementHandle<HTMLElement> | null = null;
+  const setReveal = async (on: boolean) => {
+    if (on && !revealHandle) {
+      revealHandle = await page.addStyleTag({ content: `${HOVER_ONLY_CONTAINERS.join(", ")} { display: flex !important; }` });
+    }
+    if (!on && revealHandle) {
+      const handle = revealHandle;
+      revealHandle = null;
+      await handle.evaluate((el) => el.remove());
+    }
+  };
   let totalScanned = 0;
   let totalExempt = 0;
+  let totalExtended = 0;
+  let totalHoverOnly = 0;
   const statesChecked: string[] = [];
 
   const check = async (state: string) => {
-    const r = await page.evaluate(scanTargets, MIN_TARGET);
+    await setReveal(false);
+    const r = await page.evaluate(scanTargets, { minTarget: MIN_TARGET, REVEAL: HOVER_ONLY_CONTAINERS });
+    await setReveal(true);
+    const revealed = await page.evaluate(scanTargets, { minTarget: MIN_TARGET, REVEAL: HOVER_ONLY_CONTAINERS });
+    await setReveal(false);
+
+    // 显形态那一遍只收这一族新冒出来的控件，其余的静止态已经判过，重复报只会淹没真问题
+    const hoverFails = revealed.fails.filter((f) => f.hover);
+    const allFails = [...r.fails, ...hoverFails];
     statesChecked.push(state);
-    totalScanned += r.scanned;
+    totalScanned += r.scanned + revealed.hoverOnly;
     totalExempt += r.exemptHits;
-    console.log(`R88 ${state} 控件=${r.scanned} 豁免=${r.exemptHits} 失败=${r.fails.length} ${JSON.stringify(r.fails)}`);
-    r.fails.forEach((f) => failures.push(`${state} ${f.sel} 自身=${f.own} 有效=${f.eff} 文本=${f.txt}`));
+    totalExtended += r.extended;
+    totalHoverOnly += revealed.hoverOnly;
+    console.log(
+      `R88 ${state} 控件=${r.scanned} 补判据=${r.extended} 悬停显形=${revealed.hoverOnly} 豁免=${r.exemptHits} 失败=${allFails.length} ${JSON.stringify(allFails)}`
+    );
+    allFails.forEach((f) => failures.push(`${state} ${f.sel} 自身=${f.own} 有效=${f.eff} 文本=${f.txt}`));
   };
 
   for (const label of VIEWS) {
@@ -238,5 +311,9 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数
   expect(EXEMPT.length, "豁免白名单只允许已写明理由的那几条").toBe(1);
   expect(totalExempt, "行内例外至少要命中关于页页脚那一条链接").toBeGreaterThanOrEqual(1);
   expect(totalScanned, "普查覆盖的控件数不该退化成扫了个空页").toBeGreaterThan(60);
+  // 补判据必须真的扫到东西：0 就意味着「整行可点」那一类又掉回盲区，
+  // 而这条守卫存在的理由正是它（轮66 WP-8）。
+  expect(totalExtended, "补判据一条都没扫到：整行可点的控件仍在普查盲区").toBeGreaterThan(0);
+  expect(totalHoverOnly, "悬停才显形的控件一个都没扫到：HOVER_ONLY_CONTAINERS 的选择器失配了").toBeGreaterThan(0);
   expect(failures, `不达 ${MIN_TARGET}px 的控件必须为 0：\n${failures.join("\n")}`).toEqual([]);
 });
