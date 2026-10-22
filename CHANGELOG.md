@@ -14,15 +14,24 @@ GitHub Release 正文与应用内更新面板都从这里取（scripts/sync-gith
 scripts/extract-release-notes.mjs），1.0.0 起各段已按 tag 区间提交取证回填。
 -->
 
+## [1.9.5] - 2026-10-22
+
 ### Added
 - 数据根现在按「这份副本是怎么跑的」来定，而且在设置页看得见、改得了。原先只有一条路：可执行文件旁边的 `ConfScopeData`，最多用 `CONFSCOPE_DATA_DIR` 重定向——便携版和安装版对数据该落在哪的期待根本不同，却共用一个答案。现在解析五档依次命中：环境变量覆盖（开发机与便携启动器语义一字不变）→ 应用内选定的位置 → 安装标记指向系统用户数据目录 → 采纳已有数据的旧根（老便携用户零迁移、零感知）→ 按可写性兜底。命中哪一档、依据是什么，设置页「数据位置」里直接写出来，不用你猜数据到底在哪。
 - 设置页可以换数据根了：选目标目录 → 看清「将复制几项、多大」再确认 → 先复制并逐项校验、最后一步才写位置指针。旧根原样留着不删，只落一个 `MIGRATED-` 标记；换根要重启一次才全量生效，界面把这句话挂在待重启横幅上，而不是假装已经切过去了。
 - 换错方向还能回来：「回退到旧位置」只改指针、不搬不删任何文件，确认框里先给你看两侧主数据文件各自的保存时间与大小——哪边是新的、点下去会回到哪份数据，看清楚再决定。
 - 数据位置列表补上「运行日志」（`[数据根]/logs`）：此前主数据、缓存、快照、备份、审计都能一键打开，只有日志得自己翻目录。
+- Windows 有了安装版：`confscope-windows-amd64-installer.exe`，每用户装到 `%LOCALAPPDATA%\Programs\ConfScope`，不需要管理员权限，控制面板里能正常卸载。原先只有单个 exe，升级全靠人自己覆盖文件，把程序放进 `Program Files` 还会撞上权限问题。
+- 关于页的「检查更新」不再只通知你有新版本：点一下就替你下载好并按 `update.json` 里的 sha256 校验，然后按你这台机器实际的运行形态给出真正的下一步——安装版起安装程序后优雅退出、便携版打开产物所在文件夹、`.deb`/`.rpm` 把命令摆在界面上给你复制、macOS 挂载 dmg 后由你拖进 Applications。
+- 「下载并安装」动手前先看你有没有正在跑的写入任务、还开着的 SSH 隧道，以及主数据是否已落盘；任何一项没清空就原地停下并告诉你是哪一项。要把生产配置写出去的当口，程序不会自顾自换掉自己。
+- 安装程序不强杀 ConfScope：它按发起它的那个进程的 PID 有界等待（约 15 秒），等不到就给「重试/取消」，静默安装则直接放弃覆盖，已装版本保持可用。卸载只删程序文件，永远保留数据目录、凭据与旧缓存。
+- Linux 与 macOS 的边界写死在界面上：`.deb`/`.rpm` 只给命令、不提权、不代跑；macOS 只挂载不自动替换。程序永不替换自己的二进制——「何时可以覆盖」是安装程序的责任，不是你这个进程的责任。
 
 ### Fixed
 - 装到只读目录不再无处存数据：exe 同级写不进去时兜底落到系统用户数据目录，而不是建目录失败后一路报错。
 - 启动时的旧 WebView 缓存迁移不再把上层目录递归拷进自己的子目录：判据此前只比「路径是否相同」，漏了「源是目标的上层」这一种形状——而 `%APPDATA%\ConfScope` 恰好就是它，一旦把数据根设在它下面，就会自拷到磁盘满为止。
+- 检查到新版本却拿不到可用产物时，界面不再卡在「检查中」转圈；也不会再摆一颗点了没反应的「下载」按钮——这种情况改成「打开下载页」并说明为什么没有自动下载。
+- 校验失败不再谎报「下载完成」：进度事件只在 sha256 比对通过后发出，清单里没带校验值的下载直接中止。过去半截文件或内容不对的包也会被当成已就绪。
 - 记录用户所选数据根的指针文件不能随数据根一起搬，所以落在系统配置目录；当它与默认数据根重叠时改落到旁边的 `ConfScopeRuntime`，否则把数据根迁到那个目录会让指针文件自己被当成一条数据复制过去。
 
 ### Engineering
@@ -31,6 +40,12 @@ scripts/extract-release-notes.mjs），1.0.0 起各段已按 tag 区间提交取
 - 新增 6 个 Wails 绑定（读运行布局、读主数据摘要、迁移预览、执行迁移、回退检查、执行回退）；`ConfirmModal` 支持 `details` 列表，把「确认前必须看到的事实」结构化呈现而不是塞进一句长文案；新增 `src/lib/formatBytes.ts` 供预览与摘要复用。
 - 新守卫 `tests/ux/dataRootResolutionStaysSingleSource.test.ts`（14 用例）：钉住解析链单一事实源、指针只从 `pointerDir` 拼、迁移必须 copy-verify-then-point 且禁 `RemoveAll`、回退只改指针、迁移与回退共用双向祖先判据、以及 6 个绑定在 Go 声明/前端类型/retest 桥三处齐全，每条带变异对照。
 - 测试：Go 侧补五档解析与迁移/回退用例；真机 retest 新增 T-PG-06 走完五段（档位展示 → 迁移确认 → 待重启横幅与新根生效 → 回退 → 目标与当前同根的拒绝文案）。
+- 新增 `build/windows/installer/project.nsi`（手写，不是 wails 模板产物）：`RequestExecutionLevel user`、安装目录回读、有界等待旧进程、自建 HKCU 卸载条目、写 `install.json` 运行形态标记、卸载逐条删除并豁免数据目录。`scripts/check-windows-installer.sh` 让 Linux/WSL 与 CI preflight 都能用 `makensis` 把这份脚本静态编译一遍——本机没有 Windows 也能验语法。
+- `internal/updatecheck` 把「下载完之后谁负责装」收进 `Handoff` 五值枚举（installer / reveal / command / image / page），产物选择只认 `SelectAsset` 一处出口，Windows 安装版对应 manifest 新键 `windows-amd64-installer`。旧的 `InstallAndRestart`（往 `%TEMP%` 丢 bat/sh、隐藏进程轮询等旧进程死了再覆盖 exe、最后自删）连同 `platform_*.go` 一并删除，判据只留在安装程序里。
+- 新增 6 个 Wails 绑定（起安装程序、打开下载位置、挂载 dmg、取安装命令、列活跃隧道、优雅退出），`DownloadUpdate` 增加代理参数与三参调用形态，`ssh.Manager` 暴露 `ActiveConnectionIDs()` 供忙碌闸门使用。
+- Release workflow 真的开始出安装包：Windows 作业装 NSIS 并钉住 PATH，构建前把 `wails.json` 的 `info.productVersion` 对齐到 tag（安装程序的版本属性与 `install.json` 里的版本都来自它，与 `-ldflags` 是两条独立通道），构建后硬断言安装包存在才上传，`update.json` 多一条 `windows-amd64-installer`。这一步不能省：wails 找不到 `makensis` 时只打一行 Warning 就返回成功。
+- 新守卫 `tests/ux/windowsInstallerKeepsDataAndMatchesRuntimeLayout.test.ts`（18 用例）：卸载不得碰 `$AppData`/`HKLM`/整体 `RMDir /r`，不得强杀或起隐形进程，两侧字面量（数据目录名、标记文件名、`install.json` 字段、`/UPDATE` 与 `/PID` 开关）必须与 Go 侧常量同源，产物名从 `OutFile` 到 CI 断言到 manifest 键一条链对齐，六个交接绑定在 wailsjs 两段与各测试桥齐全——每条带变异对照。
+- 测试：`About.test.tsx` 重写为 19 用例，覆盖一次点击走到底、五种出路各自的面板与动作、忙碌闸门的四种结果（有任务/有隧道/落盘失败/放行且先起安装程序再退出）、校验失败落错误态、被动自动检查不偷跑下载、无产物时不摆假按钮。
 ## [1.9.4] - 2026-10-22
 
 ### Added
