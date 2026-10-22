@@ -43,6 +43,7 @@ import { statusMessageProps } from "../lib/statusSemantics";
 import { MAX_DIFF_SEARCH_ITEMS, searchDiffContent } from "../lib/diffContentSearch";
 import { highlightSearchTerm } from "../lib/configContentSearch";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
+import { useDeferredSearchInput } from "../lib/deferredSearchInput";
 import { changeTouchesNamespace, subscribeConfigChanges } from "../lib/configChangeBus";
 
 type DiffMode = "text" | "key" | "lines";
@@ -842,7 +843,23 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   const [contentSearchInput, setContentSearchInput] = useState("");
   const [contentSearchTerm, setContentSearchTerm] = useState("");
   const [onlyHitItems, setOnlyHitItems] = useState(false);
-  const contentSearchTimer = useRef<number | undefined>(undefined);
+  /**
+   * 跨项内容搜索的输入编排：防抖 150ms + 输入法闸门（轮66 WP-6）。
+   *
+   * 原来这里是一层裸 setTimeout，组合期间每敲一个拼音字母都会派发 input，
+   * 于是「备份」会先拿 b / be / bei 各扫一遍全量正文——命中表闪成空，右侧标红也跟着抖。
+   * 回显（contentSearchInput）永远即时，落地词（contentSearchTerm）等上屏再说。
+   */
+  const {
+    schedule: scheduleContentSearch,
+    runNow: runContentSearchNow,
+    cancel: cancelContentSearchTimer,
+    onCompositionStart: onContentSearchCompositionStart,
+    onCompositionEnd: onContentSearchCompositionEnd,
+  } = useDeferredSearchInput(
+    (value: string) => setContentSearchTerm(value.trim()),
+    CONTENT_SEARCH_DEBOUNCE_MS
+  );
   const contentSearchInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // 写后失效：计划执行改的是服务端，而本页被 `.diff-apply-cache` 保活，切回来时面板里的
@@ -925,12 +942,11 @@ export default function DiffView({ active = true, connections, onConnectionsChan
    * 旧词会把列表重新打回过滤态——与配置浏览 clearSearchTerms 钉过的同款坑。
    */
   const clearContentSearch = useCallback(() => {
-    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
-    contentSearchTimer.current = undefined;
+    cancelContentSearchTimer();
     setContentSearchInput("");
     setContentSearchTerm("");
     setOnlyHitItems(false);
-  }, []);
+  }, [cancelContentSearchTimer]);
 
   /**
    * 微调状态整体归零：换来源、重新对比、回到匹配列表都必须走这里。
@@ -968,11 +984,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const onContentSearchChange = (value: string) => {
     setContentSearchInput(value);
-    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
-    contentSearchTimer.current = window.setTimeout(() => {
-      contentSearchTimer.current = undefined;
-      setContentSearchTerm(value.trim());
-    }, CONTENT_SEARCH_DEBOUNCE_MS);
+    scheduleContentSearch(value);
   };
 
   /**
@@ -999,18 +1011,13 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     if (isImeComposing(event)) return;
     if (event.key === "Enter") {
       const term = event.currentTarget.value.trim();
-      if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
-      contentSearchTimer.current = undefined;
-      setContentSearchTerm(term);
+      // Enter 是明确的提交：收掉待落地的排期，并用当前词立即落地一次。
+      runContentSearchNow(term);
       // 不等这一帧之后的 memo：直接用同一个词现算一次，否则 Enter 会按旧词的命中表跳。
       const first = searchDiffContent(batchSearchItems, term).hits[0];
       if (first) setSelectedBatchDataId(first.dataId);
     }
   };
-
-  useEffect(() => () => {
-    if (contentSearchTimer.current) window.clearTimeout(contentSearchTimer.current);
-  }, []);
 
   const resetComparisonState = useCallback(() => {
     setMatchResults(null);
@@ -2614,6 +2621,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                         autoCapitalize="off"
                         autoCorrect="off"
                         onChange={(event) => onContentSearchChange(event.target.value)}
+                        onCompositionStart={onContentSearchCompositionStart}
+                        onCompositionEnd={(event) => onContentSearchCompositionEnd(event.currentTarget.value)}
                         onKeyDown={onContentSearchKeyDown}
                       />
                     </div>

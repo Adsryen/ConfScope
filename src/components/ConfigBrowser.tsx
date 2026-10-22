@@ -19,6 +19,7 @@ import { toast } from "../lib/toast";
 import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
 import { connectionLabel } from "../lib/defaultNameCopy";
+import { useDeferredSearchInput } from "../lib/deferredSearchInput";
 import { exportConfigs, type ConfigExportOptions } from "../lib/export";
 import { createSnapshotFromConfigs } from "../api/snapshot";
 import { exportConfigSourceFiles, selectConfigSourceExportDirectory } from "../api/app";
@@ -383,33 +384,34 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     return lastReloadOk.current;
   };
 
-  // 输入即搜:防抖自动搜索(无需「搜索」按钮)
-  const searchTimer = useRef<number | undefined>(undefined);
+  /**
+   * 输入即搜：防抖 + 输入法闸门（轮66 WP-6，无需「搜索」按钮）。
+   *
+   * 口径是「回显永远即时，搜索永远等上屏」：组合期间每敲一个拼音字母都会派发 input，
+   * 原来那层裸 setTimeout 会拿 `b`/`be`/`bei` 去查一遍——内容搜索模式还要把每份正文
+   * 重扫一次，用户看到的是「我还没打完它就说搜不到」。Enter 与搜索按钮走 runNow，不等。
+   */
+  const deferredSearch = useDeferredSearchInput((v: string) => {
+    if (searchMode === "content") searchAllContent(v, selectedGroup);
+    else fetchList(v, 1, selectedGroup);
+  });
   const onSearchChange = (v: string) => {
     setSearch(v);
-    window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => {
-      if (searchMode === "content") searchAllContent(v, selectedGroup);
-      else fetchList(v, 1, selectedGroup);
-    }, 400);
+    deferredSearch.schedule(v);
   };
-  const searchNow = () => {
-    window.clearTimeout(searchTimer.current);
-    if (searchMode === "content") searchAllContent(search, selectedGroup);
-    else fetchList(search, 1, selectedGroup);
-  };
+  const searchNow = () => deferredSearch.runNow(search);
 
   // 空态里的「清除搜索条件」：搜索框、已生效词、内容搜索结果一起归零并回列表。
-  // 不顺手清掉防抖定时器的话，用户点完清除，400ms 后旧词又会把列表打回空态。
+  // 不顺手收掉尚未触发的搜索的话，用户点完清除，400ms 后旧词又会把列表打回空态。
   const clearSearchTerms = () => {
-    window.clearTimeout(searchTimer.current);
+    deferredSearch.cancel();
     setSearch("");
     if (searchMode === "content") searchAllContent("");
     else fetchList("", 1, selectedGroup);
   };
   const switchSearchMode = (mode: SearchMode) => {
     if (mode === searchMode) return;
-    window.clearTimeout(searchTimer.current);
+    deferredSearch.cancel();
     setSearchMode(mode);
     if (mode === "content") searchAllContent(search, selectedGroup);
     else {
@@ -417,10 +419,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       fetchList(search, 1, selectedGroup);
     }
   };
-  useEffect(() => () => window.clearTimeout(searchTimer.current), []);
   const onGroupChange = (group: string) => {
     guardNav(() => {
-      window.clearTimeout(searchTimer.current);
+      deferredSearch.cancel();
       setSelectedGroup(group);
       setSelected(null);
       setContent("");
@@ -1076,6 +1077,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
               autoCorrect="off"
               spellCheck={false}
               onChange={(e) => onSearchChange(e.target.value)}
+              onCompositionStart={deferredSearch.onCompositionStart}
+              onCompositionEnd={(e) => deferredSearch.onCompositionEnd(e.currentTarget.value)}
               onKeyDown={(e) => {
                 // 输入法组合态：回车/方向键都属于候选词操作，不能当成「提交搜索 / 移动选中行」
                 if (isImeComposing(e)) return;

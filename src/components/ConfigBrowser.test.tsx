@@ -1263,6 +1263,35 @@ describe("ConfigBrowser", () => {
     fireEvent.keyDown(searchInput, { key: "Enter" });
     expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "*gate*", "", 1, 50);
   });
+  it("输入法没上屏时一次都不搜：候选词落地后按最终值只发一次请求", async () => {
+    renderBrowser();
+    await screen.findByText("app.json");
+    vi.useFakeTimers();
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    const callsBefore = apiMocks.listConfigs.mock.calls.length;
+
+    // 组合期间每敲一个拼音字母都会派发 input，值就是半截拼音
+    fireEvent.compositionStart(searchInput);
+    for (const partial of ["b", "be", "bei", "beiw"]) {
+      fireEvent.change(searchInput, { target: { value: partial } });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+    // 半截拼音一个都不许发出去：发出去只换来假的「没有结果」，列表闪一下空态
+    expect(apiMocks.listConfigs.mock.calls.length).toBe(callsBefore);
+    // 但回显必须即时——用户要看得见自己正在打什么
+    expect(searchInput.value).toBe("beiw");
+
+    // 上屏：先落最终值，再派 compositionend（引擎两种顺序都兜：谁在后谁定排期的值）
+    fireEvent.change(searchInput, { target: { value: "备份" } });
+    fireEvent.compositionEnd(searchInput, { data: "备份" });
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(conn, "public", "*备份*", "", 1, 50);
+    expect(apiMocks.listConfigs.mock.calls.length).toBe(callsBefore + 1);
+  });
   it("放弃未保存修改：确认框存续时编辑器里按回车不会误确认，草稿仍在", async () => {
     await enterEditMode();
     fireEvent.keyDown(window, { key: "Escape" });
