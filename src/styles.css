@@ -2850,22 +2850,33 @@ textarea {
   background: var(--bg);
 }
 
+/* 步骤条（轮66）：5 步全展时约 620px，窄窗口里第 5 步会被切掉——
+   真机实测 1100px 视口下 `li.diff-workflow-step.upcoming.locked` 的 right=1103 > 1100。
+   不能靠 justify-content:center：滚动容器里居中会把两端都推进够不着的死区（左边那一截
+   滚不回来）。改用「auto 外边距」这一种安全居中——装得下时居中，装不下时自动收到 0，
+   溢出量交给横向滚动。纵向只留 2px 净空，因为一轴设了 auto，另一轴的 visible
+   会按 auto 计算，焦点环（outline-offset:-2px 之外还有 2px）会被上缘削掉一圈。 */
 .diff-workflow-card {
   display: flex;
   align-items: center;
-  justify-content: center;
   flex: 1;
   min-width: 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 
+/* 步骤条本体不许再收缩：原来的 min-width:0 就是「宁可裁也不换行」的那道口子，
+   换成 flex:none 后溢出量变成可滚的距离，第 5 步从「看不见」变成「滚得到」。 */
 .diff-workflow-steps {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin: 0;
+  margin: 0 auto;
   padding: 0;
   list-style: none;
-  min-width: 0;
+  flex: none;
 }
 
 .diff-workflow-step {
