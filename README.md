@@ -129,6 +129,10 @@ ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置�
 - SSH private key、SSH passphrase 等大 secret 尚未迁移到安全存储，拆在后续
   `windows-large-secret-protection` 任务线。
 - macOS Keychain 与 Linux Secret Service 尚未实现，非 Windows 平台走兼容回退。
+- 本 README 的界面截图全部由 `tests/retest/shots/` 用合成数据集重拍产出，不含任何真实环境内容；
+  公开截图与文档面的凭据形态由 `tests/ux/publicScreenshotsStaySanitized.test.ts` 在发布预检里
+  把住。早期版本 tag 树里遗留的真实环境截图（已按泄露处理）见
+  [公开截图凭据暴露面处置记录](docs/security/public-screenshot-exposure-2026-10.md)。
 
 ## 技术栈
 
