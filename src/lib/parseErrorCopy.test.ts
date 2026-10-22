@@ -11,6 +11,7 @@ import zhLocale from "../locales/zh-CN.json";
 import enLocale from "../locales/en-US.json";
 import { parseDocument } from "yaml";
 import {
+  ARCHIVE_TAIL_KEYS,
   JSON_CONTEXT_TERMS,
   JSON_EXPECT_TERMS,
   JSON_KIND_TERMS,
@@ -18,6 +19,7 @@ import {
   YAML_STEM_KEYS,
   describeParseError,
 } from "./parseErrorCopy";
+import { normalizeConfig } from "./normalize";
 
 function useLocale(locale: string): void {
   vi.stubGlobal("localStorage", { getItem: () => locale, setItem: () => {}, removeItem: () => {}, clear: () => {} });
@@ -36,6 +38,9 @@ function flatten(tree: unknown, prefix = ""): Record<string, string> {
   }
   return acc;
 }
+
+/** 产出侧（normalize.ts）挂在句尾的存档说明，逐字。 */
+const TAIL_NOTE = "（duplicate key 已按后值覆盖处理，不阻塞同步）";
 
 const locales = {
   "zh-CN": flatten(zhLocale),
@@ -199,16 +204,41 @@ describe("describeParseError：YAML 引擎串", () => {
 
   it("duplicate key 警告串尾的中文说明不能被吞（normalize.ts:188 就长这样）", () => {
     useLocale("zh-CN");
-    const out = describeParseError("YAML:Map keys must be unique at line 2, column 1:（duplicate key 已按后值覆盖处理，不阻塞同步）");
+    const out = describeParseError(`YAML:Map keys must be unique at line 2, column 1:${TAIL_NOTE}`);
     expect(out).toContain("映射的键必须唯一");
     expect(out).toContain("duplicate key 已按后值覆盖处理，不阻塞同步");
     expect(out).toContain("（第 2 行第 1 列）");
   });
 
-  it("英文界面不残留中文框架（句尾的产出侧说明属于数据，允许保留）", () => {
+  it("英文界面不残留中文框架，句尾的存档说明也翻成英文", () => {
     useLocale("en-US");
-    const out = describeParseError("YAML:Map keys must be unique at line 2, column 1:");
-    expect(out).toBe("YAML parse failed:map keys must be unique (line 2, column 1)");
+    expect(describeParseError("YAML:Map keys must be unique at line 2, column 1:")).toBe(
+      "YAML parse failed:map keys must be unique (line 2, column 1)"
+    );
+    expect(describeParseError(`YAML:Map keys must be unique at line 2, column 1:${TAIL_NOTE}`)).toBe(
+      "YAML parse failed:map keys must be unique (duplicate keys were resolved by keeping the later value; sync not blocked) (line 2, column 1)"
+    );
+  });
+
+  it("中文界面把尾注翻回原样：与产出侧存档串逐字一致，老快照显示不变", () => {
+    useLocale("zh-CN");
+    const raw = `YAML:Map keys must be unique at line 2, column 1:${TAIL_NOTE}`;
+    // 尾注的译文必须等于尾注本身，否则中文界面会从「原样」变成「少一句 / 多一句」
+    expect(locales["zh-CN"][ARCHIVE_TAIL_KEYS[TAIL_NOTE]]).toBe(TAIL_NOTE);
+    expect(describeParseError(raw)).toBe(`YAML 解析失败:映射的键必须唯一${TAIL_NOTE}（第 2 行第 1 列）`);
+  });
+
+  it("生产者与展示层不许各写一份尾注（真产出串喂进来，en 界面不得露中文）", () => {
+    // 这里刻意不复制字面量：尾注从 normalize.ts 现场产出，改产出侧文案时这条会跟着红，
+    // 逼着同步 ARCHIVE_TAIL_KEYS 的 key，而不是让英文界面重新漏出中文。
+    const produced = normalizeConfig("a: 1\na: 2\n", "YAML").parseError;
+    expect(produced).toBeTruthy();
+    useLocale("en-US");
+    const en = describeParseError(produced);
+    expect(en).not.toMatch(/[\u3400-\u9fff]/);
+    expect(en).toContain("duplicate keys were resolved");
+    useLocale("zh-CN");
+    expect(describeParseError(produced)).toContain(TAIL_NOTE);
   });
 
   it("字典里的每条 yaml 主干都真的能被现版本 yaml 跑出来（防收死条目 / 防升级后漂移）", () => {
@@ -260,12 +290,13 @@ describe("parseError 文案字典与 locale 对齐", () => {
     expect(missing).toEqual([]);
   });
 
-  it("字典覆盖了三张 JSON 表和 yaml 表，新增条目不会漏登记", () => {
+  it("字典覆盖了三张 JSON 表、yaml 表和存档尾注表，新增条目不会漏登记", () => {
     const all = [
       ...Object.values(JSON_EXPECT_TERMS),
       ...Object.values(JSON_CONTEXT_TERMS),
       ...Object.values(JSON_KIND_TERMS),
       ...Object.values(YAML_STEM_KEYS),
+      ...Object.values(ARCHIVE_TAIL_KEYS),
     ];
     expect([...new Set(all)].sort()).toEqual([...PARSE_ERROR_DICT_KEYS].sort());
     expect(new Set(all).size).toBe(all.length);

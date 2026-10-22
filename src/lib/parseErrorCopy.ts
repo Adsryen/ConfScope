@@ -77,6 +77,19 @@ export const YAML_STEM_KEYS: Record<string, string> = {
   "Tabs are not allowed as indentation": "parseError.yaml.tabsAsIndentation",
 };
 
+/**
+ * 产出侧挂在句尾的说明（轮66 WP-5）。
+ *
+ * `normalize.ts` 把这句中文尾注拼进了存档串——它是数据（进变更计划快照、进内容搜索命中），
+ * 一个字都不能动，所以在这里按逐字尾注查文案键，只在展示层翻。
+ * key 与产出侧必须**逐字一致**，且 zh-CN 的取值也要与 key 逐字一致：
+ * 中文界面靠「翻回原样」做到零变化，任何一处改动都必须三处同步
+ * （normalize.ts 的产出串 / 这里的 key / zh-CN 的取值），否则尾注会从界面上凭空消失。
+ */
+export const ARCHIVE_TAIL_KEYS: Record<string, string> = {
+  "（duplicate key 已按后值覆盖处理，不阻塞同步）": "parseError.yaml.duplicateKeyNote",
+};
+
 /** 本模块可能吐出的全部文案键（字典侧）。字面量键由 localeParity 的字面量扫描覆盖。 */
 export const PARSE_ERROR_DICT_KEYS: string[] = [
   ...new Set([
@@ -84,6 +97,7 @@ export const PARSE_ERROR_DICT_KEYS: string[] = [
     ...Object.values(JSON_CONTEXT_TERMS),
     ...Object.values(JSON_KIND_TERMS),
     ...Object.values(YAML_STEM_KEYS),
+    ...Object.values(ARCHIVE_TAIL_KEYS),
   ]),
 ];
 
@@ -189,7 +203,10 @@ function describeYamlBody(body: string): string | null {
     .sort((a, b) => b.length - a.length)
     .find((candidate) => body.startsWith(candidate));
   if (!stem) return null;
-  return translate(YAML_STEM_KEYS[stem]) + body.slice(stem.length);
+  const tail = body.slice(stem.length);
+  // 存档尾注命中字典就翻成本地文案（en 界面不再露中文）；认不出的尾注原样保留，不猜
+  const tailKey = ARCHIVE_TAIL_KEYS[tail] ?? ARCHIVE_TAIL_KEYS[tail.trim()];
+  return translate(YAML_STEM_KEYS[stem]) + (tailKey ? translate(tailKey) : tail);
 }
 
 /**

@@ -85,6 +85,7 @@
     },
     "yaml": {
       "mapKeysUnique": "map keys must be unique",
+      "duplicateKeyNote": " (duplicate keys were resolved by keeping the later value; sync not blocked)",
       "nestedMappingsInCompact": "nested mappings are not allowed in compact mappings",
       "implicitKeysSingleLine": "implicit keys need to be on a single line",
       "implicitKeysNeedValue": "implicit map keys need to be followed by map values",

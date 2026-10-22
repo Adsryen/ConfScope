@@ -417,10 +417,11 @@ describe("ApplyPlanView", () => {
     // afterValue 与 sourceValue 同源，同一条提示只许显示一遍
     expect(screen.queryAllByText((_, element) => Boolean(element?.classList?.contains("apply-parse-warning")))).toHaveLength(1);
     const warning = screen.getByText((_, element) => Boolean(element?.classList?.contains("apply-parse-warning")));
-    // 句尾那段中文说明是产出侧的数据（normalize.ts 拼上去的），翻不了但不能被吞
+    // 句尾那段说明是产出侧的数据（normalize.ts 拼上去的），存档串不动，但展示层要跟着界面语言翻
     expect(warning.textContent).toBe(
-      "\u26A0 YAML parse failed:map keys must be unique（duplicate key 已按后值覆盖处理，不阻塞同步） (line 2, column 1)"
+      "\u26A0 YAML parse failed:map keys must be unique (duplicate keys were resolved by keeping the later value; sync not blocked) (line 2, column 1)"
     );
+    expect(warning.textContent).not.toMatch(/[\u3400-\u9fff]/);
     expect(screen.queryByText(/at line 2, column 1:/)).not.toBeInTheDocument();
   });
 

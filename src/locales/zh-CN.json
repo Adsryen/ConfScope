@@ -85,6 +85,7 @@
     },
     "yaml": {
       "mapKeysUnique": "映射的键必须唯一",
+      "duplicateKeyNote": "（duplicate key 已按后值覆盖处理，不阻塞同步）",
       "nestedMappingsInCompact": "紧凑写法里不允许嵌套映射",
       "implicitKeysSingleLine": "隐式键必须写在同一行",
       "implicitKeysNeedValue": "隐式键后面必须跟映射的值",
