@@ -8,8 +8,15 @@
  *
  * 守卫拆成两半：
  *   1. 能力表本身用动态单测钉死（口径错，全链路一起错）；
- *   2. 三个接线点（ConfigBrowser tab 闸门 / OperationHistoryView 请求闸门 / opType 前端兜底）
- *      用静态指针钉住，并各自带变异负控——把实现改回旧写法，对应守卫必须变红。
+ *   2. 接线点（ConfigBrowser tab 闸门 / 历史来源分段宿主 / OperationHistoryView 请求闸门 /
+ *      opType 前端兜底）用静态指针钉住，并各自带变异负控——把实现改回旧写法，对应守卫必须变红。
+ *
+ * 轮67 WP-15 起「历史变更」有了第二档：本机版本历史。闸门口径随之变成
+ * 「服务端记了历史 **或** 本机读得到历史」——两者都没有才隐藏 tab。
+ * 这里必须同时钉住两件事，否则诚实性会从新长出的那一层漏掉：
+ *   - tab 闸门仍是能力判定，不许退回 !isLocalSnapshot 之类的猜测；
+ *   - 服务端那一档必须由 supportsConfigHistory(conn) 收口，
+ *     Apollo/Consul 连上分段宿主也不许发出那次必然失败的历史请求。
  */
 import { describe, expect, it } from "vitest";
 import { loadLocale, readScannedSource } from "./scanUtils";
@@ -59,14 +66,15 @@ describe("历史能力表（单一事实源）", () => {
 
 describe("接线点（静态指针 + 变异负控）", () => {
   const BROWSER = readScannedSource("src/components/ConfigBrowser.tsx");
+  const SOURCE_PANEL = readScannedSource("src/components/ConfigHistoryPanel.tsx");
   const OP_HISTORY = readScannedSource("src/components/OperationHistoryView.tsx");
   const API = readScannedSource("src/api/nacos.ts");
 
   /** ConfigBrowser：tab 按钮与正文面板都必须走 canBrowseHistory，不许退回 !isLocalSnapshot。 */
   function browserViolations(src: string): string[] {
     const out: string[] = [];
-    if (!/const canBrowseHistory = supportsConfigHistory\(conn\);/.test(src)) {
-      out.push("canBrowseHistory 必须由 supportsConfigHistory(conn) 判定");
+    if (!/const canBrowseHistory = supportsConfigHistory\(conn\) \|\| localRevisionStoreAvailable\(\);/.test(src)) {
+      out.push("canBrowseHistory 必须是「服务端支持历史 || 本机历史读得到」，两个源都不许少");
     }
     if (!src.includes("canBrowseHistory && (")) {
       out.push("「历史变更」tab 按钮必须挂在 canBrowseHistory 闸门之后");
@@ -76,6 +84,36 @@ describe("接线点（静态指针 + 变异负控）", () => {
     }
     if (!src.includes('tab === "content" || !canBrowseHistory')) {
       out.push("正文面板要防「连接被改成 Apollo 后 tab 停在 history」的越权渲染");
+    }
+    return out;
+  }
+
+  /**
+   * ConfigHistoryPanel：服务端那一档必须由能力表收口。
+   * 这层是轮67 新长的，最容易犯的错是「分段照渲染、请求照发」——Apollo/Consul 点进去
+   * 只会看到一句与历史无关的报错，正是本守卫从轮55 起一直在挡的那件事。
+   */
+  function historySourceViolations(src: string): string[] {
+    const out: string[] = [];
+    if (!/const serverCapable = supportsConfigHistory\(conn\);/.test(src)) {
+      out.push("服务端那一档必须由 supportsConfigHistory(conn) 判定，不许自己猜 provider");
+    }
+    if (!/const localCapable = localRevisionStoreAvailable\(\);/.test(src)) {
+      out.push("本机那一档必须由 localRevisionStoreAvailable() 判定，不许按「有没有记录」猜");
+    }
+    // 分段只在两个源都可达时出现；只有一个选项的分段是噪音
+    if (!src.includes("{bothCapable && (")) {
+      out.push("来源分段必须只在两个源都可达时出现");
+    }
+    // 服务端不可达时不许停留在 server 那一档（否则面板空着，等于说谎）
+    if (!src.includes("if (!serverCapable) setSource(\"local\");")) {
+      out.push("连接被改成不支持历史的服务端后必须退回本机那一档");
+    }
+    if (!/const showLocal = !serverCapable \|\| source === "local";/.test(src)) {
+      out.push("在屏内容必须由 serverCapable 与所选档位共同决定，不能让不可达的那档占屏");
+    }
+    if (!src.includes("<HistoryView") || !src.includes("<LocalRevisionPanel")) {
+      out.push("两个源必须各自渲染自己的面板，不许合并成一列假历史");
     }
     return out;
   }
@@ -113,13 +151,37 @@ describe("接线点（静态指针 + 变异负控）", () => {
 
   it("三个接线点的守卫对当前实现全绿", () => {
     expect(browserViolations(BROWSER)).toEqual([]);
+    expect(historySourceViolations(SOURCE_PANEL)).toEqual([]);
     expect(opHistoryViolations(OP_HISTORY)).toEqual([]);
     expect(apiViolations(API)).toEqual([]);
   });
 
   it("负控：退回旧写法时守卫必须变红", () => {
     expect(browserViolations(BROWSER.replace("canBrowseHistory && (", "!isLocalSnapshot && ("))).not.toEqual([]);
-    expect(browserViolations(BROWSER.replace("const canBrowseHistory = supportsConfigHistory(conn);", "const canBrowseHistory = !isLocalSnapshot;"))).not.toEqual([]);
+    expect(
+      browserViolations(
+        BROWSER.replace(
+          "const canBrowseHistory = supportsConfigHistory(conn) || localRevisionStoreAvailable();",
+          "const canBrowseHistory = !isLocalSnapshot;"
+        )
+      ),
+      "闸门退回猜测式判定时守卫没红"
+    ).not.toEqual([]);
+    // 只看服务端、把本机那一档摘掉（历史 tab 又会对 Apollo 之外但本机有记录的连接消失）
+    expect(
+      browserViolations(
+        BROWSER.replace(" supportsConfigHistory(conn) || localRevisionStoreAvailable()", " supportsConfigHistory(conn)")
+      ),
+      "闸门少掉本机那一档时守卫没红"
+    ).not.toEqual([]);
+    expect(
+      historySourceViolations(SOURCE_PANEL.replace("const serverCapable = supportsConfigHistory(conn);", 'const serverCapable = true;')),
+      "服务端那一档改成无条件可达时守卫没红"
+    ).not.toEqual([]);
+    expect(
+      historySourceViolations(SOURCE_PANEL.replace("{bothCapable && (", "{true && (")),
+      "只有一个源也硬渲染分段时守卫没红"
+    ).not.toEqual([]);
     expect(opHistoryViolations(OP_HISTORY.replace("if (!supportsCenterHistory(conn)) return;", ""))).not.toEqual([]);
     expect(opHistoryViolations(OP_HISTORY.replace('t("history.centerHistoryUnsupported")', 't("history.empty")'))).not.toEqual([]);
     expect(apiViolations(API.replace('opType: String(r.opType ?? "").trim()', 'opType: String(r.opType ?? "")'))).not.toEqual([]);

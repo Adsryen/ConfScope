@@ -21,7 +21,16 @@ const ENTRY_FILES = [
   "src/components/ConfigBrowser.tsx",
   "src/components/ConfigEditor.tsx",
   "src/components/HistoryView.tsx",
+  // 轮67 WP-15：本机版本历史也能「按这一版生成回滚计划」，是第五处写入出口。
+  "src/components/LocalRevisionPanel.tsx",
   "src/components/DeleteConfirm.tsx",
+];
+/** 会自己构造计划载荷的入口（DeleteConfirm 走的是删除确认，不在此列）。 */
+const PLAN_BUILDING_FILES = [
+  "src/components/ConfigBrowser.tsx",
+  "src/components/ConfigEditor.tsx",
+  "src/components/HistoryView.tsx",
+  "src/components/LocalRevisionPanel.tsx",
 ];
 
 /** 直写禁用错误只许出现在 API 层的 throw 上；UI 里出现 = 回到「点了才报错」。 */
@@ -105,7 +114,7 @@ describe("API 层的直写禁用不许被放宽", () => {
   }
 });
 
-describe("四个入口不再自己呈现直写失败", () => {
+describe("五处入口不再自己呈现直写失败", () => {
   for (const file of ENTRY_FILES) {
     it(`${file} 不引用「直接配置写入已禁用」这条 API 错误文案`, () => {
       const source = readScannedSource(file);
@@ -134,8 +143,8 @@ describe("四个入口不再自己呈现直写失败", () => {
   });
 });
 
-describe("四个入口共用同一套计划机制", () => {
-  for (const file of ["src/components/ConfigBrowser.tsx", "src/components/ConfigEditor.tsx", "src/components/HistoryView.tsx"]) {
+describe("四处入口共用同一套计划机制", () => {
+  for (const file of PLAN_BUILDING_FILES) {
     it(`${file} 经 buildDirectWriteExitEntry 交给 onStartApply`, () => {
       const source = readScannedSource(file);
       expect(source.includes("buildDirectWriteExitEntry("), `${file} 绕过统一构造器自己拼计划载荷`).toBe(true);
@@ -145,13 +154,13 @@ describe("四个入口共用同一套计划机制", () => {
   }
 
   it("构造计划载荷的逻辑只存在于 src/lib/directWriteExit.ts", () => {
-    const builders = ["ConfigBrowser.tsx", "ConfigEditor.tsx", "HistoryView.tsx"].filter((f) =>
+    const builders = PLAN_BUILDING_FILES.map((f) => f.replace(/^src\/components\//, "")).filter((f) =>
       readScannedSource(`src/components/${f}`).includes("function buildDirectWriteExitEntry")
     );
     expect(builders, "组件里又出现了一份计划载荷构造实现").toEqual([]);
   });
 
-  it("可写目标判定只有一个出处，四处入口共用", () => {
+  it("可写目标判定只有一个出处，五处入口共用", () => {
     for (const file of ENTRY_FILES) {
       const source = readScannedSource(file);
       expect(/function isWritableTarget\b/.test(source), `${file} 又本地复制了一份 isWritableTarget`).toBe(false);

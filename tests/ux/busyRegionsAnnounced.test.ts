@@ -32,7 +32,11 @@ interface Site {
   spread: string;
 }
 
-/** 本波接线的 8 处容器：列表主体与详情主体，宿主都是「占位符与内容块的共同父容器」。 */
+/**
+ * 本波接线的容器：列表主体与详情主体，宿主都是「占位符与内容块的共同父容器」。
+ * 轮67 WP-15 起新增宿主「本机版本历史」，同形三处一起登记 —— 新组件必须整族进名单，
+ * 否则「busyProps 调用数 == 名单条目数」那条会在下一处长出未登记容器时静默放过。
+ */
 const SITES: Site[] = [
   {
     file: "src/components/ConfigBrowser.tsx",
@@ -63,6 +67,27 @@ const SITES: Site[] = [
     marker: 'className="content-box"',
     count: 1,
     spread: "{...busyProps(!ready)}",
+  },
+  // 轮67 WP-15：本机版本历史面板与历史视图同形，三块异步替换区各钉一处。
+  // busy 的表达式按各自宿主真实状态取名（detailBusy / switching 是本地派生态），
+  // 不硬套 HistoryView 的 comparePending——写死 true/false 会被另一条守卫拦住。
+  {
+    file: "src/components/LocalRevisionPanel.tsx",
+    marker: 'className="history-items"',
+    count: 1,
+    spread: "{...busyProps(loading)}",
+  },
+  {
+    file: "src/components/LocalRevisionPanel.tsx",
+    marker: 'className="history-detail"',
+    count: 1,
+    spread: "{...busyProps(detailBusy)}",
+  },
+  {
+    file: "src/components/LocalRevisionPanel.tsx",
+    marker: 'className="content-box"',
+    count: 1,
+    spread: "{...busyProps(switching)}",
   },
   {
     file: "src/components/BackupView.tsx",
@@ -158,7 +183,7 @@ function callCount(file: string): number {
 describe("异步区域的 aria-busy（波36 R55）", () => {
   const files = sourceFiles();
 
-  it("站点名单钉死 8 处，且每条开标签都展开 busyProps", () => {
+  it("站点名单钉死 11 处，且每条开标签都展开 busyProps", () => {
     const violations: string[] = [];
     for (const site of SITES) {
       const found = heads(site.file, site.marker);
@@ -174,8 +199,8 @@ describe("异步区域的 aria-busy（波36 R55）", () => {
   });
 
   it("站点数与名单条目数不许悄悄缩水", () => {
-    expect(SITES).toHaveLength(8);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(8);
+    expect(SITES).toHaveLength(11);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(11);
   });
 
   it("aria-busy 字面量只许写在 busyRegion.ts", () => {
@@ -246,7 +271,7 @@ describe("异步区域的 aria-busy（波36 R55）", () => {
 
   it("全站接线规模不低于现状", () => {
     const wired = files.filter((file) => file !== MAPPING && readScannedSource(file).includes("busyProps("));
-    expect(wired.length).toBeGreaterThanOrEqual(5);
+    expect(wired.length).toBeGreaterThanOrEqual(6);
     let calls = 0;
     for (const file of wired) calls += callCount(file);
     expect(calls).toBeGreaterThanOrEqual(SITES.length);

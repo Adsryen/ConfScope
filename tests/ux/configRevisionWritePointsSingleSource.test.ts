@@ -9,7 +9,9 @@
  * 1. 绑定 AppendConfigRevision / ReadConfigRevisionsForKey 在产品代码里只有 src/lib/configRevisions.ts 能碰；
  * 2. 记 observed 的调用点只有 src/api/nacos.ts 的 getConfigDocument（全站唯一读取出口）；
  * 3. 记 confirmed-write 的调用点只有 src/lib/applyPlanExecution.ts（写后回读确认）；
- * 4. kind 两个字面量必须与 Go 侧 revisions 常量一致，两侧改其一就红。
+ * 4. kind 两个字面量与「正文省略原因」字面量必须与 Go 侧 revisions 常量一致，两侧改其一就红；
+ *    消费侧（本机历史面板）只许比较导出的常量，不许就地再写一遍 "too-large"——
+ *    那正是「Go 改了值、前端还在认旧值，于是把有正文的版本说成被省略」的老路。
  *
  * 出口自己的函数定义不算调用点（否则守卫会在自己的定义上自红）。
  */
@@ -22,6 +24,7 @@ const READ_SITE = "src/api/nacos.ts";
 const WRITE_SITE = "src/lib/applyPlanExecution.ts";
 const GUARD = "tests/ux/configRevisionWritePointsSingleSource.test.ts";
 const GO_TRAIL = "internal/revisions/trail.go";
+const LOCAL_PANEL = "src/components/LocalRevisionPanel.tsx";
 
 function walk(dir: string, acc: string[]): string[] {
   for (const entry of readdirSync(`${PROJECT_ROOT}/${dir}`, { withFileTypes: true })) {
@@ -49,11 +52,11 @@ function callSites(identifier: string): string[] {
   return hits.sort();
 }
 
-/** Go 侧常量真值：KindObserved / KindConfirmedWrite 的字面量。 */
+/** Go 侧常量真值：两个 kind 与正文省略原因的字面量。 */
 function goKindConstants(): Record<string, string> {
   const text = readFileSync(`${PROJECT_ROOT}/${GO_TRAIL}`, "utf8");
   const out: Record<string, string> = {};
-  for (const name of ["KindObserved", "KindConfirmedWrite"]) {
+  for (const name of ["KindObserved", "KindConfirmedWrite", "ContentOmittedTooLarge"]) {
     const match = new RegExp(`\\b${name}\\s*=\\s*"([^"]+)"`).exec(text);
     if (!match) throw new Error(`${GO_TRAIL} 里读不到 ${name}`);
     out[name] = match[1];
@@ -97,8 +100,21 @@ describe("本机版本历史写入点唯一事实源（R57）", () => {
     const outlet = outletText();
     const observed = /CONFIG_REVISION_KIND_OBSERVED\s*=\s*"([^"]+)"/.exec(outlet)?.[1];
     const confirmed = /CONFIG_REVISION_KIND_CONFIRMED_WRITE\s*=\s*"([^"]+)"/.exec(outlet)?.[1];
+    const omitted = /CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE\s*=\s*"([^"]+)"/.exec(outlet)?.[1];
     expect(observed).toBe(go.KindObserved);
     expect(confirmed).toBe(go.KindConfirmedWrite);
+    expect(omitted, "正文省略原因的字面量与 Go 侧脱钩，面板会把有正文的版本说成省略了").toBe(
+      go.ContentOmittedTooLarge
+    );
+  });
+
+  it("消费侧只比较导出的常量，不再就地写第三份字面量", () => {
+    const panel = stripComments(readFileSync(`${PROJECT_ROOT}/${LOCAL_PANEL}`, "utf8"));
+    expect(panel).toMatch(/CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE/);
+    expect(
+      panel.includes('"too-large"') || panel.includes("'too-large'"),
+      "本机历史面板里又写了一遍裸字面量，Go 改值时它不会跟着红"
+    ).toBe(false);
   });
 
   it("出口保持吞错的降级：记不上历史不许影响读取与写入", () => {

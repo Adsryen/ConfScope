@@ -11,8 +11,8 @@
  *    那是二次转义事故（`&amp;amp;`）与「列表命中数 vs 正文标红分叉」的老路；
  * 2. 逐行标记的 `data-hit` 只是**行内下标**，跨行重号 ⇒ 这条路径不许借用
  *    `currentHitSelector` / `CURRENT_HIT_CLASS` 那套「全篇唯一编号」的当前命中语义；
- * 3. 词只有一个出处：ConfigBrowser 算一次，HistoryView 原样透传给两个内容视图，
- *    中间任何一环再算一遍 `searchMode` / `isContentSearchActive` 就是第三份判定；
+ * 3. 词只有一个出处：ConfigBrowser 算一次，中间的宿主（历史视图、本机版本历史、来源分段壳）
+ *    一律原样透传，中间任何一环再算一遍 `searchMode` / `isContentSearchActive` 就是第三份判定；
  * 4. diff 行的语义背景色（add 绿 / del 红）不许被搜索色覆盖，命中行指示只走行号变红。
  */
 import { readFileSync } from "node:fs";
@@ -23,6 +23,15 @@ import { PROJECT_ROOT, readScannedSource } from "./scanUtils";
 const DIFF = "src/components/UnifiedDiff.tsx";
 const HISTORY = "src/components/HistoryView.tsx";
 const BROWSER = "src/components/ConfigBrowser.tsx";
+const LOCAL_PANEL = "src/components/LocalRevisionPanel.tsx";
+const SOURCE_PANEL = "src/components/ConfigHistoryPanel.tsx";
+/**
+ * 传词的中间宿主（轮67 WP-15 起长到三个）。
+ * 每一个都只许「接住父级给的那个词，原样往下传」：任何一环自己再算一次
+ * `isContentSearchActive` / `searchMode`，或起第二份 `useState(term)`，
+ * 就会出现「列表说命中 7 处、正文只标 5 处」这类分叉——而它一次都不会报错。
+ */
+const TERM_PASSEURS = [HISTORY, LOCAL_PANEL, SOURCE_PANEL];
 /** 注释里也写着颜色与类名，算之前一律剥掉（与 contrastTokens 同一口径）。 */
 const CSS = readFileSync(join(PROJECT_ROOT, "src/styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -56,19 +65,25 @@ describe("diff 视图的搜索标记复用共享层（轮41）", () => {
     expect(diffSrc).not.toMatch(/CURRENT_HIT_CLASS|search-hit-current|data-hit/);
   });
 
-  it("词只有一个出处：ConfigBrowser 算一次，HistoryView 原样透传给两个内容视图", () => {
+  it("词只有一个出处：ConfigBrowser 算一次，中间宿主原样透传", () => {
     const browserSrc = readScannedSource(BROWSER);
-    const historySrc = readScannedSource(HISTORY);
 
     expect(browserSrc.match(/isContentSearchActive/g)?.length).toBeGreaterThan(0);
-    expect(historySrc, "HistoryView 不许复制 searchMode 判定").not.toMatch(/isContentSearchActive|searchMode/);
     expect(diffSrc, "UnifiedDiff 不许自己判定搜索态、也不许起第二份词状态").not.toMatch(
       /isContentSearchActive|searchMode|useState[^\n]*[Tt]erm/
     );
 
-    // 两个内容视图同源于同一个 prop，不许出现第三种传词形状
-    const passes = [...historySrc.matchAll(/searchTerm=\{([^}]*)\}/g)].map((m) => m[1].trim());
-    expect(passes, "CodeView 与 UnifiedDiff 都要接词，且只透传 prop").toEqual(["searchTerm", "searchTerm"]);
+    for (const file of TERM_PASSEURS) {
+      const src = readScannedSource(file);
+      expect(src, `${file} 不许复制 searchMode 判定`).not.toMatch(/isContentSearchActive|searchMode/);
+      expect(src, `${file} 不许起第二份搜索词状态`).not.toMatch(/useState[^\n]*[Tt]erm/);
+      // 同源于同一个 prop，不许出现第三种传词形状（改名、加三元、就地算一次）
+      const passes = [...src.matchAll(/searchTerm=\{([^}]*)\}/g)].map((m) => m[1].trim());
+      expect(passes, `${file} 每颗下游内容视图都要接词，且只透传 prop`).toEqual([
+        "searchTerm",
+        "searchTerm",
+      ]);
+    }
   });
 
   it("命中指示只走行号变红，diff 行的语义背景色不被搜索色覆盖（R41-3）", () => {

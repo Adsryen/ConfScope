@@ -16,6 +16,9 @@
  * 自检用例逐条退回旧写法，确认每一根指针都真的在挡（见 describe 末尾）。
  *
  * 注释一律剥掉再算（与 scanUtils 同一口径），否则注释里抄着的类名会被当成实现。
+ *
+ * 轮67 WP-15：本机版本历史面板（LocalRevisionPanel）复用同一套分段控件，守卫改为按宿主清单循环。
+ * 两处是复制出来的形状，正因如此才要一起守——只改一边而另一边继续「看起来没事」是最容易溜过去的。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +26,14 @@ import { describe, expect, it } from "vitest";
 import { PROJECT_ROOT, loadLocale, readScannedSource } from "./scanUtils";
 
 const HISTORY = "src/components/HistoryView.tsx";
+const LOCAL_PANEL = "src/components/LocalRevisionPanel.tsx";
+/**
+ * 轮67 WP-15 起，同一套「两颗恒定命名按钮」的分段控件在第二个宿主（本机版本历史）上又长了一遍。
+ * 抄一份实现就得两处都守：只守 HistoryView 的话，改到新面板时它会悄悄说谎，反过来也一样。
+ * 守卫因此按 SOURCED_FILES 循环，文件相关的断言每个宿主各跑一遍（标题带文件名，红了知道是谁）；
+ * 只与 CSS / 词表相关的两条留在循环外，免得同一件事被数两次。
+ */
+const SOURCED_FILES = [HISTORY, LOCAL_PANEL];
 const STATE_FLAG = "rawView";
 const SETTER = "setRawView";
 /** 注释里也写着类名，算之前一律剥掉。 */
@@ -236,30 +247,82 @@ function viewModeViolations(source: string): string[] {
   return violations;
 }
 
-describe("历史正文视图分段控件说实话（轮49 R49-03 守卫）", () => {
-  const src = readScannedSource(HISTORY);
+describe("历史正文视图分段控件说实话（轮49 R49-03 守卫，轮67 起守两个宿主）", () => {
+  for (const file of SOURCED_FILES) {
+    const src = readScannedSource(file);
 
-  it("按钮名 / 按下态 / 视觉态 / 写入值 / 在屏视图五者同向", () => {
-    expect(viewModeViolations(src)).toEqual([]);
-  });
+    it(`按钮名 / 按下态 / 视觉态 / 写入值 / 在屏视图五者同向（${file}）`, () => {
+      expect(viewModeViolations(src)).toEqual([]);
+    });
 
-  it("解析器自证：真的从生产源码里取到两颗按钮，且每根指针都有取值", () => {
-    const group = groupSpan(src);
-    expect(group).not.toBeNull();
-    const buttons = buttonFacts(group!.body);
-    expect(buttons).toHaveLength(2);
-    for (const btn of buttons) {
-      expect(btn.labelKey).toMatch(/^history\./);
-      expect(["state", "!state"]).toContain(btn.pressed);
-      expect(["onTrue", "onFalse"]).toContain(btn.active);
-      expect(["true", "false"]).toContain(btn.sets);
-    }
-    expect(screenBranches(src)).toEqual({ trueView: "CodeView", falseView: "UnifiedDiff" });
-  });
+    it(`解析器自证：真的从生产源码里取到两颗按钮，且每根指针都有取值（${file}）`, () => {
+      const group = groupSpan(src);
+      expect(group).not.toBeNull();
+      const buttons = buttonFacts(group!.body);
+      expect(buttons).toHaveLength(2);
+      for (const btn of buttons) {
+        expect(btn.labelKey).toMatch(/^history\./);
+        expect(["state", "!state"]).toContain(btn.pressed);
+        expect(["onTrue", "onFalse"]).toContain(btn.active);
+        expect(["true", "false"]).toContain(btn.sets);
+      }
+      expect(screenBranches(src)).toEqual({ trueView: "CodeView", falseView: "UnifiedDiff" });
+    });
 
-  it("默认落在「高亮变更」，切换的初值不许漂", () => {
-    expect(src).toMatch(new RegExp(`const \\[${STATE_FLAG}, ${SETTER}\\] = useState\\(false\\);`));
-  });
+    it(`默认落在「高亮变更」，切换的初值不许漂（${file}）`, () => {
+      expect(src).toMatch(new RegExp(`const \\[${STATE_FLAG}, ${SETTER}\\] = useState\\(false\\);`));
+    });
+
+    it(`不许退回「文案跟着状态改」的单颗按钮（${file}）`, () => {
+      expect(src, "文案又开始跟着 rawView 变").not.toMatch(new RegExp(`${STATE_FLAG}\\s*\\?\\s*t\\(`));
+      expect(src, "t() 的参数变成动态，等于按钮名不固定").not.toMatch(new RegExp(`t\\(\\s*${STATE_FLAG}`));
+      // 旧写法：一颗按钮同时是标签、状态与「另一个视图」的名字
+      expect(src).not.toMatch(new RegExp(`aria-label=\\{${STATE_FLAG}`));
+      for (const key of ["history.highlightChanges", "history.rawContent"]) {
+        expect(src.split(`t("${key}")`).length - 1, `t("${key}") 出现不止一次`).toBe(1);
+      }
+    });
+
+    it(`自检：逐条变异真的被挡住（不是正则空转）（${file}）`, () => {
+      const flipped = src.replace('aria-pressed={!rawView}', 'aria-pressed={rawView}');
+      expect(flipped, "变异没落进被测文本").not.toBe(src);
+      expect(viewModeViolations(flipped), "aria-pressed 极性反转没有被挡住").not.toEqual([]);
+
+      const lostActive = src.replace('${rawView ? "" : " active"}', "");
+      expect(lostActive).not.toBe(src);
+      expect(viewModeViolations(lostActive), "丢掉 active 视觉态没有被挡住").not.toEqual([]);
+
+      const wrongSetter = src.replace("onClick={() => setRawView(false)}", "onClick={() => setRawView(true)}");
+      expect(wrongSetter).not.toBe(src);
+      expect(viewModeViolations(wrongSetter), "写入值与按钮名脱钩没有被挡住").not.toEqual([]);
+
+      const lyingLabel = src.replace(
+        '{t("history.highlightChanges")}',
+        '{rawView ? t("history.highlightChanges") : t("history.rawContent")}'
+      );
+      expect(lyingLabel).not.toBe(src);
+      expect(viewModeViolations(lyingLabel), "文案回到随状态变化没有被挡住").not.toEqual([]);
+
+      // 在屏分支整体搬走：按钮名还在，屏上却换了组件
+      const branchless = src.replace(/rawView \?\s*\(\s*<CodeView/, "rawView ? (\n                  <MessageCenter");
+      expect(branchless, "分支变异没落进被测文本").not.toBe(src);
+      expect(viewModeViolations(branchless), "在屏视图与按钮名不同名没有被挡住").not.toEqual([]);
+
+      const noGroupRole = src.replace('<div className="view-mode" role="group"', '<div className="view-mode"');
+      expect(noGroupRole).not.toBe(src);
+      expect(viewModeViolations(noGroupRole), "丢掉 role=\"group\" 没有被挡住").not.toEqual([]);
+
+      const flipSetter = src.replace("onClick={() => setRawView(true)}", "onClick={() => setRawView(!rawView)}");
+      expect(flipSetter).not.toBe(src);
+      expect(viewModeViolations(flipSetter), "退回布尔翻转没有被挡住").not.toEqual([]);
+
+      const swappedViews = src
+        .replace(/rawView \?\s*\(\s*<CodeView/, "rawView ? (\n                  <UnifiedDiff")
+        .replace(/\)\s*:\s*\(\s*\n\s*<UnifiedDiff/, ")\n                ) : (\n                  <CodeView");
+      expect(swappedViews, "分支互换没落进被测文本").not.toBe(src);
+      expect(viewModeViolations(swappedViews), "两个视图的分支互换没有被挡住").not.toEqual([]);
+    });
+  }
 
   it("按下态在 CSS 里真的看得见，而不只是 aria 上说说", () => {
     const shell = cssBlock(".view-mode");
@@ -288,55 +351,5 @@ describe("历史正文视图分段控件说实话（轮49 R49-03 守卫）", () 
         expect(label, `${file} 的「${label}」把视图写成了动作`).not.toMatch(/切换|查看|Switch|Toggle/i);
       }
     }
-  });
-
-  it("不许退回「文案跟着状态改」的单颗按钮", () => {
-    expect(src, "文案又开始跟着 rawView 变").not.toMatch(new RegExp(`${STATE_FLAG}\\s*\\?\\s*t\\(`));
-    expect(src, "t() 的参数变成动态，等于按钮名不固定").not.toMatch(new RegExp(`t\\(\\s*${STATE_FLAG}`));
-    // 旧写法：一颗按钮同时是标签、状态与「另一个视图」的名字
-    expect(src).not.toMatch(new RegExp(`aria-label=\\{${STATE_FLAG}`));
-    for (const key of ["history.highlightChanges", "history.rawContent"]) {
-      expect(src.split(`t("${key}")`).length - 1, `t("${key}") 出现不止一次`).toBe(1);
-    }
-  });
-
-  it("自检：逐条变异真的被挡住（不是正则空转）", () => {
-    const flipped = src.replace('aria-pressed={!rawView}', 'aria-pressed={rawView}');
-    expect(flipped, "变异没落进被测文本").not.toBe(src);
-    expect(viewModeViolations(flipped), "aria-pressed 极性反转没有被挡住").not.toEqual([]);
-
-    const lostActive = src.replace('${rawView ? "" : " active"}', "");
-    expect(lostActive).not.toBe(src);
-    expect(viewModeViolations(lostActive), "丢掉 active 视觉态没有被挡住").not.toEqual([]);
-
-    const wrongSetter = src.replace("onClick={() => setRawView(false)}", "onClick={() => setRawView(true)}");
-    expect(wrongSetter).not.toBe(src);
-    expect(viewModeViolations(wrongSetter), "写入值与按钮名脱钩没有被挡住").not.toEqual([]);
-
-    const lyingLabel = src.replace(
-      '{t("history.highlightChanges")}',
-      '{rawView ? t("history.highlightChanges") : t("history.rawContent")}'
-    );
-    expect(lyingLabel).not.toBe(src);
-    expect(viewModeViolations(lyingLabel), "文案回到随状态变化没有被挡住").not.toEqual([]);
-
-    // 在屏分支整体搬走：按钮名还在，屏上却换了组件
-    const branchless = src.replace(/rawView \?\s*\(\s*<CodeView/, "rawView ? (\n                  <MessageCenter");
-    expect(branchless, "分支变异没落进被测文本").not.toBe(src);
-    expect(viewModeViolations(branchless), "在屏视图与按钮名不同名没有被挡住").not.toEqual([]);
-
-    const noGroupRole = src.replace('<div className="view-mode" role="group"', '<div className="view-mode"');
-    expect(noGroupRole).not.toBe(src);
-    expect(viewModeViolations(noGroupRole), "丢掉 role=\"group\" 没有被挡住").not.toEqual([]);
-
-    const flipSetter = src.replace("onClick={() => setRawView(true)}", "onClick={() => setRawView(!rawView)}");
-    expect(flipSetter).not.toBe(src);
-    expect(viewModeViolations(flipSetter), "退回布尔翻转没有被挡住").not.toEqual([]);
-
-    const swappedViews = src
-      .replace(/rawView \?\s*\(\s*<CodeView/, "rawView ? (\n                  <UnifiedDiff")
-      .replace(/\)\s*:\s*\(\s*\n\s*<UnifiedDiff/, ")\n                ) : (\n                  <CodeView");
-    expect(swappedViews, "分支互换没落进被测文本").not.toBe(src);
-    expect(viewModeViolations(swappedViews), "两个视图的分支互换没有被挡住").not.toEqual([]);
   });
 });
