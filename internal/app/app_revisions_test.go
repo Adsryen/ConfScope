@@ -87,7 +87,7 @@ func TestAppendConfigRevisionRejectsNonServerTruth(t *testing.T) {
 			t.Fatalf("kind=%q 必须被绑定层拒绝", kind)
 		}
 	}
-	if got := a.ReadConfigRevisions(0); len(got) != 0 {
+	if got := mustReadAll(t, a, 0); len(got) != 0 {
 		t.Fatalf("被拒绝的记录不得留下痕迹，实得 %d 条", len(got))
 	}
 }
@@ -98,11 +98,11 @@ func TestReadConfigRevisionsReturnsEmptySliceNotNull(t *testing.T) {
 
 	a := &App{}
 	// Wails 把 nil 序列化成 null，前端直接 .map() 就炸；两个读出口都必须给空数组
-	all := a.ReadConfigRevisions(0)
+	all := mustReadAll(t, a, 0)
 	if all == nil {
 		t.Fatal("ReadConfigRevisions 空历史必须返回空切片")
 	}
-	keyed := a.ReadConfigRevisionsForKey("conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0)
+	keyed := mustReadKey(t, a, "conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0)
 	if keyed == nil {
 		t.Fatal("ReadConfigRevisionsForKey 空历史必须返回空切片")
 	}
@@ -113,7 +113,7 @@ func TestReadConfigRevisionsReturnsEmptySliceNotNull(t *testing.T) {
 	if _, err := a.AppendConfigRevision(revisionsInput("a: 1\n")); err != nil {
 		t.Fatalf("追加失败: %v", err)
 	}
-	if got := a.ReadConfigRevisions(0); len(got) != 1 {
+	if got := mustReadAll(t, a, 0); len(got) != 1 {
 		t.Fatalf("读回应当 1 条，实得 %d", len(got))
 	}
 }
@@ -147,7 +147,7 @@ func TestConfigRevisionFactsAndClear(t *testing.T) {
 	if err := a.ClearConfigRevisions(); err != nil {
 		t.Fatalf("清除失败: %v", err)
 	}
-	if got := a.ReadConfigRevisions(0); len(got) != 0 {
+	if got := mustReadAll(t, a, 0); len(got) != 0 {
 		t.Fatalf("清除后仍读出 %d 条", len(got))
 	}
 	if after := a.GetConfigRevisionFacts(); after.Records != 0 {
@@ -178,7 +178,7 @@ func TestPruneConfigRevisionThroughBinding(t *testing.T) {
 	if removed != 4 {
 		t.Fatalf("8 条保留 3 条 + 1 锚点应当删 4 条，实得 %d", removed)
 	}
-	records := a.ReadConfigRevisionsForKey("conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0)
+	records := mustReadKey(t, a, "conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0)
 	if len(records) != 4 {
 		t.Fatalf("剩最早锚点 + 最近 3 版，实得 %d 条", len(records))
 	}
@@ -186,7 +186,64 @@ func TestPruneConfigRevisionThroughBinding(t *testing.T) {
 	if _, err := a.PruneConfigRevisions(0); err != nil {
 		t.Fatalf("默认裁剪失败: %v", err)
 	}
-	if still := a.ReadConfigRevisions(0); len(still) != 4 {
+	if still := mustReadAll(t, a, 0); len(still) != 4 {
 		t.Fatalf("默认策略不该删掉未超配额的记录，实得 %d", len(still))
+	}
+}
+
+// mustReadAll / mustReadKey 消除绑定层测试样板：读出口现在带 error，读失败要立刻打停。
+func mustReadAll(t *testing.T, a *App, limit int) []revisions.Record {
+	t.Helper()
+	records, err := a.ReadConfigRevisions(limit)
+	if err != nil {
+		t.Fatalf("ReadConfigRevisions 失败: %v", err)
+	}
+	return records
+}
+
+func mustReadKey(t *testing.T, a *App, connectionID, namespace, group, dataID string, limit int) []revisions.Record {
+	t.Helper()
+	records, err := a.ReadConfigRevisionsForKey(connectionID, namespace, group, dataID, limit)
+	if err != nil {
+		t.Fatalf("ReadConfigRevisionsForKey 失败: %v", err)
+	}
+	return records
+}
+
+// 轮67 R57-WP15：绑定层必须把「读不出来」如实抛给前端。
+//
+// 前端界面要能在「本机还没记过」与「这份日志读不出来」之间说实话（配置浏览的历史面板据此
+// 决定是显示空态还是显示带复制键的错误）。老实现回 nil，Wails 序列化成空数组，
+// 界面只能说一句假话——而且正好在数据最可疑的时候说。
+func TestReadConfigRevisionsSurfacesUnreadableTrail(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(portabledata.DataDirEnvName, root)
+
+	app := &App{}
+
+	// 文件还没生成：合法的空历史，不是错误。
+	first, err := app.ReadConfigRevisionsForKey("conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0)
+	if err != nil {
+		t.Fatalf("文件不存在不该算读失败: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("应当读到 0 条，实得 %d", len(first))
+	}
+
+	// 同名位置被目录占据：整份日志读不出来，两个读出口都必须报错。
+	appData := filepath.Join(root, portabledata.AppDataDirName)
+	if err := os.MkdirAll(filepath.Join(appData, revisions.TrailFileName), 0o755); err != nil {
+		t.Fatalf("造阻塞项失败: %v", err)
+	}
+	if _, err := app.ReadConfigRevisionsForKey("conn-retest", "public", "DEFAULT_GROUP", "svc-gateway.yaml", 0); err == nil {
+		t.Fatal("按键读出口把失败吞成了空数组")
+	}
+	if _, err := app.ReadConfigRevisions(0); err == nil {
+		t.Fatal("全站读出口同样把失败吞成了空数组")
+	}
+
+	// 清除同样不许假装成功：文件动不了就得说清楚，否则用户以为历史已经没了。
+	if err := app.ClearConfigRevisions(); err == nil {
+		t.Fatal("目标不可写时清除必须报错")
 	}
 }

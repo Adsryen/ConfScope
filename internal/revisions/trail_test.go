@@ -105,7 +105,7 @@ func TestNormalizeContentMakesCRLFAndLFSameVersion(t *testing.T) {
 		t.Fatalf("应当判重，实得 reason=%q", res.Reason)
 	}
 	// 入库的是规范化后的正文，不是原样搬运（老版 Windows 正文里不该留着 \r）
-	records := store.Read(dir, 0)
+	records := mustRead(t, store, dir, 0)
 	if len(records) != 1 {
 		t.Fatalf("应当只有 1 版，实得 %d", len(records))
 	}
@@ -228,18 +228,18 @@ func TestReadReturnsNewestFirstAndScopesByKey(t *testing.T) {
 		t.Fatalf("追加失败: %v", err)
 	}
 
-	all := store.Read(dir, 0)
+	all := mustRead(t, store, dir, 0)
 	if len(all) != 4 {
 		t.Fatalf("全站应读到 4 条，实得 %d", len(all))
 	}
 	if all[0].Content != "gateway: on\n" {
 		t.Fatalf("Read 必须最新在前，第一条实得 %q", all[0].Content)
 	}
-	if got := store.Read(dir, 2); len(got) != 2 {
+	if got := mustRead(t, store, dir, 2); len(got) != 2 {
 		t.Fatalf("limit 必须生效，实得 %d", len(got))
 	}
 
-	keyed := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	keyed := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(keyed) != 3 {
 		t.Fatalf("按键取应当 3 条，实得 %d", len(keyed))
 	}
@@ -283,7 +283,7 @@ func TestStoreSurvivesRestartAndDataRootSwitch(t *testing.T) {
 	if _, err := restarted.Append(dirB, observedInput("a: 2\n")); err != nil {
 		t.Fatalf("追加失败: %v", err)
 	}
-	if got := len(restarted.ReadKey(dirB, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)); got != 2 {
+	if got := len(mustReadKey(t, restarted, dirB, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)); got != 2 {
 		t.Fatalf("重启后应当看到 2 版，实得 %d", got)
 	}
 }
@@ -306,7 +306,7 @@ func TestPruneKeepsEarliestAnchorAndLatestN(t *testing.T) {
 	if removed != total-6 {
 		t.Fatalf("保留最早锚点 + 最近 5 版应当删 %d 条，实得 %d", total-6, removed)
 	}
-	records := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	records := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(records) != 6 {
 		t.Fatalf("裁剪后应当剩 6 版，实得 %d", len(records))
 	}
@@ -351,7 +351,7 @@ func TestAppendAutoPrunesWithoutLosingTheLatest(t *testing.T) {
 			t.Fatalf("追加第 %d 条失败: %v", i, err)
 		}
 	}
-	records := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	records := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(records) == 0 {
 		t.Fatalf("内联裁剪不能把历史裁空")
 	}
@@ -369,7 +369,7 @@ func TestClearIsIdempotentAndReopensForAppend(t *testing.T) {
 	if err := store.Clear(dir); err != nil {
 		t.Fatalf("清除失败: %v", err)
 	}
-	if got := len(store.Read(dir, 0)); got != 0 {
+	if got := len(mustRead(t, store, dir, 0)); got != 0 {
 		t.Fatalf("清除后不该再读到东西，实得 %d", got)
 	}
 	if err := store.Clear(dir); err != nil {
@@ -421,7 +421,7 @@ func TestBadLinesAreSkippedNotFatal(t *testing.T) {
 		t.Fatalf("播种失败: %v", err)
 	}
 
-	records := store.Read(dir, 0)
+	records := mustRead(t, store, dir, 0)
 	if len(records) != 1 {
 		t.Fatalf("坏行必须跳过而不是把整份历史读没了，实得 %d", len(records))
 	}
@@ -535,7 +535,7 @@ func TestConfirmedWritePromotesObservedSameVersion(t *testing.T) {
 		t.Fatalf("同一版不得攒出两条，实得 %d 条", len(lines))
 	}
 
-	records := store.Read(dir, 0)
+	records := mustRead(t, store, dir, 0)
 	if len(records) != 1 {
 		t.Fatalf("读回应当 1 条，实得 %d", len(records))
 	}
@@ -586,7 +586,7 @@ func TestObservedNeverDowngradesConfirmedWrite(t *testing.T) {
 	if res.Appended || res.Reason != ReasonDuplicate {
 		t.Fatalf("observed 重复读同一版应当判重跳过，实得 appended=%v reason=%q", res.Appended, res.Reason)
 	}
-	records := store.Read(dir, 0)
+	records := mustRead(t, store, dir, 0)
 	if len(records) != 1 {
 		t.Fatalf("应当只有 1 条，实得 %d", len(records))
 	}
@@ -617,7 +617,7 @@ func TestPromotionSurvivesRestartAndKeepsOlderVersions(t *testing.T) {
 	if res.Reason != ReasonPromoted {
 		t.Fatalf("重启后仍须认出同一版并升级，实得 reason=%q", res.Reason)
 	}
-	records := restarted.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	records := mustReadKey(t, restarted, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(records) != 2 {
 		t.Fatalf("两个版本必须都在，实得 %d", len(records))
 	}
@@ -649,10 +649,10 @@ func TestPromotionOnlyAppliesToTheSameKey(t *testing.T) {
 	if !res.Appended {
 		t.Fatalf("不同键必须各自成版，实得 reason=%q", res.Reason)
 	}
-	if got := len(store.Read(dir, 0)); got != 2 {
+	if got := len(mustRead(t, store, dir, 0)); got != 2 {
 		t.Fatalf("应当有 2 条，实得 %d", got)
 	}
-	if a := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0); len(a) != 1 || a[0].Kind != KindObserved {
+	if a := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0); len(a) != 1 || a[0].Kind != KindObserved {
 		t.Fatalf("conn-a 那版被别的键的写入确认改掉了")
 	}
 }
@@ -683,11 +683,11 @@ func TestPromotionDoesNotCrossKeysWhenContentIsIdentical(t *testing.T) {
 		t.Fatalf("应当升级 conn-a 自己那一版，实得 reason=%q", res.Reason)
 	}
 
-	a := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	a := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(a) != 1 || a[0].Kind != KindConfirmedWrite || a[0].PlanID != "plan-a" {
 		t.Fatalf("conn-a 没拿到写入确认：len=%d kind=%q planId=%q", len(a), a[0].Kind, a[0].PlanID)
 	}
-	b := store.ReadKey(dir, "conn-b", "public", "DEFAULT_GROUP", "other.yml", 0)
+	b := mustReadKey(t, store, dir, "conn-b", "public", "DEFAULT_GROUP", "other.yml", 0)
 	if len(b) != 1 || b[0].Kind != KindObserved || b[0].PlanID != "" {
 		t.Fatalf("conn-b 那版被别的键改写了：kind=%q planId=%q", b[0].Kind, b[0].PlanID)
 	}
@@ -728,7 +728,7 @@ func TestPromotionRefusesWhenNewestVersionIsNotTheSame(t *testing.T) {
 		t.Fatalf("最新一版已经不是 v2，必须新落一条而不是回头改旧行，实得 appended=%v reason=%q", res.Appended, res.Reason)
 	}
 
-	records := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	records := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
 	if len(records) != 4 {
 		t.Fatalf("四个时刻都要在（v1 / v2 / 外部回退到 v1 / 本程序写 v2），实得 %d", len(records))
 	}
@@ -754,4 +754,88 @@ func TestPromotionRefusesWhenNewestVersionIsNotTheSame(t *testing.T) {
 	} else if again.Appended || again.Reason != ReasonDuplicate {
 		t.Fatalf("重建索引后判重仍须成立，实得 appended=%v reason=%q", again.Appended, again.Reason)
 	}
+}
+
+// 轮67 R57-WP15：「这份日志读不出来」与「本机还没记过」是两回事，必须能分开。
+//
+// 为什么单独钉：老实现把目录不可用、文件打不开、扫描中断统统回 nil，前端只能拿到空数组，
+// 于是界面在数据最可疑的那一刻说「还没有历史」。这条测试把三种情形钉死：
+// 不存在 = 无错无记录；读不出来 = 报错且不返记录；压缩在读不出来时拒绝重写（按空文件重写等于删光历史）。
+func TestReadDistinguishesUnreadableFromNeverRecorded(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+
+	// 1) 文件不存在：真的还没记过，这不是错误。
+	empty, err := store.Read(dir, 0)
+	if err != nil {
+		t.Fatalf("文件不存在不该报读失败: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("文件不存在应读到 0 条，实得 %d", len(empty))
+	}
+
+	// 2) 拿目录冒充 jsonl：读不出可信结果，必须报错，绝不回空切片冒充「没有历史」。
+	//    Linux 下 os.Open 目录会成功、扫描才失败；Windows 下打开就失败——两条路都得是错误。
+	if err := os.Mkdir(filepath.Join(dir, TrailFileName), 0o755); err != nil {
+		t.Fatalf("造阻塞项失败: %v", err)
+	}
+	fresh := NewStore()
+	records, err := fresh.Read(dir, 0)
+	if err == nil {
+		t.Fatal("日志读不出来必须报错，把失败说成「没有历史」是假话")
+	}
+	if len(records) != 0 {
+		t.Fatalf("报错时不得附带半截结果，实得 %d 条", len(records))
+	}
+	keyed, err := fresh.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	if err == nil {
+		t.Fatal("ReadKey 同样必须报错")
+	}
+	if len(keyed) != 0 {
+		t.Fatalf("ReadKey 报错时不得附带半截结果，实得 %d 条", len(keyed))
+	}
+
+	// 3) 压缩要整份重写：读不出可信结果时按空文件重写就等于删光历史，必须拒绝。
+	removed, err := fresh.Prune(dir, DefaultKeepPerKey)
+	if err == nil {
+		t.Fatal("读不出来时 Prune 必须拒绝重写")
+	}
+	if removed != 0 {
+		t.Fatalf("拒绝时不得声称删掉了条目，实得 %d", removed)
+	}
+
+	// 4) 追加不许被读失败静默吞掉：写不进去就报写错误，而不是「成功但什么都没记」。
+	if _, err := fresh.Append(dir, observedInput("a: 1\n")); err == nil {
+		t.Fatal("目标不可写时 Append 必须报错")
+	}
+
+	// 5) 体量事实仍按 stat 说实话：文件在场（size 由 stat 给出），但读不出条目 ⇒ 计数为 0。
+	//    这条不报错也不骗人：设置页看到的是「有 0 版」，与「文件不存在」在 Exists 上可区分。
+	facts := fresh.GetFacts(dir)
+	if !facts.Exists {
+		t.Fatalf("阻塞项在场，Facts 不该说文件不存在：%+v", facts)
+	}
+	if facts.Records != 0 || facts.Keys != 0 {
+		t.Fatalf("读不出来时不得凭空造出条数，实得 records=%d keys=%d", facts.Records, facts.Keys)
+	}
+}
+
+// mustRead / mustReadKey 消除测试样板：轮67 R57-WP15 起这两个读出口会返回错误，
+// 读失败在「内容对不对」的断言之前就该把测试打停，否则失败会被读成「少了一条」。
+func mustRead(t *testing.T, s *Store, dataDir string, limit int) []Record {
+	t.Helper()
+	records, err := s.Read(dataDir, limit)
+	if err != nil {
+		t.Fatalf("Read(%s, %d) 失败: %v", dataDir, limit, err)
+	}
+	return records
+}
+
+func mustReadKey(t *testing.T, s *Store, dataDir, connectionID, namespace, group, dataID string, limit int) []Record {
+	t.Helper()
+	records, err := s.ReadKey(dataDir, connectionID, namespace, group, dataID, limit)
+	if err != nil {
+		t.Fatalf("ReadKey(%s, %s) 失败: %v", dataDir, dataID, err)
+	}
+	return records
 }

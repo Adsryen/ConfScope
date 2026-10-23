@@ -55,29 +55,41 @@ func (a *App) AppendConfigRevision(input revisions.Input) (revisions.AppendResul
 }
 
 // ReadConfigRevisions 读取最近 limit 条（跨键混排，最新在前；limit<=0 取默认上限）。
-func (a *App) ReadConfigRevisions(limit int) []revisions.Record {
+//
+// 错误必须回传（轮67 R57-WP15）：目录解析不出来、日志文件打不开、扫描中断，
+// 以前一律回 nil ⇒ 前端拿到空数组 ⇒ 界面说「本机还没记过这一版」。那是假话，
+// 而且正好在数据可能出问题的时候说。文件不存在不算失败（那是真的还没记过）。
+func (a *App) ReadConfigRevisions(limit int) ([]revisions.Record, error) {
 	dir, err := revisionsDataDir()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	records := a.revisionsStore().Read(dir, limit)
+	records, err := a.revisionsStore().Read(dir, limit)
+	if err != nil {
+		return nil, err
+	}
 	if records == nil {
-		return []revisions.Record{}
+		return []revisions.Record{}, nil
 	}
-	return records
+	return records, nil
 }
 
 // ReadConfigRevisionsForKey 读取某个配置键的本机版本历史（最新在前）。
-func (a *App) ReadConfigRevisionsForKey(connectionID, namespace, group, dataID string, limit int) []revisions.Record {
+//
+// 与 ReadConfigRevisions 同一口径：读不出来就报错，绝不回空数组冒充「这个配置没历史」。
+func (a *App) ReadConfigRevisionsForKey(connectionID, namespace, group, dataID string, limit int) ([]revisions.Record, error) {
 	dir, err := revisionsDataDir()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	records := a.revisionsStore().ReadKey(dir, connectionID, namespace, group, dataID, limit)
+	records, err := a.revisionsStore().ReadKey(dir, connectionID, namespace, group, dataID, limit)
+	if err != nil {
+		return nil, err
+	}
 	if records == nil {
-		return []revisions.Record{}
+		return []revisions.Record{}, nil
 	}
-	return records
+	return records, nil
 }
 
 // PruneConfigRevisions 按保留策略压缩这份日志，返回删掉的条数。

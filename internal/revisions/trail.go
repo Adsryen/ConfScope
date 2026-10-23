@@ -17,6 +17,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -209,7 +210,10 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 			// 文件与本进程的记忆对不上（另一个实例写过这份日志，或日志被外部动过）：
 			// 判据回到文件，本次按新的一版落盘，并把索引按文件重建。
 			// 绝不允许回头改更老那一行——那会把时间序和「有人在别处改回上一版」这条事实抹掉。
-			s.reindexLocked(dataDir, readRecords(dataDir))
+			// 判据回到文件。读不出来就当本键没有历史（宁可多落一条新版，也绝不回头改更老那一行）：
+			// 这里若因读失败而不写，confirmed-write 那条最可靠的事实会永久丢掉。
+			trail, _ := readRecords(dataDir)
+			s.reindexLocked(dataDir, trail)
 		}
 	}
 	if err := appendLine(dataDir, record); err != nil {
@@ -228,28 +232,29 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 }
 
 // Read 返回最近 limit 条（跨键混排，倒序 = 最新的在前；limit<=0 时取全部上限 5000 条）。
-func (s *Store) Read(dataDir string, limit int) []Record {
-	if dataDir == "" {
-		return nil
+func (s *Store) Read(dataDir string, limit int) ([]Record, error) {
+	records, err := readRecords(dataDir)
+	if err != nil {
+		return nil, err
 	}
-	records := readRecords(dataDir)
 	if limit <= 0 {
 		limit = 5000
 	}
 	if len(records) > limit {
 		records = records[len(records)-limit:]
 	}
-	return reverseRecords(records)
+	return reverseRecords(records), nil
 }
 
 // ReadKey 返回某个配置键的版本历史，最新的在前。
-func (s *Store) ReadKey(dataDir, connectionID, namespace, group, dataID string, limit int) []Record {
-	if dataDir == "" {
-		return nil
+func (s *Store) ReadKey(dataDir, connectionID, namespace, group, dataID string, limit int) ([]Record, error) {
+	records, err := readRecords(dataDir)
+	if err != nil {
+		return nil, err
 	}
 	key := KeyOf(connectionID, namespace, group, dataID)
 	var out []Record
-	for _, rec := range readRecords(dataDir) {
+	for _, rec := range records {
 		if rec.Key() == key {
 			out = append(out, rec)
 		}
@@ -257,7 +262,7 @@ func (s *Store) ReadKey(dataDir, connectionID, namespace, group, dataID string, 
 	if limit > 0 && len(out) > limit {
 		out = out[len(out)-limit:]
 	}
-	return reverseRecords(out)
+	return reverseRecords(out), nil
 }
 
 // Prune 按保留策略重写文件，返回删掉的条数。
@@ -305,10 +310,15 @@ func (s *Store) GetFacts(dataDir string) Facts {
 	facts.Exists = true
 	facts.SizeBytes = info.Size()
 	keys := map[string]bool{}
-	for _, rec := range readRecords(dataDir) {
-		facts.Records++
-		keys[rec.Key()] = true
+	records, err := readRecords(dataDir)
+	if err == nil {
+		for _, rec := range records {
+			facts.Records++
+			keys[rec.Key()] = true
+		}
 	}
+	// 读不出来时 Records/Keys 保持 0，而 SizeBytes 仍按 stat 说实话：
+	// 「文件有 20 KB 却一条都没记」这个自相矛盾就是提示，比整块面板凭空消失好。
 	facts.Keys = len(keys)
 	return facts
 }
@@ -320,7 +330,11 @@ func (s *Store) GetFacts(dataDir string) Facts {
 // 对应哪个计划」这条最可靠的事实就永久丢了。正文没变（摘要一致），改的是来历与时间戳，
 // 不是伪造新版本；反过来 observed 永远不得覆盖 confirmed-write（降级会把 planId 回链弄丢）。
 func (s *Store) promoteLocked(dataDir string, key string, record Record) (promoteOutcome, error) {
-	records := readRecords(dataDir)
+	records, err := readRecords(dataDir)
+	if err != nil {
+		// 读不出可信结果 ⇒ 不去改写任何一行，按「本键找不到落点」处理，交给调用方落一条新版。
+		return promoteNoTrailForThisKey, nil
+	}
 	target := -1
 	for i := len(records) - 1; i >= 0; i-- {
 		if records[i].Key() != key {
@@ -355,7 +369,11 @@ func (s *Store) pruneLocked(dataDir string, keepPerKey int) (int, error) {
 	if keepPerKey <= 0 {
 		keepPerKey = DefaultKeepPerKey
 	}
-	records := readRecords(dataDir)
+	records, err := readRecords(dataDir)
+	if err != nil {
+		// 压缩要重写整份文件：读不出可信结果时绝不能「按空文件重写」，那等于删光历史。
+		return 0, err
+	}
 	if len(records) == 0 {
 		s.resetLocked(dataDir)
 		return 0, nil
@@ -489,10 +507,27 @@ func parseLine(line string) (Record, bool) {
 	return rec, true
 }
 
-func readRecords(dataDir string) []Record {
-	f := openTrail(dataDir)
-	if f == nil {
-		return nil
+/*
+ * readRecords 把「没有历史」与「历史读不出来」分成两种结果说（轮67 R57-WP15）。
+ *
+ * 之前这两件事共用一个 nil：文件不存在、目录解析不出来、文件打不开、扫描中断，全都回
+ * 空切片。界面拿到的就是「本机还没记过这一版」——一句假话，而用户恰恰在这种时候最需要
+ * 知道真相（日志读不出来 ≠ 我的版本丢了）。现在只有 os.ErrNotExist 算「真的没记过」，
+ * 其余一律带错误回来，让绑定层把失败如实抛给前端。
+ *
+ * 单行 JSON 解析失败仍按行跳过（与 internal/audit 同口径）：一条坏行不该让整屏历史黑掉，
+ * 追加式日志的容错优先级高于「一行都不许少」。
+ */
+func readRecords(dataDir string) ([]Record, error) {
+	if dataDir == "" {
+		return nil, fmt.Errorf("版本历史数据目录不可用")
+	}
+	f, err := os.Open(trailPath(dataDir))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("打开版本历史失败: %w", err)
 	}
 	defer f.Close()
 	var out []Record
@@ -502,14 +537,23 @@ func readRecords(dataDir string) []Record {
 			out = append(out, rec)
 		}
 	}
-	return out
+	if err := scan.Err(); err != nil {
+		// 扫到一半断掉（超长行、IO 错误）：已经读到的那些条数不可信，宁可整体报失败。
+		return nil, fmt.Errorf("读取版本历史中断: %w", err)
+	}
+	return out, nil
 }
 
+/*
+ * openTrail 只负责「能不能打开」，不解释内容：ensureLocked 重建加速器时逐行自己扫，
+ * 读失败与否对它无所谓——索引丢了最坏是多记一条重复。
+ * 需要把「读不出来」如实上报的调用方请用 readRecords。
+ */
 func openTrail(dataDir string) *os.File {
 	if dataDir == "" {
 		return nil
 	}
-	f, err := os.Open(filepath.Join(dataDir, TrailFileName))
+	f, err := os.Open(trailPath(dataDir))
 	if err != nil {
 		return nil
 	}
