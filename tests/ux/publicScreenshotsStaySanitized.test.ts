@@ -63,8 +63,9 @@ const REVIEWED_CAPTURES: Record<string, ReviewedCapture> = {
     note: "跨配置搜 8080，命中项 svc-gateway.yaml",
   },
   "配置对比.png": {
-    md5: "0fca31f51fd7ff2f814c4053d948399c",
-    note: "Retest Nacos A/B 两侧 svc-auth.json，域名是 auth.dev.example.com",
+    md5: "7200e8c19e388a2917dcf80cfb76401f",
+    note: "轮68 重拍：Retest Nacos A/B 两侧 svc-auth.json，域名是 auth.dev.example.com；"
+      + "第三步多出「微调右侧」入口，仍为合成数据",
   },
   "配置矩阵.png": {
     md5: "f14cb3f576d6f845e46964257bf4cc98",
