@@ -893,6 +893,23 @@ textarea {
   outline-offset: -2px;
 }
 
+/* 当前章节的位置指示（轮67 R67-WP3a）：左栏是设置页唯一的导航，
+   只回答「点了会去哪」不回答「现在在哪」，滚到面板中间就迷路。
+   排在悬停规则之后、并且用 .active:hover 把特异度提到 (0,3,0)——
+   位置指示不能因为鼠标扫过就整块消失，靠文档顺序决胜的话下一轮加规则就会翻车。 */
+.settings-rail-item.active {
+  background: var(--bg-active);
+  border-color: transparent;
+  color: var(--text-hi);
+}
+
+.settings-rail-item.active:hover,
+.settings-rail-item.active:focus-visible {
+  background: var(--bg-active);
+  border-color: var(--blue);
+  color: var(--text-hi);
+}
+
 .settings-panels {
   min-height: 0;
   overflow-y: auto;

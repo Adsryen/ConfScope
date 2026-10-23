@@ -26,9 +26,27 @@ import {
   type RuntimeLayoutInfo,
 } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
-import { scrollBehavior } from "../lib/motion";
+import { useSectionSpy } from "../lib/sectionSpy";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+
+/**
+ * 左栏索引与章节的一一对应（顺序 = 文档顺序）。
+ *
+ * scroll-spy 按「最后一个越过判定线的节」答当前节，靠的就是这个顺序与 DOM 一致，
+ * 所以章节增删必须同时改这张表和下面对应的 `<section>`，两者错序高亮就会指错地方。
+ */
+const SECTION_NAV: ReadonlyArray<{ id: string; labelKey: string }> = [
+  { id: "settings-general", labelKey: "settings.groupBasic" },
+  { id: "settings-network", labelKey: "settings.groupNetwork" },
+  { id: "settings-compare", labelKey: "settings.comparePreferences" },
+  { id: "settings-credentials", labelKey: "settings.credentials" },
+  { id: "settings-backup", labelKey: "settings.backup" },
+  { id: "settings-data-locations", labelKey: "settings.dataLocations" },
+  { id: "settings-update", labelKey: "settings.update" },
+  { id: "settings-developer", labelKey: "settings.developer" },
+];
+const SECTION_IDS = SECTION_NAV.map((item) => item.id);
 
 /** 数据根命中档位的展示标签键（Go 侧 RootSource 的稳定字面量，逐档一条 i18n）。 */
 const DATA_ROOT_SOURCE_KEYS: Record<string, string> = {
@@ -77,18 +95,10 @@ export default function SettingsView() {
   const askConfirm = (title: string, message: string, action: () => void, details?: string[], danger = true) =>
     setPendingConfirm({ title, message, details, danger, action });
   const panelsRef = useRef<HTMLDivElement | null>(null);
+  const { activeId, jumpToSection } = useSectionSpy(panelsRef, SECTION_IDS);
   const savedTimerRef = useRef<number | null>(null);
 
-  const sectionLinks = [
-    { id: "settings-general", label: t("settings.groupBasic") },
-    { id: "settings-network", label: t("settings.groupNetwork") },
-    { id: "settings-compare", label: t("settings.comparePreferences") },
-    { id: "settings-credentials", label: t("settings.credentials") },
-    { id: "settings-backup", label: t("settings.backup") },
-    { id: "settings-data-locations", label: t("settings.dataLocations") },
-    { id: "settings-update", label: t("settings.update") },
-    { id: "settings-developer", label: t("settings.developer") },
-  ];
+  const sectionLinks = SECTION_NAV.map((item) => ({ id: item.id, label: t(item.labelKey) }));
 
   const update = (patch: Partial<AppSettings>) => {
     const next = {
@@ -167,24 +177,6 @@ export default function SettingsView() {
       surfacesAliveRef.current = false;
     };
   }, [refreshDataSurfaces]);
-
-  const scrollToSection = (id: string) => {
-    const container = panelsRef.current;
-    const target = document.getElementById(id);
-    if (!container || !target) return;
-    const containerTop = container.getBoundingClientRect().top;
-    const targetTop = target.getBoundingClientRect().top;
-    // 老 WebView 没有 Element.prototype.scrollTo：缺它也只放弃滚动，焦点交接照做。
-    if (typeof container.scrollTo === "function") {
-      container.scrollTo({
-        top: container.scrollTop + targetTop - containerTop,
-        behavior: scrollBehavior(),
-      });
-    }
-    // 焦点交给目标章节：点索引后读屏要念出章节名，Tab 也从这一节继续，而不是留在左栏按钮上。
-    // preventScroll：位置已由上面定过，别让浏览器再滚一次。
-    target.focus({ preventScroll: true });
-  };
 
   const runCredentialMigration = async () => {
     setCredentialError("");
@@ -353,7 +345,13 @@ export default function SettingsView() {
       <div className="settings-workbench">
         <aside className="settings-rail" aria-label={t("app.settings")}>
           {sectionLinks.map((item) => (
-            <button key={item.id} type="button" className="settings-rail-item" onClick={() => scrollToSection(item.id)}>
+            <button
+              key={item.id}
+              type="button"
+              className={`settings-rail-item${activeId === item.id ? " active" : ""}`}
+              aria-current={activeId === item.id ? "true" : undefined}
+              onClick={() => jumpToSection(item.id)}
+            >
               {item.label}
             </button>
           ))}

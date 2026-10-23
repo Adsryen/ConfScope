@@ -44,7 +44,7 @@ describe("被忽略的更新版本可恢复（轮67 R67-WP2）", () => {
   });
 
   it("设置页的应用更新小节把值摆出来并可清空", () => {
-    expect(settingsView, "索引里少了「应用更新」这一项").toContain('{ id: "settings-update", label: t("settings.update") }');
+    expect(settingsView, "索引里少了「应用更新」这一项").toContain('{ id: "settings-update", labelKey: "settings.update" }');
     expect(settingsView, "没有对应小节，索引点了只会停在原处").toContain('id="settings-update"');
     expect(settingsView, "小节里没把被忽略的版本显示出来").toContain('t("settings.skippedUpdateVersion")');
     expect(

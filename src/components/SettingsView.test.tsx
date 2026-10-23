@@ -525,6 +525,52 @@ describe("SettingsView", () => {
     expect(screen.getByText("Never checked")).toBeInTheDocument();
   });
 
+  // ── 轮67 R67-WP3a：左栏要回答「现在在哪一节」 ──
+
+  it("点索引把当前节指示移到点的那一项", () => {
+    renderSettings("en-US");
+    const backup = screen.getByRole("button", { name: "Backup" });
+    const developer = screen.getByRole("button", { name: "Developer" });
+    // jsdom 没有布局，挂载时量到的偏移全为 0 ⇒ 按位置判会给最后一节（真机上量的是真实矩形）
+    expect(developer).toHaveAttribute("aria-current", "true");
+
+    fireEvent.click(backup);
+
+    expect(backup).toHaveAttribute("aria-current", "true");
+    expect(backup).toHaveClass("settings-rail-item", "active");
+    expect(developer).not.toHaveAttribute("aria-current");
+    expect(developer).not.toHaveClass("active");
+  });
+
+  it("用户自己滚了就交还位置判定，指示不许赖在点过的那一节", () => {
+    renderSettings("en-US");
+    const updates = screen.getByRole("button", { name: "App Updates" });
+    fireEvent.click(updates);
+    expect(updates).toHaveAttribute("aria-current", "true");
+
+    // 滚轮 = 用户表态「我自己在看」，此后按位置判；jsdom 里位置判给最后一节
+    fireEvent.wheel(document.querySelector(".settings-panels") as HTMLElement);
+
+    expect(updates).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Developer" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("输入框里的方向键不算用户滚动，容器上的才算", () => {
+    renderSettings("en-US");
+    const updates = screen.getByRole("button", { name: "App Updates" });
+    fireEvent.click(updates);
+
+    // 索引点完焦点在章节上，容器里的方向键是真滚页面；但代理输入框里的同一个键只动光标
+    const proxy = document.querySelector(".settings-proxy-grid input") as HTMLElement;
+    fireEvent.keyDown(proxy, { key: "ArrowDown" });
+    expect(updates).toHaveAttribute("aria-current", "true");
+    fireEvent.keyDown(proxy, { key: "Home" });
+    expect(updates).toHaveAttribute("aria-current", "true");
+
+    fireEvent.keyDown(document.querySelector(".settings-panels") as HTMLElement, { key: "End" });
+    expect(updates).not.toHaveAttribute("aria-current");
+  });
+
   // ── 轮67 R67-WP3b：点索引要把焦点交给目标章节 ──
 
   it("点索引把焦点交给目标章节，读屏念得出章节名", () => {

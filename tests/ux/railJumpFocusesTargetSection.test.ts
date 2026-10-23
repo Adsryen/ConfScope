@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { readScannedSource } from "./scanUtils";
 
 const settingsView = readScannedSource("src/components/SettingsView.tsx");
+const sectionSpy = readScannedSource("src/lib/sectionSpy.ts");
 
 /** 逐个 `<section id="settings-*">` 开标签，带回它的属性文本。 */
 function sectionTags(): Array<{ id: string; tag: string }> {
@@ -35,10 +36,18 @@ describe("设置页索引的焦点交接（轮67 R67-WP3b）", () => {
   });
 
   it("跳转只交焦点不再滚一次，且 scrollTo 缺实现时只放弃滚动", () => {
-    expect(settingsView, "焦点交接丢了：点索引后读屏仍停在左栏按钮").toMatch(/target\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
-    expect(settingsView, "写了 focus 但没带 preventScroll：浏览器会在我们算好的位置上再滚一次").not.toMatch(/target\.focus\(\s*\)/);
-    expect(settingsView, "老 WebView 没有 Element.prototype.scrollTo，未判空会让整次跳转抛错").toMatch(
+    expect(sectionSpy, "焦点交接丢了：点索引后读屏仍停在左栏按钮").toMatch(/target\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+    expect(sectionSpy, "写了 focus 但没带 preventScroll：浏览器会在我们算好的位置上再滚一次").not.toMatch(/target\.focus\(\s*\)/);
+    expect(sectionSpy, "老 WebView 没有 Element.prototype.scrollTo，未判空会让整次跳转抛错").toMatch(
       /typeof container\.scrollTo === "function"/
     );
+  });
+
+  it("跳转几何只有一份实现，组件侧只许调用不许再算一遍", () => {
+    // 组件里留一份 scrollTo/focus 副本，就是下一轮「高亮与实际位置不一致」的出处
+    expect(settingsView, "组件没接 useSectionSpy，索引点了没人判当前节").toContain("useSectionSpy(panelsRef, SECTION_IDS)");
+    expect(settingsView).toContain("onClick={() => jumpToSection(item.id)}");
+    expect(settingsView, "组件自己又算了一遍滚动").not.toContain(".scrollTo(");
+    expect(settingsView, "组件自己又交了一遍焦点").not.toContain(".focus(");
   });
 });
