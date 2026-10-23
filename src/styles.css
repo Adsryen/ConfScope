@@ -2783,6 +2783,29 @@ textarea {
   font-size: 11px;
   color: var(--text-dim);
 }
+/*
+ * 轮67 顺手补的漏：`.history-item-src` / `.history-publisher` 从 f17936c（2026-10-21）
+ * 就挂在 HistoryView 的发布人节点上，styles.css 里却一个字都没定义 —— 长用户名/IPv4
+ * 按整号正文直出，把 meta 行挤变形。tests/cssHooks.test.ts 把这种「JSX 用了、CSS 没有」
+ * 的类名判红，别再用「看着没事」放过去。
+ */
+.history-item-src,
+.history-publisher {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  min-width: 0;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-publisher {
+  margin: 0 6px;
+  vertical-align: middle;
+}
 
 .op {
   font-size: 11px;
@@ -8738,6 +8761,9 @@ button.diff-workflow-step-btn:hover {
 
 /* 历史 / 备份 / 任务 / 日志：dataId、名称、范围、详情元信息 */
 .history-dataid,
+/* 轮67：发布来源（用户名/IP）单行截断，抄不走就只能凭眼睛记 IP，全文另挂在 title 上 */
+.history-item-src,
+.history-publisher,
 .backup-item-name,
 .backup-config-dataid,
 .task-item-name,
