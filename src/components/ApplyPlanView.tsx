@@ -643,7 +643,18 @@ function ConfirmationPanel({
             <span>{t("tasks.taskId")}: <span className="mono">{executionTask.id}</span></span>
             <CopyButton text={executionTask.id} label={t("apply.copyTaskId")} />
           </div>
-          {executionTask.error && <pre className="apply-task-progress-error">{executionTask.error}</pre>}
+          {/*
+           * 任务失败时这句错误与下面 InlineError 的 message 是同一个字符串——
+           * applyPlanExecution.recordFailure() 把 error 同时喂给 completeTask(taskId,false,error)
+           * 和返回值的 error 字段，两处各渲染各的，谁都没写错。真机第五步实测（/tmp/cs/wp11-readings.txt）：
+           * 「配置在计划生成后又变了…」在 .apply-task-progress-error 与 .inline-error-body 里各出现一份，
+           * 同屏两遍长文本，用户以为发生了两次失败。失败详情归 InlineError 那一份（复制与重试都挂在它身上），
+           * 进度面板只留它自己该说的事实：状态、进度、任务号。
+           * 仍然保留兜底：任务带错误而 executeError 没跟上（或两者文字不同）时照旧显示，不吞信息。
+           */}
+          {executionTask.error && executionTask.error.trim() !== (executeError ?? "").trim() && (
+            <pre className="apply-task-progress-error">{executionTask.error}</pre>
+          )}
         </div>
       )}
       {executeError && (

@@ -35,6 +35,17 @@ describe("计划页失败态的回退入口接线", () => {
     expect(condition).toContain("onOpenHistory");
   });
 
+  // 轮67 R67-WP11：失败详情同屏只许一份。进度面板与 InlineError 拿的是同一个字符串
+  // （applyPlanExecution.recordFailure 把 error 同时喂给 completeTask 与返回值），
+  // 真机第五步实测两份都渲染了出来。出口归 InlineError：复制键与重试都挂在它身上。
+  it("失败详情归 InlineError 一份，进度面板只在文字不同时兜底", () => {
+    const plan = readScannedSource(PLAN);
+    const at = plan.indexOf('<pre className="apply-task-progress-error">');
+    expect(at, "进度面板的兜底错误块整个被删了？文字不同时无处显示错误").toBeGreaterThan(-1);
+    const head = plan.slice(Math.max(0, at - 400), at);
+    expect(head).toMatch(/executionTask\.error\.trim\(\)\s*!==\s*\(executeError \?\? ""\)\.trim\(\)/);
+  });
+
   it("点击把本次记录 id 交给回调，而不是随便跳一页", () => {
     const plan = readScannedSource(PLAN);
     expect(plan).toMatch(/onOpenHistory\(\s*executeHistoryId\s*\)/);

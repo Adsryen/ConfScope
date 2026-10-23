@@ -789,6 +789,58 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("task-live-1")).toBeInTheDocument();
   });
 
+  // 轮67 R67-WP11：任务与返回值带的是同一个错误字符串（recordFailure 两处共用），
+  // 修前真机实测同一句话在进度面板与 InlineError 各一份，用户以为失败了两次。
+  it("shows the failure message once when the task and the execution result carry the same error", async () => {
+    const failure = "Config changed after the plan was generated. Stale item: public/DEFAULT_GROUP/app.yml";
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    const task: Task = {
+      id: "task-failed-1",
+      name: "Change plan plan-preview-1",
+      type: "apply",
+      scope: "Staging / public",
+      cancellable: false,
+      status: "failed",
+      progress: 100,
+      total: 1,
+      completed: 0,
+      failed: 1,
+      error: failure,
+      startTime: "2026-07-06T00:00:00.000Z",
+      endTime: "2026-07-06T00:00:01.000Z",
+      elapsedTime: 1000,
+    };
+    taskManagerMocks.manager.getTask.mockReturnValue(task);
+    executionMocks.executeApplyPlan.mockImplementationOnce(async (_plan, _deps, options: { onTaskCreated?: (taskId: string) => void }) => {
+      options.onTaskCreated?.(task.id);
+      return { ok: false, taskId: task.id, error: failure };
+    });
+    const planEntry = {
+      ...entryPayload,
+      target: { ...entryPayload.target, connectionId: "conn-stage", connectionName: "Staging", label: "Staging / public" },
+    };
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+
+    renderView(planEntry, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+    expect(await screen.findByText("Execution progress")).toBeInTheDocument();
+    expect(screen.getByText("Change execution failed")).toBeInTheDocument();
+    // 正题：整屏只许有一份错误正文
+    expect(screen.getAllByText(failure)).toHaveLength(1);
+    // 去重不许把面板自己的事实一并抹掉
+    expect(screen.getByText("task-failed-1")).toBeInTheDocument();
+  });
+
   it("keeps the fifth step current after a successful sandbox execution", async () => {
     const sandboxConn: Connection = {
       ...safeTargetConn,
