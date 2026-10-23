@@ -34,8 +34,17 @@ const SHORT_HINT_SITES = [
   // 套 InlineError 会凭空多出复制按钮和详情区；就地显示在面板底部即可读。
   "src/components/SettingsView.tsx|settings.dataRootActionFailed",
 ];
-/** 裸容器块：用来区分「短提示」与「又手抄了一整套结构」。 */
-const RAW_BLOCK = /<div className="inline-error[^"]*" role="alert">([\s\S]{0,400}?)<\/div>/g;
+/**
+ * 裸容器块：用来区分「短提示」与「又手抄了一整套结构」。
+ *
+ * `(?:ref=\{\w+Ref\} )?`：轮67 R67-WP7 要把「提示出现就滚进可视区」的引用落在 alert 根节点上，
+ * 而引用只能写成开标签里的属性（noticeKeptInViewSingleSource 明确不许为挂引用多套包裹层）。
+ * 原先 `<div className=` 钉成字面相邻，任何属性插队都会让这条扫不到站点。
+ * 漏检本身不会假绿——少一条就与 SHORT_HINT_SITES 对不上、当场判红——但报错会说成
+ * 「有人新增了没登记的短提示」，把排查方向带偏。所以这里按「属性可以是 ref，其余照旧」放宽，
+ * 而不是把整段放宽成 <div[^>]*>：后者会连 `<div className="x" role="alert">` 的其它变体一起吞掉。
+ */
+const RAW_BLOCK = /<div (?:ref=\{\w+Ref\} )?className="inline-error[^"]*" role="alert">([\s\S]{0,400}?)<\/div>/g;
 /** 站点私有「标签包」：`const xxxLabels = { title: … }`。波35 起只许依赖组件默认值，命中即红。 */
 const PRIVATE_LABEL_BUNDLE = /const\s+\w*(?:Labels|LABELS)\w*\s*=\s*\{[^}]*\btitle:/g;
 

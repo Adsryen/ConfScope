@@ -30,6 +30,7 @@ import { useSectionSpy } from "../lib/sectionSpy";
 import { useScrollMemory } from "../lib/viewState";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+import { useKeepVisible } from "../lib/useKeepVisible";
 
 /**
  * 左栏索引与章节的一一对应（顺序 = 文档顺序）。
@@ -61,6 +62,9 @@ const DATA_ROOT_SOURCE_KEYS: Record<string, string> = {
 
 export default function SettingsView() {
   const { t } = useTranslation();
+  // 关闭键与全局轻提示共用 common.close（轮67 R67-WP7）：两处都是「这条我看完了」，
+  // 不该有第二种念法；不新增文案键。
+  const closeLabel = t("common.close");
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [saved, setSaved] = useState(false);
   const [credentialPending, setCredentialPending] = useState(() => countMigratableStoredCredentials());
@@ -107,6 +111,15 @@ export default function SettingsView() {
   const panelsScroll = useScrollMemory("settings.scroll.panels", 0, panelsRef);
   const { activeId, jumpToSection } = useSectionSpy(panelsRef, SECTION_IDS);
   const savedTimerRef = useRef<number | null>(null);
+  /*
+   * 数据目录一节的三条提示通道也接「出现即滚进可视区」（轮67 R67-WP7）。
+   * 真机量过（先把面板滚到本节底部再点）：容器可视区底边 798，「需重启」提示块顶边 884——
+   * 86px 落在框外，用户点完「更改位置…」看不到任何反馈，与备份面板 R67-WP1 同一个毛病。
+   * 引用一律落在提示自己的根节点上，不另加包裹层（面板是 flex column，多一层就改间距）。
+   */
+  const restartNoticeRef = useKeepVisible<HTMLDivElement>(!!restartNotice, restartNotice);
+  const dataRootErrorRef = useKeepVisible<HTMLDivElement>(!!dataRootError, dataRootError);
+  const openFolderErrorRef = useKeepVisible<HTMLDivElement>(!!openFolderError, openFolderError);
 
   const sectionLinks = SECTION_NAV.map((item) => ({ id: item.id, label: t(item.labelKey) }));
 
@@ -528,6 +541,37 @@ export default function SettingsView() {
               <h4 id="settings-data-locations-title">{t("settings.dataLocations")}</h4>
               <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
             </div>
+            {/*
+              * 三条提示挂在节首、紧挨着「更改位置…」上方（轮67 R67-WP7）。
+              * 挂在节尾时真机量到两个毛病：① 提示顶边落在可视区外 86px；② 接上「出现即滚进可视区」
+              * 之后仍然差 23px——迁移成功后 refreshDataSurfaces() 才落地，它上方那 7 行路径长高，
+              * 把刚滚进框的提示又顶了出去（关闭键正好被裁掉）。
+              * 挂到节首让「提示之上只有静态标题」，迟到的内容一律在它下方生长，落点就稳了；
+              * 与 AppDataBackupPanel 的提示位也同口径。
+              */}
+            {restartNotice && (
+              /*
+               * 关闭键挂在 div 上、不挂进 label（轮67 R67-WP9 量过 label 的代价：整行 accname
+               * 会把按钮的 × 也算进去）。tone 与播报语义一个字不动，只多一条「我看完了」的出口——
+               * 这条提示原先没有任何关闭手段，重启前它一直占着界面。
+               */
+              <div ref={restartNoticeRef} className="test-msg warn" {...statusMessageProps("info")}>
+                <span className="test-msg-text">{restartNotice}</span>
+                <button type="button" className="test-msg-close" title={closeLabel} aria-label={closeLabel} onClick={() => setRestartNotice("")}>
+                  ×
+                </button>
+              </div>
+            )}
+            {dataRootError && (
+              <div ref={dataRootErrorRef} className="inline-error" role="alert">
+                {t("settings.dataRootActionFailed", { error: dataRootError })}
+              </div>
+            )}
+            {openFolderError && (
+              <div ref={openFolderErrorRef} className="inline-error" role="alert">
+                {t("settings.openFolderFailed", { error: openFolderError })}
+              </div>
+            )}
             {/* 运行形态：便携版跟着 exe 走、安装版落系统用户数据目录，出问题时第一件要看的就是
                 「它到底命中了哪一档解析规则」，所以档位、判定依据和备注都摆在这一层，不藏进 tooltip。 */}
             {runtimeLayout && (
@@ -605,21 +649,6 @@ export default function SettingsView() {
             ) : (
               <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>
             )}
-            {restartNotice && (
-              <div className="test-msg warn" {...statusMessageProps("info")}>
-                <span className="test-msg-text">{restartNotice}</span>
-              </div>
-            )}
-            {dataRootError && (
-              <div className="inline-error" role="alert">
-                {t("settings.dataRootActionFailed", { error: dataRootError })}
-              </div>
-            )}
-            {openFolderError && (
-              <div className="inline-error" role="alert">
-                {t("settings.openFolderFailed", { error: openFolderError })}
-              </div>
-            )}
           </section>
           <section id="settings-update" className="settings-panel" tabIndex={-1} aria-labelledby="settings-update-title">
             <div className="settings-panel-head">
@@ -669,11 +698,11 @@ export default function SettingsView() {
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-danger"
+                className="btn btn-ghost btn-danger settings-busy-btn"
                 disabled={cacheBusy}
                 onClick={() => askConfirm(t("settings.clearCache"), t("settings.confirmClearCache"), () => void runClearCache())}
               >
-                {cacheBusy ? "…" : t("settings.clearCache")}
+                {cacheBusy ? t("settings.clearingCache") : t("settings.clearCache")}
               </button>
             </div>
             {cacheResult === "ok" && (

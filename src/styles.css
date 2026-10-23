@@ -956,6 +956,19 @@ textarea {
   line-height: 1.5;
 }
 
+/*
+ * 忙态按钮的宽度地板（轮67 R67-WP7）。真机在 .btn 下量四档：
+ *   静息 清理缓存 82 / Clear Cache 102，忙态 清理中... 80 / Clearing... 89。
+ * 原先忙态硬编码一个「…」，实测 3px——按钮从 82 塌成一条缝，用户分不清
+ * 是「在忙」还是「点坏了」。换成完整文案后仍会缩（en 静息→忙态差 13px），
+ * 所以按「最宽静息值 102 + 4px 余量 = 106」钉住地板：zh 静息 82→106 是让一步，
+ * 之后一次都不跳。地板只给这一颗按钮，不进 .btn（全站按钮宽度由文案决定，
+ * 给 .btn 钉 min-width 会把别的节挤变形）。
+ */
+.settings-busy-btn {
+  min-width: 106px;
+}
+
 .settings-panel-note {
   margin-top: 10px;
   padding: 10px 12px;
@@ -5159,6 +5172,40 @@ button.diff-workflow-step-btn:hover {
 .test-msg.warn {
   color: var(--amber-h);
   background: rgba(215, 186, 125, 0.12);
+}
+/*
+ * 提示块的关闭键（轮67 R67-WP7）：与 .toast-close 逐值相同，但故意不共用类名——
+ * 两个宿主各一份。tests/ux/toasterStacking.test.ts 用 `\.toast-close \{` 读声明块，
+ * 把选择器改成列表会让那条守卫找不到块；类名跨宿主复用也违反本仓库口径。
+ * 改这里请同步改那里。
+ * 尺寸按 WCAG 2.2 的 24x24 下限（轮37 R88 实测 19x22 不达标那一族的修法）：
+ * × 字形靠 flex 居中，不靠 padding 顶。前景 --text-dim 落在琥珀 tint 与
+ * .settings-panel 的 --bg2 合成的浅底上实测约 4.99:1，AA 的 4.5 达标，
+ * 所以不必像 R15/R94 那样抬到 --text-dim-raised。
+ */
+.test-msg-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 1px 5px;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.test-msg-close:hover {
+  color: var(--text-hi);
+  background: var(--bg-hover);
+}
+.test-msg-close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-shadow);
 }
 .test-trace {
   display: flex;

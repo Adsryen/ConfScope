@@ -269,6 +269,58 @@ describe("SettingsView", () => {
     expect(cacheMocks.clearAppCache).not.toHaveBeenCalled();
   });
 
+  // ── 轮67 R67-WP7：忙态文案与提示落点 ──
+
+  it("清理缓存的忙态是完整文案，不塌成一个省略号", async () => {
+    renderSettings("zh-CN");
+    let release!: () => void;
+    cacheMocks.clearAppCache.mockReturnValue(
+      new Promise<number>((resolve) => {
+        release = () => resolve(0);
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "清理缓存" }));
+    fireEvent.click(await screen.findByText(/确定清理缓存吗/));
+    fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+
+    // 忙态字样来自 locale：真机量过，硬编码「…」只有 3px，按钮从 82 塌成一条缝，
+    // 用户分不清是「在忙」还是「点坏了」。
+    const busy = await screen.findByRole("button", { name: "清理中..." });
+    expect(busy).toBeDisabled();
+    expect(busy.textContent).toBe("清理中...");
+    expect(screen.queryByRole("button", { name: "…" })).not.toBeInTheDocument();
+
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: "清理缓存" })).not.toBeDisabled());
+  });
+
+  it("需重启提示出现就滚进可视区，且能被自己的关闭键收掉", async () => {
+    dataLocMocks.SelectDataRootDirectory.mockResolvedValue(testMigrationPlan.target);
+    const scrolled: Element[] = [];
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+    try {
+      renderSettings("en-US");
+      fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+      const text = await screen.findByText(testMigrationResult.restartReason);
+      const notice = text.closest(".test-msg") as HTMLElement;
+      expect(notice, "提示不在 .test-msg 容器里（形态被改过？）").toBeTruthy();
+      // tone 一个字没动：琥珀 info 的播报语义还在，关闭键只是多一条「我看完了」的出口
+      expect(notice).toHaveAttribute("role", "status");
+      // 真机量过：面板滚到本节底部时提示顶边落在可视区外 86px，所以这里必须看到它被滚过
+      expect(scrolled, "提示出现了却没把自己滚进可视区").toContain(notice);
+
+      fireEvent.click(within(notice).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByText(testMigrationResult.restartReason)).not.toBeInTheDocument());
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("renders a grouped settings workbench without empty standalone sections", () => {
     renderSettings("en-US");
 

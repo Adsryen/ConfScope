@@ -405,6 +405,7 @@
     "developer": "开发者",
     "developerDescription": "开发者诊断入口：清理本机缓存（应用缓存 + 审计记录）。普通用户无需使用。",
     "clearCache": "清理缓存",
+    "clearingCache": "清理中...",
     "clearCacheHint": "清理本地应用缓存与审计记录（audit-trail），用于排查问题后重置现场。",
     "confirmClearCache": "确定清理缓存吗？将移除本机的应用缓存（cs.*）与审计记录文件。已连接的 Nacos 服务数据不受影响。",
     "clearCacheSuccess": "缓存已清理",

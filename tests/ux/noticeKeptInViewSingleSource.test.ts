@@ -19,12 +19,14 @@ import { readScannedSource, sourceFiles } from "./scanUtils";
 const LIB = "src/lib/useKeepVisible.ts";
 const PANEL = "src/components/AppDataBackupPanel.tsx";
 const INLINE_ERROR = "src/components/InlineError.tsx";
+const SETTINGS = "src/components/SettingsView.tsx";
 
 describe("提示落点单一出口（轮67 R67-WP1）", () => {
   const files = sourceFiles();
   const lib = readScannedSource(LIB);
   const panel = readScannedSource(PANEL);
   const inlineError = readScannedSource(INLINE_ERROR);
+  const settings = readScannedSource(SETTINGS);
 
   it("定位实现只有一份，站点不许自己滚提示", () => {
     const copies = files.filter((file) => file !== LIB && /export function useKeepVisible</.test(readScannedSource(file)));
@@ -47,6 +49,27 @@ describe("提示落点单一出口（轮67 R67-WP1）", () => {
     expect(rootTag, "引用没落在根 div 的开标签上（改成了包裹层？）").toContain("inline-error");
     expect(rootTag, "带引用的那个节点不是 role=alert 本体").toContain('role="alert"');
     expect(inlineError.match(/role="alert"/g), "错误块只能有一个 alert 根节点").toHaveLength(1);
+  });
+
+  it("设置页数据目录一节的三条提示通道都接上了（轮67 R67-WP7）", () => {
+    // 真机量过：面板滚到本节底部时，容器可视区底边 798，「需重启」提示块顶边 884，
+    // 86px 在框外——用户点完「更改位置…」看不到反馈。三条通道一条都不能漏：
+    // 漏 error 那条就是「失败被吞」，漏 warn 那条就是「换根完成但没人告诉我还要重启」。
+    const calls = [...settings.matchAll(/useKeepVisible</g)].length;
+    expect(calls, "需重启 / 换根失败 / 打开文件夹失败 各要一次 useKeepVisible").toBeGreaterThanOrEqual(3);
+    expect(settings, "「需重启」提示的根节点没挂引用").toMatch(/<div ref=\{restartNoticeRef\} className="test-msg warn"/);
+    expect(settings, "换根失败的根节点没挂引用").toMatch(/<div ref=\{dataRootErrorRef\} className="inline-error" role="alert"/);
+    expect(settings, "打开文件夹失败的根节点没挂引用").toMatch(/<div ref=\{openFolderErrorRef\} className="inline-error" role="alert"/);
+    // 不许为了挂引用多套一层包裹 div：面板是 flex column，多一层就改间距与播报节点。
+    // 本节 3 条短提示 = 2 条带引用 + 1 条「缓存清理失败」（就在按钮下方，本来看得见，不必滚）。
+    expect(settings.match(/className="inline-error" role="alert"/g), "短提示根节点数量变了").toHaveLength(3);
+    // 每一条都必须直接是 `<div …>` 的根节点本身：套一层包裹 div 就改 flex 间距，
+    // 还会让 alert 节点离引用更远一步。
+    expect(
+      settings.match(/<div (?:ref=\{\w+Ref\} )?className="inline-error" role="alert"/g),
+      "有短提示的 alert 根节点不是 <div 本体（套包裹层了？）"
+    ).toHaveLength(3);
+    expect([...settings.matchAll(/scrollIntoView\(/g)], "设置页绕开 hook 自己写了一次滚动").toHaveLength(0);
   });
 
   it("lib 模块保住绘制前、nearest、减少动效与可用性判空", () => {

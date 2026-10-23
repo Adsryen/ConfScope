@@ -32,7 +32,11 @@ interface Site {
   spread: string;
 }
 
-/** 波33 接线的 21 处站点；轮62 关于页更新面板多出一种「交接失败」提示，登记后共 22 处。 */
+/**
+ * 波33 接线的 21 处站点；轮62 关于页更新面板多出一种「交接失败」提示，登记后共 22 处；
+ * 轮67 R67-WP7 再把设置页那条唯一的琥珀色「需重启」提示登记进来（原先整族 test-msg warn
+ * 都不在名单里，它是这一族的第一处），共 23 处。
+ */
 const SITES: Site[] = [
   { file: "src/components/About.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
   // 2 处：主错误提示 + 更新交接面板的错误提示（轮62），两处都展开 error 语义
@@ -56,6 +60,9 @@ const SITES: Site[] = [
   { file: "src/components/DiffView.tsx", marker: 'className="diff-warnings" {', count: 1, spread: INFO },
   { file: "src/components/ApplyPlanView.tsx", marker: 'className="apply-edit-errors"', count: 1, spread: ERROR },
   { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
+  // 轮67 R67-WP7：数据目录的「需重启」提示。info tone = role=status + polite，
+  // 它是 .test-msg warn 这一族目前的唯一站点，挂上名单就不许再有人退回静默 div。
+  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg warn"', count: 1, spread: INFO },
   {
     file: "src/components/AppDataBackupPanel.tsx",
     marker: 'className={`test-msg ${status.ok ? "ok" : "err"}`}',
@@ -142,7 +149,7 @@ function describeHead(entry: { file: string; marker: string }, line: number, hea
 describe("状态提示的播报语义（波33 R54）", () => {
   const files = sourceFiles();
 
-  it("站点名单钉死 22 处，且每条都展开 statusMessageProps", () => {
+  it("站点名单钉死 23 处，且每条都展开 statusMessageProps", () => {
     const violations: string[] = [];
     for (const site of SITES) {
       const found = heads(site.file, site.marker);
@@ -158,8 +165,8 @@ describe("状态提示的播报语义（波33 R54）", () => {
   });
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
-    expect(SITES).toHaveLength(16);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(22);
+    expect(SITES).toHaveLength(17);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(23);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {
@@ -186,7 +193,7 @@ describe("状态提示的播报语义（波33 R54）", () => {
     expect(wired.length).toBeGreaterThanOrEqual(12);
     let calls = 0;
     for (const file of wired) calls += (readScannedSource(file).match(/statusMessageProps\(/g) ?? []).length;
-    expect(calls).toBeGreaterThanOrEqual(22);
+    expect(calls).toBeGreaterThanOrEqual(23);
   });
 
   it("内层文本节点不重复挂播报，同一句只念一遍", () => {
