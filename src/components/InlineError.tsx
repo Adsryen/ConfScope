@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { useTranslation } from "../i18n";
 import CopyButton from "./CopyButton";
 
@@ -16,6 +17,12 @@ interface Props {
   copyLabel?: string;
   /** 站点专属类（如 app-data-backup-error），只调间距不改结构。 */
   extraClassName?: string;
+  /**
+   * 指向根节点的引用，供站点做「提示出现就滚进可视区」这类定位（轮67 / R67-WP1）。
+   * 只给引用，不给包裹层：面板是 `flex column gap:16px`、`.inline-error` 自带 `margin:12px`，
+   * 多套一层 div 会改变既有间距。
+   */
+  containerRef?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -29,12 +36,12 @@ interface Props {
  * head 是 flex + space-between，actions 是 flex + gap + flex-shrink:0，
  * 单个按钮时视觉等价，长标题不再把按钮挤没。
  */
-export default function InlineError({ title, message, onRetry, retryLabel, copyLabel, extraClassName }: Props) {
+export default function InlineError({ title, message, onRetry, retryLabel, copyLabel, extraClassName, containerRef }: Props) {
   const { t } = useTranslation();
   // 三个标签的默认文案只在这里定义一次，站点侧不许再攒私有对象。
   const heading = title ?? t("common.operationFailed");
   return (
-    <div className={extraClassName ? `inline-error ${extraClassName}` : "inline-error"} role="alert">
+    <div ref={containerRef} className={extraClassName ? `inline-error ${extraClassName}` : "inline-error"} role="alert">
       <div className="inline-error-head">
         <span className="inline-error-title">{heading}</span>
         <div className="inline-error-actions">

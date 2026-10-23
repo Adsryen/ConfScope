@@ -40,6 +40,16 @@ vi.mock("../lib/credentialSecrets", async () => {
 });
 vi.mock("../lib/toast", () => ({ toast: vi.fn() }));
 
+/** 记录「谁把自己滚进了可视区」：只收提示块本身，别把子节点算成命中。 */
+function captureScrollIntoView(): HTMLElement[] {
+  const scrolled: HTMLElement[] = [];
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+    scrolled.push(this as HTMLElement);
+    return undefined;
+  });
+  return scrolled;
+}
+
 class MemoryStorage {
   private values = new Map<string, string>();
 
@@ -427,5 +437,44 @@ describe("AppDataBackupPanel", () => {
     const lastCall = onActivitiesChange.mock.calls[onActivitiesChange.mock.calls.length - 1];
     const reported = lastCall?.[0] as AppDataBackupActivity[];
     expect(reported[0]).toMatchObject({ type: "local_export", status: "success" });
+  });
+
+  // 轮67 R67-WP1：面板内容 2762px、可视只有 698px，提示固定挂在最顶部。
+  // 真机在底部点「上传当前数据」失败后量到提示 top=-221（整块在框外），
+  // 用户只会认为按钮没反应。这两条钉「提示出现就把自己滚进可视区」的接线还在。
+  it("失败提示出现时把它自己滚进可视区", async () => {
+    const scrolled = captureScrollIntoView();
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("Local backup password"), { target: { value: "one-pass" } });
+    fireEvent.change(screen.getByLabelText("Confirm local backup password"), { target: { value: "two-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Export encrypted file" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Backup passwords do not match"));
+    // 引用必须落在提示块根节点上：挂到包裹层等于没挂（我们特意不许多套一层 div）
+    expect(scrolled).toContain(screen.getByRole("alert"));
+  });
+
+  it("成功提示同样滚进可视区，且没有提示时一次都不滚", async () => {
+    const scrolled = captureScrollIntoView();
+    appDataBackupApi.selectAppDataBackupSaveFile.mockResolvedValue("C:\\tmp\\confscope.csbackup");
+    appDataBackupApi.writeAppDataBackupFile.mockResolvedValue({
+      format: "confscope.app-data-backup",
+      schemaVersion: 1,
+      appVersion: "1.4.2",
+      sourcePlatform: "windows",
+      createdAt: "2026-10-20T08:00:00.000Z",
+      size: 120,
+    });
+    renderPanel();
+    expect(scrolled).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Local backup password"), { target: { value: "backup-pass" } });
+    fireEvent.change(screen.getByLabelText("Confirm local backup password"), { target: { value: "backup-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Export encrypted file" }));
+
+    await waitFor(() => expect(document.querySelector(".test-msg.ok")).not.toBeNull());
+    expect(document.querySelector(".test-msg.ok")).toHaveTextContent("Local backup exported");
+    expect(scrolled).toContain(document.querySelector(".test-msg.ok"));
   });
 });

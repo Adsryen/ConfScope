@@ -26,6 +26,7 @@ import {
   type AppDataBackupSummary,
 } from "../lib/appDataBackup";
 import { getTaskManager } from "../lib/taskmanager";
+import { useKeepVisible } from "../lib/useKeepVisible";
 import { toast } from "../lib/toast";
 import InlineError from "./InlineError";
 import {
@@ -141,6 +142,10 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [error, setError] = useState("");
+  // 提示落在面板最顶部，动作按钮却在 2762px 内容的下方：不把它滚进可视区，
+  // 用户在底部点完只看到「什么都没发生」（轮67 / R67-WP1，实测提示 top=-221）。
+  const statusRef = useKeepVisible<HTMLDivElement>(!!status, status?.text ?? "");
+  const errorRef = useKeepVisible<HTMLDivElement>(!!error, error);
   const [busy, setBusy] = useState("");
 
   useEffect(() => {
@@ -506,11 +511,11 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
       </div>
 
       {status && (
-        <div className={`test-msg ${status.ok ? "ok" : "err"}`} {...statusMessageProps(status.ok ? "success" : "error")}>
+        <div ref={statusRef} className={`test-msg ${status.ok ? "ok" : "err"}`} {...statusMessageProps(status.ok ? "success" : "error")}>
           <span className="test-msg-text">{status.text}</span>
         </div>
       )}
-      {error && <InlineError title={t("appDataBackup.operationFailed")} message={error} extraClassName="app-data-backup-error" />}
+      {error && <InlineError containerRef={errorRef} title={t("appDataBackup.operationFailed")} message={error} extraClassName="app-data-backup-error" />}
 
       <section className="app-data-backup-password-settings" aria-labelledby="app-data-backup-password-title">
         <div className="app-data-backup-area-head">
