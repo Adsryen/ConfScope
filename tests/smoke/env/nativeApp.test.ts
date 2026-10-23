@@ -34,10 +34,26 @@ class FakeChild extends EventEmitter implements NativeSpawnedProcess {
   }
 }
 
-describe("native smoke app helpers", () => {
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
+/**
+ * 全量并跑时实测过一次清理竞态：递归删到临时工作区的 `reports` 目录时又被补上条目，
+ * rmdir 抛 ENOTEMPTY，把与被测逻辑无关的用例染红。删的是临时目录，重试三轮仍不干净就留着，
+ * 不让清理动作有机会决定门禁结论。
+ */
+async function removeTree(root: string): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
       rmSync(root, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+describe("native smoke app helpers", () => {
+  afterEach(async () => {
+    for (const root of roots.splice(0)) {
+      await removeTree(root);
     }
   });
 
