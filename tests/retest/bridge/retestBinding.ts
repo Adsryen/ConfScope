@@ -301,6 +301,293 @@ const bridgeLog = (...parts: unknown[]) => {
   for (const fn of bridgeListeners) fn(line);
 };
 
+// ── 本机配置版本历史（config-revisions.jsonl）的桥内替身（轮67 R57）──────────────
+// 为什么放内存而不是落盘：retest 禁止写桌面应用正式数据目录 portable/ConfScopeData（数据纪律第 3 条），
+// 这条链路要验的是前端可见结果——读到正文后「本机历史」攒出几版、同一版重复读不涨、服务端改一版再读才涨、
+// 分段切了在看的内容跟着切、设置页清掉之后回到诚实空态且清完还能重新攒起来（前端那份 md5 记忆确实跟着清了）。
+// 真实的 JSONL 追加、坏行跳过、超限裁剪、保留策略重写，以及「读不出来 ≠ 本机没记过」的返回值拆分由
+// internal/revisions/trail_test.go 负责，桥里只镜像它的前端可见判据：
+//   摘要 = 规范化换行后的内容指纹；同键同摘要的 observed 不新起一版；
+//   confirmed-write 命中同一版时就地升级并保留首见时刻；已挂写入确认的同一版再执行只判重。
+export const RETEST_REVISIONS_PATH = "/tmp/confscope-retest/app-data/config-revisions.jsonl（桥内内存替身）";
+
+// 与 Go 侧 revisions 包同名常量同值。桥只做镜像，不参与产品构建，产品里那一份的唯一出口是 src/lib/configRevisions.ts。
+const REVISION_KIND_OBSERVED = "observed";
+const REVISION_KIND_CONFIRMED_WRITE = "confirmed-write";
+const REVISION_CONTENT_OMITTED_TOO_LARGE = "too-large";
+const REVISION_REASON_APPENDED = "appended";
+const REVISION_REASON_DUPLICATE = "duplicate";
+const REVISION_REASON_PROMOTED = "promoted";
+const REVISION_KEEP_PER_KEY = 50;
+const REVISION_MAX_CONTENT_BYTES = 512 * 1024;
+// 分组键分隔符同 Go 侧 keySeparator（NUL）。用 fromCharCode 造而不在源码里写字面量：
+// 源文件里塞一个真实的 NUL 会让各种工具链抽搐（与 src/lib/configRevisions.ts 同一处理）。
+const REVISION_KEY_SEPARATOR = String.fromCharCode(0);
+
+/** 字段名与 Go 侧 Record 的 json tag 逐字对齐（界面按这些名字取，改一处就得三处一起改）。 */
+interface RetestRevisionRecord {
+  schema: number;
+  ts: string;
+  kind: string;
+  connectionId: string;
+  connectionName: string;
+  provider: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+  hash: string;
+  serverMd5: string;
+  bytes: number;
+  format: string;
+  content: string;
+  contentOmittedReason: string;
+  firstSeenTs: string;
+  planId: string;
+  appVersion: string;
+}
+
+/** 单个配置键在桥内替身里发生过的三种结局（断言只按自己的键取，别被同页其他配置的读取噪声串台）。 */
+interface RetestRevisionKeyCounters {
+  appended: number;
+  duplicate: number;
+  promoted: number;
+}
+
+interface RetestRevisionsState {
+  /** 追加序 = 时间序（与 jsonl 一行一条同构），读取时才倒过来变成「最新在前」。 */
+  records: RetestRevisionRecord[];
+  appended: number;
+  duplicate: number;
+  promoted: number;
+  reads: number;
+  clears: number;
+  /** 按配置键分开的结局计数（整页会顺带读别的配置正文，全局计数没法证明「这一次重复读被判重了」）。 */
+  byKey: Record<string, RetestRevisionKeyCounters>;
+}
+
+function emptyRevisionsState(): RetestRevisionsState {
+  return { records: [], appended: 0, duplicate: 0, promoted: 0, reads: 0, clears: 0, byKey: {} };
+}
+
+let revisionsState: RetestRevisionsState = emptyRevisionsState();
+
+export function resetRetestRevisions(): void {
+  revisionsState = emptyRevisionsState();
+}
+
+/** 只给复测断言用（前端不调它）：桥内到底攒了几版、三种结局各发生几次。 */
+export function retestRevisionsSnapshot(): RetestRevisionsState {
+  return {
+    ...revisionsState,
+    records: revisionsState.records.map((rec) => ({ ...rec })),
+    byKey: Object.fromEntries(Object.entries(revisionsState.byKey).map(([k, v]) => [k, { ...v }])),
+  };
+}
+
+function revisionKeyOf(rec: { connectionId: string; namespace: string; group: string; dataId: string }): string {
+  return [rec.connectionId, rec.namespace, rec.group, rec.dataId].join(REVISION_KEY_SEPARATOR);
+}
+
+/**
+ * 只给复测断言用：某个配置键在桥内攒下的版本与三种结局各发生几次。
+ *
+ * 为什么按键而不是看全局：配置浏览页挂载时会顺带读到别的配置的正文（对比页的自动恢复也会各读一次），
+ * 那些都算「本机见过」。断言「这个配置重复读不涨版」「判重真的发生了」必须只看自己那一把键。
+ */
+export function retestRevisionKeyStats(connectionId: string, namespace: string, group: string, dataId: string) {
+  const key = [connectionId, namespace, group, dataId].join(REVISION_KEY_SEPARATOR);
+  const counters = revisionsState.byKey[key] ?? { appended: 0, duplicate: 0, promoted: 0 };
+  return {
+    key,
+    records: revisionsState.records.filter((rec) => revisionKeyOf(rec) === key).map((rec) => ({ ...rec })),
+    appended: counters.appended,
+    duplicate: counters.duplicate,
+    promoted: counters.promoted,
+    attempts: counters.appended + counters.duplicate + counters.promoted,
+  };
+}
+
+function bumpRevisionKeyCounter(key: string, field: keyof RetestRevisionKeyCounters): void {
+  const current = revisionsState.byKey[key] ?? { appended: 0, duplicate: 0, promoted: 0 };
+  current[field] += 1;
+  revisionsState.byKey[key] = current;
+}
+
+/** 该键在本机记录的最后一版下标（-1 = 这个键还没记过）。 */
+function lastRevisionIndexForKey(key: string): number {
+  for (let i = revisionsState.records.length - 1; i >= 0; i -= 1) {
+    if (revisionKeyOf(revisionsState.records[i]) === key) return i;
+  }
+  return -1;
+}
+
+/** 摘要前的规范化口径同 Go 侧 NormalizeContent：只统一换行（CRLF/CR → LF），别的一律不动。 */
+function normalizeRevisionContent(content: string): string {
+  return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+/**
+ * 内容指纹。
+ *
+ * Go 侧是 sha256: + 十六进制；桥里优先用 WebCrypto 拿真 sha256（node 22 与 localhost 安全上下文都有），
+ * 取不到时退回一个「同内容必同值」的稳定短指纹——判重只要求稳定，界面也只截前 12 位显示，
+ * 真实摘要口径由 internal/revisions/trail_test.go 钉住。前缀照抄，保证 hashShort 的显示形状一致。
+ */
+async function revisionHashOf(normalized: string): Promise<string> {
+  const bytes = new TextEncoder().encode(normalized);
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const digest = await subtle.digest("SHA-256", bytes);
+    const hex = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return `sha256:${hex}`;
+  }
+  let h = 5381;
+  for (const b of bytes) h = ((h << 5) + h + b) >>> 0;
+  return `sha256:${h.toString(16).padStart(8, "0")}`;
+}
+
+/** 与 Go 侧 buildRecord 同判据：非法输入直接报错（悄悄记一条没归属的版本比失败更坏）。 */
+async function buildRevisionRecord(input: Record<string, unknown>): Promise<RetestRevisionRecord> {
+  const kind = String(input?.kind ?? "").trim();
+  const connectionId = String(input?.connectionId ?? "").trim();
+  const dataId = String(input?.dataId ?? "").trim();
+  const planId = String(input?.planId ?? "").trim();
+  if (kind !== REVISION_KIND_OBSERVED && kind !== REVISION_KIND_CONFIRMED_WRITE) {
+    throw new Error(`未知的版本记录类型: ${String(input?.kind ?? "")}`);
+  }
+  if (!connectionId || !dataId) throw new Error("版本记录缺少连接或 dataId，无法归属");
+  if (kind === REVISION_KIND_CONFIRMED_WRITE && !planId) {
+    throw new Error("写入确认记录缺少 planId，无法回链操作历史与备份快照");
+  }
+  const normalized = normalizeRevisionContent(String(input?.content ?? ""));
+  const size = new TextEncoder().encode(normalized).length;
+  const omitted = size > REVISION_MAX_CONTENT_BYTES;
+  return {
+    schema: 1,
+    ts: new Date().toISOString(),
+    kind,
+    connectionId,
+    connectionName: String(input?.connectionName ?? "").trim(),
+    provider: String(input?.provider ?? "").trim(),
+    // 命名空间与分组按原样留着（Go 侧也不 trim：空串就是 public，改成 " " 会变成另一个键）
+    namespace: String(input?.namespace ?? ""),
+    group: String(input?.group ?? ""),
+    dataId,
+    hash: await revisionHashOf(normalized),
+    serverMd5: String(input?.serverMd5 ?? "").trim(),
+    bytes: size,
+    format: String(input?.format ?? "").trim(),
+    // 超限只存摘要：显示半截正文比不显示更坏（用户会以为那一版就是半截）
+    content: omitted ? "" : normalized,
+    contentOmittedReason: omitted ? REVISION_CONTENT_OMITTED_TOO_LARGE : "",
+    firstSeenTs: "",
+    planId,
+    // Go 侧缺失时补构建版本；桥里补一个固定值，界面这一列只用来核对「记上了」
+    appVersion: String(input?.appVersion ?? "").trim() || "retest",
+  };
+}
+
+/** 与 Go 侧 Store.Append 同判据的最小镜像（三种结局都要回给调用方）。 */
+async function retestAppendRevision(input: Record<string, unknown>) {
+  const record = await buildRevisionRecord(input);
+  const key = revisionKeyOf(record);
+  const lastIndex = lastRevisionIndexForKey(key);
+  if (lastIndex >= 0 && revisionsState.records[lastIndex].hash === record.hash) {
+    if (record.kind === REVISION_KIND_OBSERVED) {
+      revisionsState.duplicate += 1;
+      bumpRevisionKeyCounter(key, "duplicate");
+      return { appended: false, reason: REVISION_REASON_DUPLICATE, record };
+    }
+    const last = revisionsState.records[lastIndex];
+    if (last.kind === REVISION_KIND_CONFIRMED_WRITE) {
+      // 这一版已经挂着写入确认与 planId：重复执行同一份内容不再改写来历，也不新起一版
+      revisionsState.duplicate += 1;
+      bumpRevisionKeyCounter(key, "duplicate");
+      return { appended: false, reason: REVISION_REASON_DUPLICATE, record };
+    }
+    record.firstSeenTs = last.ts;
+    revisionsState.records[lastIndex] = record;
+    revisionsState.promoted += 1;
+    bumpRevisionKeyCounter(key, "promoted");
+    return { appended: false, reason: REVISION_REASON_PROMOTED, record };
+  }
+  revisionsState.records.push(record);
+  revisionsState.appended += 1;
+  bumpRevisionKeyCounter(key, "appended");
+  return { appended: true, reason: REVISION_REASON_APPENDED, record };
+}
+
+/** 跨键最近 limit 条，最新在前（limit<=0 时取 Go 侧那个 5000 上限）。 */
+function retestReadRevisions(limit: number): RetestRevisionRecord[] {
+  revisionsState.reads += 1;
+  const newestFirst = [...revisionsState.records].reverse();
+  return limit > 0 ? newestFirst.slice(0, limit) : newestFirst.slice(0, 5000);
+}
+
+/** 某个配置键的版本历史，最新在前（limit<=0 = 全部，界面就是不分页地一次读完）。 */
+function retestReadRevisionsForKey(
+  connectionId: string,
+  namespace: string,
+  group: string,
+  dataId: string,
+  limit: number
+): RetestRevisionRecord[] {
+  revisionsState.reads += 1;
+  const key = [connectionId, namespace, group, dataId].join(REVISION_KEY_SEPARATOR);
+  const newestFirst = revisionsState.records.filter((rec) => revisionKeyOf(rec) === key).reverse();
+  return limit > 0 ? newestFirst.slice(0, limit) : newestFirst;
+}
+
+/** 保留策略同 Go 侧 pruneLocked：每键最早一版留作锚点，其余只留最近 keepPerKey 条。 */
+function retestPruneRevisions(keepPerKeyRaw: number): number {
+  const keepPerKey = keepPerKeyRaw > 0 ? keepPerKeyRaw : REVISION_KEEP_PER_KEY;
+  const total = new Map<string, number>();
+  for (const rec of revisionsState.records) {
+    const key = revisionKeyOf(rec);
+    total.set(key, (total.get(key) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  const kept: RetestRevisionRecord[] = [];
+  let removed = 0;
+  for (const rec of revisionsState.records) {
+    const key = revisionKeyOf(rec);
+    const nth = (seen.get(key) ?? 0) + 1;
+    seen.set(key, nth);
+    const fromEnd = (total.get(key) ?? 0) - nth + 1;
+    if (nth === 1 || fromEnd <= keepPerKey) kept.push(rec);
+    else removed += 1;
+  }
+  revisionsState.records = kept;
+  return removed;
+}
+
+function retestClearRevisions(): void {
+  // Go 侧 truncate 为 0 字节并重建索引；桥里等价于把记录清空（全局计数留着给断言看「清过几次」，
+  // 按键的结局计数属于「这份历史的内容」，跟着一起清，否则清完后断言读不到真实起点）
+  revisionsState.records = [];
+  revisionsState.byKey = {};
+  revisionsState.clears += 1;
+}
+
+/**
+ * 体量事实同 Go 侧 GetFacts 的字段；sizeBytes 按等价 jsonl 的行长估算（一字节不差没必要）。
+ * 也导给复测断言直接调：设置页那行念的数必须和界面读到的是同一份口径，不然断言就成了猜数字。
+ */
+export function retestRevisionFacts() {
+  const keys = new Set(revisionsState.records.map((rec) => revisionKeyOf(rec)));
+  const sizeBytes = revisionsState.records.reduce((acc, rec) => acc + JSON.stringify(rec).length + 1, 0);
+  return {
+    path: RETEST_REVISIONS_PATH,
+    exists: revisionsState.records.length > 0,
+    records: revisionsState.records.length,
+    sizeBytes,
+    keys: keys.size,
+    keepPerKey: REVISION_KEEP_PER_KEY,
+  };
+}
+
 // 审计事件持久化（模拟 Go 侧 AppendAuditEvent → <dataDir>/audit-trail.jsonl）：
 // 容器跨 run 持久化，jsonl 只追加，供 60-audit spec 校验完整操作过程。
 export const RETEST_AUDIT_DIR = "/tmp/confscope-retest/audit";
@@ -1153,6 +1440,28 @@ export function createRetestInvoke(): RetestInvoke {
       case "RetestAppDataDocSnapshot":
         // 只给复测断言用（前端不调它）：读桥内替身的调用计数与最后一份文档。
         return { ...appDataDoc };
+      // 本机配置版本历史（轮67 R57）：桥内内存替身，判据镜像 internal/revisions（见文件顶部的替身说明）
+      case "AppendConfigRevision":
+        return retestAppendRevision((args[0] ?? {}) as Record<string, unknown>);
+      case "ReadConfigRevisions":
+        return retestReadRevisions(Number(args[0] ?? 0));
+      case "ReadConfigRevisionsForKey":
+        return retestReadRevisionsForKey(
+          String(args[0] ?? ""),
+          String(args[1] ?? ""),
+          String(args[2] ?? ""),
+          String(args[3] ?? ""),
+          Number(args[4] ?? 0)
+        );
+      case "PruneConfigRevisions":
+        return retestPruneRevisions(Number(args[0] ?? 0));
+      case "ClearConfigRevisions":
+        return retestClearRevisions();
+      case "GetConfigRevisionFacts":
+        return retestRevisionFacts();
+      case "RetestRevisionsSnapshot":
+        // 只给复测断言用（前端不调它）：读桥内替身攒到的版本条数与各结局计数。
+        return retestRevisionsSnapshot();
       default:
         throw new Error(`retest bridge: 未实现绑定 ${method}`);
     }
