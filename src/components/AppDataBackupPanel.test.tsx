@@ -5,6 +5,8 @@ import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import AppDataBackupPanel from "./AppDataBackupPanel";
+import { formatBytes } from "../lib/formatBytes";
+import { formatDateTime } from "../lib/formatDateTime";
 import type { AppDataBackupActivity } from "../store/appDataBackup";
 
 const appDataBackupApi = vi.hoisted(() => ({
@@ -476,5 +478,61 @@ describe("AppDataBackupPanel", () => {
     await waitFor(() => expect(document.querySelector(".test-msg.ok")).not.toBeNull());
     expect(document.querySelector(".test-msg.ok")).toHaveTextContent("Local backup exported");
     expect(scrolled).toContain(document.querySelector(".test-msg.ok"));
+  });
+
+  // ── 轮67 R67-WP4：时间与体积统一走事实源（真机量到直出 UTC ISO 与 "2097152 bytes"）──
+
+  it("备份活动行显示本机时间，UTC ISO 原文只留在 datetime 属性里", () => {
+    const iso = "2026-10-23T01:23:45.678Z";
+    renderPanel({}, () => {
+      localStorage.setItem(
+        "cs.appDataBackup",
+        JSON.stringify({
+          webdav: { enabled: false, url: "", username: "", password: "", rootPath: "/confscope" },
+          activities: [{ id: "act-1", type: "local_export", status: "success", target: "C:\\tmp\\a.csbackup", message: "exported", createdAt: iso }],
+        })
+      );
+    });
+
+    const time = screen.getByText(formatDateTime(iso, { seconds: false }));
+    expect(time.tagName.toLowerCase()).toBe("time");
+    expect(time.getAttribute("datetime"), "机器可读的那份得留着，别把格式化过的串塞进 datetime").toBe(iso);
+    expect(time.textContent, "页面上不许再出现带 Z 带毫秒的原文").not.toContain(".678Z");
+  });
+
+  it("远端备份行按量级显示体积、按本机时间显示服务器时间", async () => {
+    // WebDAV 的 Last-Modified 是 RFC1123（英文月份缩写 + GMT），原先整串直出到页面上
+    const rfc1123 = "Thu, 22 Oct 2026 09:42:16 GMT";
+    appDataBackupApi.listAppDataWebDAVBackups.mockResolvedValue([
+      { name: "confscope-20261022-094216.csbackup", path: "/confscope/confscope-20261022-094216.csbackup", size: 2097152, modifiedAt: rfc1123 },
+    ]);
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("WebDAV URL"), { target: { value: "https://dav.example.com" } });
+    fireEvent.change(screen.getByLabelText("WebDAV username"), { target: { value: "ops" } });
+    fireEvent.change(screen.getByLabelText("WebDAV password"), { target: { value: "dav-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save WebDAV target" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh remote list" }));
+
+    const meta = await screen.findByText(`${formatBytes(2097152)} · ${formatDateTime(rfc1123)}`);
+    expect(meta.textContent).toBe("2.00 MB · 2026-10-22 17:42:16");
+    expect(meta.textContent).not.toMatch(/2097152|GMT/);
+  });
+
+  it("备份包摘要里的创建时间同样走时间事实源", async () => {
+    const restored = backupPayload("summary-time");
+    appDataBackupApi.selectAppDataBackupOpenFile.mockResolvedValue("C:\\tmp\\restore.csbackup");
+    appDataBackupApi.readAppDataBackupFile.mockResolvedValue({
+      plaintextJson: JSON.stringify(restored),
+      summary: { format: "confscope.app-data-backup", schemaVersion: 1, appVersion: "1.4.2", sourcePlatform: "windows", createdAt: restored.createdAt, size: 120 },
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose local backup" }));
+    await waitFor(() => expect(screen.getByText("C:\\tmp\\restore.csbackup")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Restore password"), { target: { value: "restore-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview local backup" }));
+
+    expect(await screen.findByText(`Created: ${formatDateTime("2026-07-07T08:00:00.000Z")}`)).toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ import {
   withEditedAfterValue,
   type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
 import { busyProps } from "../lib/busyRegion";
+import { formatDateTime } from "../lib/formatDateTime";
 import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
 import { describeParseError } from "../lib/parseErrorCopy";
@@ -1217,7 +1218,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
                 </div>
                 <div className="info-row">
                   <span className="info-label">{t("apply.createdAt")}:</span>
-                  <span className="info-value">{plan.createdAt}</span>
+                  <span className="info-value">{formatDateTime(plan.createdAt)}</span>
                 </div>
                 <div className="info-row">
                   <span className="info-label">{t("apply.source")}:</span>

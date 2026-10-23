@@ -498,7 +498,7 @@
     "cloudBackupActions": "Upload and restore",
     "cloudBackupActionsHint": "Upload the current app data or download an existing remote backup for preview.",
     "noRemoteBackups": "No remote backups",
-    "remoteMeta": "{size} bytes · {modifiedAt}",
+    "remoteMeta": "{size} · {modifiedAt}",
     "previewRemoteBackup": "Preview {name}",
     "webdavUploaded": "WebDAV backup uploaded",
     "webdavUploadTask": "Upload app data backup",
@@ -1302,7 +1302,7 @@
     "refreshingRemote": "Refreshing...",
     "remoteSnapshotsLoaded": "Remote snapshot list loaded",
     "noRemoteSnapshots": "No remote config snapshots",
-    "remoteSnapshotMeta": "{provider} · {configCount} configs · {size} bytes · {modifiedAt}",
+    "remoteSnapshotMeta": "{provider} · {configCount} configs · {size} · {modifiedAt}",
     "importRemoteSnapshot": "Import {name}",
     "snapshotImported": "Snapshot imported"
   },

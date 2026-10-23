@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { busyProps } from "../lib/busyRegion";
+import { formatBytes } from "../lib/formatBytes";
+import { formatDateTime } from "../lib/formatDateTime";
 import { useTranslation } from "../i18n";
 import { listSnapshots, deleteSnapshot, type ConfigSnapshot, type Snapshot } from "../api/snapshot";
 import {
@@ -541,11 +543,12 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                         <div className="backup-remote-main">
                           <strong>{remote.name}</strong>
                           <span>
+                            {/* 轮67 R67-WP4：原先直出「2097152 字节 · Thu, 22 Oct 2026 ... GMT」 */}
                             {t("backup.remoteSnapshotMeta", {
                               provider: remote.provider || "-",
                               configCount: remote.configCount,
-                              size: remote.size,
-                              modifiedAt: remote.modifiedAt || "-",
+                              size: formatBytes(remote.size),
+                              modifiedAt: formatDateTime(remote.modifiedAt, { fallback: "—" }),
                             })}
                           </span>
                         </div>

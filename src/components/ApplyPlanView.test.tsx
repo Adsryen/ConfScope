@@ -8,6 +8,7 @@ import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import type { Task } from "../lib/taskmanager";
 import { buildApplyPlan, type ApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
+import { formatDateTime } from "../lib/formatDateTime";
 import { applyConfirmationText } from "../lib/applyPlanExecution";
 import ApplyPlanView from "./ApplyPlanView";
 
@@ -339,6 +340,24 @@ describe("ApplyPlanView", () => {
     expect(screen.getByText("Total 1")).toBeInTheDocument();
     expect(screen.getByText("Overwrite 1")).toBeInTheDocument();
     expect(screen.getByText("Blocked 0")).toBeInTheDocument();
+  });
+
+  // 轮67 R67-WP4：计划摘要的创建时间原先直出 `2026-07-06T00:00:00.000Z`——
+  // UTC 带 Z 带毫秒，和本机时刻差 8 小时，用户没法靠它认出「我刚才生成的那一版」。
+  it("计划摘要里的创建时间按本机时间显示，不再直出 UTC ISO 原文", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]);
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+
+    await screen.findAllByText("plan-preview-1");
+    expect(screen.getByText(formatDateTime("2026-07-06T00:00:00.000Z"))).toBeInTheDocument();
+    expect(screen.queryByText("2026-07-06T00:00:00.000Z"), "页面上不该再留 ISO 原文").toBeNull();
   });
 
   it("shows item actions and target-to-after diff without duplicate value blocks", async () => {

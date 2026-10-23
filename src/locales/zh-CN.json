@@ -498,7 +498,7 @@
     "cloudBackupActions": "上传与恢复",
     "cloudBackupActionsHint": "上传当前应用数据，或下载已有远端备份并预览。",
     "noRemoteBackups": "暂无远端备份",
-    "remoteMeta": "{size} 字节 · {modifiedAt}",
+    "remoteMeta": "{size} · {modifiedAt}",
     "previewRemoteBackup": "预览 {name}",
     "webdavUploaded": "WebDAV 备份已上传",
     "webdavUploadTask": "上传应用数据备份",
@@ -1302,7 +1302,7 @@
     "refreshingRemote": "刷新中...",
     "remoteSnapshotsLoaded": "远端快照列表已加载",
     "noRemoteSnapshots": "暂无远端配置快照",
-    "remoteSnapshotMeta": "{provider} · {configCount} 个配置 · {size} 字节 · {modifiedAt}",
+    "remoteSnapshotMeta": "{provider} · {configCount} 个配置 · {size} · {modifiedAt}",
     "importRemoteSnapshot": "导入 {name}",
     "snapshotImported": "快照已导入"
   },

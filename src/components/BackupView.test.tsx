@@ -8,6 +8,8 @@ import { clearViewState, readViewState, viewStateKeys } from "../lib/viewState";
 import { I18nProvider } from "../i18n";
 import type { Snapshot } from "../api/snapshot";
 import { loadOperationHistory } from "../store/operationHistory";
+import { formatBytes } from "../lib/formatBytes";
+import { formatDateTime } from "../lib/formatDateTime";
 
 vi.mock("../api/snapshot", () => ({
   listSnapshots: vi.fn(),
@@ -441,6 +443,44 @@ describe("BackupView", () => {
       expect(snapshotWebDAV.importSnapshotWebDAVPackage).toHaveBeenCalledWith(expect.anything(), "/snapshots/snap.cssnapshot", "package-pass")
     );
     expect(vi.mocked(listSnapshots).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // 轮67 R67-WP4：远端快照行原先是「1 个配置 · 2097152 字节 · Thu, 22 Oct 2026 09:42:16 GMT」，
+  // 字节数没有量级、时间是服务器原始 RFC1123 串（英文月份 + GMT），两列都没法读。
+  it("远端快照行按量级显示体积、按本机时间显示服务器时间", async () => {
+    const snapshotWebDAV = await import("../api/snapshotWebDAV");
+    vi.mocked(snapshotWebDAV.listSnapshotWebDAVPackages).mockResolvedValue([
+      {
+        name: "snap.cssnapshot",
+        path: "/snapshots/snap.cssnapshot",
+        size: 2097152,
+        modifiedAt: "Thu, 22 Oct 2026 09:42:16 GMT",
+        snapshotId: "snap-1",
+        snapshotName: "dev-nacos_public_20240101",
+        provider: "nacos",
+        connectionId: "conn-1",
+        connectionName: "dev-nacos",
+        configCount: 1,
+        createdAt: "2024-01-01T10:00:00Z",
+      },
+    ]);
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.snapshotWebDAV",
+      JSON.stringify({
+        webdav: { enabled: true, url: "https://dav.example.com", username: "ops", password: "dav-secret", rootPath: "/snapshots" },
+        activities: [],
+      })
+    );
+
+    renderWithI18n(<BackupView />);
+
+    await screen.findByText("Config snapshot sync");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh remote snapshots" }));
+
+    const meta = await screen.findByText(`nacos · 1 configs · ${formatBytes(2097152)} · ${formatDateTime("Thu, 22 Oct 2026 09:42:16 GMT")}`);
+    expect(meta.textContent).toBe("nacos · 1 configs · 2.00 MB · 2026-10-22 17:42:16");
+    expect(meta.textContent).not.toMatch(/2097152|GMT/);
   });
 
   it("切走再回来：选中的快照与列表滚动位置都还在（R27）", async () => {

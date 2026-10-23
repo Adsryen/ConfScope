@@ -25,6 +25,8 @@ import {
   type AppDataBackupPayload,
   type AppDataBackupSummary,
 } from "../lib/appDataBackup";
+import { formatBytes } from "../lib/formatBytes";
+import { formatDateTime } from "../lib/formatDateTime";
 import { getTaskManager } from "../lib/taskmanager";
 import { useKeepVisible } from "../lib/useKeepVisible";
 import { toast } from "../lib/toast";
@@ -111,7 +113,11 @@ function SummaryPreview({ preview }: { preview: PreviewState }) {
       <div className="app-data-backup-summary-grid">
         <span>{t("appDataBackup.summaryVersion", { version: summary.appVersion })}</span>
         <span>{t("appDataBackup.summaryPlatform", { platform: summary.sourcePlatform })}</span>
-        <span>{t("appDataBackup.summaryCreatedAt", { createdAt: summary.createdAt })}</span>
+        {/*
+          轮67 R67-WP4：备份包里的时间是 UTC ISO 原文（2026-10-23T01:23:45.678Z），
+          和本机时刻差 8 小时、带 Z 带毫秒，用户没法判断这份件新不新 → 走时间事实源。
+        */}
+        <span>{t("appDataBackup.summaryCreatedAt", { createdAt: formatDateTime(summary.createdAt) })}</span>
         <span>{t("appDataBackup.summaryConnections", { count: summary.sections.connections })}</span>
         <span>{t("appDataBackup.summarySshProfiles", { count: summary.sections.sshProfiles })}</span>
         <span>{t("appDataBackup.summaryApplyPlans", { count: summary.sections.applyPlans })}</span>
@@ -688,7 +694,11 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
                   <div className="app-data-backup-remote-row" key={remote.path}>
                     <div>
                       <strong>{remote.name}</strong>
-                      <span>{t("appDataBackup.remoteMeta", { size: remote.size, modifiedAt: remote.modifiedAt || "-" })}</span>
+                      {/*
+                        轮67 R67-WP4：2MB 的备份件原先直出 "2097152 bytes · <服务器原始串>"，
+                        字节数没有量级、时间是 RFC1123 英文月份，两列都没法读。
+                      */}
+                      <span>{t("appDataBackup.remoteMeta", { size: formatBytes(remote.size), modifiedAt: formatDateTime(remote.modifiedAt, { fallback: "—" }) })}</span>
                     </div>
                     <button
                       type="button"
@@ -738,7 +748,7 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
                   <strong>{activityLabel(activity.type, t)}</strong>
                   <span>{activity.message}</span>
                 </div>
-                <time>{activity.createdAt}</time>
+                <time dateTime={activity.createdAt}>{formatDateTime(activity.createdAt, { seconds: false })}</time>
               </div>
             ))}
           </div>
