@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearAppCache } from "../lib/cacheCleanup";
+import { resetConfigRevisionAccelerator } from "../lib/configRevisions";
 import { formatDateTime } from "../lib/formatDateTime";
 import { formatBytes } from "../lib/formatBytes";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
@@ -14,13 +15,16 @@ import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
 import {
   CheckDataRootRollback,
+  ClearConfigRevisions,
   GetDataLocations,
+  GetConfigRevisionFacts,
   GetRuntimeLayout,
   MigrateDataRoot,
   OpenDataFolder,
   PlanDataRootMigration,
   RollbackDataRoot,
   SelectDataRootDirectory,
+  type ConfigRevisionFacts,
   type DataLocations,
   type DataRootRollbackStatus,
   type RuntimeLayoutInfo,
@@ -83,6 +87,11 @@ export default function SettingsView() {
   const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
   const [openFolderBusy, setOpenFolderBusy] = useState(false);
   const [openFolderError, setOpenFolderError] = useState("");
+  // 本机版本历史（R57-WP14）：体量事实 + 独立清除入口的状态。
+  const [revisionFacts, setRevisionFacts] = useState<ConfigRevisionFacts | null>(null);
+  const [revisionBusy, setRevisionBusy] = useState(false);
+  const [revisionResult, setRevisionResult] = useState<"" | "ok" | "fail">("");
+  const [revisionError, setRevisionError] = useState("");
   // 轮62：数据根运行形态（便携/安装 + 命中哪一档解析规则）与换根迁移状态。
   const [runtimeLayout, setRuntimeLayout] = useState<RuntimeLayoutInfo | null>(null);
   const [rollbackStatus, setRollbackStatus] = useState<DataRootRollbackStatus | null>(null);
@@ -120,6 +129,8 @@ export default function SettingsView() {
   const restartNoticeRef = useKeepVisible<HTMLDivElement>(!!restartNotice, restartNotice);
   const dataRootErrorRef = useKeepVisible<HTMLDivElement>(!!dataRootError, dataRootError);
   const openFolderErrorRef = useKeepVisible<HTMLDivElement>(!!openFolderError, openFolderError);
+  const revisionOkRef = useKeepVisible<HTMLDivElement>(revisionResult === "ok");
+  const revisionErrorRef = useKeepVisible<HTMLDivElement>(!!revisionError, revisionError);
 
   const sectionLinks = SECTION_NAV.map((item) => ({ id: item.id, label: t(item.labelKey) }));
 
@@ -190,6 +201,11 @@ export default function SettingsView() {
     });
     safeCall(CheckDataRootRollback, (status) => {
       setRollbackStatus(status);
+    });
+    // 版本历史的体量事实：旧 Go 二进制没有这颗绑定就让它缺席（safeCall 已吞同步抛与 reject），
+    // 界面据此不摆一颗点了必然报错的「清除」键。
+    safeCall(GetConfigRevisionFacts, (facts) => {
+      setRevisionFacts(facts);
     });
   }, []);
 
@@ -349,6 +365,36 @@ export default function SettingsView() {
       setCacheResult("fail");
     } finally {
       setCacheBusy(false);
+    }
+  };
+
+  /*
+   * 清除本机版本历史（R11：与开发者的「清理缓存」是两个入口，不许混）。
+   *
+   * 清完必须连前端那份 md5 记忆一起清（resetConfigRevisionAccelerator）：那些 md5 属于
+   * 刚被删掉的那份文件，留着它们，同样的正文再读到会被加速器直接跳过 IPC，
+   * 本机历史从此再也攒不起来——用户看到的是「清除之后这个功能就再也不记了」。
+   * Go 侧的内存索引由 Clear 自己重建，不需要前端管。
+   *
+   * 失败要把原文拿出来（InlineError 自带复制键）：这条错误通常指向文件权限或磁盘，
+   * 用户能抄走那句话才可能自己去查，不该只在屏幕上念一遍。
+   */
+  const runClearConfigRevisions = async () => {
+    if (revisionBusy) return;
+    setRevisionBusy(true);
+    setRevisionResult("");
+    setRevisionError("");
+    try {
+      await ClearConfigRevisions();
+      resetConfigRevisionAccelerator();
+      setRevisionResult("ok");
+      // 文件与体量都变了：连数据位置清单一起刷，否则路径行还挂着「已创建」而文件已经没了。
+      refreshDataSurfaces();
+    } catch (e) {
+      setRevisionResult("fail");
+      setRevisionError(errorText(e));
+    } finally {
+      setRevisionBusy(false);
     }
   };
 
@@ -649,6 +695,51 @@ export default function SettingsView() {
             ) : (
               <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>
             )}
+            {/*
+              * 本机版本历史的体量与清除入口（R57-WP14）。行标题用动作名而不是数据名：
+              * 上面清单里已经有一行叫「本机版本历史」（那是文件位置），再来同名的一行
+              * 就成了两行一个名字，用户分不清哪行才是能按的。形状照「清理缓存」那行抄：
+              * 标题 = 动作、说明 = 后果、右侧 = 一颗同名的键。
+              */}
+            {revisionFacts && (
+              <div className="settings-setting-row">
+                <div>
+                  <strong>{t("settings.clearRevisions")}</strong>
+                  <div className="settings-panel-description">{t("settings.revisionHistoryHint")}</div>
+                  <div className="settings-data-root-facts">
+                    <span>{t("settings.revisionFactsRecords", { count: revisionFacts.records })}</span>
+                    <span>{t("settings.revisionFactsKeys", { count: revisionFacts.keys })}</span>
+                    <span>{t("settings.revisionFactsSize", { size: formatBytes(revisionFacts.sizeBytes) })}</span>
+                    <span>{t("settings.revisionFactsKeep", { count: revisionFacts.keepPerKey })}</span>
+                  </div>
+                </div>
+                <div className="settings-data-location-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-danger settings-busy-btn"
+                    disabled={revisionBusy}
+                    onClick={() =>
+                      askConfirm(t("settings.clearRevisions"), t("settings.confirmClearRevisions"), () => void runClearConfigRevisions(), [
+                        t("settings.revisionFactsRecords", { count: revisionFacts.records }),
+                        t("settings.revisionFactsSize", { size: formatBytes(revisionFacts.sizeBytes) }),
+                        t("settings.revisionFactsServerUntouched"),
+                      ])
+                    }
+                  >
+                    {revisionBusy ? t("settings.clearingRevisions") : t("settings.clearRevisions")}
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* 原生侧在但读不到体量（旧 Go 二进制没有这颗绑定）才补一句说明：
+                纯浏览器构建里连数据位置都不可用，上面已经说过一次，不该在这儿再念一遍。 */}
+            {dataLocations && !revisionFacts && <div className="settings-panel-note">{t("settings.revisionFactsUnavailable")}</div>}
+            {revisionResult === "ok" && (
+              <div ref={revisionOkRef} className="test-msg ok" {...statusMessageProps("success")}>
+                {t("settings.clearRevisionsSuccess")}
+              </div>
+            )}
+            {revisionError && <InlineError title={t("settings.clearRevisionsFailed")} message={revisionError} containerRef={revisionErrorRef} />}
           </section>
           <section id="settings-update" className="settings-panel" tabIndex={-1} aria-labelledby="settings-update-title">
             <div className="settings-panel-head">

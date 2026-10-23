@@ -9,6 +9,7 @@ import (
 
 	"confscope/internal/audit"
 	"confscope/internal/portabledata"
+	"confscope/internal/revisions"
 )
 
 // 数据位置 key（白名单，与设置页展示条目一一对应）。
@@ -21,6 +22,10 @@ const (
 	dataLocKeyRecoveryPoints = "recoveryPoints"
 	dataLocKeyAudit          = "audit"
 	dataLocKeyLogs           = "logs"
+	// dataLocKeyRevisions 是轮57 的本机配置版本历史（只追加日志）。它与主数据文件同住
+	// app-data，靠换根迁移整目录搬运，不需要在迁移清单里另立一条——但设置页必须看得见它，
+	// 里面装的是配置正文（常含密钥），用户有权知道它在哪、有多大、怎么清掉。
+	dataLocKeyRevisions = "revisions"
 )
 
 // DataLocationEntry 是设置页展示的一条数据位置。
@@ -59,6 +64,7 @@ func (a *App) GetDataLocations() DataLocations {
 	entries := []DataLocationEntry{
 		dataLocationEntry(dataLocKeyDataRoot, root, false),
 		dataLocationEntry(dataLocKeyAppDataFile, appDataDocPath(root), true),
+		dataLocationEntry(dataLocKeyRevisions, filepath.Join(root, portabledata.AppDataDirName, revisions.TrailFileName), true),
 		dataLocationEntry(dataLocKeyWebview, filepath.Join(root, portabledata.WebviewDirName), false),
 		dataLocationEntry(dataLocKeySnapshots, filepath.Join(root, portabledata.SnapshotDirName), false),
 		dataLocationEntry(dataLocKeyRecoveryPoints, filepath.Join(root, portabledata.AppDataRecoveryPointDirName), false),

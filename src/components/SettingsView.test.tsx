@@ -56,7 +56,19 @@ const dataLocMocks = vi.hoisted(() => ({
   MigrateDataRoot: vi.fn(),
   CheckDataRootRollback: vi.fn(),
   RollbackDataRoot: vi.fn(),
+  // 轮67 R57-WP14：本机版本历史的体量与清除
+  GetConfigRevisionFacts: vi.fn(),
+  ClearConfigRevisions: vi.fn(),
 }));
+
+// 清除本机版本历史必须连前端那份 md5 记忆一起清（否则清完再也攒不起历史）。
+// 这里把出口换成可断言的替身，其余导出保持真实实现。
+const revisionOutletMocks = vi.hoisted(() => ({ resetConfigRevisionAccelerator: vi.fn() }));
+
+vi.mock("../lib/configRevisions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/configRevisions")>();
+  return { ...actual, resetConfigRevisionAccelerator: revisionOutletMocks.resetConfigRevisionAccelerator };
+});
 
 vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../wailsjs/go/app/App")>();
@@ -70,6 +82,8 @@ vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
     MigrateDataRoot: dataLocMocks.MigrateDataRoot,
     CheckDataRootRollback: dataLocMocks.CheckDataRootRollback,
     RollbackDataRoot: dataLocMocks.RollbackDataRoot,
+    GetConfigRevisionFacts: dataLocMocks.GetConfigRevisionFacts,
+    ClearConfigRevisions: dataLocMocks.ClearConfigRevisions,
   };
 });
 
@@ -83,6 +97,22 @@ const testDataLocations = {
     { key: "recoveryPoints", path: "/tmp/confscope-retest/data/app-data-recovery-points", isFile: false, exists: false },
     { key: "audit", path: "/tmp/confscope-retest/data/audit-trail.jsonl", isFile: true, exists: true },
   ],
+};
+
+// 轮67 R57-WP14：版本历史那条位置与它的体量替身。
+const testRevisionEntry = {
+  key: "revisions",
+  path: "/tmp/confscope-retest/data/app-data/config-revisions.jsonl",
+  isFile: true,
+  exists: true,
+};
+const testRevisionFacts = {
+  path: testRevisionEntry.path,
+  exists: true,
+  records: 12,
+  sizeBytes: 20480,
+  keys: 3,
+  keepPerKey: 50,
 };
 
 // 轮62：运行形态替身。installed + os-user-data 是最常出问题的组合（deb/rpm 装完写不出主数据文件），
@@ -210,6 +240,11 @@ describe("SettingsView", () => {
     dataLocMocks.MigrateDataRoot.mockResolvedValue(testMigrationResult);
     dataLocMocks.RollbackDataRoot.mockReset();
     dataLocMocks.RollbackDataRoot.mockResolvedValue(testMigrationResult);
+    dataLocMocks.GetConfigRevisionFacts.mockReset();
+    dataLocMocks.GetConfigRevisionFacts.mockResolvedValue(testRevisionFacts);
+    dataLocMocks.ClearConfigRevisions.mockReset();
+    dataLocMocks.ClearConfigRevisions.mockResolvedValue(undefined);
+    revisionOutletMocks.resetConfigRevisionAccelerator.mockReset();
     historyMocks.clearOperationHistory.mockReset();
     cacheMocks.clearAppCache.mockReset();
     cacheMocks.clearAppCache.mockResolvedValue(0);
@@ -771,6 +806,92 @@ describe("SettingsView", () => {
     expect(await screen.findByText("Data root")).toBeInTheDocument();
     expect(screen.queryByText("Runtime Mode & Data Root")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change location..." })).not.toBeInTheDocument();
+  });
+
+  // 轮67 R57-WP14：本机版本历史在设置页的落点（体量 + 独立清除入口，R11 不与清理缓存混）
+
+  describe("本机版本历史的体量与清除入口", () => {
+    // 这一组要看到「本机版本历史」那条文件位置，所以只在本组里把它打进清单；
+    // 公共 fixture 保持 6 条，否则「复制与打开」那几例的索引会被连带推移。
+    beforeEach(() => {
+      dataLocMocks.GetDataLocations.mockResolvedValue({
+        ...testDataLocations,
+        entries: [...testDataLocations.entries, testRevisionEntry],
+      });
+    });
+
+    it("把体量说清楚：记了多少版、几个配置、多大、每键留几版", async () => {
+      renderSettings("zh-CN");
+
+      const row = (await screen.findByRole("button", { name: "清除本机版本历史" })).closest(".settings-setting-row") as HTMLElement;
+      expect(row).toHaveTextContent("已记录 12 版");
+      expect(row).toHaveTextContent("涉及 3 个配置");
+      expect(row).toHaveTextContent("每个配置最多留 50 版");
+      // 文件位置那一行也在清单里（用户要能复制路径、在文件管理器里定位它）
+      expect(screen.getByText(testRevisionEntry.path)).toBeInTheDocument();
+    });
+
+    it("清除前先在应用内确认，取消就一个字节都不动", async () => {
+      renderSettings("zh-CN");
+
+      fireEvent.click(await screen.findByRole("button", { name: "清除本机版本历史" }));
+      expect(await screen.findByText(/确定清除本机版本历史吗/)).toBeInTheDocument();
+      expect(dataLocMocks.ClearConfigRevisions).not.toHaveBeenCalled();
+
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "取消" }));
+      await waitFor(() => expect(screen.queryByText(/确定清除本机版本历史吗/)).not.toBeInTheDocument());
+      expect(dataLocMocks.ClearConfigRevisions).not.toHaveBeenCalled();
+      expect(revisionOutletMocks.resetConfigRevisionAccelerator).not.toHaveBeenCalled();
+    });
+
+    it("确认后清文件、清前端 md5 记忆，并刷新清单", async () => {
+      renderSettings("zh-CN");
+
+      const before = dataLocMocks.GetDataLocations.mock.calls.length;
+      fireEvent.click(await screen.findByRole("button", { name: "清除本机版本历史" }));
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+
+      await waitFor(() => expect(dataLocMocks.ClearConfigRevisions).toHaveBeenCalledTimes(1));
+      // md5 记忆不清掉，同样的正文再读到会被跳过，本机历史从此攒不起来
+      expect(revisionOutletMocks.resetConfigRevisionAccelerator).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText("本机版本历史已清除")).toBeInTheDocument();
+      expect(dataLocMocks.GetDataLocations.mock.calls.length).toBeGreaterThan(before);
+    });
+
+    it("忙态是完整文案，失败把原因摊开还能抄走", async () => {
+      renderSettings("zh-CN");
+      let release!: (error: unknown) => void;
+      dataLocMocks.ClearConfigRevisions.mockReturnValue(
+        new Promise<void>((_resolve, reject) => {
+          release = reject;
+        })
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "清除本机版本历史" }));
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+
+      const busy = await screen.findByRole("button", { name: "清除中..." });
+      expect(busy).toBeDisabled();
+
+      release(new Error("attempted to write a read-only file"));
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("清除本机版本历史失败");
+      expect(alert).toHaveTextContent("attempted to write a read-only file");
+      expect(within(alert).getByRole("button", { name: /复制/ })).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole("button", { name: "清除本机版本历史" })).not.toBeDisabled());
+    });
+
+    it("旧 Go 二进制没有这颗绑定时不摆死按钮，只说一句不支持", async () => {
+      dataLocMocks.GetConfigRevisionFacts.mockImplementation(() => {
+        throw new Error("GetConfigRevisionFacts is not a function");
+      });
+      renderSettings("zh-CN");
+
+      expect(await screen.findByText("当前版本还不支持查看或清除本机版本历史。")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "清除本机版本历史" })).not.toBeInTheDocument();
+      // 清单里那条文件位置照旧列出：路径仍是事实
+      expect(screen.getByText(testRevisionEntry.path)).toBeInTheDocument();
+    });
   });
 
 });

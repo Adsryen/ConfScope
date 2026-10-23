@@ -35,7 +35,7 @@ interface Site {
 /**
  * 波33 接线的 21 处站点；轮62 关于页更新面板多出一种「交接失败」提示，登记后共 22 处；
  * 轮67 R67-WP7 再把设置页那条唯一的琥珀色「需重启」提示登记进来（原先整族 test-msg warn
- * 都不在名单里，它是这一族的第一处），共 23 处。
+ * 都不在名单里，它是这一族的第一处）；R57-WP14 再补一处「本机版本历史已清除」的成功提示，共 24 处。
  */
 const SITES: Site[] = [
   { file: "src/components/About.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
@@ -59,7 +59,8 @@ const SITES: Site[] = [
   // 不带 `{` 的片段会把那份也捞进来，站点数就对不上了。
   { file: "src/components/DiffView.tsx", marker: 'className="diff-warnings" {', count: 1, spread: INFO },
   { file: "src/components/ApplyPlanView.tsx", marker: 'className="apply-edit-errors"', count: 1, spread: ERROR },
-  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
+  // 轮67 R57-WP14 再补一处：「本机版本历史已清除」的成功提示。
+  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok"', count: 4, spread: SUCCESS },
   // 轮67 R67-WP7：数据目录的「需重启」提示。info tone = role=status + polite，
   // 它是 .test-msg warn 这一族目前的唯一站点，挂上名单就不许再有人退回静默 div。
   { file: "src/components/SettingsView.tsx", marker: 'className="test-msg warn"', count: 1, spread: INFO },
@@ -149,7 +150,7 @@ function describeHead(entry: { file: string; marker: string }, line: number, hea
 describe("状态提示的播报语义（波33 R54）", () => {
   const files = sourceFiles();
 
-  it("站点名单钉死 23 处，且每条都展开 statusMessageProps", () => {
+  it("站点名单钉死 24 处，且每条都展开 statusMessageProps", () => {
     const violations: string[] = [];
     for (const site of SITES) {
       const found = heads(site.file, site.marker);
@@ -166,7 +167,7 @@ describe("状态提示的播报语义（波33 R54）", () => {
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
     expect(SITES).toHaveLength(17);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(23);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(24);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {

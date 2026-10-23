@@ -38,13 +38,15 @@ func TestGetDataLocationsWithEnvOverride(t *testing.T) {
 		dataLocKeyRecoveryPoints: filepath.Join(root, portabledata.AppDataRecoveryPointDirName),
 		dataLocKeyAudit:          filepath.Join(root, auditTrailFileNameForTest()),
 		dataLocKeyLogs:           filepath.Join(root, portabledata.LogsDirName),
+		// 轮57 本机版本历史：与主数据文件同住 app-data（字面量与 revisions.TrailFileName 对齐）
+		dataLocKeyRevisions: filepath.Join(root, portabledata.AppDataDirName, "config-revisions.jsonl"),
 	}
 	for _, e := range locs.Entries {
 		byKey[e.Key] = true
 		if wantPaths[e.Key] != e.Path {
 			t.Errorf("entry %s path = %q, want %q", e.Key, e.Path, wantPaths[e.Key])
 		}
-		if e.IsFile != (e.Key == dataLocKeyAppDataFile || e.Key == dataLocKeyAudit) {
+		if e.IsFile != (e.Key == dataLocKeyAppDataFile || e.Key == dataLocKeyAudit || e.Key == dataLocKeyRevisions) {
 			t.Errorf("entry %s IsFile = %v, wrong", e.Key, e.IsFile)
 		}
 	}
@@ -61,8 +63,8 @@ func TestGetDataLocationsWithEnvOverride(t *testing.T) {
 	if !exists[dataLocKeyDataRoot] || !exists[dataLocKeyAppDataFile] || !exists[dataLocKeyWebview] {
 		t.Errorf("expected dataRoot/appDataFile/webview to exist: %v", exists)
 	}
-	if exists[dataLocKeySnapshots] || exists[dataLocKeyRecoveryPoints] {
-		t.Errorf("expected snapshots/recoveryPoints to be absent: %v", exists)
+	if exists[dataLocKeySnapshots] || exists[dataLocKeyRecoveryPoints] || exists[dataLocKeyRevisions] {
+		t.Errorf("expected snapshots/recoveryPoints/revisions to be absent: %v", exists)
 	}
 
 	// 轮62：只读面板也要能自证运行形态与命中档位。
@@ -107,4 +109,47 @@ func TestOpenDataFolderMissingLocation(t *testing.T) {
 // auditTrailFileNameForTest 避免测试直接依赖 internal/audit 包名。
 func auditTrailFileNameForTest() string {
 	return "audit-trail.jsonl"
+}
+
+// TestDataLocationsRevisionsTracksTheFileAppendWrites 把两处路径算式钉在一起（轮67 R57-WP14）。
+//
+// 为什么要钉：设置页那条 revisions 走 GetDataLocations 的 filepath.Join(root, app-data, 文件名)，
+// 真正写盘走 revisionsDataDir() + internal/revisions 自己的算式。两条式子各写各的，
+// 一旦哪边改了目录，设置页就指着一条不存在的路径让用户「打开」——用户看到的是
+// 「我的数据丢了」，而数据其实安安静静躺在别处。
+func TestDataLocationsRevisionsTracksTheFileAppendWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(portabledata.DataDirEnvName, root)
+
+	a := &App{}
+	entry := dataLocationByKey(t, a.GetDataLocations(), dataLocKeyRevisions)
+	if entry.Exists {
+		t.Fatal("还没记过任何版本，条目必须如实报「不存在」，不能凭空造文件")
+	}
+
+	if _, err := a.AppendConfigRevision(revisionsInput("gateway: on\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+
+	after := dataLocationByKey(t, a.GetDataLocations(), dataLocKeyRevisions)
+	if after.Path != entry.Path {
+		t.Fatalf("路径两次算出来不一样：%q vs %q", entry.Path, after.Path)
+	}
+	if !after.Exists {
+		t.Fatalf("记过一版之后设置页仍说文件不存在：%q", after.Path)
+	}
+	if !after.IsFile {
+		t.Errorf("版本历史是单个 jsonl 文件，isFile=false 会让「打开」用错方式（应定位到文件而非进目录）")
+	}
+}
+
+func dataLocationByKey(t *testing.T, locs DataLocations, key string) DataLocationEntry {
+	t.Helper()
+	for _, e := range locs.Entries {
+		if e.Key == key {
+			return e
+		}
+	}
+	t.Fatalf("数据位置清单里没有 %s，设置页看不见这份数据", key)
+	return DataLocationEntry{}
 }
