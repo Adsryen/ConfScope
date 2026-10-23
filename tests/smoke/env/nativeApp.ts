@@ -1,10 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Readable } from "node:stream";
 import type { SmokeWorkspace } from "./workspace";
+import { openSmokeLogStream } from "./smokeLogStream";
 
 export const nativeSmokeOutputName = "ConfScope-smoke-native";
 
@@ -108,7 +109,7 @@ export async function launchNativeSmokeApp(options: LaunchNativeSmokeAppOptions)
     encoding: "utf8",
     flag: "a",
   });
-  const logStream = createWriteStream(logPath, { flags: "a" });
+  const logStream = openSmokeLogStream(logPath);
   const child = spawnProcess(options.executablePath, [], {
     cwd: options.workspace.projectRoot,
     windowsHide: true,

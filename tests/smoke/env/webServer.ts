@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import type { SmokeWorkspace } from "./workspace";
+import { openSmokeLogStream } from "./smokeLogStream";
 
 const WEB_HOST = "127.0.0.1";
 const WEB_PORT = 15174;
@@ -65,7 +66,7 @@ export async function startSmokeWebServer(workspace: SmokeWorkspace, options: St
   mkdirSync(workspace.reportsDir, { recursive: true });
   const logPath = smokeWebServerLogPath(workspace);
   writeFileSync(logPath, `[${new Date().toISOString()}] starting smoke Vite server at ${WEB_URL}\n`, { encoding: "utf8", flag: "a" });
-  const logStream = createWriteStream(logPath, { flags: "a" });
+  const logStream = openSmokeLogStream(logPath);
   const child = spawnProcess("pnpm", ["dev:web", "--host", WEB_HOST, "--port", String(WEB_PORT), "--strictPort"], {
     cwd: workspace.projectRoot,
     shell: true,
