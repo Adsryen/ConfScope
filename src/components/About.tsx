@@ -64,6 +64,10 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  // 轮67 R67-WP2：被忽略的版本不能只在「忽略」那一刻生效完就消失。
+  // 关于页读它才能把「已是最新」说清是「本来就最新」还是「被你忽略过」；
+  // 这一页是按 mode 挂载的（离开即卸载），挂载时读一次就是新读数，不会停在旧值。
+  const [skippedVersion, setSkippedVersion] = useState(() => loadSettings().update.skipVersion);
   // 交接三件事实：落盘路径（Go 给的，不猜）、包管理器命令（Go 拼的，不抄）、忙碌闸门读数（点退出时才查）
   const [artifactPath, setArtifactPath] = useState("");
   const [handoffCommand, setHandoffCommand] = useState("");
@@ -239,6 +243,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   const skipVersion = useCallback(() => {
     if (!updateResult?.latestVersion) return;
     updateUpdateSettings({ skipVersion: updateResult.latestVersion });
+    setSkippedVersion(updateResult.latestVersion);
     setUpdatePhase("upToDate");
   }, [updateResult]);
 
@@ -464,7 +469,9 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
         return (
           <>
             <div className="test-msg ok" {...statusMessageProps("success")}>
-              <span className="test-msg-text">{t("about.noUpdate")}</span>
+              <span className="test-msg-text">
+                {skippedVersion ? t("about.noUpdateIgnored", { version: skippedVersion }) : t("about.noUpdate")}
+              </span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={() => void runUpdateCheck({ autoDownload: true })}>
               {t("about.checkUpdate")}

@@ -86,6 +86,7 @@ export default function SettingsView() {
     { id: "settings-credentials", label: t("settings.credentials") },
     { id: "settings-backup", label: t("settings.backup") },
     { id: "settings-data-locations", label: t("settings.dataLocations") },
+    { id: "settings-update", label: t("settings.update") },
     { id: "settings-developer", label: t("settings.developer") },
   ];
 
@@ -597,6 +598,42 @@ export default function SettingsView() {
               </div>
             )}
           </section>
+          <section id="settings-update" className="settings-panel">
+            <div className="settings-panel-head">
+              <h4>{t("settings.update")}</h4>
+              <div className="settings-panel-description">{t("settings.updateDescription")}</div>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.lastUpdateCheck")}</strong>
+              </div>
+              <code>{settings.update.lastCheckAt ? formatDateTime(settings.update.lastCheckAt) : t("settings.updateNeverChecked")}</code>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.lastSeenUpdateVersion")}</strong>
+              </div>
+              <code>{settings.update.lastSeenVersion || t("settings.noSeenUpdateVersion")}</code>
+            </div>
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.skippedUpdateVersion")}</strong>
+                <div className="settings-panel-description">{t("settings.updateSkipHint")}</div>
+              </div>
+              <div className="settings-update-skip">
+                <code>{settings.update.skipVersion || t("settings.noSkippedUpdateVersion")}</code>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={!settings.update.skipVersion}
+                  onClick={() => update({ update: { ...settings.update, skipVersion: "" } })}
+                >
+                  {t("settings.restoreUpdateReminder")}
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section id="settings-developer" className="settings-panel">
             <div className="settings-panel-head">
               <h4>{t("settings.developer")}</h4>

@@ -4,6 +4,7 @@
 import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { formatDateTime } from "../lib/formatDateTime";
 import SettingsView from "./SettingsView";
 
 const credentialMocks = vi.hoisted(() => ({
@@ -469,6 +470,59 @@ describe("SettingsView", () => {
 
     await waitFor(() => expect(dataLocMocks.RollbackDataRoot).toHaveBeenCalled());
     expect(await screen.findByText(/Restart to apply it|需要重启/)).toBeInTheDocument();
+  });
+
+  // ── 轮67 R67-WP2：被忽略的更新版本必须看得见、也能撤销 ──
+
+  it("应用更新小节把检查读数与被忽略的版本摆出来", () => {
+    vi.stubGlobal("localStorage", new MemoryStorage());
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({ update: { skipVersion: "1.9.8", lastCheckAt: "2026-10-23T01:23:45.678Z", lastSeenVersion: "1.9.7" } })
+    );
+    render(
+      <I18nProvider>
+        <SettingsView />
+      </I18nProvider>
+    );
+
+    expect(screen.getByRole("button", { name: "App Updates" })).toBeInTheDocument();
+    expect(screen.getByText("1.9.8")).toBeInTheDocument();
+    expect(screen.getByText("1.9.7")).toBeInTheDocument();
+    expect(screen.getByText(formatDateTime("2026-10-23T01:23:45.678Z"))).toBeInTheDocument();
+    // 裸 ISO 原文不许出现在界面上
+    expect(screen.queryByText("2026-10-23T01:23:45.678Z")).not.toBeInTheDocument();
+  });
+
+  it("恢复提醒清空 skipVersion，界面当场上报并停用按钮", () => {
+    vi.stubGlobal("localStorage", new MemoryStorage());
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem("cs.settings", JSON.stringify({ update: { skipVersion: "1.9.8", lastCheckAt: "", lastSeenVersion: "" } }));
+    render(
+      <I18nProvider>
+        <SettingsView />
+      </I18nProvider>
+    );
+
+    const restore = screen.getByRole("button", { name: "Restore reminders" });
+    expect(restore).toBeEnabled();
+    fireEvent.click(restore);
+
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").update.skipVersion).toBe("");
+    expect(screen.queryByText("1.9.8")).not.toBeInTheDocument();
+    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore reminders" })).toBeDisabled();
+  });
+
+  it("没有忽略过版本时恢复提醒是停用态，且不拿 title 当说明", () => {
+    renderSettings("en-US");
+
+    const restore = screen.getByRole("button", { name: "Restore reminders" });
+    expect(restore).toBeDisabled();
+    expect(restore).not.toHaveAttribute("title");
+    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getByText("Never checked")).toBeInTheDocument();
   });
 
   it("degrades without crashing when the runtime layout binding is absent", async () => {

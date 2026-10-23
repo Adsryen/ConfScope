@@ -1013,6 +1013,13 @@ textarea {
   align-items: flex-start;
 }
 
+.settings-update-skip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .settings-data-root-facts {
   display: flex;
   flex-wrap: wrap;

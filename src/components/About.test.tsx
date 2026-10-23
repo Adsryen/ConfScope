@@ -41,12 +41,12 @@ vi.mock("../lib/taskmanager", async (importOriginal) => {
 
 const PROXY = { httpProxy: "http://127.0.0.1:7890", httpsProxy: "http://127.0.0.1:7890", noProxy: "localhost,127.0.0.1" };
 
-function writeSettings(lastCheckAt: string) {
+function writeSettings(lastCheckAt: string, skipVersion = "") {
   localStorage.setItem(
     "cs.settings",
     JSON.stringify({
       proxy: PROXY,
-      update: { skipVersion: "", lastCheckAt },
+      update: { skipVersion, lastCheckAt },
       compare: { sortConnections: true, sortNamespaces: true },
     })
   );
@@ -461,6 +461,50 @@ describe("About", () => {
 
     expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
     expect(apiMocks.downloadUpdate).not.toHaveBeenCalled();
+  });
+
+  // ── 轮67 R67-WP2：忽略不能是死胡同 ──
+
+  it("忽略过版本时，「已是最新」要说清是被哪个版本挡住的", async () => {
+    writeSettings(new Date().toISOString(), "1.1.0");
+    apiMocks.checkForUpdates.mockResolvedValue(
+      checkResult({ latestVersion: "1.1.0", hasUpdate: false, downloadUrl: "", handoff: "", platformKey: "windows-amd64" })
+    );
+
+    renderAbout();
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+
+    expect(await screen.findByText(/已忽略 v1\.1\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/设置 · 应用更新/)).toBeInTheDocument();
+  });
+
+  it("点「忽略此版本」后当场改口，不留下「本来就是最新」的假象", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.checkForUpdates.mockResolvedValue(checkResult({ latestVersion: "1.1.0", hasUpdate: true, downloadUrl: "" }));
+
+    renderAbout();
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "忽略此版本" }));
+
+    expect(await screen.findByText(/已忽略 v1\.1\.0/)).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").update.skipVersion).toBe("1.1.0");
+  });
+
+  it("没忽略过版本时仍说「当前已是最新版本」", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.checkForUpdates.mockResolvedValue(
+      checkResult({ latestVersion: "1.0.0", hasUpdate: false, downloadUrl: "", handoff: "", platformKey: "windows-amd64" })
+    );
+
+    renderAbout();
+    await screen.findByText("v1.0.0");
+    fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+
+    expect(await screen.findByText("当前已是最新版本")).toBeInTheDocument();
+    expect(screen.queryByText(/已忽略/)).not.toBeInTheDocument();
   });
 
   it("uses loaded app version for automatic update checks", async () => {
