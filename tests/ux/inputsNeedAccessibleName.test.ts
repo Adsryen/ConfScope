@@ -153,7 +153,10 @@ describe("输入控件必须有不消失的可访问名", () => {
   const checkboxRadio = controls.filter((s) => s.type === "checkbox" || s.type === "radio");
 
   it("扫描要有命中量（口径漂了先在这里红）", () => {
-    expect(controls.length).toBeGreaterThanOrEqual(110);
+    // 111 → 95：轮67 R67-WP6 把 18 处遮码框收进 PasswordField 一份实现（少 18 个调用点、多 1 个组件本体），是去重不是漏标。
+    // PasswordField 不进 SHARED_COMPONENTS：它的名字来源必须是显式 aria-labelledby + 必填 name/autoComplete，
+    // 由 passwordFieldsUseSharedComponent 按调用点逐个钉，比这里「在 label 内即算合规」的判据更严。
+    expect(controls.length).toBeGreaterThanOrEqual(95);
     expect(components.length).toBeGreaterThanOrEqual(9);
     expect(checkboxRadio.length).toBeGreaterThanOrEqual(20);
     // placeholder 是最容易被误当名字的来源，命中量要够，否则「placeholder 不算名字」那条会空转
@@ -176,7 +179,9 @@ describe("输入控件必须有不消失的可访问名", () => {
   it("三种命名来源各自都要真有命中，不许全靠一条分支兜住", () => {
     expect(controls.filter((s) => s.viaAria).length).toBeGreaterThanOrEqual(18);
     expect(controls.filter((s) => s.viaAssociate && !s.viaAria).length).toBeGreaterThanOrEqual(4);
-    expect(controls.filter((s) => s.viaLabel && !s.viaAria && !s.viaAssociate).length).toBeGreaterThanOrEqual(80);
+    // 88 → 70：同上，18 处遮码框从 <input> 变成 <PasswordField> 调用点后不再计入 controls；
+    // 组件本体那一处靠 viaAria（显式 aria-labelledby）命中，落进上面 18 那档。
+    expect(controls.filter((s) => s.viaLabel && !s.viaAria && !s.viaAssociate).length).toBeGreaterThanOrEqual(70);
     // label 包裹不能是全站唯一来源，否则 htmlFor 配对那条判定早就漂了
     expect(controls.filter((s) => s.viaLabel).length).toBeLessThan(controls.length);
   });

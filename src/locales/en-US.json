@@ -25,7 +25,9 @@
     "pagerLabel": "Pagination",
     "pagerInfo": "Page {page} of {pages}",
     "linkUnsafe": "This link can't be opened",
-    "openLinkCopied": "Couldn't open the link, copied to clipboard instead"
+    "openLinkCopied": "Couldn't open the link, copied to clipboard instead",
+    "revealPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "errorDialog": {
     "fullError": "Full Error",
@@ -796,9 +798,6 @@
     "privateKeyHelp": "Private key used to log in to the jump host.",
     "privateKeyPasswordHelp": "Fill this only when the private key has a passphrase.",
     "removeSSH": "Remove SSH Config",
-    "revealPassword": "Show password",
-    "hide": "Hide",
-    "show": "Show",
     "defaultProjectName": "Default Project",
     "defaultEnvironmentName": "Ungrouped",
     "defaultSourceName": "Default Source"

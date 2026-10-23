@@ -5101,9 +5101,15 @@ button.diff-workflow-step-btn:hover {
   background: var(--red-fill);
 }
 
+/* 口令框一行（轮67 R67-WP6）：输入框 + 回显开关。label 的内容模型只收短语内容，
+   所以 PasswordField 用的是 <span class="pwd-field">，这里靠 display:flex 把它变成行容器。
+   align-items/min-width 是新加的：开关要垂直居中，输入框要能被压窄（.search-input 有 max-width:220px，
+   加 34px 按钮 + 6px 间距后，两列 grid 里必须靠 min-width:0 才不撑出横向滚动）。 */
 .pwd-field {
   display: flex;
   gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 .path-field,
 .namespace-field {
@@ -5111,6 +5117,7 @@ button.diff-workflow-step-btn:hover {
   gap: 6px;
   align-items: center;
 }
+.pwd-field .search-input,
 .path-field .search-input,
 .namespace-field .search-input {
   min-width: 0;

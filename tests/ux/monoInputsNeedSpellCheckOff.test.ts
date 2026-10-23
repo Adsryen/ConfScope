@@ -63,8 +63,11 @@ describe("输入框的拼写检查红线", () => {
   const monoMissing = mono.filter((e) => !/\bspellCheck=/.test(e.attrs));
 
   it("扫描要有命中量（口径漂了先在这里红）", () => {
-    expect(elements.length).toBeGreaterThanOrEqual(90);
-    expect(mono.length).toBeGreaterThanOrEqual(15);
+    // 96 → 79：轮67 R67-WP6 把 18 处遮码框收进 PasswordField（少 18 个调用点、多 1 个组件本体），是去重不是漏标。
+    expect(elements.length).toBeGreaterThanOrEqual(79);
+    // 40 → 34：连接管理那 6 个 mono 遮码框收进组件后，调用点不再是 <input>；
+    // 它们的红线改由「PasswordField 本体必须带 spellCheck={false}」那条用例整体兜住。
+    expect(mono.length).toBeGreaterThanOrEqual(34);
   });
 
   it("App 根容器必须带全局 spellCheck 兜底", () => {
@@ -78,9 +81,20 @@ describe("输入框的拼写检查红线", () => {
     expect(monoMissing.map((e) => `${e.file}:${e.line} <${e.tag}>`).join("\n")).toBe("");
   });
 
-  it("显式声明数量只增不减（轮48 抽 FindBar 后 44）", () => {
+  it("PasswordField 本体必须替 18 个调用点把红线关掉", () => {
+    // 轮67 R67-WP6：遮码框的 mono 类调用点（如 "search-input wide mono"）不再是 <input>，
+    // 上面那条逐个检查扫不到它们。兜底只剩组件本体这一处，摘掉它等于 18 处一起退化。
+    const source = readScannedSource("src/components/PasswordField.tsx");
+    for (const attr of ["spellCheck={false}", 'autoCapitalize="off"', 'autoCorrect="off"']) {
+      expect(source, `PasswordField 丢了 ${attr}`).toContain(attr);
+    }
+  });
+
+  it("显式声明数量只增不减（轮67 抽 PasswordField 后 40）", () => {
     // 45 → 44：两份重复的查找输入框合成 FindBar 里的一份，spellCheck={false} 跟着只剩一处。
-    expect(declared.length).toBeGreaterThanOrEqual(44);
+    // 44 → 40：连接管理 6 处遮码框的 spellCheck={false} 收进 PasswordField 一处（-6 +1）。
+    //          口令框不再靠调用点自觉声明，而是由下面「PasswordField 本体」那条保证——摘掉组件里的声明立刻红。
+    expect(declared.length).toBeGreaterThanOrEqual(40);
     // 顺带证明这条不是靠「整份文件都一样」蒙过去：locales 之外确实有输入框
     expect(declared.length).toBeLessThan(elements.length);
   });

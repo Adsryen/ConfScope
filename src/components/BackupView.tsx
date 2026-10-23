@@ -23,6 +23,7 @@ import { applyEntryRiskSummary, type ApplyEntryPayload, type ApplyEntryRef } fro
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
+import PasswordField from "./PasswordField";
 import { errorText } from "../lib/errorText";
 
 export interface BackupDiffJumpParams {
@@ -475,15 +476,14 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                       onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, username: e.target.value }))}
                     />
                   </label>
-                  <label className="field">
-                    <span>{t("backup.webdavPassword")}</span>
-                    <input
-                      className="search-input"
-                      type="password"
-                      value={snapshotWebDAV.password}
-                      onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, password: e.target.value }))}
-                    />
-                  </label>
+                  <PasswordField
+                    label={t("backup.webdavPassword")}
+                    value={snapshotWebDAV.password}
+                    name="snapshot-webdav-login-password"
+                    autoComplete="current-password"
+                    className="search-input"
+                    onChange={(v) => setSnapshotWebDAV((current) => ({ ...current, password: v }))}
+                  />
                   <label className="field">
                     <span>{t("backup.remoteFolder")}</span>
                     <input
@@ -493,15 +493,15 @@ export default function BackupView({ onNavigateToDiff, onStartApply }: Props) {
                       onChange={(e) => setSnapshotWebDAV((current) => ({ ...current, rootPath: e.target.value }))}
                     />
                   </label>
-                  <label className="field backup-webdav-package-password">
-                    <span>{t("backup.packagePassword")}</span>
-                    <input
-                      className="search-input"
-                      type="password"
-                      value={packagePassword}
-                      onChange={(e) => setPackagePassword(e.target.value)}
-                    />
-                  </label>
+                  <PasswordField
+                    label={t("backup.packagePassword")}
+                    value={packagePassword}
+                    name="snapshot-package-password"
+                    autoComplete="new-password"
+                    className="search-input"
+                    onChange={setPackagePassword}
+                    labelClassName="backup-webdav-package-password"
+                  />
                 </div>
 
                 <div className="backup-webdav-actions">

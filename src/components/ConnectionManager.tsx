@@ -23,6 +23,7 @@ import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import { environmentTone } from "../lib/envTone";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
+import PasswordField from "./PasswordField";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
@@ -431,10 +432,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [renamingProject, setRenamingProject] = useState<{ oldName: string; value: string } | null>(null);
   // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
-  const [showPwd, setShowPwd] = useState(false);
   const [showSSHConfig, setShowSSHConfig] = useState(false);
-  const [showSSHPwd, setShowSSHPwd] = useState(false);
-  const [showSSHPassphrase, setShowSSHPassphrase] = useState(false);
   const currentTestKey = connectionTestKey(draft);
   const currentNamespaceKey = namespaceLoadKey(draft);
   const currentTestKeyRef = useRef(currentTestKey);
@@ -1535,32 +1533,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   onChange={(e) => set({ baseUrl: e.target.value })}
                 />
               </label>
-              <label className="field">
-                <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloTokenHelp")}>
+              <PasswordField
+                label={<FieldLabel {...fieldLabelProps} required tip={t("connection.apolloTokenHelp")}>
                   {t("connection.apolloToken")}
-                </FieldLabel>
-                <div className="pwd-field">
-                  <input
-                    className="search-input wide mono"
-                    type={showPwd ? "text" : "password"}
-                    value={draft.apolloToken ?? ""}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(e) => set({ apolloToken: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="pwd-toggle"
-                    title={showPwd ? t("connection.hide") : t("connection.show")}
-                    aria-label={t("connection.revealPassword")}
-                    aria-pressed={showPwd}
-                    onClick={() => setShowPwd((v) => !v)}
-                  >
-                    {showPwd ? "🙈" : "👁"}
-                  </button>
-                </div>
-              </label>
+                </FieldLabel>}
+                value={draft.apolloToken ?? ""}
+                name="connection-apollo-token"
+                autoComplete="off"
+                className="search-input wide mono"
+                onChange={(v) => set({ apolloToken: v })}
+              />
               <div className="field-row">
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} required tip={t("connection.apolloEnvHelp")}>
@@ -1644,32 +1626,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   onChange={(e) => set({ baseUrl: e.target.value })}
                 />
               </label>
-              <label className="field">
-                <FieldLabel {...fieldLabelProps} tip={t("connection.consulTokenHelp")}>
+              <PasswordField
+                label={<FieldLabel {...fieldLabelProps} tip={t("connection.consulTokenHelp")}>
                   {t("connection.consulToken")}
-                </FieldLabel>
-                <div className="pwd-field">
-                  <input
-                    className="search-input wide mono"
-                    type={showPwd ? "text" : "password"}
-                    value={draft.consulToken ?? ""}
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    onChange={(e) => set({ consulToken: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="pwd-toggle"
-                    title={showPwd ? t("connection.hide") : t("connection.show")}
-                    aria-label={t("connection.revealPassword")}
-                    aria-pressed={showPwd}
-                    onClick={() => setShowPwd((v) => !v)}
-                  >
-                    {showPwd ? "🙈" : "👁"}
-                  </button>
-                </div>
-              </label>
+                </FieldLabel>}
+                value={draft.consulToken ?? ""}
+                name="connection-consul-token"
+                autoComplete="off"
+                className="search-input wide mono"
+                onChange={(v) => set({ consulToken: v })}
+              />
               <div className="field-row">
                 <label className="field">
                   <FieldLabel {...fieldLabelProps} tip={t("connection.consulDatacenterHelp")}>
@@ -1738,32 +1704,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       onChange={(e) => set({ username: e.target.value })}
                     />
                   </label>
-                  <label className="field">
-                    <FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t("connection.passwordHelp")}>
+                  <PasswordField
+                    label={<FieldLabel {...fieldLabelProps} required={draft.authType === "nacos-password"} tip={t("connection.passwordHelp")}>
                       {t("connection.password")}
-                    </FieldLabel>
-                    <div className="pwd-field">
-                      <input
-                        className="search-input wide mono"
-                        type={showPwd ? "text" : "password"}
-                        value={draft.password}
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        onChange={(e) => set({ password: e.target.value })}
-                      />
-                      <button
-                        type="button"
-                        className="pwd-toggle"
-                        title={showPwd ? t("connection.hide") : t("connection.show")}
-                        aria-label={t("connection.revealPassword")}
-                        aria-pressed={showPwd}
-                        onClick={() => setShowPwd((v) => !v)}
-                      >
-                        {showPwd ? "🙈" : "👁"}
-                      </button>
-                    </div>
-                  </label>
+                    </FieldLabel>}
+                    value={draft.password}
+                    name="connection-nacos-password"
+                    autoComplete="current-password"
+                    className="search-input wide mono"
+                    onChange={(v) => set({ password: v })}
+                  />
                 </div>
               )}
               {draft.authType === "aliyun-aksk" && (
@@ -1784,32 +1734,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         onChange={(e) => set({ accessKeyId: e.target.value })}
                       />
                     </label>
-                    <label className="field">
-                      <FieldLabel {...fieldLabelProps} required tip={t("connection.accessKeyHelp")}>
+                    <PasswordField
+                      label={<FieldLabel {...fieldLabelProps} required tip={t("connection.accessKeyHelp")}>
                         {t("connection.accessKeySecret")}
-                      </FieldLabel>
-                      <div className="pwd-field">
-                        <input
-                          className="search-input wide mono"
-                          type={showPwd ? "text" : "password"}
-                          value={draft.accessKeySecret ?? ""}
-                          autoCapitalize="off"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          onChange={(e) => set({ accessKeySecret: e.target.value })}
-                        />
-                        <button
-                          type="button"
-                          className="pwd-toggle"
-                          title={showPwd ? t("connection.hide") : t("connection.show")}
-                          aria-label={t("connection.revealPassword")}
-                          aria-pressed={showPwd}
-                          onClick={() => setShowPwd((v) => !v)}
-                        >
-                          {showPwd ? "🙈" : "👁"}
-                        </button>
-                      </div>
-                    </label>
+                      </FieldLabel>}
+                      value={draft.accessKeySecret ?? ""}
+                      name="connection-access-key-secret"
+                      autoComplete="off"
+                      className="search-input wide mono"
+                      onChange={(v) => set({ accessKeySecret: v })}
+                    />
                   </div>
                   <label className="field">
                     <FieldLabel {...fieldLabelProps} tip={t("connection.securityTokenHelp")}>
@@ -2006,30 +1940,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       </label>
 
                       {(draft.sshConfig?.authType ?? "password") === "password" && (
-                        <label className="field">
-                          <FieldLabel {...fieldLabelProps} required tip={t("connection.sshPasswordHelp")}>
+                        <PasswordField
+                          label={<FieldLabel {...fieldLabelProps} required tip={t("connection.sshPasswordHelp")}>
                             {t("connection.sshPassword")}
-                          </FieldLabel>
-                          <div className="pwd-field">
-                            <input
-                              className="search-input wide mono"
-                              spellCheck={false}
-                              type={showSSHPwd ? "text" : "password"}
-                              value={draft.sshConfig?.password || ""}
-                              onChange={(e) => setSSH({ password: e.target.value })}
-                            />
-                            <button
-                              type="button"
-                              className="pwd-toggle"
-                              title={showSSHPwd ? t("connection.hide") : t("connection.show")}
-                              aria-label={t("connection.revealPassword")}
-                              aria-pressed={showSSHPwd}
-                              onClick={() => setShowSSHPwd((v) => !v)}
-                            >
-                              {showSSHPwd ? "🙈" : "👁"}
-                            </button>
-                          </div>
-                        </label>
+                          </FieldLabel>}
+                          value={draft.sshConfig?.password || ""}
+                          name="connection-ssh-password"
+                          autoComplete="current-password"
+                          className="search-input wide mono"
+                          onChange={(v) => setSSH({ password: v })}
+                        />
                       )}
 
                       {draft.sshConfig?.authType === "key" && (
@@ -2046,30 +1966,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                               onChange={(e) => setSSH({ privateKey: e.target.value })}
                             />
                           </label>
-                          <label className="field">
-                            <FieldLabel {...fieldLabelProps} tip={t("connection.privateKeyPasswordHelp")}>
+                          <PasswordField
+                            label={<FieldLabel {...fieldLabelProps} tip={t("connection.privateKeyPasswordHelp")}>
                               {t("connection.privateKeyPassword")}
-                            </FieldLabel>
-                            <div className="pwd-field">
-                              <input
-                                className="search-input wide mono"
-                                spellCheck={false}
-                                type={showSSHPassphrase ? "text" : "password"}
-                                value={draft.sshConfig?.passphrase || ""}
-                                onChange={(e) => setSSH({ passphrase: e.target.value })}
-                              />
-                              <button
-                                type="button"
-                                className="pwd-toggle"
-                                title={showSSHPassphrase ? t("connection.hide") : t("connection.show")}
-                                aria-label={t("connection.revealPassword")}
-                                aria-pressed={showSSHPassphrase}
-                                onClick={() => setShowSSHPassphrase((v) => !v)}
-                              >
-                                {showSSHPassphrase ? "🙈" : "👁"}
-                              </button>
-                            </div>
-                          </label>
+                            </FieldLabel>}
+                            value={draft.sshConfig?.passphrase || ""}
+                            name="connection-ssh-passphrase"
+                            autoComplete="off"
+                            className="search-input wide mono"
+                            onChange={(v) => setSSH({ passphrase: v })}
+                          />
                         </>
                       )}
 

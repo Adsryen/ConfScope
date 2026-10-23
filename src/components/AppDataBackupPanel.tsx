@@ -31,6 +31,7 @@ import { getTaskManager } from "../lib/taskmanager";
 import { useKeepVisible } from "../lib/useKeepVisible";
 import { toast } from "../lib/toast";
 import InlineError from "./InlineError";
+import PasswordField from "./PasswordField";
 import {
   loadAppDataBackupState,
   recordAppDataBackupActivity,
@@ -532,14 +533,22 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
           {backupState.backupPasswordSecretRef?.status === "stored" && <strong>{t("appDataBackup.savedPasswordConfigured")}</strong>}
         </div>
         <div className="app-data-backup-fields">
-          <label className="field">
-            <span>{t("appDataBackup.savedPassword")}</span>
-            <input className="search-input" type="password" value={savedPasswordDraft} onChange={(e) => setSavedPasswordDraft(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>{t("appDataBackup.confirmSavedPassword")}</span>
-            <input className="search-input" type="password" value={savedPasswordConfirm} onChange={(e) => setSavedPasswordConfirm(e.target.value)} />
-          </label>
+          <PasswordField
+            label={t("appDataBackup.savedPassword")}
+            value={savedPasswordDraft}
+            name="app-data-saved-backup-password"
+            autoComplete="new-password"
+            className="search-input"
+            onChange={setSavedPasswordDraft}
+          />
+          <PasswordField
+            label={t("appDataBackup.confirmSavedPassword")}
+            value={savedPasswordConfirm}
+            name="app-data-saved-backup-password-confirm"
+            autoComplete="new-password"
+            className="search-input"
+            onChange={setSavedPasswordConfirm}
+          />
         </div>
         <div className="app-data-backup-action-row">
           <button type="button" className="btn btn-primary btn-sm" onClick={saveBackupPassword} disabled={busy === "backup-password-save"}>
@@ -567,14 +576,22 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
               <span>{t("appDataBackup.localBackupHint")}</span>
             </div>
             <div className="app-data-backup-fields">
-              <label className="field">
-                <span>{t("appDataBackup.localBackupPassword")}</span>
-                <input className="search-input" type="password" value={exportPassword} onChange={(e) => setExportPassword(e.target.value)} />
-              </label>
-              <label className="field">
-                <span>{t("appDataBackup.confirmLocalBackupPassword")}</span>
-                <input className="search-input" type="password" value={exportConfirm} onChange={(e) => setExportConfirm(e.target.value)} />
-              </label>
+              <PasswordField
+                label={t("appDataBackup.localBackupPassword")}
+                value={exportPassword}
+                name="app-data-local-backup-password"
+                autoComplete="new-password"
+                className="search-input"
+                onChange={setExportPassword}
+              />
+              <PasswordField
+                label={t("appDataBackup.confirmLocalBackupPassword")}
+                value={exportConfirm}
+                name="app-data-local-backup-password-confirm"
+                autoComplete="new-password"
+                className="search-input"
+                onChange={setExportConfirm}
+              />
             </div>
             <div className="app-data-backup-action-row">
               <button type="button" className="btn btn-primary btn-sm" onClick={exportLocalBackup} disabled={busy === "local-export"}>
@@ -594,10 +611,14 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
               </button>
               {restorePath && <span className="app-data-backup-path">{restorePath}</span>}
             </div>
-            <label className="field">
-              <span>{t("appDataBackup.restorePassword")}</span>
-              <input className="search-input" type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} />
-            </label>
+            <PasswordField
+              label={t("appDataBackup.restorePassword")}
+              value={restorePassword}
+              name="app-data-restore-password"
+              autoComplete="off"
+              className="search-input"
+              onChange={setRestorePassword}
+            />
             <div className="app-data-backup-action-row">
               <button type="button" className="btn btn-primary btn-sm" onClick={previewLocalBackup} disabled={busy === "local-preview"}>
                 {busy === "local-preview" ? t("appDataBackup.previewing") : t("appDataBackup.previewLocalBackup")}
@@ -639,10 +660,14 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
                   onChange={(e) => setWebdavDraft({ ...webdavDraft, username: e.target.value })}
                 />
               </label>
-              <label className="field">
-                <span>{t("appDataBackup.webdavPassword")}</span>
-                <input className="search-input" type="password" value={webdavDraft.password} onChange={(e) => setWebdavDraft({ ...webdavDraft, password: e.target.value })} />
-              </label>
+              <PasswordField
+                label={t("appDataBackup.webdavPassword")}
+                value={webdavDraft.password}
+                name="app-data-webdav-login-password"
+                autoComplete="current-password"
+                className="search-input"
+                onChange={(v) => setWebdavDraft({ ...webdavDraft, password: v })}
+              />
               <label className="field">
                 <span>{t("appDataBackup.remoteFolder")}</span>
                 <input
@@ -669,10 +694,14 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
               <span>{t("appDataBackup.cloudBackupActionsHint")}</span>
             </div>
             <div className="app-data-backup-remote-tools">
-              <label className="field">
-                <span>{t("appDataBackup.webdavBackupPassword")}</span>
-                <input className="search-input" type="password" value={webdavBackupPassword} onChange={(e) => setWebdavBackupPassword(e.target.value)} />
-              </label>
+              <PasswordField
+                label={t("appDataBackup.webdavBackupPassword")}
+                value={webdavBackupPassword}
+                name="app-data-webdav-backup-password"
+                autoComplete="new-password"
+                className="search-input"
+                onChange={setWebdavBackupPassword}
+              />
               <button type="button" className="btn btn-primary btn-sm" onClick={uploadWebDAVBackup} disabled={busy === "webdav-upload"}>
                 {busy === "webdav-upload" ? t("appDataBackup.uploading") : t("appDataBackup.uploadCurrentData")}
               </button>
@@ -681,10 +710,14 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
               </button>
             </div>
 
-            <label className="field">
-              <span>{t("appDataBackup.remoteRestorePassword")}</span>
-              <input className="search-input" type="password" value={remoteRestorePassword} onChange={(e) => setRemoteRestorePassword(e.target.value)} />
-            </label>
+            <PasswordField
+              label={t("appDataBackup.remoteRestorePassword")}
+              value={remoteRestorePassword}
+              name="app-data-remote-restore-password"
+              autoComplete="off"
+              className="search-input"
+              onChange={setRemoteRestorePassword}
+            />
 
             <div className="app-data-backup-remote-list">
               {remoteBackups.length === 0 ? (

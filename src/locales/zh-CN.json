@@ -25,7 +25,9 @@
     "pagerLabel": "分页导航",
     "pagerInfo": "第 {page} 页，共 {pages} 页",
     "linkUnsafe": "该链接不被允许打开",
-    "openLinkCopied": "无法打开链接，已复制到剪贴板"
+    "openLinkCopied": "无法打开链接，已复制到剪贴板",
+    "revealPassword": "显示密码",
+    "hidePassword": "隐藏密码"
   },
   "errorDialog": {
     "fullError": "完整错误",
@@ -796,9 +798,6 @@
     "privateKeyHelp": "登录跳板机使用的私钥内容。",
     "privateKeyPasswordHelp": "私钥设置了 passphrase 时填写，否则留空。",
     "removeSSH": "移除 SSH 配置",
-    "revealPassword": "显示密码",
-    "hide": "隐藏",
-    "show": "显示",
     "defaultProjectName": "默认项目",
     "defaultEnvironmentName": "未分组",
     "defaultSourceName": "默认来源"

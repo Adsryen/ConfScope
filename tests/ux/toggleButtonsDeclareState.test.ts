@@ -70,9 +70,9 @@ const FIXED_SITES: Array<[string, string]> = [
   ["src/components/AuditView.tsx", "aria-expanded={showSettings}"],
   ["src/components/AuditView.tsx", "aria-pressed={statusFilter.has(status)}"],
   ["src/components/AuditView.tsx", "aria-pressed={sortKey === key}"],
-  ["src/components/ConnectionManager.tsx", "aria-pressed={showPwd}"],
-  ["src/components/ConnectionManager.tsx", "aria-pressed={showSSHPwd}"],
-  ["src/components/ConnectionManager.tsx", "aria-pressed={showSSHPassphrase}"],
+  // 轮67 R67-WP6：连接管理那 3 颗口令开关（其中一颗同时管 4 个框）收进 PasswordField，
+  // 状态源从 showPwd / showSSHPwd / showSSHPassphrase 变成组件内部的 shown，每框各持一颗。
+  ["src/components/PasswordField.tsx", "aria-pressed={shown}"],
   ["src/components/ConnectionManager.tsx", "aria-expanded={showSSHConfig}"],
   ["src/components/DiffView.tsx", "aria-expanded={!sourcesCollapsed}"],
   ["src/components/HistoryView.tsx", "aria-pressed={!rawView}"],
@@ -119,14 +119,19 @@ describe("布尔翻转按钮必须声明状态（R69 守卫）", () => {
   });
 
   it("密码显隐按钮：label 固定描述动作，状态只由 aria-pressed 承担", () => {
-    const source = readScannedSource("src/components/ConnectionManager.tsx");
+    // 轮67 R67-WP6：18 处口令框共用 PasswordField，开关也只剩组件本体这一处实现。
+    // 站点数从 6 降到 1 是去重；「每框一颗、各自点得动」改由 passwordFieldsUseSharedComponent
+    // 与 99-s-password-fields-semantics（真机）保证，因为这里数的是实现份数而不是调用份数。
+    const source = readScannedSource("src/components/PasswordField.tsx");
     const toggles = buttonSites(source).filter((s) => s.attrs.includes('className="pwd-toggle"'));
-    expect(toggles).toHaveLength(6);
+    expect(toggles).toHaveLength(1);
     for (const site of toggles) {
       // 带三元运算的 label 会和 aria-pressed 打架：读屏会听到「隐藏，已按下」这种自相矛盾的播报
-      expect(site.attrs).toContain('aria-label={t("connection.revealPassword")}');
+      expect(site.attrs).toContain('aria-label={t("common.revealPassword")}');
       expect(site.attrs).not.toMatch(/aria-label=\{[^}]*\?/);
       expect(site.attrs).toMatch(/aria-pressed=\{/);
+      // 焦点必须留在输入框：点完开关还得接着敲，不能让用户再点一次框
+      expect(site.attrs).toContain("onMouseDown={(e) => e.preventDefault()}");
     }
   });
 
@@ -150,8 +155,11 @@ describe("布尔翻转按钮必须声明状态（R69 守卫）", () => {
     for (const file of ["zh-CN.json", "en-US.json"]) {
       // loadLocale 返回摊平后的 key -> 文案映射，键名带命名空间前缀
       const flat = loadLocale(file);
-      expect(flat["connection.revealPassword"], `${file} 缺 connection.revealPassword`).toBeTruthy();
-      expect(flat["connection.revealPassword"]).not.toMatch(/[?{}]/);
+      expect(flat["common.revealPassword"], `${file} 缺 common.revealPassword`).toBeTruthy();
+      expect(flat["common.revealPassword"]).not.toMatch(/[?{}]/);
+      // title 的悬停文案跟着状态走是允许的（title 不参与 accname），但两个档位都得有词
+      expect(flat["common.hidePassword"], `${file} 缺 common.hidePassword`).toBeTruthy();
+      expect(flat["common.hidePassword"]).not.toMatch(/[?{}]/);
     }
   });
 
@@ -175,6 +183,8 @@ describe("布尔翻转按钮必须声明状态（R69 守卫）", () => {
         if (FLIP.test(onClickExpr(site.attrs))) hits.push(1);
       }
     }
-    expect(hits.length).toBeGreaterThan(12);
+    // 14 → 9：轮67 R67-WP6 把连接管理 6 颗口令开关收进 PasswordField 一颗（-6 +1）。
+    // 这条只是「判定不是空集」的防永真下限，不承诺具体份数；口令开关的份数由专门的两条守卫管。
+    expect(hits.length).toBeGreaterThan(8);
   });
 });

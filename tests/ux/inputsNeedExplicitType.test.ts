@@ -62,7 +62,9 @@ describe("输入元素必须显式声明 type", () => {
   const textType = sites.filter((s) => /\btype=(?:"text"|\{\s*"text"\s*\})/.test(s.attrs));
 
   it("扫描要有命中量（口径漂了先在这里红）", () => {
-    expect(sites.length).toBeGreaterThanOrEqual(90);
+    // 93 → 76：轮67 R67-WP6 把全站 18 处遮码框收进 PasswordField 一份实现（少 18 个调用点、多 1 个组件本体），
+    // 是去重不是漏标；每处调用点仍要写全 name / autoComplete，由 passwordFieldsUseSharedComponent 逐个钉。
+    expect(sites.length).toBeGreaterThanOrEqual(76);
   });
 
   it("不许有 <input> 吃 HTML 默认的 type=text", () => {

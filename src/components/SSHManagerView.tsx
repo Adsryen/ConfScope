@@ -11,6 +11,7 @@ import {
   type SSHProfile,
 } from "../store/sshProfiles";
 import NumberField from "./NumberField";
+import PasswordField from "./PasswordField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -361,15 +362,14 @@ export default function SSHManagerView({ connections }: Props) {
                     </select>
                   </label>
                   {draft.config.authType === "password" ? (
-                    <label className="field">
-                      <span>{t('connection.sshPassword')}</span>
-                      <input
-                        className="search-input wide mono"
-                        type="password"
-                        value={draft.config.password || ""}
-                        onChange={(e) => setConfig({ password: e.target.value })}
-                      />
-                    </label>
+                    <PasswordField
+                      label={t('connection.sshPassword')}
+                      value={draft.config.password || ""}
+                      name="ssh-manager-password"
+                      autoComplete="current-password"
+                      className="search-input wide mono"
+                      onChange={(v) => setConfig({ password: v })}
+                    />
                   ) : (
                     <>
                       <label className="field">
@@ -382,15 +382,14 @@ export default function SSHManagerView({ connections }: Props) {
                           onChange={(e) => setConfig({ privateKey: e.target.value })}
                         />
                       </label>
-                      <label className="field">
-                        <span>{t('connection.privateKeyPassword')}</span>
-                        <input
-                          className="search-input wide mono"
-                          type="password"
-                          value={draft.config.passphrase || ""}
-                          onChange={(e) => setConfig({ passphrase: e.target.value })}
-                        />
-                      </label>
+                      <PasswordField
+                        label={t('connection.privateKeyPassword')}
+                        value={draft.config.passphrase || ""}
+                        name="ssh-manager-passphrase"
+                        autoComplete="off"
+                        className="search-input wide mono"
+                        onChange={(v) => setConfig({ passphrase: v })}
+                      />
                     </>
                   )}
                 </div>
