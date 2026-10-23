@@ -565,33 +565,42 @@ export default function SettingsView() {
             )}
             {dataLocations ? (
               <div className="settings-data-locations">
-                {dataLocations.entries.map((entry) => (
-                  <div key={entry.key} className="settings-setting-row">
-                    <div>
-                      <strong>
-                        {t(`settings.dataLoc${entry.key.charAt(0).toUpperCase()}${entry.key.slice(1)}`)}
-                        {!entry.exists && <span className="settings-data-location-missing">{t("settings.dataLocMissing")}</span>}
-                      </strong>
-                      <div className="settings-data-location-path" title={entry.path}>
-                        <code>{entry.path}</code>
+                {dataLocations.entries.map((entry) => {
+                  const rowName = t(`settings.dataLoc${entry.key.charAt(0).toUpperCase()}${entry.key.slice(1)}`);
+                  return (
+                    <div key={entry.key} className="settings-setting-row">
+                      <div>
+                        <strong>
+                          {rowName}
+                          {!entry.exists && <span className="settings-data-location-missing">{t("settings.dataLocMissing")}</span>}
+                        </strong>
+                        <div className="settings-data-location-path" title={entry.path}>
+                          <code>{entry.path}</code>
+                        </div>
+                      </div>
+                      {/*
+                        轮67 R67-WP5：7 行 14 颗按钮原先的可访问名全是「复制」「打开」各刷 7 遍
+                        （真机 aria-label 全 null），键盘走到第 34 颗时听不出这是日志目录还是备份快照。
+                        可见文字一个字不动，只给读屏点名是哪一行；按 WCAG 2.5.3 把可见文字含在名字里。
+                      */}
+                      <div className="settings-data-location-actions">
+                        <CopyButton text={entry.path} ariaLabel={t("settings.copyPathAria", { name: rowName })} />
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          aria-label={t("settings.openFolderAria", { name: rowName })}
+                          disabled={openFolderBusy || !entry.exists}
+                          onClick={() => {
+                            if (openFolderBusy || !entry.exists) return;
+                            void runOpenDataFolder(entry.key);
+                          }}
+                        >
+                          {t("settings.openFolder")}
+                        </button>
                       </div>
                     </div>
-                    <div className="settings-data-location-actions">
-                      <CopyButton text={entry.path} />
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={openFolderBusy || !entry.exists}
-                        onClick={() => {
-                          if (openFolderBusy || !entry.exists) return;
-                          void runOpenDataFolder(entry.key);
-                        }}
-                      >
-                        {t("settings.openFolder")}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>

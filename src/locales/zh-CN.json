@@ -352,6 +352,8 @@
     "dataLocAudit": "审计日志",
     "dataLocMissing": "（尚未创建）",
     "dataLocationsUnavailable": "当前环境暂不支持查看数据位置。",
+    "copyPathAria": "复制{name}的路径",
+    "openFolderAria": "打开{name}所在目录",
     "openFolder": "打开",
     "openFolderFailed": "打开失败：{error}",
     "dataRootRuntime": "运行形态与数据根",

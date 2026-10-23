@@ -352,6 +352,8 @@
     "dataLocAudit": "Audit log",
     "dataLocMissing": "(not created yet)",
     "dataLocationsUnavailable": "Data locations are not available in this environment.",
+    "copyPathAria": "Copy {name} path",
+    "openFolderAria": "Open {name} folder",
     "openFolder": "Open",
     "openFolderFailed": "Failed to open: {error}",
     "dataRootRuntime": "Runtime Mode & Data Root",

@@ -70,7 +70,8 @@ const BASELINE: Record<string, string[]> = {
     '<button className="btn btn-ghost btn-sm" onClick={() => selected && openConfig(selected)} title={t("config.refreshContent")} aria-label={t("config.ref',
   ],
   "src/components/CopyButton.tsx": [
-    '<button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} title={t("common.copyToClipboard")}>',
+    // 轮67 WP5：这颗按钮补了 aria-label 给同名动作点名（键随标签头变化，disabled+title 的取舍本身没动）
+    '<button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} aria-label={ariaLabel} title={t("common.copyToClipboard")}>',
   ],
   "src/components/DeleteConfirm.tsx": [
     '<button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>',

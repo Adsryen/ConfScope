@@ -369,7 +369,7 @@ describe("SettingsView", () => {
     // 未创建的位置标注“尚未创建”且打开按钮禁用
     const snapshotsRow = screen.getByText("Backup snapshots").closest(".settings-setting-row");
     expect(snapshotsRow).toHaveTextContent("(not created yet)");
-    const openButtons = screen.getAllByRole("button", { name: "Open" });
+    const openButtons = screen.getAllByRole("button", { name: /Open .* folder/ });
     expect(openButtons).toHaveLength(6);
     expect(openButtons[3]).toBeDisabled(); // snapshots
     expect(openButtons[0]).toBeEnabled(); // dataRoot
@@ -378,11 +378,62 @@ describe("SettingsView", () => {
     await waitFor(() => expect(dataLocMocks.OpenDataFolder).toHaveBeenCalledWith("appDataFile"));
   });
 
+  // 轮67 R67-WP5：真机量到 7 行 14 颗按钮的可访问名全是「复制」「打开」各刷 7 遍（aria-label 全 null），
+  // 键盘走到第 34 颗听不出这是日志目录还是备份快照。这里钉「名字唯一 + 点名行 + 可见文字不动」。
+  it("names each data-location action with the row it belongs to", async () => {
+    renderSettings("en-US");
+    await screen.findByRole("heading", { name: "Data Locations" });
+
+    // 第一行是「运行形态与数据根」，只有一个动作按钮，不是同名动作的来源
+    const rows = Array.from(document.querySelectorAll<HTMLElement>("#settings-data-locations .settings-setting-row")).filter((row) =>
+      Boolean(row.querySelector(".settings-data-location-path"))
+    );
+    expect(rows, "替身给了 6 个位置，渲染出来的行数对不上").toHaveLength(6);
+
+    const names: string[] = [];
+    for (const row of rows) {
+      const buttons = within(row).getAllByRole("button");
+      expect(buttons).toHaveLength(2);
+      expect(buttons.map((button) => (button.textContent ?? "").trim())).toEqual(["Copy", "Open"]);
+      const rowName = (row.querySelector("strong")?.firstChild?.textContent ?? "").trim();
+      for (const button of buttons) {
+        const label = button.getAttribute("aria-label");
+        expect(label, `${rowName} 这行的动作没有可访问名`).not.toBeNull();
+        // WCAG 2.5.3：可见文字必须含在可访问名里，否则键盘念到的和看到的不是一回事
+        expect(label).toContain((button.textContent ?? "").trim());
+        names.push(label as string);
+      }
+      expect(names[names.length - 2], "名字里点的行和屏幕上那行不是同一行").toBe(`Copy ${rowName} path`);
+      expect(names[names.length - 1]).toBe(`Open ${rowName} folder`);
+    }
+
+    expect(new Set(names).size, `${names.length} 颗按钮只念得出 ${new Set(names).size} 个名字`).toBe(names.length);
+  });
+
+  // 中文档也得点名：静态守卫只查「模板含可见文字」，M4 那种「zh 模板把「复制」两个字丢了」
+  // 只有这条真渲染能抓住（en 档的组件用例挡不住 zh 的措辞漂移）。
+  it("中文界面的数据位置动作同样按行点名", async () => {
+    renderSettings("zh-CN");
+    await screen.findByRole("heading", { name: "数据位置" });
+
+    expect(screen.getByRole("button", { name: "复制备份快照的路径" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开审计日志所在目录" })).toBeInTheDocument();
+
+    // 只数带路径的行：第一行「运行形态与数据根」共用同一个动作容器类名，
+    // 它那两颗按钮的可见文字本身就唯一（更改位置…/回退…），不下发 aria-label
+    const names = Array.from(document.querySelectorAll<HTMLElement>("#settings-data-locations .settings-setting-row"))
+      .filter((row) => Boolean(row.querySelector(".settings-data-location-path")))
+      .flatMap((row) => Array.from(row.querySelectorAll<HTMLElement>(".settings-data-location-actions button")))
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names.every((name) => Boolean(name)), "又有按钮没名字了").toBe(true);
+    expect(new Set(names).size, `${names.length} 颗按钮只念得出 ${new Set(names).size} 个名字`).toBe(names.length);
+  });
+
   it("shows an error message when opening a data location fails", async () => {
     dataLocMocks.OpenDataFolder.mockRejectedValueOnce(new Error("no file manager"));
     renderSettings("en-US");
 
-    const openButtons = await screen.findAllByRole("button", { name: "Open" });
+    const openButtons = await screen.findAllByRole("button", { name: /Open .* folder/ });
     fireEvent.click(openButtons[0]);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Failed to open: no file manager");
@@ -393,7 +444,7 @@ describe("SettingsView", () => {
     renderSettings("en-US");
 
     expect(await screen.findByText("Data locations are not available in this environment.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open .* folder/ })).not.toBeInTheDocument();
   });
 
   it("falls back to an unavailable note when the binding method throws synchronously", async () => {
@@ -404,7 +455,7 @@ describe("SettingsView", () => {
     renderSettings("en-US");
 
     expect(await screen.findByText("Data locations are not available in this environment.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open .* folder/ })).not.toBeInTheDocument();
   });
   // ── 轮62：数据根运行形态与换根迁移 ──
   it("shows runtime mode, decided source, and notes in the data locations panel", async () => {

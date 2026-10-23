@@ -49,6 +49,20 @@ describe("CopyButton", () => {
     expect(screen.getByRole("button", { name: "复制内容" })).toBeInTheDocument();
   });
 
+  // 轮67 R67-WP5：同一屏 7 行都是「复制」，读屏只能靠 aria-label 点名；可见文字一个字不许动。
+  it("把分辨用的名字放aria-label上、可见文字保持原样", () => {
+    renderCopyButton({ text: "/var/log/confscope.log", ariaLabel: "复制运行日志的路径" });
+
+    const button = screen.getByRole("button", { name: "复制运行日志的路径" });
+    expect(button.textContent).toBe("复制");
+  });
+
+  it("没给分辨名时不下发 aria-label（别让读屏丢掉可见文字）", () => {
+    renderCopyButton({ text: "boom", label: "复制错误详情" });
+
+    expect(screen.getByRole("button", { name: "复制错误详情" })).not.toHaveAttribute("aria-label");
+  });
+
   it("localizes the default label, tooltip, and copied feedback", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);
