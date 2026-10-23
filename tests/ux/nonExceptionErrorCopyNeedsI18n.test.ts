@@ -230,7 +230,7 @@ describe("非异常出口的报错必须走 i18n（波30 R50）", () => {
   });
 
   it("内部标识不算文案：审计/日志标题保持原样（R3）", () => {
-    expect(readScannedSource("src/lib/applyPlanExecution.ts")).toContain("APPLY ${plan.id} TO ${plan.target.label}");
+    expect(readScannedSource("src/lib/applyPlanExecution.ts")).toContain("APPLY ${plan.id}");
     expect(readScannedSource("src/lib/applyFollowup.ts")).toContain('error: "apply_followup_failed"');
   });
 

@@ -8179,9 +8179,18 @@ button.diff-workflow-step-btn:hover {
   overflow-wrap: anywhere;
 }
 
+/* 确认文本与复制键同一行：复制键不许被长文本挤掉，所以右侧固定不缩，
+   左侧 code 继续按字符换行（旧格式 80 字符时它是整块独占一行，如今 26 字符才配得上这种排法）。 */
+.apply-confirmation-code-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .apply-confirmation-code {
-  display: block;
-  width: fit-content;
+  min-width: 0;
   max-width: 100%;
   padding: 6px 8px;
   overflow-wrap: anywhere;
@@ -8189,6 +8198,10 @@ button.diff-workflow-step-btn:hover {
   border: 1px solid rgba(220, 220, 170, 0.28);
   border-radius: 4px;
   background: rgba(220, 220, 170, 0.08);
+}
+
+.apply-confirmation-code-row .btn {
+  flex-shrink: 0;
 }
 
 /* 写后回读面板（R55-B2）。基类只管排版，配色全在两条 is-* 分支里各自写全：
@@ -8729,6 +8742,9 @@ button.diff-workflow-step-btn:hover {
 /* 变更计划：执行流水与每行的主体文案 */
 .apply-ledger,
 .apply-item-main,
+/* 轮67 R67-WP10：受保护目标的确认文本要手敲进输入框，抄不走就只能逐字符用眼睛记 */
+.apply-confirmation-code,
+.apply-partial-write,
 
 /* 更新交接面板：产物路径单行截断，安装命令要整段抄进终端 */
 .update-artifact-path,

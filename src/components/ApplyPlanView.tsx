@@ -510,7 +510,10 @@ function ConfirmationPanel({
 }) {
   const { t } = useTranslation();
   const requiredText = applyConfirmationText(plan);
-  const ready = protectedTarget ? confirmationText === requiredText : confirmed;
+  // 手敲 26 个字符很容易带进一个尾空格，而空格看不见——差一个字符就永远灰着，
+  // 用户只会以为「这按钮坏了」。比较前 trim，多敲的空格不算错（轮67 / R67-WP10）。
+  const typedText = confirmationText.trim();
+  const ready = protectedTarget ? typedText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
   // 只读预演不受「这个计划已经成功执行过一次」的限制：写完想再干跑一次核对目标现状，
   // 是执行之后最自然的下一步，把它灰掉等于逼用户重新生成一份计划（R55-D3）。
@@ -530,7 +533,14 @@ function ConfirmationPanel({
   if (!ready) {
     blockers.push({
       id: "notReady",
-      label: protectedTarget ? t("apply.blockConfirmText") : t("apply.blockNotConfirmed"),
+      // 「一个字都没敲」与「敲了但差一个字符」必须分开说（轮67 / R67-WP10）：
+      // 真机量过，敲错时旧文案仍然回「还没输入上方要求的确认文本。」，
+      // 用户对着已经填满的输入框看不出哪里错，只能整串重来。
+      label: !protectedTarget
+        ? t("apply.blockNotConfirmed")
+        : typedText
+          ? t("apply.blockConfirmMismatch")
+          : t("apply.blockConfirmText"),
       alsoDryRun: false,
     });
   }
@@ -562,7 +572,13 @@ function ConfirmationPanel({
             {t("apply.confirmationTextLabel")}
           </label>
           <div className="field-hint">{t("apply.protectedInstruction")}</div>
-          <code className="apply-confirmation-code">{requiredText}</code>
+          {/* 确认文本要能抄（轮67 / R67-WP10）：`body` 关了全选，这一串原本拖选/三击都是 0 字符，
+              于是「抄不走 + 敲不完」两头堵。放开选中再补一颗复制键，粘过去即可；
+              但不做「一键填入」——填进去就等于跳过手敲那层防呆，复制出口留给真的敲不动的人。 */}
+          <div className="apply-confirmation-code-row">
+            <code className="apply-confirmation-code">{requiredText}</code>
+            <CopyButton text={requiredText} label={t("apply.copyConfirmationText")} />
+          </div>
           <input
             type="text"
             id="apply-confirmation-text"

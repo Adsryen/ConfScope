@@ -242,6 +242,8 @@
     "blockerHintLabel": "无法执行的原因",
     "blockNotConfirmed": "还没有勾选确认。",
     "blockConfirmText": "还没输入上方要求的确认文本。",
+    "blockConfirmMismatch": "确认文本与上方要求逐字不一致，请核对大小写后重敲。",
+    "copyConfirmationText": "复制确认文本",
     "blockNoSelection": "至少勾选一项配置。",
     "blockHasBlocked": "勾选项里有不可执行项（blocked），取消勾选后即可执行其余项。",
     "blockRunning": "已有任务在执行中，请等它结束。",

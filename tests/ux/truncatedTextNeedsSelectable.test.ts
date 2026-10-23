@@ -45,7 +45,15 @@ const NOT_REQUIRED: Record<string, string> = {
 };
 
 /** 整块正文都该能抄走的容器（正文在子树里，自身不一定带省略号）。 */
-const MUST_BE_SELECTABLE = [".apply-item-row", ".modal-body", ".settings-data-location-path"];
+const MUST_BE_SELECTABLE = [
+  ".apply-item-row",
+  ".modal-body",
+  ".settings-data-location-path",
+  // 轮67 R67-WP10：这两块都不截断，所以不在上面那套「截断必须有出口」的判据里，
+  // 但内容同样是要抄走的东西——确认文本要手敲进输入框，半截失败的 ref 要拿去定位那条配置。
+  ".apply-confirmation-code",
+  ".apply-partial-write",
+];
 
 /** 必须继续禁选的编辑器部件，理由见文件头第 4 条。 */
 const MUST_STAY_UNSELECTABLE = [".code-gutter", ".code-minimap", ".udiff-gutter", ".udiff-mark", ".diff-gutter"];

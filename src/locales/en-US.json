@@ -242,6 +242,8 @@
     "blockerHintLabel": "Why execution is unavailable",
     "blockNotConfirmed": "Tick the confirmation checkbox first.",
     "blockConfirmText": "Type the required confirmation text above.",
+    "blockConfirmMismatch": "Confirmation text doesn't match the text above character for character. Check the capitalization and retype it.",
+    "copyConfirmationText": "Copy confirmation text",
     "blockNoSelection": "Select at least one item.",
     "blockHasBlocked": "Some selected items are blocked; uncheck them to run the rest.",
     "blockRunning": "A task is already running; wait for it to finish.",

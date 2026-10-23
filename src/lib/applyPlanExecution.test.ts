@@ -68,7 +68,7 @@ describe("apply plan execution confirmation helpers", () => {
     expect(isProtectedApplyTarget(baseConnection, endpoint())).toBe(false);
   });
 
-  it("builds a deterministic confirmation text from plan id and target label", () => {
+  it("keeps the confirmation text short enough to type by hand", () => {
     const plan = buildApplyPlan({
       id: "plan-confirm-1",
       createdAt: "2026-07-06T00:00:00.000Z",
@@ -98,7 +98,13 @@ describe("apply plan execution confirmation helpers", () => {
       ],
     });
 
-    expect(applyConfirmationText(plan)).toBe("APPLY plan-confirm-1 TO Prod / public");
+    // 旧格式把整条目标标签塞进确认串，复测真机量到 80 字符（真实 MSE 命名空间是 36 位
+    // UUID 时约 110 字符），而承载它的 <code> 当时还是禁选的——抄不走又敲不完（轮67 / R67-WP10）。
+    expect(applyConfirmationText(plan)).toBe("APPLY plan-confirm-1");
+    expect(applyConfirmationText(plan)).not.toContain("Prod / public");
+    // 上限按真实 planId 形态留余量：`APPLY plan_mvksd3zy_8akc2s` 实测 26 字符。
+    const realistic = { id: `plan_${Date.now().toString(36)}_abcdef`, target: plan.target };
+    expect(applyConfirmationText(realistic).length).toBeLessThanOrEqual(32);
   });
 
 

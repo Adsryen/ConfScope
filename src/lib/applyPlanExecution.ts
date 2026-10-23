@@ -153,8 +153,19 @@ export function isProtectedApplyTarget(connection: Connection | null | undefined
   return PROTECTED_TARGET_MARKERS.some((marker) => text.includes(marker));
 }
 
-export function applyConfirmationText(plan: Pick<ApplyPlan, "id" | "target">): string {
-  return `APPLY ${plan.id} TO ${plan.target.label}`;
+/**
+ * 受保护目标的确认文本（轮67 / R67-WP10）。
+ *
+ * 旧格式 `APPLY <planId> TO <目标标签>` 是复测真机量出来的：
+ * 复测环境 80 字符，真实 MSE（命名空间是 36 位 UUID）约 110 字符，而承载它的
+ * `<code>` 被 body 的 `user-select:none` 禁选（拖选/三击实测都是 0 字符）——
+ * 抄不走又敲不完，第五步成了打字考试。
+ * 现在只留 `APPLY <planId>`（实测 26 字符）：planId 每个计划新生成、不复用，
+ * 「必须看清屏幕才能提交」这层防呆一分没少；目标身份由上方「目标」行与每条计划项的
+ * ref 承担，不必在确认串里再抄一遍。
+ */
+export function applyConfirmationText(plan: Pick<ApplyPlan, "id">): string {
+  return `APPLY ${plan.id}`;
 }
 
 function isMissingConfigError(error: unknown): boolean {

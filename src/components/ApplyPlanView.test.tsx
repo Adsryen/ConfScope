@@ -10,7 +10,12 @@ import type { Task } from "../lib/taskmanager";
 import { buildApplyPlan, type ApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
 import { formatDateTime } from "../lib/formatDateTime";
 import { applyConfirmationText } from "../lib/applyPlanExecution";
+
 import ApplyPlanView from "./ApplyPlanView";
+
+// 复制确认文本这条出口要验到「复制出去的就是那一串」；真剪贴板在 jsdom 里拿不到（轮67 / R67-WP10）。
+const copyMocks = vi.hoisted(() => ({ run: vi.fn().mockResolvedValue(true) }));
+vi.mock("../lib/clipboard", () => ({ copyText: copyMocks.run }));
 
 const draftMocks = vi.hoisted(() => ({
   buildApplyPlanFromEntry: vi.fn(),
@@ -504,6 +509,70 @@ describe("ApplyPlanView", () => {
 
     fireEvent.change(screen.getByLabelText("Confirmation text"), { target: { value: applyConfirmationText(plan) } });
     expect(executeButton).toBeEnabled();
+  });
+
+  it("says the confirmation text mismatches instead of claiming nothing was typed", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-prod",
+      targetLabel: "Production / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+
+    const blockerList = await screen.findByRole("list", { name: "Why execution is unavailable" });
+    expect(blockerList).toHaveTextContent("Type the required confirmation text above.");
+    expect(blockerList).not.toHaveTextContent("match the text above");
+
+    // 一个字一个字敲错时旧文案仍回「还没输入」，用户看不出已经输入过（轮67 / R67-WP10）。
+    fireEvent.change(screen.getByLabelText("Confirmation text"), { target: { value: "APPLY plan_x, one char off" } });
+    expect(blockerList).toHaveTextContent("match the text above");
+    expect(blockerList).not.toHaveTextContent("Type the required confirmation text above.");
+  });
+
+  it("tolerates the trailing space a hand-typed confirmation always picks up", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-prod",
+      targetLabel: "Production / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    fireEvent.change(screen.getByLabelText("Confirmation text"), { target: { value: `  ${applyConfirmationText(plan)}  ` } });
+    expect(executeButton).toBeEnabled();
+  });
+
+  it("offers a copy affordance for the confirmation text", async () => {
+    const plan = makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-prod",
+      targetLabel: "Production / public",
+    });
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: targetConn,
+    });
+
+    renderView();
+
+    await screen.findByRole("button", { name: "Execute change" });
+    const copy = screen.getByRole("button", { name: /Copy confirmation text/i });
+    fireEvent.click(copy);
+    // 复制的必须是那一串本身：粘出去一份别的字符串，第五步照样过不去。
+    await waitFor(() => expect(copyMocks.run).toHaveBeenCalledWith(applyConfirmationText(plan)));
   });
 
   it("executes the saved plan snapshot instead of recalculating from entry", async () => {
