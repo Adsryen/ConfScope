@@ -12,6 +12,7 @@ import {
 } from "../lib/configContentSearch";
 import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
 import { effectiveProvider, supportsConfigHistory } from "../lib/configCapabilities";
+import { localRevisionStoreAvailable } from "../lib/configRevisions";
 import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import { detectFormat, Format, FORMATS } from "../lib/format";
 import { reportError } from "../lib/errorCenter";
@@ -37,7 +38,7 @@ import ConfigEditor from "./ConfigEditor";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
 import DeleteConfirm from "./DeleteConfirm";
-import HistoryView from "./HistoryView";
+import ConfigHistoryPanel from "./ConfigHistoryPanel";
 import Pager from "./Pager";
 import Select from "./Select";
 import { errorText } from "../lib/errorText";
@@ -170,9 +171,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   useWheelSurface(itemsScrollRef);
   const dirty = editing && draft !== content;
   const isLocalSnapshot = conn.sourceType === "local-snapshot";
-  // 「历史变更」tab 按配置中心能力收口（轮55 R55-E2）：Apollo/Consul 的 ListHistory 在 Go 侧
-  // 直接返回「当前为只读模式」，点进 tab 只会看到一句与历史无关的报错。
-  const canBrowseHistory = supportsConfigHistory(conn);
+  /**
+   * 「历史变更」tab 的出现条件（轮67 R57-WP15 改口径，R8）。
+   *
+   * 轮55 R55-E2 那条收口仍然成立：Apollo/Consul 的 ListHistory 在 Go 侧直接返回
+   * 「当前为只读模式」，所以**服务端**那一档照旧按 supportsConfigHistory 决定出不出现。
+   * tab 本身放宽到「服务端能给 或 本机存储可达」：本机历史正是由用户刚才那次读取写进去的
+   * （fire-and-forget），拿「本机是否已有这个键的记录」当闸门会让 tab 忽隐忽现，
+   * 所以闸门只看存储可达不可达，面板内部用诚实空态 + 重新读取兜住「刚记上还来不及列出来」。
+   */
+  const canBrowseHistory = supportsConfigHistory(conn) || localRevisionStoreAvailable();
   const isContentSearchActive = searchMode === "content" && Boolean(contentTerm);
   const visibleItems = isContentSearchActive ? contentResults.map((result) => result.item) : items;
   const selectedContentResults = contentResults.filter((result) => selectedContentKeys.has(configResultKey(result.item)));
@@ -1425,7 +1433,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 )}
               </div>
             ) : (
-              <HistoryView
+              <ConfigHistoryPanel
                 conn={conn}
                 tenant={tenant}
                 active={active}

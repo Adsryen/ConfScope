@@ -20,11 +20,15 @@ import {
 } from "../../wailsjs/go/app/App";
 import type { Connection } from "../store/connections";
 import { effectiveProvider } from "./configCapabilities";
+import { wailsAppBindings } from "./wailsAppBindings";
 
 /** 与 Go 侧 revisions.KindObserved 同值：本机读到过这一版。 */
 export const CONFIG_REVISION_KIND_OBSERVED = "observed";
 /** 与 Go 侧 revisions.KindConfirmedWrite 同值：本程序写入且回读确认。 */
 export const CONFIG_REVISION_KIND_CONFIRMED_WRITE = "confirmed-write";
+
+/** 与 Go 侧 revisions.ContentOmittedTooLarge 同值：正文超单条上限，本机只留下摘要与字节数。 */
+export const CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE = "too-large";
 
 /** 一条版本记录的归属：连接 + 命名空间 + 分组 + dataId（key 级变更也记整篇正文）。 */
 export interface ConfigRevisionTarget {
@@ -151,6 +155,29 @@ export function recordConfirmedWrite(conn: Connection, target: ConfigRevisionTar
   } catch {
     /* 写入确认记不上，不影响已经完成的写入 */
   }
+}
+
+/**
+ * 本机版本历史的读出口在当前运行时可达吗。
+ *
+ * 只有桌面运行时（Wails 注入 window.go.app.App）才有机身文件；纯浏览器 / web 模式拿不到绑定，
+ * 那时「本机历史」这一档必须整个不出现——挂着一个永远读不出内容的分段比少一个入口更糟。
+ * 命名空间探测只走 wailsAppBindings()（守卫 tests/ux/wailsBindingNamespaceIsSingleSource 钉死）。
+ */
+export function localRevisionStoreAvailable(): boolean {
+  const bindings = wailsAppBindings<LocalRevisionBindings>();
+  return typeof bindings?.ReadConfigRevisionsForKey === "function";
+}
+
+/** 界面需要的那一颗读绑定；只按存在性判断，调用仍走本文件的 listRevisionsForKey。 */
+interface LocalRevisionBindings {
+  ReadConfigRevisionsForKey(
+    connectionID: string,
+    namespace: string,
+    group: string,
+    dataID: string,
+    limit: number
+  ): Promise<ConfigRevisionRecord[]>;
 }
 
 /**

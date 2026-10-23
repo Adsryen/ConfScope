@@ -2668,6 +2668,25 @@ textarea {
   min-height: 0;
   display: flex;
 }
+/*
+ * 「历史变更」分段宿主（轮67 R57-WP15）：上方一排来源分段，下方整块给子面板。
+ * 子面板自己就是 .history-view（flex:1 + min-height:0），这里只做纵向排布与不塌高度。
+ */
+.history-source {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.history-source-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
 .history-list {
   width: 320px;
   flex-shrink: 0;
@@ -2687,6 +2706,13 @@ textarea {
   border-bottom: 1px solid var(--border);
   background: var(--bg2);
   flex-shrink: 0;
+}
+/* 本机历史那一栏的表头：标题计数与「重新读取」并排，说明仍占整行（轮67 R57-WP15）。 */
+.history-list-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .history-hint {
   display: block;
