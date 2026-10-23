@@ -10,6 +10,9 @@ import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { writeFileSync } from "node:fs";
 
+// 剪贴板读写都要真授权：本条的判据是「粘回来的那一串」，靠 page.evaluate 伪造粘贴不算测到闭环
+test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+
 const NS_A = "retest-dev";
 const NS_B = "retest-qa";
 const GROUP = "RETEST-PROD";
@@ -114,4 +117,74 @@ test("R67-WP10 受保护目标的确认文本敲得完、抄得走，敲错时�
   const filled = await page.evaluate(readConfirmation);
   expect(filled.exec.find((item) => item.text.startsWith("执行"))?.disabled, "多敲了看不见的首尾空格就过不去").toBe(false);
   expect(filled.blockers, "灰掉的原因清单该随就绪清空").toEqual([]);
+});
+
+/**
+ * 复制 → 粘贴的闭环（轮68 补，用户实测诉求）。
+ *
+ * 上面那条只证明「有复制出口、手敲能过」，没证明**粘回来的那一串能过校验**：
+ * 复制键写的到底是什么、粘贴会不会带进看不见的换行、粘贴路径是否绕开逐字比对，
+ * 三件事各是一个坑。所以这里走真人动作：点复制键 → 读剪贴板 → Ctrl+V → 看按钮。
+ *
+ * 先写哨兵再点复制键：不这么做的话，剪贴板里留着上一条用例的内容也能"看起来通过"。
+ */
+test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（含换行与错文两条反向对照）", async ({ page, retest }) => {
+  test.setTimeout(300_000);
+  await installRetestBridge(page, retest);
+  await seedProtectedTarget(page);
+  await republishRetestData();
+  await openProtectedPlan(page);
+
+  const required = (await page.evaluate(readConfirmation)).text;
+  expect(required.startsWith("APPLY "), "没拿到真实的确认文本，后面全是空转").toBe(true);
+
+  const copyButton = page.getByRole("button", { name: "复制确认文本" });
+  await expect(copyButton, "复制键不在页面上").toBeVisible();
+
+  // 1) 先污染剪贴板，再点复制键：读回来必须逐字等于要求的那一串（证明写的是它，不是别的）。
+  await page.evaluate(() => navigator.clipboard.writeText("SENTINEL-MUST-BE-OVERWRITTEN"));
+  await copyButton.click();
+  await expect
+    .poll(async () => await page.evaluate(() => navigator.clipboard.readText()), { timeout: 10_000 })
+    .toBe(required);
+  // 复制成功要有反馈，且不许冒出「复制失败」的错误提示（轮6 R51 那条：失败以前是点了没反应）
+  await expect(page.getByRole("button", { name: /已复制/ })).toBeVisible();
+  await expect(page.locator(".toast-error")).toHaveCount(0);
+
+  // 2) 真人粘贴：Ctrl+V 之后输入框里就是那一串，灰因清单清空，执行按钮放开
+  const input = page.locator("#apply-confirmation-text");
+  await input.click();
+  await page.keyboard.press("Control+v");
+  await expect(input).toHaveValue(required);
+  const pasted = await page.evaluate(readConfirmation);
+  expect(pasted.blockers, "粘贴正确文本后仍列着灰掉原因").toEqual([]);
+  expect(pasted.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴正确文本却不放开执行按钮").toBe(false);
+
+  // 3) 粘贴带首尾空格：看不见，但不该算错（与手敲同口径）。
+  //    这里刻意用空格而不是换行——单行 input 的粘贴会先把 \n 吃掉（实测：写 `text\n`
+  //    粘进去读回就是 text），拿换行去验 trim 是条空转断言，摘掉 trim 也照样绿。
+  await page.evaluate((text) => navigator.clipboard.writeText(`  ${text}  `), required);
+  await input.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+  const pastedSpaces = await page.evaluate(readConfirmation);
+  expect(pastedSpaces.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴带首尾空格就过不去").toBe(false);
+  expect(pastedSpaces.blockers, "带空格的正确文本仍列着灰掉原因").toEqual([]);
+
+  // 3b) 带尾换行的那一串只验「粘贴不卡住」：换行由浏览器吃掉，不归应用管
+  await page.evaluate((text) => navigator.clipboard.writeText(`${text}\n`), required);
+  await input.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+  const pastedNewline = await page.evaluate(readConfirmation);
+  expect(pastedNewline.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴带尾换行就过不去").toBe(false);
+
+  // 4) 反向对照：粘贴路径不许绕开逐字比对——错文粘进去必须仍然灰着，且说的是「不一致」
+  await page.evaluate((text) => navigator.clipboard.writeText(`${text}x`), required);
+  await input.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+  const pastedWrong = await page.evaluate(readConfirmation);
+  expect(pastedWrong.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘错文本却给了执行按钮").toBe(true);
+  expect(pastedWrong.blockers.join("|"), "粘贴错文本时报的仍是「还没输入」").toContain("不一致");
 });
