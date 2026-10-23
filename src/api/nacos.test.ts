@@ -19,6 +19,8 @@ import {
   testConnection,
 } from "./nacos";
 import { StaleRequestError } from "./nacos";
+// R57 本机版本历史：加速器是模块单例，用例之间必须显式清零，否则上一条记下的服务端 md5 会让下一条直接省掉 IPC 调用。
+import { resetConfigRevisionAccelerator } from "../lib/configRevisions";
 import type { Connection } from "../store/connections";
 
 const goApp = {
@@ -47,6 +49,7 @@ const goApp = {
   GetSSHTunnelLocalPort: vi.fn(),
   StopSSHTunnel: vi.fn(),
   ReadSecureSecret: vi.fn(),
+  AppendConfigRevision: vi.fn(),
 };
 
 class MemoryStorage {
@@ -130,6 +133,9 @@ describe("nacos api compatibility bridge", () => {
       globalAdmin: true,
     });
     goApp.ReadSecureSecret.mockImplementation(async (ref: { field: string }) => `stored-${ref.field}`);
+    // 记历史默认成功：具体用例再改成 reject，或直接断言调用参数。
+    resetConfigRevisionAccelerator();
+    goApp.AppendConfigRevision.mockResolvedValue({ appended: true, reason: "appended", record: {} });
     vi.stubGlobal("go", {
       app: {
         App: goApp,
@@ -1138,6 +1144,129 @@ describe("nacos api compatibility bridge", () => {
       })
     );
     expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:13380/nacos" }));
+  });
+
+  describe("本机版本历史：读取出口顺手记一版（R57）", () => {
+    /** fire-and-forget 的绑定调用要等微任务跑完才看得见结果。 */
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    /** 让 configCenter 读取返回一版正文；md5 可省略（本地快照就没有这个字段）。 */
+    function mockDocument(conn: Connection, dataId: string, content: string, namespace = "public", md5?: string) {
+      goApp.ConfigCenterGetConfig.mockResolvedValue({
+        ref: expectedRef(conn, namespace, dataId, "DEFAULT_GROUP"),
+        content,
+        format: "yaml",
+        version: "",
+        source: "",
+        updateTime: "",
+        ...(md5 ? { md5 } : {}),
+      });
+    }
+
+    it("读到正文就记一版 observed，服务端 md5 原样带过去", async () => {
+      const conn = makeConnection("conn-rev-observe");
+      mockDocument(conn, "rev-observe.yaml", "server:\n  port: 8080\n", "public", "md5-from-server");
+
+      await getConfigDocument(conn, "public", "rev-observe.yaml", "DEFAULT_GROUP");
+      await settle();
+
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(1);
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "observed",
+          connectionId: "conn-rev-observe",
+          connectionName: "dev",
+          provider: "nacos",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "rev-observe.yaml",
+          content: "server:\n  port: 8080\n",
+          format: "yaml",
+          serverMd5: "md5-from-server",
+          planId: "",
+          // 版本号由 Go 侧补构建值：前端不许猜自己该叫什么版本。
+          appVersion: "",
+        })
+      );
+    });
+
+    it("getConfig 走的是同一个读取出口，同一版不会被记两遍", async () => {
+      const conn = makeConnection("conn-rev-once");
+      mockDocument(conn, "rev-once.yaml", "a: 1", "public", "md5-once");
+
+      await expect(getConfig(conn, "public", "rev-once.yaml", "DEFAULT_GROUP")).resolves.toBe("a: 1");
+      await settle();
+
+      expect(goApp.ConfigCenterGetConfig).toHaveBeenCalledTimes(1);
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(1);
+    });
+
+    it("服务端 md5 没变就不再重复落历史，变了才记新版", async () => {
+      const conn = makeConnection("conn-rev-md5");
+      const ref = expectedRef(conn, "public", "rev-md5.yaml", "DEFAULT_GROUP");
+      goApp.ConfigCenterGetConfig.mockResolvedValue({ ref, content: "a: 1", format: "yaml", md5: "md5-a" });
+
+      await getConfig(conn, "public", "rev-md5.yaml", "DEFAULT_GROUP");
+      await settle();
+      await getConfig(conn, "public", "rev-md5.yaml", "DEFAULT_GROUP");
+      await settle();
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(1);
+
+      goApp.ConfigCenterGetConfig.mockResolvedValue({ ref, content: "a: 2", format: "yaml", md5: "md5-b" });
+      await expect(getConfig(conn, "public", "rev-md5.yaml", "DEFAULT_GROUP")).resolves.toBe("a: 2");
+      await settle();
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(2);
+      expect(goApp.AppendConfigRevision).toHaveBeenLastCalledWith(expect.objectContaining({ content: "a: 2", serverMd5: "md5-b" }));
+    });
+
+    it("记历史失败不许影响这次读取", async () => {
+      const conn = makeConnection("conn-rev-reject");
+      mockDocument(conn, "rev-reject.yaml", "a: 1", "public", "md5-reject");
+      goApp.AppendConfigRevision.mockRejectedValue(new Error("revision store busy"));
+
+      await expect(getConfigDocument(conn, "public", "rev-reject.yaml", "DEFAULT_GROUP")).resolves.toEqual({
+        content: "a: 1",
+        format: "yaml",
+        version: "",
+        source: "",
+        updateTime: "",
+        md5: "md5-reject",
+      });
+      await settle();
+
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(1);
+    });
+
+    it("本地快照连接记的版本 provider 为 local 且没有服务端 md5", async () => {
+      const conn: Connection = {
+        ...makeConnection("conn-rev-local"),
+        sourceType: "local-snapshot",
+        localPath: "C:\\backup\\prod",
+        baseUrl: "C:\\backup\\prod",
+        username: "",
+        password: "",
+      };
+      mockDocument(conn, "rev-local.yaml", "a: 1", "");
+
+      await getConfigDocument(conn, "", "rev-local.yaml", "DEFAULT_GROUP");
+      await settle();
+
+      expect(goApp.AppendConfigRevision).toHaveBeenCalledTimes(1);
+      const input = goApp.AppendConfigRevision.mock.calls[0][0];
+      expect(input.provider).toBe("local");
+      expect(input.serverMd5).toBe("");
+      expect(input.namespace).toBe("");
+    });
+
+    it("dataId 为空时不发历史记录，读取照常", async () => {
+      const conn = makeConnection("conn-rev-blank");
+      mockDocument(conn, "", "a: 1");
+
+      await expect(getConfig(conn, "public", "", "DEFAULT_GROUP")).resolves.toBe("a: 1");
+      await settle();
+
+      expect(goApp.AppendConfigRevision).not.toHaveBeenCalled();
+    });
   });
 
   describe("listAllConfigs 聚合翻页", () => {

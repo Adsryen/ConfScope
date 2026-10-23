@@ -45,6 +45,9 @@ const (
 
 	// ReasonDuplicate 表示同一键的同一摘要已经记过，本次没写盘。
 	ReasonDuplicate = "duplicate"
+	// ReasonPromoted 表示同一版的「首见」被就地升级成「本程序写入」：
+	// 正文一个字节没变（摘要相同），变的是这一版的来历，因此不新起一条版本。
+	ReasonPromoted = "promoted"
 
 	keySeparator = "\x00"
 )
@@ -66,8 +69,11 @@ type Record struct {
 	Format         string `json:"format"`
 	Content        string `json:"content"`
 	ContentOmitted string `json:"contentOmittedReason"`
-	PlanID         string `json:"planId"`
-	AppVersion     string `json:"appVersion"`
+	// FirstSeenTS 只在 observed 被升级为 confirmed-write 时出现：正文是同一版，
+	// 首见时刻必须留着，否则界面只能拿到写入时间，「本机何时第一次看到」这条事实没了。
+	FirstSeenTS string `json:"firstSeenTs"`
+	PlanID      string `json:"planId"`
+	AppVersion  string `json:"appVersion"`
 }
 
 // Input 是前端提交的一条观测/写入事实。摘要、大小、超限裁剪、时间戳一律由本包决定，
@@ -132,6 +138,23 @@ func (r Record) Key() string {
 	return KeyOf(r.ConnectionID, r.Namespace, r.Group, r.DataID)
 }
 
+// promoteOutcome 是「这一版能否把来历就地升级成 confirmed-write」的四种结局。
+//
+// 拆成四态而不是 bool：判重跳过与升级失败是两回事——前者这一版已经在历史里，
+// 后者说明内存记忆和文件对不上，必须回落到「按新的一版落盘」，否则会静默丢掉一次写入确认。
+type promoteOutcome int
+
+const (
+	// promoteDone：已把这一版的 observed 就地升级为 confirmed-write。
+	promoteDone promoteOutcome = iota
+	// promoteAlreadyConfirmed：这一版本来就挂着写入确认，判重即可。
+	promoteAlreadyConfirmed
+	// promoteIndexIsStale：文件里本键最新一版是别的内容，加速器（内存 lastHash）过期。
+	promoteIndexIsStale
+	// promoteNoTrailForThisKey：文件里已经找不到这个键（被外部清空或裁剪掉）。
+	promoteNoTrailForThisKey
+)
+
 // Store 是版本日志的读写入口，内存索引（每键最后摘要 + 条数）只是加速器。
 //
 // 判据仍以文件为准：进程重启后索引丢了，最坏结果是多记一条重复，绝不会漏一版。
@@ -167,8 +190,27 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureLocked(dataDir)
-	if s.lastHash[key] == record.Hash {
+	if s.lastHash[key] == record.Hash && record.Kind == KindObserved {
 		return AppendResult{Appended: false, Reason: ReasonDuplicate, Record: record}, nil
+	}
+	if s.lastHash[key] == record.Hash {
+		// 摘要与上一版相同，但这一条是「本程序写的」：先试着把来历升级，而不是当重复丢掉。
+		outcome, err := s.promoteLocked(dataDir, key, record)
+		if err != nil {
+			return AppendResult{Record: record}, err
+		}
+		switch outcome {
+		case promoteDone:
+			return AppendResult{Appended: false, Reason: ReasonPromoted, Record: record}, nil
+		case promoteAlreadyConfirmed:
+			// 这一版已经挂着写入确认与 planId：重复执行同一份内容不再改写来历，也不新起一版。
+			return AppendResult{Appended: false, Reason: ReasonDuplicate, Record: record}, nil
+		default:
+			// 文件与本进程的记忆对不上（另一个实例写过这份日志，或日志被外部动过）：
+			// 判据回到文件，本次按新的一版落盘，并把索引按文件重建。
+			// 绝不允许回头改更老那一行——那会把时间序和「有人在别处改回上一版」这条事实抹掉。
+			s.reindexLocked(dataDir, readRecords(dataDir))
+		}
 	}
 	if err := appendLine(dataDir, record); err != nil {
 		return AppendResult{}, err
@@ -269,6 +311,43 @@ func (s *Store) GetFacts(dataDir string) Facts {
 	}
 	facts.Keys = len(keys)
 	return facts
+}
+
+// promoteLocked 把该键最后一条「同摘要的 observed」就地改成本条 confirmed-write 记录。
+//
+// 为什么必须允许动这一行：执行器写后回读走的是全站唯一读取出口，那一版会先以 observed
+// 落进历史；随后 recordConfirmedWrite 拿到同一摘要若只判重跳过，「这一版是本程序写的、
+// 对应哪个计划」这条最可靠的事实就永久丢了。正文没变（摘要一致），改的是来历与时间戳，
+// 不是伪造新版本；反过来 observed 永远不得覆盖 confirmed-write（降级会把 planId 回链弄丢）。
+func (s *Store) promoteLocked(dataDir string, key string, record Record) (promoteOutcome, error) {
+	records := readRecords(dataDir)
+	target := -1
+	for i := len(records) - 1; i >= 0; i-- {
+		if records[i].Key() != key {
+			continue
+		}
+		if records[i].Hash != record.Hash {
+			// 文件里本键最新一版与摘要不符：加速器过期了，按新版落盘。
+			return promoteIndexIsStale, nil
+		}
+		if records[i].Kind == KindConfirmedWrite {
+			// 这一版已经挂着写入确认与 planId，重复执行同一份内容不再动它。
+			return promoteAlreadyConfirmed, nil
+		}
+		target = i
+		break
+	}
+	if target < 0 {
+		return promoteNoTrailForThisKey, nil
+	}
+	// 保留这一版第一次被看到的时刻（R6 说实话）：kind 变了，首见时间不该被写入时间盖掉。
+	record.FirstSeenTS = records[target].TS
+	records[target] = record
+	if err := writeRecords(dataDir, records); err != nil {
+		return promoteDone, err
+	}
+	s.reindexLocked(dataDir, records)
+	return promoteDone, nil
 }
 
 // pruneLocked 必须在持有 s.mu 时调用。

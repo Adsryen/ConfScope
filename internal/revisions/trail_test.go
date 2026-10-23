@@ -491,7 +491,7 @@ func TestRecordsNeverCarryCredentials(t *testing.T) {
 	want := []string{
 		"schema", "ts", "kind", "connectionId", "connectionName", "provider",
 		"namespace", "group", "dataId", "hash", "serverMd5", "bytes", "format",
-		"content", "contentOmittedReason", "planId", "appVersion",
+		"content", "contentOmittedReason", "firstSeenTs", "planId", "appVersion",
 	}
 	if len(decoded) != len(want) {
 		t.Fatalf("字段数量漂移，实得 %d 期望 %d（keys=%v）", len(decoded), len(want), decoded)
@@ -500,5 +500,258 @@ func TestRecordsNeverCarryCredentials(t *testing.T) {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("缺少约定字段 %q", key)
 		}
+	}
+}
+
+// 执行器写后回读走的是全站唯一读取出口，那一版先以 observed 落进历史；
+// 若 confirmed-write 只按摘要判重跳过，「这版是本程序写的、对应哪个计划」就永久丢了。
+func TestConfirmedWritePromotesObservedSameVersion(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	const content = "gateway: on\n"
+	observed, err := store.Append(dir, observedInput(content))
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if !observed.Appended {
+		t.Fatalf("首见必须写盘")
+	}
+
+	written := observedInput(content)
+	written.Kind = KindConfirmedWrite
+	written.PlanID = "plan_mvkso08c_3t6xmv"
+	promoted, err := store.Append(dir, written)
+	if err != nil {
+		t.Fatalf("写入确认追加失败: %v", err)
+	}
+	if promoted.Reason != ReasonPromoted {
+		t.Fatalf("同一版必须走升级而不是新起一版，实得 reason=%q appended=%v", promoted.Reason, promoted.Appended)
+	}
+	if promoted.Appended {
+		t.Fatalf("升级不新增条目")
+	}
+	lines := readLines(t, dir)
+	if len(lines) != 1 {
+		t.Fatalf("同一版不得攒出两条，实得 %d 条", len(lines))
+	}
+
+	records := store.Read(dir, 0)
+	if len(records) != 1 {
+		t.Fatalf("读回应当 1 条，实得 %d", len(records))
+	}
+	rec := records[0]
+	if rec.Kind != KindConfirmedWrite {
+		t.Fatalf("这一版必须挂上写入确认，实得 %q", rec.Kind)
+	}
+	if rec.PlanID != "plan_mvkso08c_3t6xmv" {
+		t.Fatalf("planId 回链丢了，实得 %q", rec.PlanID)
+	}
+	if rec.Hash != observed.Record.Hash {
+		t.Fatalf("正文没变，摘要不许变")
+	}
+	// R6：升级把 kind 改了，但「本机第一次看到这一版」的时刻必须留下来说实话
+	if rec.FirstSeenTS != observed.Record.TS {
+		t.Fatalf("首见时刻必须保留，实得 %q 期望 %q", rec.FirstSeenTS, observed.Record.TS)
+	}
+
+	// 再执行一次同样内容：既不新起版本，也不重复改写来历
+	again, err := store.Append(dir, written)
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if again.Reason != ReasonDuplicate || again.Appended {
+		t.Fatalf("重复的写入确认应当判重，实得 appended=%v reason=%q", again.Appended, again.Reason)
+	}
+	if got := len(readLines(t, dir)); got != 1 {
+		t.Fatalf("重复执行不得放大写入，实得 %d 行", got)
+	}
+}
+
+func TestObservedNeverDowngradesConfirmedWrite(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	const content = "gateway: on\n"
+	written := observedInput(content)
+	written.Kind = KindConfirmedWrite
+	written.PlanID = "plan_first"
+	if _, err := store.Append(dir, written); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+
+	// 之后任何一次普通读取都拿到同一份正文：不许把来历改回 observed，更不许丢 planId
+	res, err := store.Append(dir, observedInput(content))
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if res.Appended || res.Reason != ReasonDuplicate {
+		t.Fatalf("observed 重复读同一版应当判重跳过，实得 appended=%v reason=%q", res.Appended, res.Reason)
+	}
+	records := store.Read(dir, 0)
+	if len(records) != 1 {
+		t.Fatalf("应当只有 1 条，实得 %d", len(records))
+	}
+	if records[0].Kind != KindConfirmedWrite || records[0].PlanID != "plan_first" {
+		t.Fatalf("来历被降级了：kind=%q planId=%q", records[0].Kind, records[0].PlanID)
+	}
+}
+
+func TestPromotionSurvivesRestartAndKeepsOlderVersions(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	if _, err := store.Append(dir, observedInput("v1\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if _, err := store.Append(dir, observedInput("v2\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+
+	// 进程重启后索引靠文件重建：升级仍须命中同一版，且不许动更早那版
+	restarted := NewStore()
+	write := observedInput("v2\n")
+	write.Kind = KindConfirmedWrite
+	write.PlanID = "plan_v2"
+	res, err := restarted.Append(dir, write)
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if res.Reason != ReasonPromoted {
+		t.Fatalf("重启后仍须认出同一版并升级，实得 reason=%q", res.Reason)
+	}
+	records := restarted.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	if len(records) != 2 {
+		t.Fatalf("两个版本必须都在，实得 %d", len(records))
+	}
+	if records[0].Kind != KindConfirmedWrite || records[0].Content != "v2\n" {
+		t.Fatalf("升级落在最新那版，实得 kind=%q content=%q", records[0].Kind, records[0].Content)
+	}
+	if records[1].Kind != KindObserved || records[1].Content != "v1\n" {
+		t.Fatalf("更早那版不许被碰，实得 kind=%q content=%q", records[1].Kind, records[1].Content)
+	}
+}
+
+func TestPromotionOnlyAppliesToTheSameKey(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	if _, err := store.Append(dir, observedInput("shared\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	// 另一个连接读到同一份正文：那是另一条配置的另一版，不许跨键升级
+	other := observedInput("shared\n")
+	other.ConnectionID = "conn-b"
+	other.DataID = "other.yml"
+	write := other
+	write.Kind = KindConfirmedWrite
+	write.PlanID = "plan-b"
+	res, err := store.Append(dir, write)
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if !res.Appended {
+		t.Fatalf("不同键必须各自成版，实得 reason=%q", res.Reason)
+	}
+	if got := len(store.Read(dir, 0)); got != 2 {
+		t.Fatalf("应当有 2 条，实得 %d", got)
+	}
+	if a := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0); len(a) != 1 || a[0].Kind != KindObserved {
+		t.Fatalf("conn-a 那版被别的键的写入确认改掉了")
+	}
+}
+
+// 两份配置正文完全一样时，"最新那一行"可能属于另一个键：升级必须只落在本键上。
+func TestPromotionDoesNotCrossKeysWhenContentIsIdentical(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	if _, err := store.Append(dir, observedInput("shared\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	other := observedInput("shared\n")
+	other.ConnectionID = "conn-b"
+	other.DataID = "other.yml"
+	if _, err := store.Append(dir, other); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+
+	// conn-a 的加速器认得这一版，文件里最新那行却属于 conn-b：此时最容易被误改
+	write := observedInput("shared\n")
+	write.Kind = KindConfirmedWrite
+	write.PlanID = "plan-a"
+	res, err := store.Append(dir, write)
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if res.Reason != ReasonPromoted {
+		t.Fatalf("应当升级 conn-a 自己那一版，实得 reason=%q", res.Reason)
+	}
+
+	a := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	if len(a) != 1 || a[0].Kind != KindConfirmedWrite || a[0].PlanID != "plan-a" {
+		t.Fatalf("conn-a 没拿到写入确认：len=%d kind=%q planId=%q", len(a), a[0].Kind, a[0].PlanID)
+	}
+	b := store.ReadKey(dir, "conn-b", "public", "DEFAULT_GROUP", "other.yml", 0)
+	if len(b) != 1 || b[0].Kind != KindObserved || b[0].PlanID != "" {
+		t.Fatalf("conn-b 那版被别的键改写了：kind=%q planId=%q", b[0].Kind, b[0].PlanID)
+	}
+	if got := len(readLines(t, dir)); got != 2 {
+		t.Fatalf("升级不许新增条目，实得 %d 行", got)
+	}
+}
+
+// 加速器（内存 lastHash）过期时不能靠它改写更老的那一行：宁可多落一条，也不许把时间序弄乱。
+//
+// 场景是真的：本程序写完 v2 之后，有人在别处把这版配置改回了 v1（这里用直接落盘模拟外部写入）。
+func TestPromotionRefusesWhenNewestVersionIsNotTheSame(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore()
+	if _, err := store.Append(dir, observedInput("v1\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if _, err := store.Append(dir, observedInput("v2\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+
+	reverted, err := buildRecord(observedInput("v1\n"))
+	if err != nil {
+		t.Fatalf("构造外部回退记录失败: %v", err)
+	}
+	if err := appendLine(dir, reverted); err != nil {
+		t.Fatalf("模拟外部回退失败: %v", err)
+	}
+
+	write := observedInput("v2\n")
+	write.Kind = KindConfirmedWrite
+	write.PlanID = "plan-write"
+	res, err := store.Append(dir, write)
+	if err != nil {
+		t.Fatalf("追加失败: %v", err)
+	}
+	if res.Reason == ReasonPromoted || !res.Appended {
+		t.Fatalf("最新一版已经不是 v2，必须新落一条而不是回头改旧行，实得 appended=%v reason=%q", res.Appended, res.Reason)
+	}
+
+	records := store.ReadKey(dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
+	if len(records) != 4 {
+		t.Fatalf("四个时刻都要在（v1 / v2 / 外部回退到 v1 / 本程序写 v2），实得 %d", len(records))
+	}
+	if records[0].Kind != KindConfirmedWrite || records[0].Content != "v2\n" || records[0].PlanID != "plan-write" {
+		t.Fatalf("最新一条应是本次写入确认，实得 kind=%q content=%q", records[0].Kind, records[0].Content)
+	}
+	if records[1].Kind != KindObserved || records[1].Content != "v1\n" {
+		t.Fatalf("那条外部回退不许被改动，实得 kind=%q content=%q", records[1].Kind, records[1].Content)
+	}
+	if records[2].Kind != KindObserved || records[2].Content != "v2\n" || records[2].FirstSeenTS != "" {
+		t.Fatalf("更早那版 v2 必须仍是 observed 且不带首见时刻，实得 kind=%q firstSeenTs=%q", records[2].Kind, records[2].FirstSeenTS)
+	}
+
+	// 重建索引不只是这一键的最后摘要，条数也要跟上文件：
+	// 否则自动裁剪的配额会被外部写入骗过去，这份日志只涨不落。
+	if got := store.counts[KeyOf("conn-a", "public", "DEFAULT_GROUP", "app.yml")]; got != len(records) {
+		t.Fatalf("加速器里的条数要按文件重建，实得 %d 期望 %d", got, len(records))
+	}
+
+	// 索引已按文件重建：再读一次同一版不该多出重复条目
+	if again, err := store.Append(dir, observedInput("v2\n")); err != nil {
+		t.Fatalf("追加失败: %v", err)
+	} else if again.Appended || again.Reason != ReasonDuplicate {
+		t.Fatalf("重建索引后判重仍须成立，实得 appended=%v reason=%q", again.Appended, again.Reason)
 	}
 }

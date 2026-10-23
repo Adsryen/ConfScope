@@ -27,6 +27,7 @@ import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "./concurrency";
 import { normalizeConfig } from "./normalize";
 import { translate } from "../locales";
 import { errorText } from "./errorText";
+import { recordConfirmedWrite } from "./configRevisions";
 import { normalizeNamespace, type ConfigChangeNotice, type ConfigChangeRef } from "./configChangeBus";
 
 const PROTECTED_TARGET_MARKERS = ["uat", "prod", "production", "生产", "真实", "线上"] as const;
@@ -288,18 +289,26 @@ function valueFromDocument(item: ApplyPlanItem, document: ConfigDocument, ref = 
   return ref.key === DOCUMENT_KEY ? documentValue(item, document, ref) : keyValue(item, document, ref);
 }
 
-async function readCurrentValue(
+/**
+ * 现值 + 读回的那份正文。
+ *
+ * 为什么要把 document 一起交出去：写后回读确认（R55-B1）拿到的整篇正文，正是本机版本历史
+ * 要记的那一版（R57）。只回传派生出来的 value 的话，key 级写入那条路只能拿到单个 key 的值，
+ * 记不进「这一版的完整正文」。读取失败与 404 的语义仍由 readCurrentValue 统一收口。
+ */
+async function readCurrentValueWithDocument(
   item: ApplyPlanItem,
   conn: Connection,
   role: "source" | "target",
   deps: ExecuteApplyPlanDeps
-): Promise<ApplyPlanValueInput> {
+): Promise<{ value: ApplyPlanValueInput; document?: ConfigDocument }> {
   const ref = role === "source" ? sourceRef(item) : targetRef(item);
   try {
     const document = await deps.getConfigDocument(conn, ref.namespace, ref.dataId, ref.group);
-    return valueFromDocument(item, document, ref);
+    return { value: valueFromDocument(item, document, ref), document };
   } catch (error) {
-    if (isMissingConfigError(error)) return missingValue(item, ref);
+    // 404 归成「不存在」：这时手里没有正文，本机历史也就没有可记的一版（不是漏记，是确实没读到）。
+    if (isMissingConfigError(error)) return { value: missingValue(item, ref) };
     throw new Error(
       translate("apply.readConfigFailed", {
         role: translate(role === "source" ? "apply.source" : "apply.target"),
@@ -308,6 +317,16 @@ async function readCurrentValue(
       })
     );
   }
+}
+
+/** 只要派生值的地方走这颗薄封装，语义与改动前完全一致。 */
+async function readCurrentValue(
+  item: ApplyPlanItem,
+  conn: Connection,
+  role: "source" | "target",
+  deps: ExecuteApplyPlanDeps
+): Promise<ApplyPlanValueInput> {
+  return (await readCurrentValueWithDocument(item, conn, role, deps)).value;
 }
 
 async function readBeforeSnapshot(
@@ -506,15 +525,18 @@ async function verifyWrittenWrite(
   write: PlannedWrite,
   targetConnection: Connection,
   deps: ExecuteApplyPlanDeps
-): Promise<ApplyWriteVerdict> {
+): Promise<{ verdict: ApplyWriteVerdict; document?: ConfigDocument }> {
   let current: ApplyPlanValueInput;
+  let document: ConfigDocument | undefined;
   try {
-    current = await readCurrentValue(item, targetConnection, "target", deps);
+    const readBack = await readCurrentValueWithDocument(item, targetConnection, "target", deps);
+    current = readBack.value;
+    document = readBack.document;
   } catch {
     // readCurrentValue 已经把 404 归成「不存在」，走到这儿只剩读取本身失败
-    return "unreadable";
+    return { verdict: "unreadable" };
   }
-  return writeMatchesReadBack(write, current) ? "confirmed" : "drifted";
+  return { verdict: writeMatchesReadBack(write, current) ? "confirmed" : "drifted", document };
 }
 
 /**
@@ -529,16 +551,26 @@ export async function verifyWrittenWrites(
   written: WrittenWrite[],
   targetConnection: Connection,
   deps: ExecuteApplyPlanDeps,
-  options: ExecuteApplyPlanOptions
+  options: ExecuteApplyPlanOptions,
+  planId = ""
 ): Promise<ApplyWriteVerification | undefined> {
   if (!written.length) return undefined;
   const delays = options.verifyDelaysMs?.length ? options.verifyDelaysMs : [...WRITE_VERIFY_DELAYS_MS];
   const items = await mapWithConcurrency(written, BATCH_READ_CONCURRENCY, async ({ write, refLabel }) => {
     let verdict: ApplyWriteVerdict = "unreadable";
+    let document: ConfigDocument | undefined;
     for (const delay of delays) {
       await sleep(delay);
-      verdict = await verifyWrittenWrite(write.item, write, targetConnection, deps);
+      const checked = await verifyWrittenWrite(write.item, write, targetConnection, deps);
+      verdict = checked.verdict;
+      document = checked.document;
       if (verdict === "confirmed") break;
+    }
+    if (verdict === "confirmed" && document) {
+      // R57：回读确认过的那一版才是「本程序写的」。这里挂上 planId，
+      // Go 侧会把刚才回读时以 observed 落下的同一版就地升级（promote），不会攒出重复版本。
+      const ref = targetRef(write.item);
+      recordConfirmedWrite(targetConnection, { namespace: ref.namespace, group: ref.group, dataId: ref.dataId }, document, planId);
     }
     return { ref: refLabel, verdict };
   });
@@ -773,7 +805,7 @@ export async function executeApplyPlan(
     } catch (error) {
       // 部分写入：失败项之前落成功的那些已经改过服务端了，先回读确认它们到底生效没有，
       // 再广播失效——回读排在广播之前，免得保活视图在可见窗口里重取到旧值。
-      const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options);
+      const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
       notifyConfigsChanged();
       return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, true, {
         completedWrites,
@@ -783,7 +815,7 @@ export async function executeApplyPlan(
       }, verification);
     }
 
-    const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options);
+    const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
     const history = deps.recordOperation(safety.historyInput);
     deps.taskManager.completeTask(taskId, true);
     notifyConfigsChanged();

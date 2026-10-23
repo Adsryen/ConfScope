@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Connection } from "../store/connections";
 import type { ConfigDocument } from "../api/nacos";
 import type { OperationRecord } from "../store/operationHistory";
@@ -1432,5 +1432,182 @@ describe("executeApplyPlan 写后回读验证", () => {
     expect("verification" in result).toBe(false);
     // 目标侧只有批量新鲜度一次读取，没有写前快照、没有复检、没有回读
     expect(runDeps.getConfigDocument.mock.calls.filter((call: unknown[]) => (call[0] as Connection).id === "conn-prod")).toHaveLength(1);
+  });
+});
+
+describe("本机版本历史：只有写后回读确认才算本程序写的那一版（R57）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** 装一颗绑定替身并把调用抓下来：这一层没有别的出口，只能按真接线打桩。 */
+  function captureRevisions(opts: { reject?: boolean } = {}) {
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("window", {
+      go: {
+        app: {
+          App: {
+            AppendConfigRevision: (input: Record<string, unknown>) => {
+              calls.push(input);
+              return opts.reject ? Promise.reject(new Error("本机历史写不进去")) : Promise.resolve({ appended: true, reason: "", record: {} });
+            },
+          },
+        },
+      },
+    });
+    return calls;
+  }
+
+  /** fire-and-forget：等一个宏任务让绑定的 then/catch 跑完。 */
+  async function settle() {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  /** 让 conn-prod 从第 fromCall 次读起固定拿到指定正文（用来造 drifted / unreadable）。 */
+  function depsWithForcedTargetRead(
+    documents: Record<string, ConfigDocument | null>,
+    options: { dataId: string; fromCall: number; content?: string; throwOnRead?: boolean }
+  ) {
+    const runDeps = deps(documents);
+    const original = runDeps.getConfigDocument;
+    let targetReads = 0;
+    runDeps.getConfigDocument = vi.fn(async (conn: Connection, namespace: string, dataId: string, group: string) => {
+      if (conn.id === "conn-prod" && dataId === options.dataId) {
+        targetReads += 1;
+        if (targetReads >= options.fromCall) {
+          if (options.throwOnRead) throw new Error("500 Internal Server Error");
+          return doc(options.content ?? "someone-else-changed-it", "yaml", `forced-${targetReads}`);
+        }
+      }
+      return original(conn, namespace, dataId, group);
+    });
+    return runDeps;
+  }
+
+  it("整篇写入确认后记 confirmed-write：带 planId、归属与写后的完整正文", async () => {
+    const calls = captureRevisions();
+    const plan = applyPlan([{ ref: ref("history.yaml"), sourceValue: documentValue("gateway: on\n"), targetValue: absentValue() }]);
+    const result = await executeApplyPlan(plan, deps({ "conn-dev:history.yaml": doc("gateway: on\n") }), { verifyDelaysMs: [0, 0] });
+
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    expect(result.verification).toMatchObject({ total: 1, confirmedCount: 1 });
+    await settle();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toMatchObject({
+      kind: "confirmed-write",
+      connectionId: "conn-prod",
+      provider: "nacos",
+      namespace: "public",
+      group: "DEFAULT_GROUP",
+      dataId: "history.yaml",
+      content: "gateway: on\n",
+      planId: "plan-1",
+    });
+  });
+
+  it("key 级写入记整篇正文与真实 provider，不记单个 key 的值", async () => {
+    const calls = captureRevisions();
+    const apolloTarget: Connection = { ...targetConnection, id: "apollo-prod", provider: "apollo", apolloEnv: "DEV" };
+    const apolloSource: Connection = { ...sourceConnection, id: "apollo-dev", provider: "apollo", apolloEnv: "DEV" };
+    const keyRef: BuildApplyPlanInput["items"][number]["ref"] = {
+      provider: "apollo",
+      connectionId: "apollo-prod",
+      namespace: "order-service",
+      group: "default",
+      dataId: "application",
+      key: "feature.enabled",
+    };
+    const plan = buildApplyPlan({
+      id: "plan-apollo-revision",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      scope: "key",
+      source: planEndpoint(apolloSource, "Apollo Dev / application"),
+      target: planEndpoint(apolloTarget, "Apollo Prod / application"),
+      inputSummary: {
+        sourceType: "audit",
+        scope: "key",
+        sourceLabel: "Apollo Dev / application",
+        targetLabel: "Apollo Prod / application",
+        selectedCount: 1,
+      },
+      items: [
+        {
+          ref: keyRef,
+          sourceRef: { ...keyRef, connectionId: "apollo-dev" },
+          targetRef: keyRef,
+          sourceValue: { exists: true, value: "enabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+          targetValue: { exists: true, value: "disabled", valueType: "string", format: "Properties", parseStatus: "ok" },
+        },
+      ],
+    });
+    const runDeps = deps({
+      "apollo-dev:application": doc("feature.enabled=enabled", "properties"),
+      "apollo-prod:application": doc("feature.enabled=disabled", "properties"),
+    });
+    runDeps.connections = [apolloSource, apolloTarget];
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0, 0] });
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    await settle();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toMatchObject({
+      kind: "confirmed-write",
+      connectionId: "apollo-prod",
+      provider: "apollo",
+      namespace: "order-service",
+      group: "default",
+      dataId: "application",
+      planId: "plan-apollo-revision",
+    });
+    // 整篇正文：只记这一项的值会让人以为配置只剩这一行
+    expect(calls[0].content).toBe("feature.enabled=enabled");
+    expect(calls[0].content).not.toBe("enabled");
+  });
+
+  it("drifted 不算本程序写成的那一版：没确认就不许记 confirmed-write", async () => {
+    const calls = captureRevisions();
+    const plan = applyPlan([{ ref: ref("drift.yaml"), sourceValue: documentValue("new"), targetValue: absentValue() }]);
+    const runDeps = depsWithForcedTargetRead({ "conn-dev:drift.yaml": doc("new") }, { dataId: "drift.yaml", fromCall: 4 });
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0, 0] });
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    expect(result.verification).toMatchObject({ total: 1, confirmedCount: 0, drifted: ["public/DEFAULT_GROUP/drift.yaml"] });
+    await settle();
+
+    expect(calls.length).toBe(0);
+  });
+
+  it("回读不通（unreadable）也不记：确认不了就是确认不了", async () => {
+    const calls = captureRevisions();
+    const plan = applyPlan([{ ref: ref("dark.yaml"), sourceValue: documentValue("new"), targetValue: absentValue() }]);
+    const runDeps = depsWithForcedTargetRead({ "conn-dev:dark.yaml": doc("new") }, { dataId: "dark.yaml", fromCall: 4, throwOnRead: true });
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0, 0] });
+    if (!result.ok || "dryRun" in result) throw new Error("expected execution to succeed");
+    await settle();
+
+    expect(calls.length).toBe(0);
+  });
+
+  it("dry-run 一条都不记：还没写就不存在「本程序写的那一版」", async () => {
+    const calls = captureRevisions();
+    const plan = applyPlan([{ ref: ref("dry.yaml"), sourceValue: documentValue("new"), targetValue: absentValue() }]);
+    const result = await executeApplyPlan(plan, deps({ "conn-dev:dry.yaml": doc("new") }), { dryRun: true });
+
+    expect(result.ok).toBe(true);
+    await settle();
+    expect(calls.length).toBe(0);
+  });
+
+  it("本机历史写不进去时执行照常成功：记不上是日志问题，不是写入失败", async () => {
+    const calls = captureRevisions({ reject: true });
+    const plan = applyPlan([{ ref: ref("boom.yaml"), sourceValue: documentValue("new"), targetValue: absentValue() }]);
+    const result = await executeApplyPlan(plan, deps({ "conn-dev:boom.yaml": doc("new") }), { verifyDelaysMs: [0, 0] });
+
+    expect(result.ok).toBe(true);
+    await settle();
+    expect(calls.length).toBe(1);
   });
 });

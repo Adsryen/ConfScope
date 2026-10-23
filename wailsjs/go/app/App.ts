@@ -25,6 +25,12 @@ type GoApp = {
   AppendAuditEvent(raw: string): Promise<void>;
   ClearAuditTrail(): Promise<void>;
   ReadAuditLogLines(limit: number): Promise<string[]>;
+  AppendConfigRevision(input: ConfigRevisionInput): Promise<ConfigRevisionAppendResult>;
+  ReadConfigRevisions(limit: number): Promise<ConfigRevisionRecord[]>;
+  ReadConfigRevisionsForKey(connectionID: string, namespace: string, group: string, dataID: string, limit: number): Promise<ConfigRevisionRecord[]>;
+  PruneConfigRevisions(keepPerKey: number): Promise<number>;
+  ClearConfigRevisions(): Promise<void>;
+  GetConfigRevisionFacts(): Promise<ConfigRevisionFacts>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   SelectConfigSourceExportDirectory(): Promise<string>;
@@ -270,6 +276,64 @@ export interface AppDataDocumentStatus {
   error: string;
 }
 
+// ── 本机配置版本历史（internal/revisions，R57）──
+// 手维护的绑定声明：字段名与 Go 侧 Record/Input 的 json tag 逐字对齐，
+// 加字段必须同时改 internal/revisions/trail.go 与它的字段清单测试。
+
+/** 前端提交的一条观测/写入事实：摘要、大小、超限裁剪、时间戳由 Go 决定，前端只说实话。 */
+export interface ConfigRevisionInput {
+  kind: string;
+  connectionId: string;
+  connectionName: string;
+  provider: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+  content: string;
+  format: string;
+  serverMd5: string;
+  planId: string;
+  appVersion: string;
+}
+
+export interface ConfigRevisionRecord {
+  schema: number;
+  ts: string;
+  kind: string;
+  connectionId: string;
+  connectionName: string;
+  provider: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+  hash: string;
+  serverMd5: string;
+  bytes: number;
+  format: string;
+  content: string;
+  contentOmittedReason: string;
+  /** 仅在本版由 observed 升级为 confirmed-write 时出现：首见时刻不许被写入时刻盖掉。 */
+  firstSeenTs: string;
+  planId: string;
+  appVersion: string;
+}
+
+export interface ConfigRevisionAppendResult {
+  appended: boolean;
+  /** duplicate = 同一版已记过（常态）；promoted = 同一版的来历就地升级为写入确认。 */
+  reason: string;
+  record: ConfigRevisionRecord;
+}
+
+export interface ConfigRevisionFacts {
+  path: string;
+  exists: boolean;
+  records: number;
+  sizeBytes: number;
+  keys: number;
+  keepPerKey: number;
+}
+
 declare global {
   interface Window {
     go: {
@@ -319,6 +383,14 @@ export const AppendAuditEvent = (raw: string) => app().AppendAuditEvent(raw);
 export const ClearAuditTrail = () => app().ClearAuditTrail();
 
 export const ReadAuditLogLines = (limit: number) => app().ReadAuditLogLines(limit);
+
+export const AppendConfigRevision = (input: ConfigRevisionInput) => app().AppendConfigRevision(input);
+export const ReadConfigRevisions = (limit: number) => app().ReadConfigRevisions(limit);
+export const ReadConfigRevisionsForKey = (connectionID: string, namespace: string, group: string, dataID: string, limit: number) =>
+  app().ReadConfigRevisionsForKey(connectionID, namespace, group, dataID, limit);
+export const PruneConfigRevisions = (keepPerKey: number) => app().PruneConfigRevisions(keepPerKey);
+export const ClearConfigRevisions = () => app().ClearConfigRevisions();
+export const GetConfigRevisionFacts = () => app().GetConfigRevisionFacts();
 
 export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
 

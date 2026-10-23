@@ -30,6 +30,7 @@ import { connectionSSHConfig } from "../store/sshProfiles";
 import { nacosAuthUsesAccessKey, nacosRequestSignRequested } from "../lib/nacosSigning";
 import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
 import { effectiveProvider } from "../lib/configCapabilities";
+import { observeLoadedDocument } from "../lib/configRevisions";
 import { errorText } from "../lib/errorText";
 
 // ── SSH 隧道缓存：按连接 id 缓存隧道的本地 baseUrl ──
@@ -658,7 +659,12 @@ export async function getConfig(conn: Connection, namespace: string, dataId: str
 export async function getConfigDocument(conn: Connection, namespace: string, dataId: string, group: string): Promise<ConfigDocument> {
   return withProfile(conn, async (profile) => {
     const document = await configCenterGetConfig(profile, toConfigRef(conn, namespace, dataId, group));
-    return fromConfigCenterDocument(document);
+    const loaded = fromConfigCenterDocument(document);
+    // R57 本机版本历史：读到正文就是「本机见过这一版」。这是全站唯一的读取出口，
+    // 配置浏览 / 计划生成 / 写后回读 / 操作历史详情都从这儿过，所以写入点只需这一处。
+    // observeLoadedDocument 内部吞掉所有异常，记不上历史绝不会影响这次读取。
+    observeLoadedDocument(conn, { namespace, group, dataId }, loaded);
+    return loaded;
   });
 }
 
