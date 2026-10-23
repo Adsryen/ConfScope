@@ -525,6 +525,34 @@ describe("SettingsView", () => {
     expect(screen.getByText("Never checked")).toBeInTheDocument();
   });
 
+  // ── 轮67 R67-WP3b：点索引要把焦点交给目标章节 ──
+
+  it("点索引把焦点交给目标章节，读屏念得出章节名", () => {
+    renderSettings("en-US");
+    const backup = document.getElementById("settings-backup") as HTMLElement;
+    expect(backup).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Backup" }));
+
+    expect(document.activeElement).toBe(backup);
+    expect(backup).toHaveAccessibleName("Backup");
+  });
+
+  it("每一节都有可聚焦目标与标题关联，索引点了不会把焦点丢在无名容器上", () => {
+    renderSettings("en-US");
+    const sections = Array.from(document.querySelectorAll<HTMLElement>(".settings-panels section[id^='settings-']"));
+    expect(sections.length).toBe(8);
+    sections.forEach((section) => {
+      expect(section, `${section.id} 不能被设为焦点目标`).toHaveAttribute("tabindex", "-1");
+      const labelId = section.getAttribute("aria-labelledby");
+      expect(labelId, `${section.id} 没有标题关联`).toBeTruthy();
+      const heading = document.getElementById(labelId as string);
+      expect(heading, `${section.id} 指向的 ${labelId} 不存在`).not.toBeNull();
+      expect(heading!.tagName).toBe("H4");
+      expect(heading!.textContent?.trim()).not.toBe("");
+    });
+  });
+
   it("degrades without crashing when the runtime layout binding is absent", async () => {
     // 旧 Go 二进制没有新方法：调用同步抛错，界面仍要能列出数据位置
     dataLocMocks.GetRuntimeLayout.mockImplementation(() => {

@@ -174,10 +174,16 @@ export default function SettingsView() {
     if (!container || !target) return;
     const containerTop = container.getBoundingClientRect().top;
     const targetTop = target.getBoundingClientRect().top;
-    container.scrollTo({
-      top: container.scrollTop + targetTop - containerTop,
-      behavior: scrollBehavior(),
-    });
+    // 老 WebView 没有 Element.prototype.scrollTo：缺它也只放弃滚动，焦点交接照做。
+    if (typeof container.scrollTo === "function") {
+      container.scrollTo({
+        top: container.scrollTop + targetTop - containerTop,
+        behavior: scrollBehavior(),
+      });
+    }
+    // 焦点交给目标章节：点索引后读屏要念出章节名，Tab 也从这一节继续，而不是留在左栏按钮上。
+    // preventScroll：位置已由上面定过，别让浏览器再滚一次。
+    target.focus({ preventScroll: true });
   };
 
   const runCredentialMigration = async () => {
@@ -354,9 +360,9 @@ export default function SettingsView() {
         </aside>
 
         <div ref={panelsRef} className="settings-panels">
-          <section id="settings-general" className="settings-panel">
+          <section id="settings-general" className="settings-panel" tabIndex={-1} aria-labelledby="settings-general-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.groupBasic")}</h4>
+              <h4 id="settings-general-title">{t("settings.groupBasic")}</h4>
               <div className="settings-panel-description">{t("settings.generalDescription")}</div>
             </div>
             <label className="settings-setting-row">
@@ -366,9 +372,9 @@ export default function SettingsView() {
             <div className="settings-panel-note">{t("settings.connectionScopedNote")}</div>
           </section>
 
-          <section id="settings-network" className="settings-panel">
+          <section id="settings-network" className="settings-panel" tabIndex={-1} aria-labelledby="settings-network-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.groupNetwork")}</h4>
+              <h4 id="settings-network-title">{t("settings.groupNetwork")}</h4>
               <div className="settings-panel-description">{t("settings.networkDescription")}</div>
             </div>
             <div className="settings-proxy-grid">
@@ -405,9 +411,9 @@ export default function SettingsView() {
             </div>
           </section>
 
-          <section id="settings-compare" className="settings-panel">
+          <section id="settings-compare" className="settings-panel" tabIndex={-1} aria-labelledby="settings-compare-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.comparePreferences")}</h4>
+              <h4 id="settings-compare-title">{t("settings.comparePreferences")}</h4>
               <div className="settings-panel-description">{t("settings.compareDescription")}</div>
             </div>
             <label className="settings-setting-row">
@@ -428,9 +434,9 @@ export default function SettingsView() {
             </label>
           </section>
 
-          <section id="settings-credentials" className="settings-panel">
+          <section id="settings-credentials" className="settings-panel" tabIndex={-1} aria-labelledby="settings-credentials-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.credentials")}</h4>
+              <h4 id="settings-credentials-title">{t("settings.credentials")}</h4>
               <div className="settings-panel-description">{t("settings.credentialsDescription")}</div>
             </div>
             <div className="settings-setting-row">
@@ -465,9 +471,9 @@ export default function SettingsView() {
             {credentialError && <InlineError title={t("settings.credentialMigrationFailed")} message={credentialError} />}
           </section>
 
-          <section id="settings-backup" className="settings-panel settings-backup-panel">
+          <section id="settings-backup" className="settings-panel settings-backup-panel" tabIndex={-1} aria-labelledby="settings-backup-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.backup")}</h4>
+              <h4 id="settings-backup-title">{t("settings.backup")}</h4>
               <div className="settings-panel-description">{t("settings.backupDescription")}</div>
             </div>
             {docInfo && (
@@ -509,9 +515,9 @@ export default function SettingsView() {
             </div>
           </section>
 
-          <section id="settings-data-locations" className="settings-panel">
+          <section id="settings-data-locations" className="settings-panel" tabIndex={-1} aria-labelledby="settings-data-locations-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.dataLocations")}</h4>
+              <h4 id="settings-data-locations-title">{t("settings.dataLocations")}</h4>
               <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
             </div>
             {/* 运行形态：便携版跟着 exe 走、安装版落系统用户数据目录，出问题时第一件要看的就是
@@ -598,9 +604,9 @@ export default function SettingsView() {
               </div>
             )}
           </section>
-          <section id="settings-update" className="settings-panel">
+          <section id="settings-update" className="settings-panel" tabIndex={-1} aria-labelledby="settings-update-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.update")}</h4>
+              <h4 id="settings-update-title">{t("settings.update")}</h4>
               <div className="settings-panel-description">{t("settings.updateDescription")}</div>
             </div>
             <div className="settings-setting-row">
@@ -634,9 +640,9 @@ export default function SettingsView() {
             </div>
           </section>
 
-          <section id="settings-developer" className="settings-panel">
+          <section id="settings-developer" className="settings-panel" tabIndex={-1} aria-labelledby="settings-developer-title">
             <div className="settings-panel-head">
-              <h4>{t("settings.developer")}</h4>
+              <h4 id="settings-developer-title">{t("settings.developer")}</h4>
               <div className="settings-panel-description">{t("settings.developerDescription")}</div>
             </div>
             <div className="settings-setting-row">
