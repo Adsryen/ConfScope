@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { formatDateTime } from "../lib/formatDateTime";
+import { clearViewState, readViewState, writeViewState } from "../lib/viewState";
 import SettingsView from "./SettingsView";
 
 const credentialMocks = vi.hoisted(() => ({
@@ -155,6 +156,27 @@ class MemoryStorage {
   setItem(key: string, value: string) {
     this.values.set(key, value);
   }
+}
+
+/**
+ * jsdom 没有布局引擎：原生 scrollTop 赋值是空操作，测不出「滚→卸载→重挂→恢复」。
+ * 换成 WeakMap 记账探针（与 lib/viewState.test.tsx 同口径），用例只在这次运行里装着，
+ * 结束后还原，免得影响本文件其余用例对 DOM 的假设。
+ */
+function installScrollTopProbe(): () => void {
+  const original = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+  expect(original, "jsdom 应在 Element.prototype 上定义 scrollTop").toBeTruthy();
+  const store = new WeakMap<Element, number>();
+  Object.defineProperty(Element.prototype, "scrollTop", {
+    configurable: true,
+    get(this: Element) {
+      return store.get(this) ?? 0;
+    },
+    set(this: Element, value: number) {
+      store.set(this, Math.max(0, value));
+    },
+  });
+  return () => Object.defineProperty(Element.prototype, "scrollTop", original!);
 }
 
 function renderSettings(locale: "zh-CN" | "en-US" = "en-US") {
@@ -569,6 +591,40 @@ describe("SettingsView", () => {
 
     fireEvent.keyDown(document.querySelector(".settings-panels") as HTMLElement, { key: "End" });
     expect(updates).not.toHaveAttribute("aria-current");
+  });
+
+  // ── 轮67 R67-WP3c：切走再回来不丢阅读位置 ──
+
+  it("滚到中途切走再回来，位置还在原处", () => {
+    clearViewState();
+    const restoreProbe = installScrollTopProbe();
+    try {
+      const first = renderSettings("en-US");
+      const panels = first.container.querySelector(".settings-panels") as HTMLElement;
+      panels.scrollTop = 800;
+      fireEvent.scroll(panels);
+      expect(readViewState<number>("settings.scroll.panels"), "滚动没记进唯一实现的账本").toBe(800);
+
+      first.unmount();
+      const again = renderSettings("en-US");
+      expect((again.container.querySelector(".settings-panels") as HTMLElement).scrollTop).toBe(800);
+    } finally {
+      restoreProbe();
+      clearViewState();
+    }
+  });
+
+  it("账本里没有记住的位置时不动用户：新会话打开就在顶部", () => {
+    clearViewState();
+    const restoreProbe = installScrollTopProbe();
+    try {
+      writeViewState("audit.scroll.matrix", 640);
+      const { container } = renderSettings("en-US");
+      expect((container.querySelector(".settings-panels") as HTMLElement).scrollTop).toBe(0);
+    } finally {
+      restoreProbe();
+      clearViewState();
+    }
   });
 
   // ── 轮67 R67-WP3b：点索引要把焦点交给目标章节 ──

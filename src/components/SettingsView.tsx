@@ -27,6 +27,7 @@ import {
 } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
 import { useSectionSpy } from "../lib/sectionSpy";
+import { useScrollMemory } from "../lib/viewState";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
 
@@ -95,6 +96,15 @@ export default function SettingsView() {
   const askConfirm = (title: string, message: string, action: () => void, details?: string[], danger = true) =>
     setPendingConfirm({ title, message, details, danger, action });
   const panelsRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * 切走再回设置页不丢阅读位置（轮67 R67-WP3c）：真机量过——面板滚到 800 → 去配置浏览 →
+   * 回来 scrollTop=0，2762px 的内容每次都要从头找那一节。位置记在 lib/viewState 那份
+   * 唯一的模块内存里（与审计/历史/备份同口径，不进浏览器持久存储：用户要的是切 Tab 不丢，
+   * 不是重启还记得）。listVersion 给常量 0：8 节同屏渲染、挂载即有完整高度，
+   * 不存在「列表还没到被夹回 0」那种要按条数再恢复一次的场景。
+   * 传 panelsRef 进来：同一个容器还要喂给 scroll-spy，两处不能各攥一份。
+   */
+  const panelsScroll = useScrollMemory("settings.scroll.panels", 0, panelsRef);
   const { activeId, jumpToSection } = useSectionSpy(panelsRef, SECTION_IDS);
   const savedTimerRef = useRef<number | null>(null);
 
@@ -357,7 +367,7 @@ export default function SettingsView() {
           ))}
         </aside>
 
-        <div ref={panelsRef} className="settings-panels">
+        <div ref={panelsScroll.ref} className="settings-panels" onScroll={panelsScroll.onScroll}>
           <section id="settings-general" className="settings-panel" tabIndex={-1} aria-labelledby="settings-general-title">
             <div className="settings-panel-head">
               <h4 id="settings-general-title">{t("settings.groupBasic")}</h4>

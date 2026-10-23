@@ -15,9 +15,10 @@ import { describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const STORE_PATH = "src/lib/viewState.ts";
-/** 已接入记忆层的三个非浏览页。 */
+/** 已接入记忆层的四个非浏览页（轮67 把设置页的整页面板也接了进来）。 */
 const PAGES: Array<{ rel: string; namespace: string; scrollKey: string }> = [
   { rel: "src/components/AuditView.tsx", namespace: "audit", scrollKey: "audit.scroll.matrix" },
+  { rel: "src/components/SettingsView.tsx", namespace: "settings", scrollKey: "settings.scroll.panels" },
   { rel: "src/components/OperationHistoryView.tsx", namespace: "history", scrollKey: "history.scroll.list" },
   { rel: "src/components/BackupView.tsx", namespace: "backup", scrollKey: "backup.scroll.list" },
 ];
@@ -56,7 +57,7 @@ describe("视图状态的唯一实现", () => {
     expect(store).toMatch(/const values = new Map<string, unknown>\(\)/);
   });
 
-  it("审计 / 历史 / 备份三页都从同一份实现取状态，且都接了滚动记忆", () => {
+  it("审计 / 设置 / 历史 / 备份四页都从同一份实现取状态，且都接了滚动记忆", () => {
     PAGES.forEach(({ rel, scrollKey }) => {
       const src = read(rel);
       expect(src, `${rel} 没有引用 ../lib/viewState`).toContain('from "../lib/viewState"');
@@ -66,7 +67,7 @@ describe("视图状态的唯一实现", () => {
     });
   });
 
-  it("三页不再自己写一套存储，也不手动摆弄 scrollTop", () => {
+  it("四页不再自己写一套存储，也不手动摆弄 scrollTop", () => {
     PAGES.forEach(({ rel }) => {
       const src = read(rel);
       expect(src, `${rel} 直接用 sessionStorage 记状态`).not.toContain("sessionStorage");

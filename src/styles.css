@@ -914,6 +914,13 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /*
+   * 轮67 R67-WP3c：关掉浏览器自身的滚动锚定。真机量过——恢复写回 800 的那一帧内容只有 2386px
+   * （数据根事实/备份预览是异步补的，最终 2898px），Chrome 的 anchoring 为了"保持画面不动"
+   * 把容器又推了 93px 到 893；等布局落定后各节位置其实和离开时一模一样，于是用户看到的是
+   * 凭空往下偏了 93px。恢复位置要的是「就停在我离开的那一行」，不是浏览器猜的"差不多"。
+   */
+  overflow-anchor: none;
   scroll-padding-top: 2px;
   display: flex;
   flex-direction: column;
