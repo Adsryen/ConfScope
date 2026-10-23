@@ -14,6 +14,7 @@ import (
 	"confscope/internal/nacos"
 	"confscope/internal/portabledata"
 	"confscope/internal/provider"
+	"confscope/internal/revisions"
 	"confscope/internal/snapshotwebdav"
 	"confscope/internal/ssh"
 	"confscope/internal/updatecheck"
@@ -55,6 +56,11 @@ type App struct {
 	downloadedFile   string
 
 	nativeSmokeControl *nativeSmokeControl
+
+	// revisions 是本机配置版本历史的状态句柄（见 app_revisions.go）。
+	// 绑定可能并发调用，句柄用 once 建，不给它第二次写指针的机会。
+	revisionsOnce sync.Once
+	revisions     *revisions.Store
 }
 
 // NewApp 创建应用服务实例。
