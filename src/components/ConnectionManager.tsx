@@ -383,17 +383,24 @@ function FieldLabel({
   children,
   tip,
   required = false,
+  id,
   onHelpShow,
   onHelpHide,
 }: {
   children: ReactNode;
   tip?: string;
   required?: boolean;
+  /**
+   * 标题元素的 id（轮67 R67-WP9）：给那些「同一只 <label> 里还坐着动作按钮」的框用。
+   * label 内其它交互元素的文字会被浏览器的 accname 算法并进输入框的名字，
+   * 唯一干净的来源是显式 `aria-labelledby` 指向这只只有标题文字的元素。
+   */
+  id?: string;
   onHelpShow: (popover: HelpPopover) => void;
   onHelpHide: () => void;
 }) {
   return (
-    <span className="field-label">
+    <span className="field-label" id={id}>
       <span>{children}</span>
       {required && (
         <span className="required-mark" aria-hidden="true">
@@ -464,6 +471,15 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   // 焦点陷阱：内嵌在设置页里时不参与，否则会替设置页其余表单吃掉 Tab。
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // 轮67 R67-WP9：本地快照目录与默认命名空间这两只框，动作按钮就坐在同一只 <label> 里
+  // （选目录/校验/加载命名空间/重试/复制）。名字来源改成显式指向标题元素，
+  // 读屏念出来的才是「默认命名空间 ID（留空=public）」而不是「…加载命名空间」。
+  // 「项目」这一栏更特殊：同一只 <label> 里并排坐着下拉框和新建时的文本框（按条件只显其一），
+  // HTML 的隐式关联只认子树里第一只 labelable 后代——文本框因此在读屏里彻底没名字。
+  // 两只都显式指向标题元素，切到「新建项目」时也念得出「项目」。
+  const projectCaptionId = useId();
+  const localPathCaptionId = useId();
+  const namespaceCaptionId = useId();
   useDialogFocus({ active: !embedded, containerRef: modalRef });
   const overlayDismiss = useOverlayDismiss(onClose);
 
@@ -1257,12 +1273,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             <div className="conn-section-title">{t("connection.sectionBasic")}</div>
             <div className="field-row">
               <label className="field">
-                <FieldLabel {...fieldLabelProps} required tip={t("connection.projectHelp")}>
+                <FieldLabel id={projectCaptionId} {...fieldLabelProps} required tip={t("connection.projectHelp")}>
                   {t("connection.project")}
                 </FieldLabel>
                 {projectOptions.length > 0 && (
                   <select
                     className="search-input wide"
+                    aria-labelledby={projectCaptionId}
                     value={selectedProjectOption}
                     onChange={(e) => {
                       if (e.target.value === "__new__") {
@@ -1286,6 +1303,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   <input
                     type="text"
                     className="search-input wide"
+                    aria-labelledby={projectCaptionId}
                     value={draft.projectName ?? ""}
                     placeholder={t("connection.projectPlaceholder")}
                     autoCapitalize="off"
@@ -1381,13 +1399,14 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             </div>
             {draft.provider === "local" && (
               <label className="field">
-                <FieldLabel {...fieldLabelProps} required tip={t("connection.localPathHelp")}>
+                <FieldLabel id={localPathCaptionId} {...fieldLabelProps} required tip={t("connection.localPathHelp")}>
                   {t("connection.localPath")}
                 </FieldLabel>
                 <div className="path-field">
                   <input
                     type="text"
                     className="search-input wide mono"
+                    aria-labelledby={localPathCaptionId}
                     value={draft.localPath ?? ""}
                     placeholder={t("connection.localPathPlaceholder")}
                     autoCapitalize="off"
@@ -1763,13 +1782,14 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 </>
               )}
               <label className="field">
-                <FieldLabel {...fieldLabelProps} tip={t("connection.defaultNamespaceHelp")}>
+                <FieldLabel id={namespaceCaptionId} {...fieldLabelProps} tip={t("connection.defaultNamespaceHelp")}>
                   {t("connection.defaultNamespace")}
                 </FieldLabel>
                 <div className="namespace-field">
                   <input
                     type="text"
                     className="search-input wide mono"
+                    aria-labelledby={namespaceCaptionId}
                     value={draft.defaultNamespace}
                     placeholder={t("connection.defaultNamespacePlaceholder")}
                     autoCapitalize="off"
@@ -1786,6 +1806,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                     {visibleNamespaces.length > 0 && (
                       <select
                         className="search-input wide"
+                        aria-labelledby={namespaceCaptionId}
                         value={draft.defaultNamespace}
                         onChange={(e) => set({ defaultNamespace: e.target.value })}
                       >

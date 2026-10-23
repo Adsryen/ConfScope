@@ -716,8 +716,12 @@ function SourcePicker({
               {cfgLoading ? `(${t("common.loading")} ${t("diff.configListLoaded", { count: cfgLoaded })})` : `(${configs.length})`}
             </span>
           </span>
+          {/* 轮67 R67-WP9：这只 label 里还坐着「重试配置列表」与复制键，
+              label 的文字会被并进输入框的可访问名（读屏念成「dataId (3) 重试配置列表 复制错误…」）。
+              显式给名字，取可见标题那句 "dataId"（WCAG 2.5.3 要求名字含可见文字）。 */}
           <Combobox
             value={source.dataId}
+            ariaLabel="dataId"
             placeholder={t("diff.dataIdPlaceholder")}
             options={dataIdOptions}
             onChange={(value) => onChange({ ...source, dataId: value })}
