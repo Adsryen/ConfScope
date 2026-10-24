@@ -451,6 +451,7 @@ function SourcePicker({
   onChange,
   onSetDefaultNamespace,
   onLoadError,
+  sortConnections,
   sortNamespaces,
 }: {
   title: string;
@@ -462,6 +463,11 @@ function SourcePicker({
   onChange: (source: Source) => void;
   onSetDefaultNamespace?: (connId: string, namespace: string) => void;
   onLoadError?: () => void;
+  /**
+   * 连接下拉是否按名称排序（轮72 R-B9）。设置页这一条开关从写下那天起没有任何地方读它，
+   * 取消勾选后下拉照样是排的：关掉时保持连接里的原始顺序（那是用户自己排的优先级）。
+   */
+  sortConnections: boolean;
   sortNamespaces: boolean;
 }) {
   const { t } = useTranslation();
@@ -505,9 +511,11 @@ function SourcePicker({
   const sourceConnections = selectedEnvironment
     ? projectConnections.filter((item) => connectionEnvironmentName(item) === selectedEnvironment)
     : projectConnections;
-  const sourceOptions = [...sourceConnections]
-    .sort((a, b) => compareText(sourceOptionLabel(a, t), sourceOptionLabel(b, t)))
-    .map((item) => ({ value: item.id, label: sourceOptionLabel(item, t) }));
+  // 排序判据（轮72 R-B9）：只有勾选时才排，未勾选保持传入顺序
+  const orderedSourceConnections = sortConnections
+    ? [...sourceConnections].sort((a, b) => compareText(sourceOptionLabel(a, t), sourceOptionLabel(b, t)))
+    : sourceConnections;
+  const sourceOptions = orderedSourceConnections.map((item) => ({ value: item.id, label: sourceOptionLabel(item, t) }));
 
   useEffect(() => {
     if (!conn) return;
@@ -2252,6 +2260,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 onChange={updateLeft}
                 onLoadError={() => setSourcesCollapsed(false)}
                 onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
+                sortConnections={settings.compare.sortConnections}
                 sortNamespaces={settings.compare.sortNamespaces}
               />
               <button
@@ -2283,6 +2292,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 onChange={updateRight}
                 onLoadError={() => setSourcesCollapsed(false)}
                 onSetDefaultNamespace={onConnectionsChange ? setConnectionDefaultNamespace : undefined}
+                sortConnections={settings.compare.sortConnections}
                 sortNamespaces={settings.compare.sortNamespaces}
               />
             </div>
