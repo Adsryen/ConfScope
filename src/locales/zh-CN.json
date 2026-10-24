@@ -448,6 +448,7 @@
     "proxyErrorUrl": "这里填代理服务器地址，要带协议头，例如 http://127.0.0.1:7890。本程序只支持 http / https 代理，不支持 SOCKS。",
     "proxyErrorNoProxyItem": "{item} 不能当「不走代理」的条目：写主机名、以 . 开头的后缀、CIDR 或 *，不要带空格，也不要带 http:// 前缀。",
     "settingsSaved": "设置已保存",
+    "railAriaLabel": "设置章节",
     "dangerZone": "危险操作",
     "clearHistoryHint": "清空所有本地操作记录，此操作不可恢复。",
     "dataFile": "本地数据文件",

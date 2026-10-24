@@ -8,7 +8,15 @@ import { formatBytes } from "../lib/formatBytes";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
 import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
-import { loadSettings, saveSettings, type AppSettings, type ProxySettings } from "../store/settings";
+import {
+  loadSettings,
+  saveSettings,
+  type AppSettings,
+  type CompareSettings,
+  type ProxySettings,
+  type StartupSettings,
+  type UpdateSettings,
+} from "../store/settings";
 import { useSettings } from "../lib/useSettings";
 import { toast } from "../lib/toast";
 import { PROXY_FIELDS, isSameProxy, readProxyField, type ProxyField, type ProxyIssue } from "../lib/proxySettings";
@@ -33,7 +41,8 @@ import {
   type RuntimeLayoutInfo,
 } from "../../wailsjs/go/app/App";
 import LanguageSwitch from "./LanguageSwitch";
-import { useSectionSpy } from "../lib/sectionSpy";
+import { moveRailFocus, useSectionSpy } from "../lib/sectionSpy";
+import { useWheelColumnResolver, useWheelSurface } from "../lib/useWheelColumnResolver";
 import { useScrollMemory } from "../lib/viewState";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -56,6 +65,20 @@ const SECTION_NAV: ReadonlyArray<{ id: string; labelKey: string }> = [
   { id: "settings-developer", labelKey: "settings.developer" },
 ];
 const SECTION_IDS = SECTION_NAV.map((item) => item.id);
+
+/*
+ * 设置补丁（轮73 R73-I4）：四个嵌套段只给要改的那一个字段。
+ * 原先调用方写 update({ compare: { ...settings.compare, sortConnections: v } })——展开的是**渲染闭包**里
+ * 那份 settings，而 update 内部的合并基准是盘上的 loadSettings()。同一次交互里连着写两段时
+ * （代理框失焦提交 + 立刻动开关，React 还没重渲染），后一次的闭包是旧的，会把前一次刚写进去的
+ * 兄弟字段整片吃回去。段级合并收在 update 一处，调用方不再有机会带旧值。
+ */
+type SettingsPatch = Omit<Partial<AppSettings>, "proxy" | "update" | "compare" | "startup"> & {
+  proxy?: Partial<ProxySettings>;
+  update?: Partial<UpdateSettings>;
+  compare?: Partial<CompareSettings>;
+  startup?: Partial<StartupSettings>;
+};
 
 /** 数据根命中档位的展示标签键（Go 侧 RootSource 的稳定字面量，逐档一条 i18n）。 */
 const DATA_ROOT_SOURCE_KEYS: Record<string, string> = {
@@ -107,6 +130,12 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   // About 写完 skipVersion 后回到设置页看到的是旧值，得切走再切回才刷新。
   const settings = useSettings();
   const [saved, setSaved] = useState(false);
+  /*
+   * 「设置已保存」落在哪一节（轮73 R73-I2）：徽章原先只钉在页面头右上角，离被点的控件三百多像素，
+   * 1.2s 就消失。现在由调用方点名——徽章画在刚被改动那一节的右上角。null = 调用方没给落点，
+   * 退回工作区右上角，绝不出现「保存了但屏幕上没有任何回应」。
+   */
+  const [savedPanel, setSavedPanel] = useState<string | null>(null);
   const [credentialPending, setCredentialPending] = useState(() => countMigratableStoredCredentials());
   const [credentialSummary, setCredentialSummary] = useState<CredentialMigrationSummary | null>(null);
   const [credentialError, setCredentialError] = useState("");
@@ -159,7 +188,21 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
    * 传 panelsRef 进来：同一个容器还要喂给 scroll-spy，两处不能各攥一份。
    */
   const panelsScroll = useScrollMemory("settings.scroll.panels", 0, panelsRef);
-  const { activeId, jumpToSection } = useSectionSpy(panelsRef, SECTION_IDS);
+  const { activeId, jumpToSection, releasePin } = useSectionSpy(panelsRef, SECTION_IDS);
+  /*
+   * 滚轮兜底（轮73 R73-I1 的另一半，改 CSS 只是必要条件不是充分条件）。
+   * 左栏原先自己滚动（max-height + overflow-y:auto + overscroll-behavior:contain），删掉它之后
+   * 实测仍然死：afterRail 0 / afterHead 600——因为左栏不是 .settings-panels 的子孙，浏览器顺着
+   * 祖先链找不到任何可滚容器，这一格滚轮无处可去。全站 chrome 死区由 lib/useWheelColumnResolver
+   * 那一份实现接管（按几何挑靶面、把滚轮档位换算成像素、夹界、写偏移），这里只登记两件事：
+   * 「这一页要兜底」挂在 .settings-workbench（页头在它之外，与差异对比同一形状），
+   * 「投给谁」递 panelsRef 本身——递 .current 等于节点快照，兜底静默失活。
+   * syncScroll 交 releasePin：兜底直接写 scrollTop，容器上的 wheel 监听收不到，
+   * 不交还位置判定的话高亮会赖在刚才点过的那一节。
+   */
+  const workbenchRef = useRef<HTMLDivElement | null>(null);
+  useWheelColumnResolver(workbenchRef);
+  useWheelSurface(panelsRef, { syncScroll: releasePin });
   const savedTimerRef = useRef<number | null>(null);
   /*
    * 数据目录一节的三条提示通道也接「出现即滚进可视区」（轮67 R67-WP7）。
@@ -183,7 +226,15 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
 
   const sectionLinks = SECTION_NAV.map((item) => ({ id: item.id, label: t(item.labelKey) }));
 
-  const update = (patch: Partial<AppSettings>) => {
+  /** 「设置已保存」就近徽章：只在被改动的那一节渲染，绝对定位不占布局。 */
+  const savedFlagFor = (panelId: string) =>
+    saved && savedPanel === panelId ? (
+      <div className="test-msg ok settings-panel-flag" {...statusMessageProps("success")}>
+        {t("settings.settingsSaved")}
+      </div>
+    ) : null;
+
+  const update = (patch: SettingsPatch, savedIn?: string) => {
     /*
      * 合并基准从盘上读，不用渲染闭包里那份 settings（轮72 R-B2）：代理一框改成失焦提交后，
      * 同一次交互里可能连着两次 update（先提交代理、再动别的开关），第二次拿的闭包还是渲染前的旧值，
@@ -199,6 +250,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
       startup: { ...current.startup, ...(patch.startup ?? {}) },
     });
     setSaved(true);
+    setSavedPanel(savedIn ?? null);
     if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
     savedTimerRef.current = window.setTimeout(() => {
       setSaved(false);
@@ -239,9 +291,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     // 回显归一后的值：用户看到的和盘上存的是同一串（trim、协议小写、noProxy 逐项整理）
     setProxyDraft((draft) => (draft[field] === outcome.value ? draft : { ...draft, [field]: outcome.value }));
     if (outcome.value !== settings.proxy[field]) {
-      const nextProxy: ProxySettings = { ...settings.proxy };
-      nextProxy[field] = outcome.value;
-      update({ proxy: nextProxy });
+      update({ proxy: { [field]: outcome.value } as Partial<ProxySettings> }, "settings-network");
     }
   };
 
@@ -491,14 +541,18 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           <h3>{t("app.settings")}</h3>
           <div className="page-subtitle">{t("app.settingsSubtitle")}</div>
         </div>
-        {saved && (
-          <div className="test-msg ok" {...statusMessageProps("success")}>
+      </div>
+      <div className="settings-workbench" ref={workbenchRef}>
+        {/*
+         * 兜底落点（轮73 R73-I2）：调用方没点名是哪一节时（新写的开关忘了传 savedIn、
+         * 或改动不属于任何一节），徽章仍出现在内容区右上角——宁可远一点，也不能没有。
+         */}
+        {saved && savedPanel === null && (
+          <div className="test-msg ok settings-saved-flag" {...statusMessageProps("success")}>
             {t("settings.settingsSaved")}
           </div>
         )}
-      </div>
-      <div className="settings-workbench">
-        <aside className="settings-rail" aria-label={t("app.settings")}>
+        <aside className="settings-rail" aria-label={t("settings.railAriaLabel")} onKeyDown={moveRailFocus}>
           {sectionLinks.map((item) => (
             <button
               key={item.id}
@@ -514,6 +568,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
 
         <div ref={panelsScroll.ref} className="settings-panels" onScroll={panelsScroll.onScroll}>
           <section id="settings-general" className="settings-panel" tabIndex={-1} aria-labelledby="settings-general-title">
+            {savedFlagFor("settings-general")}
             <div className="settings-panel-head">
               <h4 id="settings-general-title">{t("settings.groupBasic")}</h4>
               <div className="settings-panel-description">{t("settings.generalDescription")}</div>
@@ -526,6 +581,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           </section>
 
           <section id="settings-network" className="settings-panel" tabIndex={-1} aria-labelledby="settings-network-title">
+            {savedFlagFor("settings-network")}
             <div className="settings-panel-head">
               <h4 id="settings-network-title">{t("settings.groupNetwork")}</h4>
               <div className="settings-panel-description">{t("settings.networkDescription")}</div>
@@ -568,6 +624,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           </section>
 
           <section id="settings-compare" className="settings-panel" tabIndex={-1} aria-labelledby="settings-compare-title">
+            {savedFlagFor("settings-compare")}
             <div className="settings-panel-head">
               <h4 id="settings-compare-title">{t("settings.comparePreferences")}</h4>
               <div className="settings-panel-description">{t("settings.compareDescription")}</div>
@@ -582,7 +639,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
               <input
                 type="checkbox"
                 checked={settings.compare.sortConnections}
-                onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
+                onChange={(e) => update({ compare: { sortConnections: e.target.checked } }, "settings-compare")}
               />
             </label>
             <div className="field-hint">{t("settings.compareSortConnectionsHint")}</div>
@@ -591,13 +648,14 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
               <input
                 type="checkbox"
                 checked={settings.compare.sortNamespaces}
-                onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
+                onChange={(e) => update({ compare: { sortNamespaces: e.target.checked } }, "settings-compare")}
               />
             </label>
             <div className="field-hint">{t("settings.compareSortNamespacesHint")}</div>
           </section>
 
           <section id="settings-credentials" className="settings-panel" tabIndex={-1} aria-labelledby="settings-credentials-title">
+            {savedFlagFor("settings-credentials")}
             <div className="settings-panel-head">
               <h4 id="settings-credentials-title">{t("settings.credentials")}</h4>
               <div className="settings-panel-description">{t("settings.credentialsDescription")}</div>
@@ -635,6 +693,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           </section>
 
           <section id="settings-backup" className="settings-panel settings-backup-panel" tabIndex={-1} aria-labelledby="settings-backup-title">
+            {savedFlagFor("settings-backup")}
             <div className="settings-panel-head">
               <h4 id="settings-backup-title">{t("settings.backup")}</h4>
               <div className="settings-panel-description">{t("settings.backupDescription")}</div>
@@ -685,6 +744,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           </section>
 
           <section id="settings-data-locations" className="settings-panel" tabIndex={-1} aria-labelledby="settings-data-locations-title">
+            {savedFlagFor("settings-data-locations")}
             <div className="settings-panel-head">
               <h4 id="settings-data-locations-title">{t("settings.dataLocations")}</h4>
               <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
@@ -844,6 +904,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
             {revisionError && <InlineError title={t("settings.clearRevisionsFailed")} message={revisionError} containerRef={revisionErrorRef} />}
           </section>
           <section id="settings-update" className="settings-panel" tabIndex={-1} aria-labelledby="settings-update-title">
+            {savedFlagFor("settings-update")}
             <div className="settings-panel-head">
               <h4 id="settings-update-title">{t("settings.update")}</h4>
               <div className="settings-panel-description">{t("settings.updateDescription")}</div>
@@ -872,7 +933,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                   className="btn btn-ghost btn-sm"
                   disabled={!settings.update.skipVersion}
                   onClick={() => {
-                    update({ update: { ...settings.update, skipVersion: "" } });
+                    update({ update: { skipVersion: "" } }, "settings-update");
                     // 清空是「点了一下、但屏幕上什么都没挪」的动作（右上角那条徽章 1.2s 就没了），
                     // 补一条轻提示说明接下来会发生什么：下次检查会重新提示这个版本。
                     toast(t("settings.updateReminderRestored"), "success");
@@ -896,6 +957,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
           </section>
 
           <section id="settings-developer" className="settings-panel" tabIndex={-1} aria-labelledby="settings-developer-title">
+            {savedFlagFor("settings-developer")}
             <div className="settings-panel-head">
               <h4 id="settings-developer-title">{t("settings.developer")}</h4>
               <div className="settings-panel-description">{t("settings.developerDescription")}</div>

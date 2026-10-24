@@ -20,6 +20,7 @@ const RESOLVER = "src/lib/useWheelColumnResolver.ts";
 const BROWSER = "src/components/ConfigBrowser.tsx";
 const DIFF = "src/components/DiffView.tsx";
 const PANEL = "src/components/DiffPanel.tsx";
+const SETTINGS = "src/components/SettingsView.tsx";
 const VIEW = "src/components/CodeView.tsx";
 const EDITOR = "src/components/CodeEditor.tsx";
 const MM = "src/components/CodeMinimap.tsx";
@@ -58,6 +59,9 @@ describe("滚动面登记递的是 ref（轮33 F-34 要求 1）", () => {
     [PANEL, 1],
     [VIEW, 1],
     [EDITOR, 1],
+    // 轮73 R73-I1：设置页的左栏索引不是内容容器的子孙，删掉它自己的 overflow 之后实测仍是死区
+    // （afterRail 0 / afterHead 600）——浏览器顺着祖先链找不到可滚容器，这一格滚轮无处可去。
+    [SETTINGS, 1],
   ] as const;
 
   it("每个登记点都递 `xxxRef` 本身", () => {
@@ -104,6 +108,38 @@ describe("页面根选在 chrome 的公共祖先、把页头留在外面（轮33
     expect(headerPrecedesRoot(src, 'className="diff-workspace" ref={workspaceRef}'), "页头必须在根之前、而不是根的子树里").toBe(true);
   });
 
+  it("设置页挂在 .settings-workbench 上，页头在它前面、滚动面只有正文那一块（轮73 R73-I1）", () => {
+    const src = readScannedSource(SETTINGS);
+    expect(src, "根必须落在 .settings-workbench：它的子树正好罩住左栏索引与八节正文").toMatch(
+      /className="settings-workbench" ref=\{workbenchRef\}/
+    );
+    expect(src, "解析器没接上：左栏仍是滚轮死区").toMatch(/useWheelColumnResolver\(workbenchRef\)/);
+    expect(src, "设置页自己搓一份 wheel 监听 = 第二份换算，双滚").not.toMatch(/onWheel=\{|addEventListener\("wheel"/);
+    // 靶面必须是 .settings-panels 那一份 ref，且必须把「交还位置判定」挂进那一帧的同步里：
+    // 兜底直接写 scrollTop，容器上的 wheel 监听收不到，不交还的话高亮会赖在刚才点过的那一节。
+    expect(src, "滚动面必须递 panelsRef 本身，且 syncScroll 要接 releasePin").toMatch(
+      /useWheelSurface\(panelsRef, \{ syncScroll: releasePin \}\)/
+    );
+    const header = src.indexOf('<div className="page-header">');
+    const root = src.indexOf('className="settings-workbench" ref={workbenchRef}');
+    expect(header, "读不到设置页页头").toBeGreaterThanOrEqual(0);
+    expect(root, "读不到设置页兜底根").toBeGreaterThanOrEqual(0);
+    expect(root > header, "页头必须落在根之外：它不在正文这一列的几何里，接管它等于凭空多一块死区变体").toBe(true);
+    // 自检：根退回包住页头的 .settings-page 必须判红
+    const regressed = src
+      .replace('<div className="page-surface settings-page">', '<div className="page-surface settings-page" ref={workbenchRef}>')
+      .replace('className="settings-workbench" ref={workbenchRef}', 'className="settings-workbench"');
+    expect(regressed, "变异没落到源码里，这条自检是空转").not.toBe(src);
+    expect(regressed, "退回包住页头的根之后这条接线还能过，判据就是空转").not.toMatch(
+      /className="settings-workbench" ref=\{workbenchRef\}/
+    );
+    // 页头「落进根之内」= 根的开标签排在页头之前，所以比较方向是 ref < header
+    expect(
+      regressed.indexOf('ref={workbenchRef}') < regressed.indexOf('<div className="page-header">'),
+      "变异样本里页头必须落进根之内（否则这条判据证明不了什么）"
+    ).toBe(true);
+  });
+
   it("自检：根退回包含页头的 .diff-view 必须判红", () => {
     const src = readScannedSource(DIFF);
     const regressed = src
@@ -134,13 +170,13 @@ describe("旧的 per-surface 接线整体退场（轮33 F-34 要求 2）", () =>
     expect(hit(/reattachKey\s*:/, RESOLVER), "登记递的是引用，重挂依据这套东西已经退场").toEqual([]);
   });
 
-  it("兜底根全站只有这四处：两个页面 + 两个代码视图", () => {
+  it("兜底根全站只有这五处：三个页面 + 两个代码视图", () => {
     const roots = sourceFiles()
       .filter((f) => f !== RESOLVER) // 解析器自己那份是定义，不是接线
       .map((f) => ({ f, n: (readScannedSource(f).match(/useWheelColumnResolver\(/g) || []).length }))
       .filter((x) => x.n > 0);
     expect(roots.map((x) => `${x.f}:${x.n}`).sort(), "挂根的位置要多一处，得先说清它的子树里有没有可滚容器、弹框在不在里面").toEqual(
-      [`${BROWSER}:1`, `${DIFF}:1`, `${EDITOR}:1`, `${VIEW}:1`].sort()
+      [`${BROWSER}:1`, `${DIFF}:1`, `${EDITOR}:1`, `${SETTINGS}:1`, `${VIEW}:1`].sort()
     );
     // 代码视图挂自己那棵的根：历史版本 / 变更计划 / 应用计划这三个宿主没有页面级根，
     // 靠页面级接线的话，删掉旧监听就等于让它们退回死区（静默回归，页面上不会报错）。
@@ -154,6 +190,7 @@ describe("旧的 per-surface 接线整体退场（轮33 F-34 要求 2）", () =>
     // 一开就会越过闸门去滚自己登记的正文，等于把「谁的外层面板」抢过来。
     expect(readScannedSource(BROWSER), "配置浏览的页面根不许开 localPriority").not.toMatch(/localPriority/);
     expect(readScannedSource(DIFF), "差异对比的页面根不许开 localPriority").not.toMatch(/localPriority/);
+    expect(readScannedSource(SETTINGS), "设置页的页面根不许开 localPriority：弹框里的确认框与下拉有它自己的滚动语义").not.toMatch(/localPriority/);
   });
 
   it("localPriority 只许组件级根用：全站就这两个文件", () => {
@@ -167,7 +204,7 @@ describe("旧的 per-surface 接线整体退场（轮33 F-34 要求 2）", () =>
 });
 
 describe("消费方不许再自建第二份 wheel 监听（轮33 F-34 要求 2）", () => {
-  for (const file of [MM, VIEW, EDITOR, BROWSER, DIFF, PANEL] as const) {
+  for (const file of [MM, VIEW, EDITOR, BROWSER, DIFF, PANEL, SETTINGS] as const) {
     it(`${file}：既没有 JSX 的 onWheel，也没有自己的 addEventListener("wheel")`, () => {
       const src = readScannedSource(file);
       expect(src, "React 18 的 wheel 是 passive 委托，preventDefault 实测无效").not.toMatch(/onWheel=\{/);

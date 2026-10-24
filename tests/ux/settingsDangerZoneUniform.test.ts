@@ -110,8 +110,10 @@ describe("代理框只有一个提交出口（R-B2）", () => {
   it("落库必须经 lib/proxySettings 的判据，不许再逐键写盘", () => {
     expect(settings, "提交没有走唯一入口 readProxyField").toContain("readProxyField(");
     expect(settings, "打字即落库的老路子被粘回来了").not.toMatch(/onChange=\{(?:\(e\)|e) =>\s*update\(\{\s*proxy:/);
+    // 轮73 R73-I4 之后写法变了（不再从渲染闭包展开整段 proxy），要保住的判据没变：
+    // 提交必须经 update() 这一个出口，才有「已保存」徽章与 useSettings 广播。
     expect(settings, "代理的写入仍要经过 update()，才能保住「已保存」徽章与 useSettings 同步").toMatch(
-      /nextProxy\[field\] = outcome\.value;\s*update\(\{ proxy: nextProxy \}\)/
+      /update\(\{ proxy: \{ \[field\]: outcome\.value \}[^)]*\}, "settings-network"\)/
     );
     // 校验只在提交那一刻跑：加载时清洗历史脏值 = 悄悄改用户存过的东西。
     expect(settings, "不许在加载路径清洗历史值").not.toMatch(/normalizeNoProxyList\(/);

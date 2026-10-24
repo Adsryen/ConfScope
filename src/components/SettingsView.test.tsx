@@ -615,6 +615,30 @@ describe("SettingsView", () => {
     vi.useRealTimers();
   });
 
+  // 轮73 R73-I2：徽章原先只画在页头右上角。真机量过，点「智能对比」里那颗开关时，反馈出现在被点控件
+  // 上方约 340px 处、1.2s 就消失——用户读不到「保存」与「我刚点的东西」的因果，于是再点一次
+  // （轮72 的实测记录里被投诉过）。现在它钉在被改动那一节的右上角，改动换节就跟着搬家。
+  it("「设置已保存」落在被改动的那一节，换节时不留残影", () => {
+    renderSettings("en-US");
+
+    fireEvent.click(screen.getByLabelText("Sort connection dropdowns by name"));
+
+    const compare = document.getElementById("settings-compare") as HTMLElement;
+    const flag = within(compare).getByText("Settings saved");
+    expect(flag).toHaveClass("test-msg", "ok", "settings-panel-flag");
+    expect(document.querySelectorAll(".settings-panel-flag")).toHaveLength(1);
+    expect(document.querySelector(".settings-saved-flag"), "点名了所在节就不该再落工作区兜底位").toBeNull();
+
+    // 代理框失焦提交落在「网络」节：旧的节不许留着上一句「已保存」
+    const http = screen.getByLabelText("HTTP Proxy");
+    fireEvent.change(http, { target: { value: "http://127.0.0.1:7890" } });
+    fireEvent.blur(http);
+
+    expect(document.querySelectorAll(".settings-panel-flag"), "两处徽章同时亮 = 说不清是哪一次改动存了盘").toHaveLength(1);
+    expect(within(document.getElementById("settings-network") as HTMLElement).getByText("Settings saved")).toBeInTheDocument();
+    expect(within(compare).queryByText("Settings saved")).not.toBeInTheDocument();
+  });
+
   it("scrolls the settings panel container from rail navigation", () => {
     renderSettings("en-US");
     const panels = document.querySelector(".settings-panels") as HTMLDivElement;
@@ -919,6 +943,48 @@ describe("SettingsView", () => {
 
     fireEvent.keyDown(document.querySelector(".settings-panels") as HTMLElement, { key: "End" });
     expect(updates).not.toHaveAttribute("aria-current");
+  });
+
+  // 轮73 R73-P1：真机量过，焦点停在「基础信息」上按 ↓ 时焦点原地不动（railKeys.json：
+  // railFocusBefore/After 是同一项），而浏览器默认行为会去滚最近的滚动祖先——八项索引原先只能
+  // 一颗一颗 Tab 过去。上下键在列表里的直觉就是「挪一格」，这里照做，但只挪焦点不跳章节。
+  it("左栏方向键挪焦点、首尾回环、Home/End 到端点，且全程不跳章节", () => {
+    renderSettings("en-US");
+    const rail = screen.getByRole("complementary", { name: "Settings sections" });
+    const items = within(rail).getAllByRole("button");
+    expect(items).toHaveLength(8);
+
+    const panels = document.querySelector(".settings-panels") as HTMLElement;
+    const scrollTo = vi.fn();
+    panels.scrollTo = scrollTo;
+
+    items[0].focus();
+    // fireEvent 返回 false 表示 preventDefault 生效：方向键不能顺带把页面滚走
+    expect(fireEvent.keyDown(items[0], { key: "ArrowDown" })).toBe(false);
+    expect(items[1]).toHaveFocus();
+    expect(fireEvent.keyDown(items[1], { key: "ArrowUp" })).toBe(false);
+    expect(items[0]).toHaveFocus();
+
+    // 首尾回环：到顶再往上就是最后一项，反过来同理
+    expect(fireEvent.keyDown(items[0], { key: "ArrowUp" })).toBe(false);
+    expect(items[7]).toHaveFocus();
+    expect(fireEvent.keyDown(items[7], { key: "ArrowDown" })).toBe(false);
+    expect(items[0]).toHaveFocus();
+
+    expect(fireEvent.keyDown(items[0], { key: "End" })).toBe(false);
+    expect(items[7]).toHaveFocus();
+    expect(fireEvent.keyDown(items[7], { key: "Home" })).toBe(false);
+    expect(items[0]).toHaveFocus();
+
+    // 只挪焦点不跳章节：跳章节是 Enter/Space 的事（原生按钮自带），与全站列表口径一致
+    expect(scrollTo, "方向键把内容区滚走了：用户只是在挑选项就被搬了位置").not.toHaveBeenCalled();
+    expect(items[7]).toHaveAttribute("aria-current", "true");
+    expect(items[1]).not.toHaveAttribute("aria-current");
+
+    // 焦点不在索引上时不接管，别截走内容区的方向键
+    items[0].blur();
+    expect(fireEvent.keyDown(items[3], { key: "ArrowDown" })).toBe(true);
+    expect(items[3]).not.toHaveFocus();
   });
 
   // ── 轮67 R67-WP3c：切走再回来不丢阅读位置 ──

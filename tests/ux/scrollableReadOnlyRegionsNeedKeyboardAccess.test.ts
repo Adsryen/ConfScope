@@ -159,7 +159,7 @@ const LEGACY_NON_PRE_CLASSES = new Set([
   "modal-body",
   "sel-menu",
   "settings-panels",
-  "settings-rail",
+  // 轮73 R73-I1：左栏撤掉了自身滚动（滚轮死区），不再是滚动站点，僵尸登记同步撤掉。
   "ssh-manager-page",
   "ssh-profile-list",
 ]);

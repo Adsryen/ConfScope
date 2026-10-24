@@ -853,40 +853,66 @@ textarea {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 18px;
-  width: min(1080px, 100%);
+  /*
+   * 轮73 R73-V3：上限从 1080 提到 1200。1440 窗口下侧栏占 184，可用 1256，
+   * 1080 的列宽在右边留下 176px 死白，而页头标题仍贴着左缘——读起来像「没排版完」。
+   * 不做居中：.page-header 是全站的左对齐页头，居中工作区会让标题与内容错开一条竖线。
+   */
+  width: min(1200px, 100%);
   padding: 22px;
+  /* 「设置已保存」就近徽章的定位锚点（见 .settings-panel-flag）。 */
+  position: relative;
 }
 
 .settings-rail {
   position: sticky;
   top: 0;
-  min-height: 0;
-  max-height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   padding-left: 10px;
-  border-left: 2px solid rgba(125, 184, 255, 0.35);
+  border-left: 1px solid var(--border);
 }
 
+/*
+ * 轮73 R73-I1（上）：左栏不再自己滚动（原先 max-height:100% + overflow-y:auto + overscroll-behavior:contain）。
+ * 真机量过（指针停在左栏上滚 600px）：容器 scrollTop 0 → 0，一格都没动；同一手势落在面板上是 0 → 600。
+ * 八项索引合计约 300px 高，正常窗口根本用不上内部滚动，换来的却是鼠标停在导航上就滚不动页面——
+ * 而导航恰好是这块页面里面积最大、最容易被指针压住的区域。overscroll-behavior:contain 还额外
+ * 掐断了「滚到底就交给父容器」的链式滚动，等于把死区焊死。
+ * 因此这里删掉 overflow，并同步从 LEGACY_NON_PRE_CLASSES 撤掉 settings-rail 的登记（守卫会验僵尸）。
+ *
+ * 轮73 R73-I1（下）：删掉上面这三行**只是必要条件，不是充分条件**——改完复测仍是从 0 滚到 0。
+ * 真因是左栏不在 .settings-panels 的子树里，它是那一列的兄弟，浏览器顺着祖先链找不到任何可滚容器，
+ * 这一格滚轮本来就无处可去；靠 CSS 永远修不好，得由页面的滚轮兜底接管。见 SettingsView 里挂在
+ * .settings-workbench 上的 useWheelColumnResolver + useWheelSurface(panelsRef, { syncScroll: releasePin })。
+ * 兜底根把页头留在外面（页头自己不在正文这一列的几何里），接线形状由 tests/ux/wheelFallbackWiring.test.ts 钉。
+ */
+
 .settings-rail-item {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-dim);
   text-align: left;
-  padding: 8px 10px;
+  padding: 6px 10px;
+  /*
+   * 轮73 R73-V1：字号与行高此前一个字都没写，实测落到 UA 默认的 13.3333px / normal，
+   * 是全站唯一没走 12/13px 排版体系的导航文字（侧栏 .side-nav-item 是 13px）。
+   */
+  font-size: 13px;
+  line-height: 1.4;
   cursor: pointer;
 }
 
 .settings-rail-item:hover,
 .settings-rail-item:focus-visible {
   color: var(--text-hi);
-  border-color: var(--border);
-  background: var(--bg2);
+  background: var(--bg-hover);
 }
 .settings-rail-item:focus-visible {
   outline: 2px solid var(--focus-outline);
@@ -898,15 +924,21 @@ textarea {
    排在悬停规则之后、并且用 .active:hover 把特异度提到 (0,3,0)——
    位置指示不能因为鼠标扫过就整块消失，靠文档顺序决胜的话下一轮加规则就会翻车。 */
 .settings-rail-item.active {
-  background: var(--bg-active);
-  border-color: transparent;
+  /*
+   * 轮73 R73-V2：当前节指示改用侧栏 .side-nav-item.active 那一档淡色（同色同透明度）。
+   * 原先是 --bg-active(#094771) 实心块——全站唯一的实心蓝出现在这里，八项索引里有一颗
+   * 比页面标题还抢眼的色块，视线被拽到左栏而不是内容；而「我现在在哪个页面」这件事
+   * 左侧主导航已经用淡色回答过一次，同一屏里两种强度的「当前位置」不该并存。
+   */
+  background: rgba(0, 122, 204, 0.15);
+  border-color: rgba(0, 122, 204, 0.35);
   color: var(--text-hi);
 }
 
 .settings-rail-item.active:hover,
 .settings-rail-item.active:focus-visible {
-  background: var(--bg-active);
-  border-color: var(--blue);
+  background: rgba(0, 122, 204, 0.22);
+  border-color: var(--accent);
   color: var(--text-hi);
 }
 
@@ -930,10 +962,27 @@ textarea {
 }
 
 .settings-panel {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg2);
   padding: 16px;
+}
+
+/*
+ * 「设置已保存」就近落点（轮73 R73-I2）。
+ * 原先徽章只画在 .page-header 右上角：真机量过，点「智能对比」里那颗开关时，
+ * 反馈出现在被点控件上方约 340px 处，1.2s 就消失——用户读不到「保存」和「我刚点的东西」的因果，
+ * 于是再点一次（这一条在轮72 的实测记录里被投诉过）。改成钉在**被改动那一节**的右上角：
+ * 绝对定位不占布局（不影响 scroll-spy 量到的节高与偏移），pointer-events:none 不挡控件，
+ * 顶部留 12px 正好落在节标题右侧的空位上。
+ */
+.settings-panel-flag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .settings-panel-head {
@@ -987,7 +1036,17 @@ textarea {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.settings-setting-row:first-of-type {
+/*
+ * 节内首行不带顶部分隔线（轮73 R73-V4）。
+ * 原先写的是 .settings-setting-row:first-of-type，而 :first-of-type 要求该元素是**同标签**的首个兄弟——
+ * 每节第一个子元素是 .settings-panel-head（div），所以所有 div 行永远匹配不上，只有 <label> 行（基础信息 /
+ * 智能对比两节）恰好是首个 label 才生效。实测 8 节里 5 节（凭据 / 备份 / 数据位置 / 应用更新 / 开发者）
+ * 首行顶着一条孤零零的线，另 3 节没有：同一套行组件在页面上出现两种节奏。
+ * 判据改成结构事实「紧跟节标题的那一行」。:not(.settings-danger-zone) 不是可有可无的修饰：
+ * 开发者节的首行就是危险区，它自己写了 border 简色（红框四边），少了这个 :not 就得靠
+ * 「谁写在后面谁赢」决胜——两条特异度同为 (0,2,0)，挪一次文件顺序红框就少一条边。
+ */
+.settings-panel-head + .settings-setting-row:not(.settings-danger-zone) {
   border-top: none;
 }
 
@@ -1048,9 +1107,29 @@ textarea {
   min-width: 0;
 }
 
-/* R80：路径行必须和 .settings-setting-row 一起用（全站唯一用法就是这一处），否则顶对齐不生效。 */
+/*
+ * 主数据文件那一行（轮73 R73-V6 改堆叠）。
+ * 原先与普通行一样「左说明 + 右值」并整列右对齐：绝对路径在 350px 的右列里断成
+ * 「-data.json（桥内内存替身）」这种半截一行，「文件位置」四个字也被压成两行竖排。
+ * 这一行的主角是路径本身（要抄给别人排查），所以整行改为上下堆叠：说明在上，
+ * 路径与两条时间戳在下方占满卡片宽度，一行放得下就一行。
+ * 必须与 .settings-setting-row 一起用（全站唯一用法就是这一处）。
+ */
 .settings-setting-row.settings-data-file-row {
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * 堆叠后两个子块要占满卡片宽度，靠的是子元素自己的 align-self，不是父级的 align-items（轮73 R73-V6 收口）。
+ * 为什么不能用父级 align-items: stretch：@media (max-width: 980px) 里那条
+ * .settings-setting-row { align-items: flex-start } 是全站窄屏口径，父级写 stretch 会靠更高的特异度
+ * 把这条响应式覆盖整段吃掉（守卫 classOverridesResolveBySpecificity 判红「窄屏从未生效」）。
+ * align-self 是子元素维度的属性，本就该由行内容自己声明，两侧规则各管各的维度，谁也不压谁。
+ */
+.settings-setting-row.settings-data-file-row > div {
+  align-self: stretch;
+  min-width: 0;
 }
 
 /* 设置页·数据位置：路径展示与操作按钮 */
@@ -1090,8 +1169,21 @@ textarea {
 .settings-update-skip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   min-width: 0;
+}
+
+/*
+ * 轮73 R73-I3：720px 窄窗实测两处横向溢出——这一行 scrollWidth 457 / clientWidth 454，
+ * 本块 83 / 80。原因是「版本号 code + 8px 间距 + 恢复提醒按钮」是一个不可收缩的整体，
+ * 窄屏下把整行顶宽 3px，右侧被裁。放开换行后本块的最小宽度退化成「最宽的那一个子项」，
+ * 版本号长（未来带构建号）也只是按钮换到下一行，不再挤破卡片。
+ */
+.settings-update-skip code {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .settings-data-root-facts {
@@ -1124,6 +1216,17 @@ textarea {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+/*
+ * 轮73 R73-V5：三框实测只有 220px（.search-input 全站带 max-width:220px），
+ * 而列宽 258~372px——列越宽留白越大，标签与输入框右缘对不齐。这一节的三框是**成组填写**的
+ * 同构字段，撑满列宽才读得出「三格一排、各管一件事」。只在这一格里放开上限，
+ * 不动 .search-input（其余页面的搜索框靠 220px 保持工具栏节奏）。
+ */
+.settings-proxy-grid .search-input {
+  width: 100%;
+  max-width: none;
 }
 
 .settings-subsection-head {
@@ -1650,8 +1753,6 @@ textarea {
 
   .settings-rail {
     position: static;
-    max-height: none;
-    overflow: visible;
     flex-direction: row;
     flex-wrap: wrap;
     border-left: none;
@@ -8807,11 +8908,12 @@ button.diff-workflow-step-btn:hover {
 
 .data-file-info {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
   font-size: 12px;
   color: #9a9aa8;
-  text-align: right;
+  text-align: left;
   min-width: 0;
 }
 
@@ -8822,21 +8924,28 @@ button.diff-workflow-step-btn:hover {
 }
 
 /*
- * 主数据文件路径那一行（轮72 R-B5）：值是可长可短的绝对路径，右侧跟着复制键。
- * 整列右对齐（.data-file-info），所以这一行也靠右排；路径长时在 code 内部折行，
- * 键不参与收缩——否则一条 120 字符的路径会把「复制」压成一条缝。
+ * 主数据文件路径那一行（轮72 R-B5 补复制键，轮73 R73-V6 改左起排）：值是可长可短的绝对路径，
+ * 右侧跟着复制键；路径长时在 code 内部折行，键不参与收缩——否则一条 120 字符的路径会把
+ * 「复制」压成一条缝。「文件位置」这四个字是标签不是内容，压窄就会竖排两行，所以钉住不换行。
  */
 .settings-data-file-path {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
   min-width: 0;
 }
 
+.settings-data-file-path > span {
+  flex: none;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .settings-data-file-path code {
   min-width: 0;
-  text-align: right;
+  text-align: left;
 }
 
 .settings-data-file-path > .btn {
@@ -8959,4 +9068,17 @@ button.diff-workflow-step-btn:hover {
 .udiff:focus-visible {
   outline: 2px solid var(--focus-outline);
   outline-offset: -2px;
+}
+
+/*
+ * 已保存徽章的兜底落点（轮73 R73-I2）：绝对定位挂在 .settings-workbench 上，
+ * 只给「调用方没点名是哪一节」这一种情况用；正常路径走 .settings-panel-flag 就近显示。
+ * 不占布局、不吃点击，位置与页头同高但落在内容列内（右侧留 26px = 工作区内边距 22 + 4）。
+ */
+.settings-saved-flag {
+  position: absolute;
+  top: 26px;
+  right: 26px;
+  z-index: 6;
+  pointer-events: none;
 }

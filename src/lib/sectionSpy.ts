@@ -16,7 +16,7 @@
 // 纯按位置判会显示倒数第二节——用户明确点了「开发者」，高亮却回答「你在看数据位置」。
 // 所以点索引后把高亮钉在点的那一节，直到用户**自己**滚动（滚轮 / 触摸 / 键盘）才交还给位置判定。
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { scrollBehavior } from "./motion";
 
 /** 判定容差：章节顶缘在容器上缘下方这么多像素内仍算「正在这节」。0 是精确对齐，留点余量给亚像素与上边距。 */
@@ -51,11 +51,52 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
+/**
+ * 左栏索引的方向键漫游（轮73 R73-P1）。
+ *
+ * 量出来的原缺陷：焦点停在「基础信息」上按 ↓，焦点原地不动（railKeys.json：railFocusBefore/After 同一项），
+ * 而浏览器默认行为会去滚最近的滚动祖先——八项索引原先只能一颗一颗 Tab 过去，
+ * 上下键给用户的直觉是「在列表里挪」，这里就照这个直觉做。
+ *
+ * 三条口径：
+ * - **只挪焦点不跳章节**。跳章节是 Enter/Space 的事（原生按钮自带），与全站「方向键换焦点、回车确认」
+ *   的列表口径一致；否则方向键会把内容区滚走，用户只是在挑选项就被搬了位置。
+ * - **preventDefault 挡掉方向键顺带滚页面**：焦点已经在左栏，让浏览器再滚一次外层容器等于抢用户的滚动条。
+ * - 首尾回环，Home/End 直接到端点（与原生列表行为一致）。焦点不在索引上时不接管，别截走内容区的按键。
+ *
+ * 实现放在这里而不是组件里：组件侧只许「调用」，不许自己再交一遍焦点——
+ * 一份 focus 副本就是下一条 `tabIndex`/`preventScroll` 口径漏网的入口
+ * （见 tests/ux/railJumpFocusesTargetSection.test.ts 的「跳转几何只有一份实现」）。
+ */
+export function moveRailFocus(event: ReactKeyboardEvent<HTMLElement>): void {
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button.settings-rail-item"));
+  if (items.length === 0) return;
+  const current = items.findIndex((item) => item === document.activeElement);
+  if (current < 0) return;
+  let next = -1;
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (current + 1) % items.length;
+  else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (current - 1 + items.length) % items.length;
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = items.length - 1;
+  if (next < 0) return;
+  event.preventDefault();
+  items[next].focus();
+}
+
 export interface SectionSpyResult {
   /** 当前章节 id；一个都判不出来时为 null（左栏此时不带 aria-current）。 */
   activeId: string | null;
   /** 点索引：滚过去 + 交焦点 + 把高亮钉住（几何与焦点交接见 railJumpFocusesTargetSection 的口径）。 */
   jumpToSection: (id: string) => void;
+  /**
+   * 交还位置判定（轮73 R73-I1）。
+   *
+   * 「点击锁定」只该挡住**我们自己**那一次跳转带来的 scroll 事件。内容容器被我们之外的代码滚了一下
+   * ——滚轮兜底把压在左栏/chrome 上的那一格投给它（lib/wheelScroll 的 consumeWheel 直接写 scrollTop，
+   * 不经过容器上的 wheel 监听）——同样是用户亲自动了手，高亮不许赖在点过的那一节。
+   * 出口住在这里而不是组件里：钉住/交还的判定只有一份，组件只许在接线时把它交出去。
+   */
+  releasePin: () => void;
 }
 
 /**
@@ -87,6 +128,12 @@ export function useSectionSpy(containerRef: RefObject<HTMLElement | null>, ids: 
     measure();
   }, [measure, idsKey]);
 
+  const releasePin = useCallback(() => {
+    if (pinnedRef.current === null) return;
+    pinnedRef.current = null;
+    measure();
+  }, [measure]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -95,11 +142,7 @@ export function useSectionSpy(containerRef: RefObject<HTMLElement | null>, ids: 
       measure();
     };
     // 用户亲自动了手，位置判定就该接管：这三种是「我自己滚」的唯一信号
-    const release = () => {
-      if (pinnedRef.current === null) return;
-      pinnedRef.current = null;
-      measure();
-    };
+    const release = releasePin;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!SECTION_SPY_SCROLL_KEYS.includes(event.key)) return;
       if (isEditableTarget(event.target)) return;
@@ -120,7 +163,7 @@ export function useSectionSpy(containerRef: RefObject<HTMLElement | null>, ids: 
       container.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("resize", onResize);
     };
-  }, [containerRef, measure, idsKey]);
+  }, [containerRef, measure, releasePin, idsKey]);
 
   const jumpToSection = useCallback(
     (id: string) => {
@@ -145,5 +188,5 @@ export function useSectionSpy(containerRef: RefObject<HTMLElement | null>, ids: 
     [containerRef]
   );
 
-  return { activeId, jumpToSection };
+  return { activeId, jumpToSection, releasePin };
 }

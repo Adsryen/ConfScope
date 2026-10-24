@@ -32,6 +32,11 @@ const LOCALE_KEYS = [
   "about.noUpdateIgnored",
 ];
 
+/*
+ * 轮73 改形状：update() 从「整段展开 ...settings.update」换成「只给要改的字段 + 落盘节 id」
+ * （SettingsPatch，合并基准改为从盘上读，见 R73-P2 注释）。
+ * 守卫钉的仍是那条口径——清空必须走 update() 这唯一的落盘出口，只是正则跟着换成新形状。
+ */
 describe("被忽略的更新版本可恢复（轮67 R67-WP2）", () => {
   const about = readScannedSource(ABOUT);
   const settingsView = readScannedSource(SETTINGS_VIEW);
@@ -50,7 +55,7 @@ describe("被忽略的更新版本可恢复（轮67 R67-WP2）", () => {
     expect(
       settingsView,
       "清空必须走 update()（同一份 settings 落盘出口），别另开一条写盘路径"
-    ).toMatch(/update\(\{ update: \{ \.\.\.settings\.update, skipVersion: "" \} \}\)/);
+    ).toMatch(/update\(\{ update: \{ skipVersion: "" \} \}, "settings-update"\)/);
     expect(settingsView, "没有忽略记录时按钮要停用，别让人点一颗空按钮").toMatch(/disabled=\{!settings\.update\.skipVersion\}/);
   });
 

@@ -448,6 +448,7 @@
     "proxyErrorUrl": "Enter the proxy server URL including the scheme, e.g. http://127.0.0.1:7890. Only http / https proxies are supported here — SOCKS is not.",
     "proxyErrorNoProxyItem": "{item} is not a valid no-proxy entry. Use a hostname, a suffix starting with a dot, CIDR or * — no spaces, no http:// prefix.",
     "settingsSaved": "Settings saved",
+    "railAriaLabel": "Settings sections",
     "dangerZone": "Danger Zone",
     "clearHistoryHint": "Clear all local operation records. This action cannot be undone.",
     "dataFile": "Local Data File",

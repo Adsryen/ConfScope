@@ -36,7 +36,8 @@ interface Site {
  * 波33 接线的 21 处站点；轮62 关于页更新面板多出一种「交接失败」提示，登记后共 22 处；
  * 轮67 R67-WP7 再把设置页那条唯一的琥珀色「需重启」提示登记进来（原先整族 test-msg warn
  * 都不在名单里，它是这一族的第一处）；R57-WP14 再补一处「本机版本历史已清除」的成功提示，共 24 处；
- * WP-15 本机版本历史面板再多一处「读不出来」的错误提示，共 25 处。
+ * WP-15 本机版本历史面板再多一处「读不出来」的错误提示，共 25 处；
+ * 轮73 R73-P3 设置页保存徽章拆成「节内就近」与「工作区兜底」两种容器，净增 1 处（共 26 处、20 条名单）。
  * 新宿主一律整族登记：只补 SITES 不补沉默/播报名单，等于给下一条裸提示留了空子。
  */
 const SITES: Site[] = [
@@ -64,7 +65,11 @@ const SITES: Site[] = [
   { file: "src/components/DiffView.tsx", marker: 'className="diff-warnings" {', count: 1, spread: INFO },
   { file: "src/components/ApplyPlanView.tsx", marker: 'className="apply-edit-errors"', count: 1, spread: ERROR },
   // 轮67 R57-WP14 再补一处：「本机版本历史已清除」的成功提示。
-  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok"', count: 4, spread: SUCCESS },
+  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok"', count: 3, spread: SUCCESS },
+  // 轮73 R73-P3：「设置已保存」从页头搬到被改动的那一节右上角，多出两种带定位类的容器。
+  // 单独登记而不是放宽上面那条：徽章同样必须被播报，否则省掉一次长滚动换来的是读屏彻底静默。
+  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok settings-panel-flag"', count: 1, spread: SUCCESS },
+  { file: "src/components/SettingsView.tsx", marker: 'className="test-msg ok settings-saved-flag"', count: 1, spread: SUCCESS },
   // 轮67 R67-WP7：数据目录的「需重启」提示。info tone = role=status + polite，
   // 它是 .test-msg warn 这一族目前的唯一站点，挂上名单就不许再有人退回静默 div。
   { file: "src/components/SettingsView.tsx", marker: 'className="test-msg warn"', count: 1, spread: INFO },
@@ -156,7 +161,7 @@ function describeHead(entry: { file: string; marker: string }, line: number, hea
 describe("状态提示的播报语义（波33 R54）", () => {
   const files = sourceFiles();
 
-  it("站点名单钉死 25 处，且每条都展开 statusMessageProps", () => {
+  it("站点名单钉死 26 处，且每条都展开 statusMessageProps", () => {
     const violations: string[] = [];
     for (const site of SITES) {
       const found = heads(site.file, site.marker);
@@ -172,8 +177,8 @@ describe("状态提示的播报语义（波33 R54）", () => {
   });
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
-    expect(SITES).toHaveLength(18);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(25);
+    expect(SITES).toHaveLength(20);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(26);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {
