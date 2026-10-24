@@ -54,6 +54,9 @@ const (
 	PointerFileName = "data-root.json"
 	// LogsDirName 是数据根下的日志目录（data-root.log 等）。
 	LogsDirName = "logs"
+	// RuntimeLogFileName 是日志目录里的自证据文件：启动时的数据根解析与退出时的
+	// 收尾诊断都写在这里（AppendRuntimeLogLine）。设置页「日志」入口指向的就是这个目录。
+	RuntimeLogFileName = "data-root.log"
 	// MigrationJournalFileName 是迁移断点记录（幂等续跑用），以点开头避免被当数据条目展示。
 	MigrationJournalFileName = ".confscope-migration.json"
 	// PointerFileVersion 是指针文件 schema 版本。
@@ -584,23 +587,36 @@ func LogRuntimeLayout(layout RuntimeLayout) string {
 	if strings.TrimSpace(layout.DataRoot) == "" {
 		return ""
 	}
-	logDir := filepath.Join(layout.DataRoot, LogsDirName)
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		println("runtime layout: 创建日志目录失败:", err.Error())
+	line := fmt.Sprintf("mode=%s\tsource=%s\troot=%s\tpointer=%s\texeWritable=%t%s",
+		layout.Mode, layout.Source, layout.DataRoot,
+		layout.PointerPath, layout.ExeDirWritable, notesSuffix(layout.Notes))
+	return AppendRuntimeLogLine(layout.DataRoot, line)
+}
+
+// AppendRuntimeLogLine 往 [数据根]/logs/[RuntimeLogFileName] 追加一行带时间戳的记录，
+// 返回日志路径（写不成也返回尽力算出的路径，空数据根才返回空串）。
+//
+// 单独抽出这一支是因为退出路径也需要自证据：桌面应用没有控制台，
+// println 在 Windows 上到不了任何地方，而「哪条隧道拖住了退出」正是用户
+// 装不上新版本时唯一能查的东西。best-effort：日志写失败绝不许挡住退出。
+func AppendRuntimeLogLine(dataRoot string, line string) string {
+	if strings.TrimSpace(dataRoot) == "" || strings.TrimSpace(line) == "" {
 		return ""
 	}
-	path := filepath.Join(logDir, "data-root.log")
-	line := fmt.Sprintf("%s\tmode=%s\tsource=%s\troot=%s\tpointer=%s\texeWritable=%t%s\n",
-		time.Now().Format(time.RFC3339), layout.Mode, layout.Source, layout.DataRoot,
-		layout.PointerPath, layout.ExeDirWritable, notesSuffix(layout.Notes))
+	logDir := filepath.Join(dataRoot, LogsDirName)
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		println("runtime log: 创建日志目录失败:", err.Error())
+		return ""
+	}
+	path := filepath.Join(logDir, RuntimeLogFileName)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		println("runtime layout: 打开启动日志失败:", err.Error())
+		println("runtime log: 打开启动日志失败:", err.Error())
 		return path
 	}
 	defer file.Close()
-	if _, err := file.WriteString(line); err != nil {
-		println("runtime layout: 写启动日志失败:", err.Error())
+	if _, err := file.WriteString(fmt.Sprintf("%s\t%s\n", time.Now().Format(time.RFC3339), line)); err != nil {
+		println("runtime log: 写启动日志失败:", err.Error())
 	}
 	return path
 }

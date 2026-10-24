@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"confscope/internal/appbackup"
 	"confscope/internal/nacos"
@@ -519,11 +520,52 @@ func (a *App) Startup(ctx context.Context) {
 	a.startNativeSmokeControl(ctx)
 }
 
-// shutdown 停止所有 SSH 隧道。
+// shutdownTunnelCeiling 是退出收尾给「关掉所有 SSH 隧道」的硬上限。
+// 取值只看一件事：Wails 已经销毁窗口，用户此刻看到的是「程序没了但还占着文件」，
+// 每多等一秒，Windows 安装程序就多等一秒。2s 足够让正常的 Close 走完。
+const shutdownTunnelCeiling = 2 * time.Second
+
+// stopAllTunnelsOnShutdown 是退出收尾里「关掉所有隧道」这一脚的接缝。
+// 默认实现只有一条：带硬上限的那一支。存在的意义是让「退出到底走没走上限」
+// 能被单测直接钉住——否则这一脚只能在真机上复现，改回无上限版本也没人报警。
+var stopAllTunnelsOnShutdown = func(mgr *ssh.Manager, ceiling time.Duration) []string {
+	return mgr.StopAllWithCeiling(ceiling)
+}
+
+// shutdown 收尾：停本地探针，再停所有 SSH 隧道 —— 并且给后者设硬上限。
+//
+// 上限是这一轮加的：窗口销毁之后进程必须真的退出去。只要进程还活着，
+// 它的 exe 就被系统当作镜像加载着，安装程序覆盖前那道「目标文件能不能写」的
+// 探针就永远过不去，用户看到的症状就是「等待 ConfScope 退出」无限打转。
+// 一条拨不动的隧道不该拿走整个程序的退出能力：到点点名记一笔日志然后放行。
 func (a *App) Shutdown(ctx context.Context) {
 	a.stopNativeSmokeControl()
-	a.sshMgr.StopAll()
+	if a.sshMgr == nil {
+		return
+	}
+	pending := stopAllTunnelsOnShutdown(a.sshMgr, shutdownTunnelCeiling)
+	if len(pending) == 0 {
+		return
+	}
+	a.reportPendingTunnelsOnShutdown(pending)
 }
+
+// reportPendingTunnelsOnShutdown 把「哪条连接拖住了退出」写进数据根的日志。
+// 桌面应用没有控制台，println 在 Windows 上到不了任何地方，所以落点在
+// [数据根]/logs/data-root.log（与启动时的数据根解析同一支笔，best-effort）。
+func (a *App) reportPendingTunnelsOnShutdown(pending []string) {
+	line := fmt.Sprintf("shutdown\t退出时未在 %s 内关闭的 SSH 隧道（已放行退出，请检查这些连接的目标是否可达）: %s",
+		shutdownTunnelCeiling, strings.Join(nonNilStrings(pending), ", "))
+	println("Shutdown:", line)
+	root, err := a.appDataRoot()
+	if err != nil {
+		return
+	}
+	shutdownLogf(root, line)
+}
+
+// shutdownLogf 是退出诊断的落点，测试里换成内存收集器（不碰真实文件）。
+var shutdownLogf = portabledata.AppendRuntimeLogLine
 
 // NacosDetectVersion 探测目标 Nacos 服务应使用 v1 还是 v3 OpenAPI。
 func (a *App) NacosDetectVersion(baseUrl string) (string, error) {

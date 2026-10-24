@@ -314,6 +314,27 @@ jobs:
           node scripts/check-installer-strings.mjs --self-test | grep -E "^ok +.*blocks=[0-9]+ bad=[0-9]+"
           node scripts/check-installer-strings.mjs build/bin/confscope-windows-amd64-installer.exe | grep -E "UTF-16LE"
 
+      # 交接实测：拿真的安装包在真的 Windows 上撞四种进程状态（占用/无关活进程/
+      # 句柄残留/空闲），退出码就是断言。project.nsi 的判据是内核调用，Linux 侧
+      # 只能证明它编译得过，证明不了它会不会永远等下去（v1.9.9 线上事故形态）。
+      - name: Run Windows installer handoff check
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $output = & "${{ github.workspace }}\scripts\check-windows-installer-handoff.ps1" 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath "${{ github.workspace }}\build\bin\handoff-ci.log"
+          $joined = $output -join "`n"
+          # 看不到成功标记就当红：轮70 的教训是「步骤在、但没人看输出」等于空气闸门。
+          if ($joined -notmatch 'HANDOFF-CI ok scenarios=4') {
+            Write-Host "::error::Windows 交接实测没有打印 HANDOFF-CI ok scenarios=4（退出码 $exitCode）"
+            exit 1
+          }
+          if ($exitCode -ne 0) {
+            Write-Host "::error::Windows 交接实测退出码 $exitCode，但输出里写着成功"
+            exit 1
+          }
+
       - name: Upload artifact (Windows installer)
         if: matrix.platform == 'windows'
         uses: actions/upload-artifact@v4

@@ -36,6 +36,9 @@ const TOOLS = "build/windows/installer/wails_tools.nsh";
 const HANDOFF_GO = "internal/updatecheck/handoff.go";
 const ARTIFACT_GO = "internal/updatecheck/artifact.go";
 const APP_GO = "internal/app/app.go";
+const TUNNEL_GO = "internal/ssh/tunnel.go";
+const MANAGER_GO = "internal/ssh/manager.go";
+const HANDOFF_PS1 = "scripts/check-windows-installer-handoff.ps1";
 const WORKFLOW = ".github/workflows/release.yml";
 const STRINGS_SCRIPT = "scripts/check-installer-strings.mjs";
 const WAILS_TS = "wailsjs/go/app/App.ts";
@@ -175,13 +178,43 @@ describe("B. 覆盖二进制之前必须确认旧进程已退出，且绝不强�
     }
   });
 
-  it("有界等待 + 超时放弃：宁可这一版不覆盖，也不硬抢运行中的 exe", () => {
+  it("能不能覆盖只看目标 exe 被不被占用；进程号降级成诊断", () => {
     const code = nsisCode(NSI);
-    expect(code).toMatch(/System::Call 'kernel32::OpenProcess\(i 0x1000/);
-    expect(code).toMatch(/FileOpen \$2 "\$INSTDIR\\\$\{PRODUCT_EXECUTABLE\}" a/);
+    // v1.9.9 线上事故的形态：slotBusy 里先看 OpenProcess 成不成，成功就当「进程还活着」并跳过
+    // 文件探针。进程已退出而句柄仍被引用、或 PID 被复用时判据永远为真，用户看到的症状就是
+    // 「等待 ConfScope 退出」无限打转。所以探针必须只剩文件这一条。
+    const probe = functionBody(code, "slotBusy");
+    expect(probe).toMatch(/FileOpen \$2 "\$INSTDIR\\\$\{PRODUCT_EXECUTABLE\}" a/);
+    expect(probe, "slotBusy 里不许再按进程号判忙：判据归属只能有一条").not.toMatch(/OpenProcess/);
+
+    // 进程号那一脚只能在 appPidAlive 里，且必须问 GetExitCodeProcess（句柄非空 ≠ 活着），
+    // 拿到句柄必须关掉。
+    const pidProbe = functionBody(code, "appPidAlive");
+    expect(pidProbe).toMatch(/kernel32::OpenProcess\(i 0x1000/);
+    expect(pidProbe).toMatch(/kernel32::GetExitCodeProcess\(p \$1, \*i\.r2\)/);
+    expect(pidProbe).toMatch(/kernel32::CloseHandle\(p \$1\)/);
+    expect(pidProbe).toMatch(/\$\{If\} \$2 = \$\{STILL_ACTIVE\}/);
+    expect(countOccurrences(code, /kernel32::OpenProcess/g), "OpenProcess 每次都得有对应的 CloseHandle").toBeLessThanOrEqual(
+      countOccurrences(code, /kernel32::CloseHandle/g),
+    );
+  });
+
+  it("有界等待 + 轮次上限 + 进度可见：宁可这一版不覆盖，也绝不无限转圈", () => {
+    const code = nsisCode(NSI);
     expect(code).toMatch(/Sleep \$\{WAIT_INTERVAL\}/);
     expect(code).toMatch(/\$\{If\} \$R9 >= \$\{WAIT_TICKS\}/);
+    expect(code).toMatch(/!define WAIT_ROUNDS \d+/);
+    expect(code).toMatch(/\$\{If\} \$WaitRound >= \$\{WAIT_ROUNDS\}/);
+    expect(code).toMatch(/!define WAIT_PROGRESS_TICKS \d+/);
+    expect(code).toMatch(/IntOp \$R8 \$R9 % \$\{WAIT_PROGRESS_TICKS\}/);
+    // 「还在数」必须在进度页看得见，否则用户只能对着静止的窗口猜。
+    expect(code).toMatch(/DetailPrint "\$\(CS_WAIT_PROGRESS\)\$R7\$\(CS_WAIT_SECONDS\)"/);
+    // 一撞上占用就要说清在等谁：文件路径 + 进程号线索，两类都得有中英文案。
+    for (const key of ["CS_WAIT_FILE", "CS_WAIT_NOPID", "CS_WAIT_PID_ALIVE", "CS_WAIT_PID_GONE", "CS_WAIT_PROGRESS", "CS_WAIT_SECONDS", "CS_WAIT_GIVEUP_LONG"]) {
+      expect(countOccurrences(code, new RegExp(String.raw`LangString ${key} \$\{LANG_`, "g")), `${key} 必须中英各一条`).toBe(2);
+    }
     expect(code).toMatch(/SetErrorLevel 75/);
+    expect(countOccurrences(code, /Abort/g), "放弃覆盖必须真的中止 Section").toBeGreaterThanOrEqual(3);
     expect(countOccurrences(code, /Call ensureSlotFree/g), "单点闸门：判据只许出现在安装 Section 开头一次").toBe(1);
     const ins = installSection(code);
     expect(ins.indexOf("Call ensureSlotFree"), "ensureSlotFree 必须在 wails.files 覆盖之前").toBeLessThan(ins.indexOf("!insertmacro wails.files"));
@@ -435,6 +468,51 @@ describe("G. 安装包的中文不能是码页错读出来的乱码", () => {
   });
 });
 
+describe("H. 窗口关了进程必须真的退出去（否则安装永远等在占用上）", () => {
+  it("拨号不在锁里：停止/退出不会被一条拨不动的隧道拖死", () => {
+    const tunnel = stripComments(read(TUNNEL_GO));
+    const start = /func \(t \*Tunnel\) Start\(\)[\s\S]*?\n}/.exec(tunnel)?.[0] ?? "";
+    expect(start, "找不到 Tunnel.Start").not.toBe("");
+    expect(start, "Start 里不许用 defer 持锁跨拨号：那是「窗口没了进程还活着」的第一现场").not.toMatch(/defer t\.mu\.Unlock\(\)/);
+    expect(start).toMatch(/t\.mu\.Unlock\(\)/);
+    const forward = /func \(t \*Tunnel\) forward\([\s\S]*?\n}/.exec(tunnel)?.[0] ?? "";
+    expect(forward, "Accept 出错且没要求停止时要退避，否则空转烧 CPU").toMatch(/acceptRetryDelay/);
+
+    const manager = stripComments(read(MANAGER_GO));
+    expect(manager).toMatch(/func \(m \*Manager\) StopAllWithCeiling\(ceiling time\.Duration\) \[\]string/);
+    const create = /func \(m \*Manager\) CreateTunnel\([\s\S]*?\n}/.exec(manager)?.[0] ?? "";
+    expect(create, "CreateTunnel 不许持 m.mu 跨拨号").not.toMatch(/m\.mu\.Lock\(\)\n\s*defer m\.mu\.Unlock\(\)/);
+    expect(create).toMatch(/stopped while connecting/);
+  });
+
+  it("退出收尾走带硬上限的那一支，超时点名到连接", () => {
+    const app = stripComments(read(APP_GO));
+    expect(app).toMatch(/const shutdownTunnelCeiling = \d+ \* time\.Second/);
+    expect(app, "退出收尾必须把「关掉所有隧道」交给带上限的实现").toMatch(/mgr\.StopAllWithCeiling\(ceiling\)/);
+    const shutdown = /func \(a \*App\) Shutdown\(ctx context\.Context\)\s*\{[\s\S]*?\n}/.exec(app)?.[0] ?? "";
+    expect(shutdown).toMatch(/stopAllTunnelsOnShutdown\(a\.sshMgr, shutdownTunnelCeiling\)/);
+    expect(shutdown).toMatch(/reportPendingTunnelsOnShutdown/);
+    expect(app, "退出诊断要有类别前缀，才能和启动时的数据根解析分开检索").toMatch(String.raw`shutdown\t`);
+  });
+
+  it("交接实测脚本与 CI 闸门都在位：Windows 真机跑过才算修完", () => {
+    const ps1 = read(HANDOFF_PS1);
+    expect(ps1).toMatch(/\$ErrorActionPreference\s*=\s*'Stop'/);
+    expect(ps1, "静默安装必须带 /UPDATE，且 /D= 只能放最后一个参数").toMatch(/\/UPDATE/);
+    expect(ps1).toMatch(/HANDOFF-CI ok scenarios=\d+/);
+    expect(ps1, "每个场景都得先清掉上一轮留下的 HKCU 卸载项，否则 resolveInstallDir 会把 /D 覆盖掉").toMatch(/Uninstall\\ConfScope/);
+    for (const flag of ["/PID=", "/S"]) expect(ps1).toContain(flag);
+
+    const wf = yamlCode(read(WORKFLOW));
+    expect(wf).toContain("check-windows-installer-handoff.ps1");
+    expect(wf, "CI 必须真的看到成功标记，看不到就报错（空气闸门教训）").toMatch(/HANDOFF-CI ok scenarios=4/);
+    const build = stepChunk(wf, "Build application") || wf;
+    expect(build.indexOf("Run Windows installer handoff check"), "交接实测必须在上传安装包产物之前").toBeLessThan(
+      build.indexOf("Upload artifact (Windows installer)"),
+    );
+  });
+});
+
 /** G 组的共享判据：读文件、看码页、比 BOM，全走真实字节而不是解码后的字符串。 */
 function readBytes(rel: string): Buffer {
   return readFileSync(join(PROJECT_ROOT, rel));
@@ -503,6 +581,14 @@ function entrypointProblems(scriptText: string): string[] {
     problems.push("入口判定不是 resolve(argv[1]) === resolve(fileURLToPath(import.meta.url)) 这个形态");
   }
   return problems;
+}
+
+/** NSIS 函数体：从 `Function 名字` 到自己那一行的 `FunctionEnd`。 */
+function functionBody(code: string, name: string): string {
+  const start = code.indexOf(`Function ${name}`);
+  if (start < 0) throw new Error(`project.nsi 里找不到 Function ${name}`);
+  const end = code.indexOf("FunctionEnd", start);
+  return code.slice(start, end < 0 ? code.length : end);
 }
 
 function countOccurrences(text: string, re: RegExp): number {

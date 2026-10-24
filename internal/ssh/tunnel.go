@@ -30,10 +30,29 @@ type TestResult struct {
 	LatencyMs int64 `json:"latencyMs"`
 }
 
+// sshClientConn 是隧道对 SSH 客户端的最小依赖面。
+// *ssh.Client 天然满足它；单测靠它注入「拨号可以卡任意久」的假客户端 ——
+// 退出路径不能被真实网络决定，所以这条缝必须是可替换的，而不是只有真机能验。
+type sshClientConn interface {
+	Dial(network, addr string) (net.Conn, error)
+	Close() error
+}
+
+// sshDialFunc 建立 SSH 连接。拨号是可阻塞动作，必须留在临界区外（见 Start）。
+type sshDialFunc func(addr string, cfg *ssh.ClientConfig) (sshClientConn, error)
+
+// listenFunc 建立本地监听。同样是可阻塞动作，且单测要靠它造「Close 卡住」的监听器。
+type listenFunc func(network, address string) (net.Listener, error)
+
+// acceptRetryDelay 是 Accept 出错但隧道并未关闭时的退避，避免热转吃满一个核。
+const acceptRetryDelay = 50 * time.Millisecond
+
 // Tunnel is a running SSH tunnel instance.
 type Tunnel struct {
 	config    Config
-	sshClient *ssh.Client
+	dialer    sshDialFunc
+	listenFn  listenFunc
+	sshClient sshClientConn
 	listener  net.Listener
 	localPort int
 	mu        sync.Mutex
@@ -43,14 +62,29 @@ type Tunnel struct {
 func NewTunnel(config Config) *Tunnel {
 	return &Tunnel{
 		config: config,
+		dialer: func(addr string, cfg *ssh.ClientConfig) (sshClientConn, error) {
+			client, err := ssh.Dial("tcp", addr, cfg)
+			if err != nil {
+				return nil, err
+			}
+			return client, nil
+		},
+		listenFn: net.Listen,
 	}
 }
 
+// Start 建立 SSH 连接并开始本地监听。
+//
+// 锁的用法是这一轮修的重点：拨号（含 TCP 之后的 SSH 握手）可以在任意时长上阻塞，
+// 而 Stop() 拿的是同一把 t.mu。原先 Start 全程持锁 ⇒ 一条拨不动的隧道会把
+// StopAll、进而把整个退出路径拖住：窗口没了、进程还在、exe 仍被系统当作镜像加载，
+// Windows 安装程序只能永远停在「等待 ConfScope 退出」。
+// 所以这里临界区只包「读 closed」和「提交结果」两步，拨号与监听都在锁外。
 func (t *Tunnel) Start() (int, error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.closed {
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
 		return 0, fmt.Errorf("tunnel is closed")
 	}
 
@@ -60,40 +94,62 @@ func (t *Tunnel) Start() (int, error) {
 	}
 
 	addr := net.JoinHostPort(t.config.Host, strconv.Itoa(t.config.Port))
-	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
+	sshClient, err := t.dialer(addr, sshConfig)
 	if err != nil {
 		return 0, fmt.Errorf("failed to connect to SSH server: %w", err)
 	}
-	t.sshClient = sshClient
 
 	localAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(t.config.LocalPort))
-	listener, err := net.Listen("tcp", localAddr)
+	listener, err := t.listenFn("tcp", localAddr)
 	if err != nil {
 		sshClient.Close()
 		return 0, fmt.Errorf("failed to listen on local port: %w", err)
 	}
+
+	t.mu.Lock()
+	if t.closed {
+		// 拨号期间已经有人要求停止：当场收回，绝不留一条没人认领的监听。
+		t.mu.Unlock()
+		listener.Close()
+		sshClient.Close()
+		return 0, fmt.Errorf("tunnel is closed")
+	}
+	t.sshClient = sshClient
 	t.listener = listener
 	t.localPort = listener.Addr().(*net.TCPAddr).Port
+	localPort := t.localPort
+	t.mu.Unlock()
 
-	go t.forward()
+	go t.forward(listener, sshClient)
 
-	return t.localPort, nil
+	return localPort, nil
 }
 
+// Stop 关闭隧道。置位与取快照在锁内，Close 在锁外。
+//
+// listener/client 的字段值不清空：转发协程还在按同一对象工作，
+// 清空反而制造数据竞争。重复调用只会重复 Close（返回 error 被忽略）。
 func (t *Tunnel) Stop() {
+	t.mu.Lock()
+	t.closed = true
+	listener := t.listener
+	client := t.sshClient
+	t.mu.Unlock()
+
+	if listener != nil {
+		listener.Close()
+	}
+	if client != nil {
+		client.Close()
+	}
+}
+
+// GetLocalPort 返回本地监听端口；未建立时是 0。
+// 加锁读是因为调用方（Manager 的复用判定）与 Start 的提交不在同一个 goroutine 上。
+func (t *Tunnel) GetLocalPort() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.closed = true
-	if t.listener != nil {
-		t.listener.Close()
-	}
-	if t.sshClient != nil {
-		t.sshClient.Close()
-	}
-}
-
-func (t *Tunnel) GetLocalPort() int {
 	return t.localPort
 }
 
@@ -171,9 +227,9 @@ func TestConnection(config Config) (TestResult, error) {
 	return TestResult{LatencyMs: time.Since(startedAt).Milliseconds()}, nil
 }
 
-func (t *Tunnel) forward() {
+func (t *Tunnel) forward(listener net.Listener, client sshClientConn) {
 	for {
-		conn, err := t.listener.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			t.mu.Lock()
 			closed := t.closed
@@ -181,18 +237,24 @@ func (t *Tunnel) forward() {
 			if closed {
 				return
 			}
+			// 没关闭却 Accept 失败是瞬时故障，退一步再看，别把 CPU 转满。
+			time.Sleep(acceptRetryDelay)
 			continue
 		}
 
-		go t.handleConnection(conn)
+		go t.handleConnection(conn, client)
 	}
 }
 
-func (t *Tunnel) handleConnection(localConn net.Conn) {
+func (t *Tunnel) handleConnection(localConn net.Conn, client sshClientConn) {
 	defer localConn.Close()
 
+	if client == nil {
+		return
+	}
+
 	remoteAddr := net.JoinHostPort(t.config.RemoteHost, strconv.Itoa(t.config.RemotePort))
-	remoteConn, err := t.sshClient.Dial("tcp", remoteAddr)
+	remoteConn, err := client.Dial("tcp", remoteAddr)
 	if err != nil {
 		return
 	}

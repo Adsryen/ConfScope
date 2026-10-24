@@ -60,6 +60,14 @@
 !define DEFAULT_INSTALL_DIR "$LOCALAPPDATA\Programs\ConfScope"
 !define WAIT_TICKS 30
 !define WAIT_INTERVAL 500
+; 一轮 ≈ ${WAIT_TICKS} × ${WAIT_INTERVAL}ms = 15s。用户点「重试」最多再来 ${WAIT_ROUNDS} 轮，
+; 到点必须给个明确的停止说法，不能让人对着无限转圈的「等待」自己猜。
+!define WAIT_ROUNDS 3
+; 每 ${WAIT_PROGRESS_TICKS} 次探测（≈5s）在进度页打一行「已经等了多久」，
+; 让「还在动」和「卡住了」在界面上看得出区别。
+!define WAIT_PROGRESS_TICKS 10
+; Windows 的 STILL_ACTIVE：GetExitCodeProcess 还返回它才说明进程真的活着。
+!define STILL_ACTIVE 259
 
 # 这两行必须是四段式版本号
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -90,6 +98,8 @@ Var UpdateMode   ; "1" = ConfScope 自动发起（命令行带 /UPDATE），向�
 Var AppPid       ; /PID= 传进来的旧进程 PID；空串 = 人工双击，只能靠文件占用探测
 Var SlotBusy     ; slotBusy 的出参（NSIS 函数没有返回值）
 Var KeepData     ; 卸载时是否在程序目录里检测到数据目录
+Var AppPidAlive  ; appPidAlive 的出参：1 = /PID 那个进程还在跑（只用于解释「在等谁」）
+Var WaitRound    ; 当前是第几轮等待（超时后用户点重试才 +1）
 
 ; ---------------------------------------------------------------------------
 ; 运行形态标记：install.json 写在 exe 同级，声明「这一份是安装态」。
@@ -112,33 +122,48 @@ Function writeInstallMarker
 FunctionEnd
 
 ; ---------------------------------------------------------------------------
-; 现在能不能覆盖程序文件？两条探针，任一命中即「还不能」：
-;   ① 应用带了 /PID 来 → 只等那一个进程。别的实例（比如U盘里的便携版同名 exe）
-;      不该挡住本机安装版升级，所以不能按进程名一刀切。
-;   ② 目标 exe 仍被占用 → append 方式打开只是探测占用（不截断、不删、不改），
-;      打不开就是还被加载着。人工双击安装包时没有 PID，只能靠这条。
-; OpenProcess 用 PROCESS_QUERY_LIMITED_INFORMATION(0x1000)，查不到就当作已退出：
-; 宁可少等一轮，也绝不 taskkill —— 主数据是 debounce 落盘的，强杀会吃掉最后一次写入。
+; 现在能不能覆盖程序文件？唯一判据：目标 exe 能不能以追加方式打开。
+; 打不开 = 还被某个进程当镜像加载着 = 不能覆盖。Windows 上只要进程在跑，它的 exe
+; 必然被锁，所以这条探针把「占用」这件事一次说尽，不需要再按进程名/进程号猜。
+;
+; v1.9.9 线上事故：这里先看 /PID 的 OpenProcess 是否成功，成功就当「进程还活着」，
+; 并且**跳过**文件探针。进程已退出但句柄仍被别处引用、或 PID 被复用时，判据永远为真，
+; 用户看到的就是「等待 ConfScope 退出」反复打转、永不停歇。进程号从此只做诊断。
+; 探测方式仍然只是打开再关闭：不截断、不删、不改，绝不硬抢运行中的 exe。
 ; ---------------------------------------------------------------------------
 Function slotBusy
     StrCpy $SlotBusy 0
-    ${If} $AppPid != ""
-        System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i $AppPid) i.r1'
-        ${If} $1 != 0
-            System::Call 'kernel32::CloseHandle(p $1)'
+    ${If} ${FileExists} "$INSTDIR\${PRODUCT_EXECUTABLE}"
+        ClearErrors
+        FileOpen $2 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+        ${IfNot} ${Errors}
+            FileClose $2
+        ${Else}
             StrCpy $SlotBusy 1
         ${EndIf}
     ${EndIf}
-    ${If} $SlotBusy = 0
-        ${If} ${FileExists} "$INSTDIR\${PRODUCT_EXECUTABLE}"
-            ClearErrors
-            FileOpen $2 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
-            ${IfNot} ${Errors}
-                FileClose $2
-            ${Else}
-                StrCpy $SlotBusy 1
-            ${EndIf}
-        ${EndIf}
+FunctionEnd
+
+; ---------------------------------------------------------------------------
+; /PID 那个进程到底还活着吗？只用来决定「等待」那几行该对用户说什么，
+; 不参与能不能覆盖的判断（判据在 slotBusy，唯一一条）。
+; OpenProcess 拿不到句柄 = 进程早没了；拿到了还要问 GetExitCodeProcess，
+; 只有 STILL_ACTIVE 才算活着 —— 单看句柄非空会把「已退出但句柄被引用」误判成活。
+; 三条 API 成对使用，拿到句柄必须 CloseHandle，否则装完留下句柄泄漏。
+; ---------------------------------------------------------------------------
+Function appPidAlive
+    StrCpy $AppPidAlive 0
+    ${If} $AppPid == ""
+        Return
+    ${EndIf}
+    System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i $AppPid) i.r1'
+    ${If} $1 = 0
+        Return
+    ${EndIf}
+    System::Call 'kernel32::GetExitCodeProcess(p $1, *i.r2)'
+    System::Call 'kernel32::CloseHandle(p $1)'
+    ${If} $2 = ${STILL_ACTIVE}
+        StrCpy $AppPidAlive 1
     ${EndIf}
 FunctionEnd
 
@@ -146,8 +171,14 @@ FunctionEnd
 ; 有界等待，单点闸门：整个脚本只有这里检查旧进程，Section 里不得再出现第二份。
 ; 放在 Section 开头而不是 .onInit —— .onInit 阶段 InstFiles 页还没建好，
 ; DetailPrint 用户根本看不见，「等待」就变成了界面无响应。
-; 上限 ${WAIT_TICKS} × ${WAIT_INTERVAL}ms ≈ 15s；超时后有界面给「重试/取消」，
-; 静默（/S，留给脚本与 CI）则直接非 0 退出并放弃覆盖，绝不硬抢运行中的 exe。
+;
+; 本轮把「等待」做成看得见的东西：
+;   · 一撞上占用就打印在等谁（文件路径 + 进程号线索），不再是同一句话刷屏；
+;   · 每 ${WAIT_PROGRESS_TICKS} 次探测报一次「已等 N 秒」，界面看得出还在数；
+;   · 一轮 ${WAIT_TICKS} × ${WAIT_INTERVAL}ms ≈ 15s，最多 ${WAIT_ROUNDS} 轮重试，
+;     用完就明确停手并说明已装版本未受损 —— 绝不无限转圈，也绝不 taskkill
+;     （主数据是 debounce 落盘的，强杀会吃掉最后一次写入）。
+; 静默（/S，留给脚本与 CI）超时直接非 0 退出并放弃覆盖。
 ; ---------------------------------------------------------------------------
 Function ensureSlotFree
     StrCpy $R9 0
@@ -161,11 +192,34 @@ Function ensureSlotFree
         ${EndIf}
         ${If} $R9 = 0
             DetailPrint "$(CS_WAITING)"
+            DetailPrint "$(CS_WAIT_FILE)"
+            DetailPrint "    $INSTDIR\${PRODUCT_EXECUTABLE}"
+            Call appPidAlive
+            ${If} $AppPid == ""
+                DetailPrint "$(CS_WAIT_NOPID)"
+            ${ElseIf} $AppPidAlive = 1
+                DetailPrint "$(CS_WAIT_PID_ALIVE)"
+                DetailPrint "    PID $AppPid"
+            ${Else}
+                DetailPrint "$(CS_WAIT_PID_GONE)"
+                DetailPrint "    PID $AppPid"
+            ${EndIf}
         ${EndIf}
         IntOp $R9 $R9 + 1
+        IntOp $R8 $R9 % ${WAIT_PROGRESS_TICKS}
+        ${If} $R8 = 0
+            IntOp $R7 $R9 * ${WAIT_INTERVAL}
+            IntOp $R7 $R7 / 1000
+            DetailPrint "$(CS_WAIT_PROGRESS)$R7$(CS_WAIT_SECONDS)"
+        ${EndIf}
         ${If} $R9 >= ${WAIT_TICKS}
             ${If} ${Silent}
                 DetailPrint "$(CS_WAIT_GIVEUP)"
+                SetErrorLevel 75
+                Abort
+            ${EndIf}
+            ${If} $WaitRound >= ${WAIT_ROUNDS}
+                MessageBox MB_OK|MB_ICONSTOP "$(CS_WAIT_GIVEUP_LONG)" /SD IDOK
                 SetErrorLevel 75
                 Abort
             ${EndIf}
@@ -173,6 +227,7 @@ Function ensureSlotFree
             SetErrorLevel 75
             Abort
             cs_wait_reset:
+            IntOp $WaitRound $WaitRound + 1
             StrCpy $R9 0
         ${EndIf}
         Sleep ${WAIT_INTERVAL}
@@ -268,6 +323,27 @@ LangString CS_WAIT_DONE ${LANG_ENGLISH} "ConfScope has exited, continuing"
 LangString CS_WAIT_GIVEUP ${LANG_SIMPCHINESE} "ConfScope 仍在运行，静默安装放弃覆盖（未破坏已装版本）"
 LangString CS_WAIT_GIVEUP ${LANG_ENGLISH} "ConfScope is still running; silent install gives up without touching the current version"
 
+LangString CS_WAIT_FILE ${LANG_SIMPCHINESE} "被占用、暂时还不能覆盖的文件："
+LangString CS_WAIT_FILE ${LANG_ENGLISH} "Program file in use, cannot be replaced yet:"
+
+LangString CS_WAIT_NOPID ${LANG_SIMPCHINESE} "安装程序没有拿到应用进程号（人工双击安装的常见情形），只按上面的文件占用判断。"
+LangString CS_WAIT_NOPID ${LANG_ENGLISH} "No app process id was passed in (typical for a manually started installer); only the file lock above is used."
+
+LangString CS_WAIT_PID_ALIVE ${LANG_SIMPCHINESE} "应用进程仍在运行，等它自己退出（不会强杀）："
+LangString CS_WAIT_PID_ALIVE ${LANG_ENGLISH} "The app is still running, waiting for it to exit on its own (never force-killed):"
+
+LangString CS_WAIT_PID_GONE ${LANG_SIMPCHINESE} "应用进程已经退出，文件还没被系统释放，继续等："
+LangString CS_WAIT_PID_GONE ${LANG_ENGLISH} "The app process already exited, its file is not released yet, still waiting:"
+
+LangString CS_WAIT_PROGRESS ${LANG_SIMPCHINESE} "仍在等待，已等 "
+LangString CS_WAIT_PROGRESS ${LANG_ENGLISH} "Still waiting, "
+
+LangString CS_WAIT_SECONDS ${LANG_SIMPCHINESE} " 秒"
+LangString CS_WAIT_SECONDS ${LANG_ENGLISH} " seconds so far"
+
+LangString CS_WAIT_GIVEUP_LONG ${LANG_SIMPCHINESE} "ConfScope 的程序文件一直被占用，安装到此停止。$\r$\n$\r$\n已经装好的版本没有被破坏，直接重新打开 ConfScope 就能继续用。$\r$\n如果确认已经没有窗口在运行，请在任务管理器里结束残留的 ConfScope 进程，或注销后重新运行本安装程序。"
+LangString CS_WAIT_GIVEUP_LONG ${LANG_ENGLISH} "ConfScope's program file stayed locked, so this installation stopped here.$\r$\n$\r$\nYour installed version is intact - just start ConfScope again to keep using it.$\r$\nIf no window is running, end the leftover ConfScope process in Task Manager, or sign out and run this installer again."
+
 LangString CS_WAIT_RETRY ${LANG_SIMPCHINESE} "ConfScope 还在运行，无法覆盖正在使用的程序文件。$\r$\n$\r$\n「重试」继续等待；「取消」退出安装程序 —— 已装的版本不会被破坏。"
 LangString CS_WAIT_RETRY ${LANG_ENGLISH} "ConfScope is still running, so its program file cannot be replaced.$\r$\n$\r$\nRetry keeps waiting; Cancel leaves the installed version intact."
 
@@ -291,6 +367,7 @@ Function .onInit
 
     StrCpy $UpdateMode "0"
     StrCpy $AppPid ""
+    StrCpy $WaitRound 0
 
     ${GetOptions} "$CmdLine" "/UPDATE" $R0
     ${IfNot} ${Errors}
