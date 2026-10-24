@@ -31,7 +31,16 @@ if (-not (Test-Path -LiteralPath $Installer)) {
 $Installer = (Resolve-Path -LiteralPath $Installer).Path
 
 if (-not $WorkRoot) {
-    $WorkRoot = Join-Path $env:TEMP ("confscope-handoff-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    # NSIS 的 /D= 取命令行里它之后的全部内容：路径带空格时 PowerShell 会加引号，
+    # 引号会渗进 InstallDir，四个场景全变成测不到目标的假绿。挑一个不含空格的位置。
+    $candidates = @($env:TEMP, $env:LOCALAPPDATA, $env:USERPROFILE) | Where-Object { $_ -and ($_ -notmatch " ") }
+    if ($candidates.Count -eq 0) {
+        throw "找不到没有空格的临时目录：NSIS 的 /D= 不接受带引号的路径，请用 -WorkRoot 指定一个不含空格的目录"
+    }
+    $WorkRoot = Join-Path $candidates[0] ("confscope-handoff-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+}
+if ($WorkRoot -match " ") {
+    throw "工作目录不能带空格（NSIS /D= 的解析限制）：$WorkRoot"
 }
 New-Item -ItemType Directory -Force -Path $WorkRoot | Out-Null
 
@@ -81,10 +90,13 @@ function Invoke-Installer {
     }
     $argList += "/D=$TargetDir"
     $proc = Start-Process -FilePath $Installer -ArgumentList $argList -PassThru -WindowStyle Hidden
-    if (-not (Wait-Process -Id $proc.Id -Timeout $TimeoutSec -ErrorAction SilentlyContinue)) {
+    # 用 WaitForExit(毫秒) 而不是 Wait-Process：后者成功时不输出任何东西，
+    # 「if (-not (Wait-Process ...))」恒为真，会把四个场景全判成超时（第一次 CI 跑就是这样误红的）。
+    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         throw "安装程序在 $TimeoutSec 秒内没有退出——这正是 v1.9.9 线上「等待 ConfScope 退出」永不结束的形态"
     }
+    Write-Host "  安装进程 $($proc.Id) 退出码 $($proc.ExitCode)"
     return $proc.ExitCode
 }
 
@@ -96,6 +108,7 @@ function Invoke-Scenario {
     )
     Remove-UninstallEntry
     $targetDir = Join-Path $WorkRoot ("t-" + $Name)
+    Write-Host ">> $Name（期望退出码 $Expect）目标：$targetDir"
     try {
         $pidArg = & $Prepare $targetDir
         $code = Invoke-Installer -TargetDir $targetDir -PidArg $pidArg
