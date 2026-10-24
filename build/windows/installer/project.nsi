@@ -1,4 +1,13 @@
-Unicode true
+﻿Unicode true
+
+; 首三字节必须是 UTF-8 BOM（EF BB BF），编辑器/脚本别把它抹掉：Windows 上的 makensis 对
+; 没有 BOM 的脚本按宿主 ANSI 码页解释源码（en-US 机器 = CP1252），下面 9 组中文 LangString
+; 会被编成乱码，用户在安装进度页看到的就是「ConfScope å·²é€€å‡º」这种形态（v1.9.9 线上事故）。
+; `Unicode true` 只保证运行时用 UTF-16，救不了源码阶段的解码；而 POSIX 侧的 makensis 恒按
+; UTF-8 读源码（C.UTF-8 / C / ISO-8859-1 四种 locale 下产物 sha256 全等），所以 Linux 那道
+; 语法闸门原理上抓不到它——验收靠 scripts/check-installer-strings.mjs 直接解编译产物，
+; 判据钉在 tests/ux/windowsInstallerKeepsDataAndMatchesRuntimeLayout.test.ts 的 G 组。
+
 
 ####
 ## ConfScope Windows 安装包 —— 本文件是手写的，不是 wails 模板产物。
@@ -8,7 +17,10 @@ Unicode true
 ## 一律在本文件里用 !define 覆盖，或者干脆不调用那个宏、自己实现一份：
 ##   - REQUEST_EXECUTION_LEVEL：默认 admin（每机 Program Files，每次升级弹 UAC）→ 改 user
 ##   - PRODUCT_EXECUTABLE：默认 ${INFO_PROJECTNAME}.exe = confscope.exe，与
-##     wails.json outputfilename / update.json 的 ConfScope.exe 分叉 → 显式统一
+##     wails.json outputfilename 分叉 → 显式统一成 ConfScope.exe。注意这只管
+##     「装进程序目录的可执行文件名」；发布资产名是另一件事（轮70 起统一为
+##     confscope-windows-amd64-portable.exe / -installer.exe，由 CI 在上传前改名），
+##     两者不同源也不冲突。
 ##   - wails.writeUninstaller / wails.deleteUninstaller：硬编码 HKLM，user 级写入
 ##     静默失败（控制面板根本没有卸载入口）→ 不调用，自建 HKCU 版本
 ##

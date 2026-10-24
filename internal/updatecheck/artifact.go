@@ -41,6 +41,18 @@ const (
 // 与 .github/workflows/release.yml 的 generate-manifest 保持一致。
 const InstallerPlatformKey = "windows-amd64-installer"
 
+// publishedAssetNames 按 manifest 键列出当前发布形态的文件名。
+// 与 release.yml 的 fileName 字段同源（TestDefaultFileNameMatchesPublishedAssets 逐键比对）。
+var publishedAssetNames = map[string]string{
+	"windows-amd64":      "confscope-windows-amd64-portable.exe",
+	InstallerPlatformKey: "confscope-windows-amd64-installer.exe",
+	"linux-amd64":        "confscope-linux-amd64.tar.gz",
+	"linux-amd64-deb":    "confscope-linux-amd64.deb",
+	"linux-amd64-rpm":    "confscope-linux-amd64.rpm",
+	"darwin-arm64":       "confscope-macos-arm64.dmg",
+	"darwin-amd64":       "confscope-macos-amd64.dmg",
+}
+
 // Selection 描述"这台机器现在该拿哪个条目"。
 type Selection struct {
 	Platform      string                   `json:"platform"`      // windows-amd64 / linux-amd64 / darwin-arm64 ...
@@ -151,15 +163,16 @@ func normalizeAsset(asset PlatformAsset, key string) PlatformAsset {
 	return asset
 }
 
+// defaultFileName 是 manifest 没带 fileName 时的兜底（界面不能显示空白）。
+// 名字必须与 .github/workflows/release.yml 实际发布的资产同名（轮70 统一成
+// 「全小写 + 平台 + 形态」），判据见 TestDefaultFileNameMatchesPublishedAssets；
+// 而条目键（windows-amd64 / darwin-arm64 ...）是历史契约，不跟着文件名一起改：
+// ≤1.9.9 的客户端靠键选条目，改键等于把所有人的更新检查打死。
 func defaultFileName(key string) string {
-	switch key {
-	case InstallerPlatformKey:
-		return "confscope-windows-amd64-installer.exe"
-	case "windows-amd64":
-		return "ConfScope.exe"
-	default:
-		return "confscope-" + key
+	if name, ok := publishedAssetNames[key]; ok {
+		return name
 	}
+	return "confscope-" + key
 }
 
 // handoffFor 决定出路。规则：能安全交给安装程序的只有 Windows 安装版；

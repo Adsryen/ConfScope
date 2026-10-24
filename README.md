@@ -232,10 +232,10 @@ retest 与截图取证都依赖 `scripts/retest-data/` 的合成数据，跑之�
 | 平台 | 产物 | 形态 |
 | --- | --- | --- |
 | Windows amd64 | `confscope-windows-amd64-installer.exe` | **安装版（推荐）**：每用户 NSIS，装到 `%LOCALAPPDATA%\Programs\ConfScope`，免管理员权限，控制面板可卸载 |
-| Windows amd64 | `ConfScope.exe` | 便携版：单文件放哪跑哪，数据默认落在 exe 同级 `ConfScopeData` |
+| Windows amd64 | `confscope-windows-amd64-portable.exe` | 便携版：单文件放哪跑哪，数据默认落在 exe 同级 `ConfScopeData` |
 | Linux amd64 | `confscope-linux-amd64.tar.gz` / `confscope-linux-amd64.deb` / `confscope-linux-amd64.rpm` | 裸二进制 / 系统包 |
-| macOS arm64 | `ConfScope-darwin-arm64.dmg` | 挂载后拖进 Applications |
-| macOS amd64 | `ConfScope-darwin-amd64.dmg` | 同上 |
+| macOS arm64 | `confscope-macos-arm64.dmg` | 挂载后拖进 Applications |
+| macOS amd64 | `confscope-macos-amd64.dmg` | 同上 |
 
 两种 Windows 形态只差**数据根默认落在哪**（见上文「数据与凭据边界」），配置与凭据的写法完全相同：
 安装版由安装程序在 exe 同级写 `install.json` 标记，数据落系统用户数据目录；便携版没有标记，数据随

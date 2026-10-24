@@ -82,7 +82,7 @@ jobs:
           sudo apt-get install -y nsis
           command -v makensis >/dev/null
           rm -f build/bin/confscope-windows-amd64-installer.exe
-          bash scripts/check-windows-installer.sh
+          REQUIRE_STRING_CHECK=1 bash scripts/check-windows-installer.sh
           test -f build/bin/confscope-windows-amd64-installer.exe
 
       # 可执行证据：注入必须真的落进 internal/app（本轮线上事故的形态），不是只 grep 文本
@@ -217,6 +217,16 @@ jobs:
           # 产物里永远是 "dev"（钉在 tests/ux/buildVersionSymbolResolvesToGoDeclaration）。
           # shellcheck disable=SC2086
           wails build -clean ${NSIS_FLAG} -ldflags "-X confscope/internal/app.appVersion=${VERSION}"
+
+          # 名字规范：全小写 + 平台 + 形态。wails 的产物名由 wails.json 的 outputfilename
+          # 决定，而它必须和安装脚本里的 PRODUCT_EXECUTABLE 同源（装进去的可执行文件名），
+          # 所以不改构建产物本身，只在上传前改名——update.json 的 fileName/downloadUrl
+          # 与 release 资产跟着一起走，平台键（windows-amd64 等）一个字都不动，
+          # 否则 ≤1.9.9 的客户端选不出条目，全员更新检查失效。
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            test -f build/bin/ConfScope.exe
+            mv build/bin/ConfScope.exe build/bin/confscope-windows-amd64-portable.exe
+          fi
         env:
           GOARCH: ${{ matrix.goarch }}
 
@@ -234,7 +244,7 @@ jobs:
           fi
           echo "Using app bundle: ${APP_PATH}"
 
-          DMG_PATH="build/bin/ConfScope-darwin-${{ matrix.goarch }}.dmg"
+          DMG_PATH="build/bin/confscope-macos-${{ matrix.goarch }}.dmg"
           rm -f "${DMG_PATH}"
 
           brew install create-dmg
@@ -266,7 +276,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ConfScope-darwin-${{ matrix.goarch }}
-          path: build/bin/ConfScope-darwin-${{ matrix.goarch }}.dmg
+          path: build/bin/confscope-macos-${{ matrix.goarch }}.dmg
           if-no-files-found: error
 
       - name: Upload artifact (Windows)
@@ -274,7 +284,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ConfScope-windows-amd64
-          path: build/bin/ConfScope.exe
+          path: build/bin/confscope-windows-amd64-portable.exe
           # 产物没编出来要在上传这一步就红；默认的 warn 会把它推到下游 sha256sum 才炸
           if-no-files-found: error
 
@@ -289,6 +299,20 @@ jobs:
           ls -la build/bin
           test -f build/bin/confscope-windows-amd64-installer.exe
           du -h build/bin/confscope-windows-amd64-installer.exe
+
+      # 乱码判据只能在这条链路上生效：Windows 的 makensis 按宿主 ANSI 码页解释没有 BOM 的
+      # 脚本，而 preflight 那套跑在 ubuntu（POSIX 侧恒按 UTF-8 读源码，原理上看不见这个缺陷）。
+      # v1.9.9 就是 Linux 闸门全绿、线上安装包中文全是乱码。
+      - name: Check Windows installer strings
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 两条都必须看到实际输出才算数：入口判定不成立时脚本会静默退出 0（Windows 上
+          # process.argv[1] 是 D:\a\... 而 import.meta.url 是 file:///D:/a/...，
+          # 早先那种逐字比对的写法在这条链路上恒假，闸门就成了空气）。
+          node scripts/check-installer-strings.mjs --self-test | grep -E "^ok +.*blocks=[0-9]+ bad=[0-9]+"
+          node scripts/check-installer-strings.mjs build/bin/confscope-windows-amd64-installer.exe | grep -E "UTF-16LE"
 
       - name: Upload artifact (Windows installer)
         if: matrix.platform == 'windows'
@@ -443,7 +467,7 @@ jobs:
           echo "${NOTES}"
 
           # Windows：裸 exe（便携形态）+ NSIS 安装程序（每用户安装形态）
-          WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe" | awk '{print $1}')
+          WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable.exe" | awk '{print $1}')
           WIN_INSTALLER_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64-installer/confscope-windows-amd64-installer.exe" | awk '{print $1}')
 
           # Linux
@@ -452,8 +476,8 @@ jobs:
           LINUX_RPM_SHA256=$(sha256sum "artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm" | awk '{print $1}')
 
           # macOS
-          DARWIN_ARM64_SHA256=$(sha256sum "artifacts/ConfScope-darwin-arm64/ConfScope-darwin-arm64.dmg" | awk '{print $1}')
-          DARWIN_AMD64_SHA256=$(sha256sum "artifacts/ConfScope-darwin-amd64/ConfScope-darwin-amd64.dmg" | awk '{print $1}')
+          DARWIN_ARM64_SHA256=$(sha256sum "artifacts/ConfScope-darwin-arm64/confscope-macos-arm64.dmg" | awk '{print $1}')
+          DARWIN_AMD64_SHA256=$(sha256sum "artifacts/ConfScope-darwin-amd64/confscope-macos-amd64.dmg" | awk '{print $1}')
 
           DOWNLOAD_BASE="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
 
@@ -476,9 +500,9 @@ jobs:
               mandatory: false,
               platforms: {
                 "windows-amd64": {
-                  downloadUrl: "\($downloadBase)/ConfScope.exe",
+                  downloadUrl: "\($downloadBase)/confscope-windows-amd64-portable.exe",
                   sha256: $winSha256,
-                  fileName: "ConfScope.exe"
+                  fileName: "confscope-windows-amd64-portable.exe"
                 },
                 "windows-amd64-installer": {
                   downloadUrl: "\($downloadBase)/confscope-windows-amd64-installer.exe",
@@ -501,14 +525,14 @@ jobs:
                   fileName: "confscope-linux-amd64.rpm"
                 },
                 "darwin-arm64": {
-                  downloadUrl: "\($downloadBase)/ConfScope-darwin-arm64.dmg",
+                  downloadUrl: "\($downloadBase)/confscope-macos-arm64.dmg",
                   sha256: $darwinArm64Sha256,
-                  fileName: "ConfScope-darwin-arm64.dmg"
+                  fileName: "confscope-macos-arm64.dmg"
                 },
                 "darwin-amd64": {
-                  downloadUrl: "\($downloadBase)/ConfScope-darwin-amd64.dmg",
+                  downloadUrl: "\($downloadBase)/confscope-macos-amd64.dmg",
                   sha256: $darwinAmd64Sha256,
-                  fileName: "ConfScope-darwin-amd64.dmg"
+                  fileName: "confscope-macos-amd64.dmg"
                 }
               }
             }' > update.json
@@ -565,11 +589,11 @@ jobs:
           generate_release_notes: false
           body_path: ${{ runner.temp }}/release-body.md
           files: |
-            artifacts/ConfScope-windows-amd64/ConfScope.exe
+            artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable.exe
             artifacts/ConfScope-windows-amd64-installer/confscope-windows-amd64-installer.exe
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.tar.gz
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.deb
             artifacts/ConfScope-linux-amd64/confscope-linux-amd64.rpm
-            artifacts/ConfScope-darwin-arm64/ConfScope-darwin-arm64.dmg
-            artifacts/ConfScope-darwin-amd64/ConfScope-darwin-amd64.dmg
+            artifacts/ConfScope-darwin-arm64/confscope-macos-arm64.dmg
+            artifacts/ConfScope-darwin-amd64/confscope-macos-amd64.dmg
             artifacts/update-manifest/update.json

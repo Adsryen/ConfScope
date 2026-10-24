@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -167,7 +168,7 @@ func TestNormalizeAssetFillsReadableFileName(t *testing.T) {
 	if got := defaultFileName(InstallerPlatformKey); got != "confscope-windows-amd64-installer.exe" {
 		t.Fatalf("defaultFileName(installer) = %q", got)
 	}
-	if got := defaultFileName("windows-amd64"); got != "ConfScope.exe" {
+	if got := defaultFileName("windows-amd64"); got != "confscope-windows-amd64-portable.exe" {
 		t.Fatalf("defaultFileName(windows) = %q", got)
 	}
 	if got := defaultFileName("linux-arm64"); got != "confscope-linux-arm64" {
@@ -449,4 +450,57 @@ func goCodeOnly(t *testing.T, name string) string {
 		return true
 	})
 	return strings.Join(parts, " ")
+}
+
+// TestDefaultFileNameMatchesPublishedAssets 把兜底文件名钉在 release.yml 真实发布的资产名上。
+// 为什么要跨语言比：update.json 的 fileName 是 CI 用 jq 写死的字面量，而 defaultFileName 是
+// Go 里的兜底；两边漂了都不会有人立刻发现（界面显示的文件名和实际下载到的不是一个东西，
+// 人工覆盖时用户照着文件名找不着）。轮70 把产物名统一成「全小写 + 平台 + 形态」，
+// 正是靠这条比对保证一次改到位、以后不敢只改一边。
+func TestDefaultFileNameMatchesPublishedAssets(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("读不到 release.yml（判据依赖它，读不到就是判据漂了）: %v", err)
+	}
+	text := string(raw)
+
+	keyRe := regexp.MustCompile(`"([a-z0-9-]+)": \{\n`)
+	fileRe := regexp.MustCompile(`fileName: "([^"]+)"`)
+	keys := keyRe.FindAllStringSubmatch(text, -1)
+	names := fileRe.FindAllStringSubmatch(text, -1)
+	if len(keys) == 0 || len(keys) != len(names) {
+		t.Fatalf("release.yml 的条目解析不出来：keys=%d fileNames=%d（解析口径漂了就去看这条测试）", len(keys), len(names))
+	}
+
+	published := map[string]string{}
+	for i, k := range keys {
+		published[k[1]] = names[i][1]
+	}
+	if len(published) != len(keys) {
+		t.Fatal("release.yml 里同一个平台键出现了两次")
+	}
+
+	for key, want := range published {
+		if got := defaultFileName(key); got != want {
+			t.Errorf("键 %s：release.yml 发布的是 %q，Go 的兜底名却是 %q", key, want, got)
+		}
+	}
+	for key, want := range publishedAssetNames {
+		if got, ok := published[key]; !ok {
+			t.Errorf("publishedAssetNames 里的键 %s 在 release.yml 没有对应条目（清单不发它，兜底名是空的）", key)
+		} else if got != want {
+			t.Errorf("键 %s：表里写 %q，release.yml 写 %q", key, want, got)
+		}
+	}
+
+	// 平台键是历史契约：老客户端靠键选条目，改键 = 打死所有人的更新检查。
+	for _, key := range []string{"windows-amd64", InstallerPlatformKey, "linux-amd64", "linux-amd64-deb", "linux-amd64-rpm", "darwin-arm64", "darwin-amd64"} {
+		if _, ok := published[key]; !ok {
+			t.Errorf("update.json 少了平台键 %s，≤1.9.9 的客户端会选不出条目", key)
+		}
+	}
+	// 兜底名不许再出现「大小写混排 / 看不出平台与形态」的旧形态
+	if strings.Contains(text, "fileName: \"ConfScope.exe\"") || strings.Contains(text, "ConfScope-darwin-amd64.dmg\"") {
+		t.Error("release.yml 又出现了旧命名（ConfScope.exe / ConfScope-darwin-*.dmg）")
+	}
 }

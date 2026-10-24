@@ -1,5 +1,5 @@
 /**
- * Windows 安装包脚本（build/windows/installer/project.nsi）的六组不变量，轮62 起钉在这里。
+ * Windows 安装包脚本（build/windows/installer/project.nsi）的七组不变量，轮62 起钉在这里。
  *
  * 为什么要这么写：本机没有 Windows，wails build -nsis 出来的安装程序没法真跑；
  * CI 的 preflight 只能证明这脚本「编译得过」。而编译得过不等于行为对——下面每一条
@@ -15,11 +15,18 @@
  *  D. 程序自己永不写运行形态标记：写了就等于把便携副本伪装成安装态。
  *  E. 交接出路的绑定面（wailsjs 两段 + 前端 API + 两套测试桥 + Go 方法）不能缺角。
  *  F. CI 不能静默不出安装包：wails v2.13 找不到 makensis 时只打一行 Warning 就 return nil。
+ *  G. 安装包里的中文必须是真中文：project.nsi 缺 UTF-8 BOM 时，Windows 的 makensis 按宿主
+ *     ANSI 码页（en-US = CP1252）解释源码，9 组中文 LangString 全被编成乱码，用户在安装进度
+ *     页看到的是「ConfScope å·²é€€å‡ºï¼Œç»§ç»­è¦†ç›–å®‰è£…」（v1.9.9 线上事故）。这道缺陷在
+ *     Linux 侧原理上不可见——POSIX 的 makensis 恒按 UTF-8 读脚本，四种 locale 下产物 sha256
+ *     全等，所以 F 组那道语法闸门全绿也拦不住它，只能验编译产物本身（G 组）。
  *
  * NSIS 的注释有整行 #、整行 ; 和行尾 # 三种，解释历史的注释不算行为（project.nsi 头部
  * 就写着「默认 admin」），所以先剥注释再抽判据，否则守卫会在自己解释自己的注释上自红。
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PROJECT_ROOT, stripComments } from "./scanUtils";
@@ -30,6 +37,7 @@ const HANDOFF_GO = "internal/updatecheck/handoff.go";
 const ARTIFACT_GO = "internal/updatecheck/artifact.go";
 const APP_GO = "internal/app/app.go";
 const WORKFLOW = ".github/workflows/release.yml";
+const STRINGS_SCRIPT = "scripts/check-installer-strings.mjs";
 const WAILS_TS = "wailsjs/go/app/App.ts";
 const MARKER_CONSUMER_DIRS = ["internal/portabledata", "internal/app", "internal/updatecheck"];
 
@@ -325,6 +333,177 @@ describe("F. CI 不能静默不出安装包", () => {
     expect(stepChunk(wf, "Build")).toMatch(/jq --arg v "\$\{INSTALLER_VERSION\}" '\.info\.productVersion = \$v'/);
   });
 });
+
+describe("G. 安装包的中文不能是码页错读出来的乱码", () => {
+  // 判据本身是负向的：不校验「有没有中文」，只校验「有没有 UTF-8 字节被当单字节码页读出来
+  // 的形态」。这样 NSIS 版本、语言表、字符串顺序变了都不会让守卫自红。
+  it("project.nsi 带非 ASCII 就必须带 UTF-8 BOM，且 BOM 后第一行是 Unicode true", () => {
+    const bytes = readBytes(NSI);
+    expect(hasNonAscii(bytes), "project.nsi 的中文 LangString 又被清空了？安装进度页会只剩英文").toBe(true);
+    expect(encodingProblems({ nsiBytes: bytes })).toEqual([]);
+    const text = bytes.subarray(3).toString("utf8");
+    expect(text.split("\n")[0].trim(), "BOM 后面第一行必须是 Unicode true").toBe("Unicode true");
+  });
+
+  it("wails_tools.nsh 每次构建被 wails 重写且不带 BOM，所以它里面不许有非 ASCII", () => {
+    const tools = readBytes(TOOLS);
+    expect(hasNonAscii(tools), "wails 模板里出现了非 ASCII：它不带 BOM，Windows 编译必乱码，得把文案挪回 project.nsi").toBe(false);
+  });
+
+  it("Linux 闸门跑产物体检，Windows 出包链路也跑，两处都不许静默跳过", () => {
+    const sh = read("scripts/check-windows-installer.sh");
+    expect(sh, "preflight 只验语法就等于没验：产物体检必须在编译完就跑一次").toContain("check-installer-strings.mjs");
+    expect(sh).toContain("REQUIRE_STRING_CHECK");
+    // 体检脚本静默退出 0（入口判定不成立、或压根没跑）也算过，那是空气闸门：两处都得要求实际输出
+    expect(sh, "产物体检没要求实际输出，静默跳过就查不出来").toContain('grep -E "UTF-16LE"');
+    const wf = yamlCode(read(WORKFLOW));
+    expect(stepChunk(wf, "Validate Windows installer script (makensis)")).toContain("REQUIRE_STRING_CHECK=1");
+    const check = stepChunk(wf, "Check Windows installer strings");
+    expect(check, "Windows 出包时没对真实安装包跑乱码判据，v1.9.9 那次的乱码包还会再发一次").toBeTruthy();
+    expect(check).toContain("check-installer-strings.mjs --self-test");
+    expect(check).toContain("build/bin/confscope-windows-amd64-installer.exe");
+    expect(check).toMatch(/--self-test\s*\|\s*grep/);
+    expect(check).toMatch(/installer\.exe\s*\|\s*grep -E "UTF-16LE"/);
+    // 判据得排在「安装包确实存在」之后、上传之前：缺产物时先报缺产物，乱码包不许进 artifact
+    const order = wf.indexOf("- name: Assert Windows installer exists");
+    const checkAt = wf.indexOf("- name: Check Windows installer strings");
+    const uploadAt = wf.indexOf("- name: Upload artifact (Windows installer)");
+    expect(checkAt).toBeGreaterThan(order);
+    expect(checkAt).toBeLessThan(uploadAt);
+  });
+
+  it("判据自身有可执行证据：脚本 --self-test 必须退出 0", () => {
+    const out = execFileSync("node", ["scripts/check-installer-strings.mjs", "--self-test"], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+    });
+    expect(out).toMatch(/ok/i);
+  });
+
+  it("体检脚本「直接执行」的判定跨平台成立（CI 那一步不是空气闸门）", () => {
+    const scriptText = read(STRINGS_SCRIPT);
+    expect(entrypointProblems(scriptText), "入口判定的形态漂了").toEqual([]);
+
+    // 可执行证据：路径里带空格时 import.meta.url 会转成 %20，而 argv[1] 不会——
+    // 这正是 Windows 上「反斜杠 + 盘符」那类不等价的同型场景。此时 CLI 必须照样真的跑。
+    const spacedDir = mkdtempSync(join(tmpdir(), "confscope installer check-"));
+    const target = join(spacedDir, "check-installer-strings.mjs");
+    writeFileSync(target, scriptText, "utf8");
+    const out = execFileSync("node", [target, "--self-test"], { encoding: "utf8" });
+    expect(out).toMatch(/blocks=\d+ bad=\d+/);
+    expect(out, "静默退出（什么都没输出）说明入口判定又错了").toMatch(/正确中文不该判红/);
+
+    // 变异对照：换回逐字比对的写法，带空格路径这一跑就没输出了
+    const naive = scriptText.replace(
+      "resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))",
+      "import.meta.url === `file://${process.argv[1]}`"
+    );
+    expect(naive).not.toBe(scriptText);
+    expect(entrypointProblems(naive).length).toBeGreaterThan(0);
+    const naiveTarget = join(spacedDir, "naive-entry.mjs");
+    writeFileSync(naiveTarget, naive, "utf8");
+    const silent = execFileSync("node", [naiveTarget, "--self-test"], { encoding: "utf8" });
+    expect(silent.trim(), "旧写法在这种路径形态下压根不跑 CLI").toBe("");
+  });
+
+  it("变异对照：抹掉 BOM、给 tools 塞中文、删掉 Windows 那一步、preflight 放宽，都必须判红", () => {
+    const nsiBytes = readBytes(NSI);
+    const tools = read(TOOLS);
+    const wf = yamlCode(read(WORKFLOW));
+    const preflight = stepChunk(wf, "Validate Windows installer script (makensis)");
+
+    const noBom = Buffer.concat([Buffer.from("Unicode true\n"), nsiBytes.subarray(3)]);
+    expect(encodingProblems({ nsiBytes: noBom }).length).toBeGreaterThan(0);
+
+    expect(encodingProblems({ nsiBytes, toolsText: tools + '\nLangString zh 1000 "\u4e2d\u6587"\n' }).length).toBeGreaterThan(0);
+
+    const withoutStep = wf.replace("      - name: Check Windows installer strings\n", "      - name: x\n");
+    expect(withoutStep).not.toBe(wf);
+    expect(workflowProblems(withoutStep).length).toBeGreaterThan(0);
+
+    const lenient = wf.replace("REQUIRE_STRING_CHECK=1 bash scripts/check-windows-installer.sh", "bash scripts/check-windows-installer.sh");
+    expect(lenient).not.toBe(wf);
+    expect(workflowProblems(lenient).length).toBeGreaterThan(0);
+
+    const silentCi = wf.replace(' | grep -E "UTF-16LE"\n', "\n");
+    expect(silentCi).not.toBe(wf);
+    expect(workflowProblems(silentCi).length).toBeGreaterThan(0);
+
+    const silentSelfTest = wf.replace(' --self-test | grep -E "^ok +.*blocks=[0-9]+ bad=[0-9]+"', " --self-test");
+    expect(silentSelfTest).not.toBe(wf);
+    expect(workflowProblems(silentSelfTest).length).toBeGreaterThan(0);
+  });
+});
+
+/** G 组的共享判据：读文件、看码页、比 BOM，全走真实字节而不是解码后的字符串。 */
+function readBytes(rel: string): Buffer {
+  return readFileSync(join(PROJECT_ROOT, rel));
+}
+
+function hasNonAscii(bytes: Buffer): boolean {
+  return bytes.some((byte) => byte > 0x7f);
+}
+
+/**
+ * 源码侧的编码不变量：非 ASCII 的 .nsi 只有带 UTF-8 BOM 才可能在 Windows 上被正确解码；
+ * wails 重写的 wails_tools.nsh 永远不带 BOM，所以它根本不该出现非 ASCII。
+ * workflow 侧的不变量：preflight 不许放宽，Windows 出包链路必须对真实产物再跑一次。
+ */
+function encodingProblems(args: { nsiBytes: Buffer; toolsText?: string }): string[] {
+  const problems: string[] = [];
+  const { nsiBytes } = args;
+  const toolsText = args.toolsText ?? read(TOOLS);
+  if (hasNonAscii(nsiBytes) && !(nsiBytes[0] === 0xef && nsiBytes[1] === 0xbb && nsiBytes[2] === 0xbf)) {
+    problems.push("project.nsi 含非 ASCII 却没有 UTF-8 BOM：Windows 的 makensis 会按 CP1252 读源码，产物里的中文全成乱码");
+  }
+  if (hasNonAscii(Buffer.from(toolsText, "utf8"))) {
+    problems.push("wails_tools.nsh 含非 ASCII：它由 wails 重写且不带 BOM，Windows 侧编译必乱码");
+  }
+  return problems;
+}
+
+function workflowProblems(workflowCode: string): string[] {
+  const problems: string[] = [];
+  if (!workflowCode.includes("- name: Check Windows installer strings")) {
+    problems.push("release.yml 的 build 作业不再对真实安装包跑乱码判据");
+  }
+  const preflight = stepChunk(workflowCode, "Validate Windows installer script (makensis)");
+  if (!preflight.includes("REQUIRE_STRING_CHECK=1")) {
+    problems.push("preflight 把产物体检放宽成可跳过（缺 node/缺产物时静默放行）");
+  }
+  const check = stepChunk(workflowCode, "Check Windows installer strings");
+  if (!/installer\.exe\s*\|\s*grep -E "UTF-16LE"/.test(check)) {
+    problems.push("Windows 侧的产物体检没要求实际输出：脚本静默退出 0 也会一路绿灯");
+  }
+  if (!/--self-test\s*\|\s*grep/.test(check)) {
+    problems.push("判据脚本的自检没要求实际输出，跑没跑看不出来");
+  }
+  const sh = read("scripts/check-windows-installer.sh");
+  if (!sh.includes('grep -E "UTF-16LE"')) {
+    problems.push("preflight 的产物体检同样没要求实际输出");
+  }
+  return problems;
+}
+
+/**
+ * 直接执行的判定必须走路径解析，不能逐字比 `file://${process.argv[1]}`：
+ * Windows 上 argv[1] 是 D:\a\... 而 import.meta.url 是 file:///D:/a/...（反斜杠 + 盘符多一个斜杠），
+ * 逐字比对恒假 ⇒ CI 那一步静默 exit 0。同一类缺陷在 Linux 上也能复现：路径里带空格时
+ * import.meta.url 会把空格转成 %20，argv[1] 不会——下面的可执行证据就走这条路。
+ */
+function entrypointProblems(scriptText: string): string[] {
+  const problems: string[] = [];
+  if (/file:\$\{process\.argv\[1\]\}/.test(scriptText)) {
+    problems.push("入口判定退回逐字比对 file://${process.argv[1]}：Windows（以及带空格的路径）上恒假");
+  }
+  if (!scriptText.includes("fileURLToPath")) {
+    problems.push("入口判定没有 fileURLToPath，跨平台比不出同一个文件");
+  }
+  if (!/resolve\(process\.argv\[1\]\)\s*===\s*resolve\(fileURLToPath\(import\.meta\.url\)\)/.test(scriptText)) {
+    problems.push("入口判定不是 resolve(argv[1]) === resolve(fileURLToPath(import.meta.url)) 这个形态");
+  }
+  return problems;
+}
 
 function countOccurrences(text: string, re: RegExp): number {
   return [...text.matchAll(re)].length;

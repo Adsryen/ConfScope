@@ -11,7 +11,7 @@
  *   漂一个字母的结果是 sha256 变空或 "no asset for platform X"，构建照样绿。
  * - 发版链路此前一条检查都不跑（release.yml 里 tsc / vitest / go test / gofmt 计数为 0）。
  *
- * 守卫钉六条，每条都带变异对照：
+ * 守卫钉九条，每条都带变异对照：
  * 1. preflight 作业存在、build 依赖它，且作业里确实跑了类型检查、守卫、Go 测试、注入证据、发版脚本；
  * 2. 每个 upload-artifact 步骤都必须 if-no-files-found: error；
  * 3. jq 模板写出的键 ⊆ Go Manifest/PlatformAsset 的 json tag，且必需键一个不少；
@@ -27,6 +27,10 @@
  * 8. （轮58）两个消费方同源：打过 tag 的版本必须在 CHANGELOG 里有段落，应用内纯文本 notes 与
  *    Release markdown 正文的 bullet 必须一一对得上，处置规则（写入/覆盖/保留手写/已同步/缺段落）
  *    用离线正文快照钉住，不许真打 API。
+ * 9. （轮70）发布说明的口吻：CHANGELOG 抽出来的文字原样进应用更新面板与 Release 正文，
+ *    开发日志式写法（轮次编号、「实测」「门禁」这类内部词、仓库内部路径、源码文件名、超长条目）
+ *    就是直接把用户眼前的文案写成自己的工作草稿。判据见本文件末尾的「发布说明的口吻」一节，
+ *    覆盖 1.9.2 起的段落；更早的段落按当时的形态已经发布过，回改会让说明与实际交付脱节。
  *
  * 解释历史的注释不算代码：先按行剥掉 `#` 注释再抽判据，否则守卫会在自己解释自己的注释上自红。
  */
@@ -35,7 +39,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { listChangelogVersions, normalizeVersion } from "../../scripts/changelogSection.mjs";
+import { SECTION_LABELS, listChangelogVersions, normalizeVersion } from "../../scripts/changelogSection.mjs";
 import { manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
 import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
@@ -507,7 +511,7 @@ function wailsVersionGateProblems(script: string): string[] {
   });
 
   it("变异对照：资产字段改名（fileName→filename）必须判红，因为 Go 只会静默忽略", () => {
-    const mutated = text.replace('                  fileName: "ConfScope.exe"', '                  filename: "ConfScope.exe"');
+    const mutated = text.replace('                  fileName: "confscope-windows-amd64-portable.exe"', '                  filename: "confscope-windows-amd64-portable.exe"');
     expect(mutated).not.toBe(text);
     expect(manifestProblems(mutated).length).toBeGreaterThan(0);
   });
@@ -533,11 +537,14 @@ function wailsVersionGateProblems(script: string): string[] {
     expect(dropped).not.toBe(text);
     expect(manifestProblems(dropped).some((problem) => problem.includes("windows-amd64"))).toBe(true);
 
-    const mismatch = text.replace('WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.exe"', 'WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/ConfScope.bin"');
+    const mismatch = text.replace(
+      'WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable.exe"',
+      'WIN_SHA256=$(sha256sum "artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable.bin"'
+    );
     expect(mismatch).not.toBe(text);
     expect(manifestProblems(mismatch).some((problem) => problem.includes("被哈希的是"))).toBe(true);
 
-    const notPublished = text.replace("            artifacts/ConfScope-windows-amd64/ConfScope.exe\n", "            artifacts/ConfScope-windows-amd64/ConfScope-win.exe\n");
+    const notPublished = text.replace("            artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable.exe\n", "            artifacts/ConfScope-windows-amd64/confscope-windows-amd64-portable-win.exe\n");
     expect(notPublished).not.toBe(text);
     expect(manifestProblems(notPublished).some((problem) => problem.includes("files 里没有"))).toBe(true);
   });
@@ -987,5 +994,226 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
     expect(plain.stdout.trim()).toBe("新增\n- 支持 粗体 与 code 和 链接");
     const body = runSyncScript([`--print-body=2.5.0`, `--changelog=${file}`]);
     expect(body.stdout).toContain("- 支持 **粗体** 与 `code` 和 [链接](https://example.com)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 轮70：发布说明的口吻
+// ---------------------------------------------------------------------------
+// CHANGELOG 的段落不是开发日志：它被抽成两份，一份是 update.json 的 notes（应用内「更新内容」按
+// white-space: pre-wrap 直接显示），一份是 GitHub Release 正文。写成取证记录，用户看到的就是一屏
+// 黑话。口径落在 .trellis/spec/guides/release-notes-voice.md，这一节把其中能机械判定的部分钉住。
+
+/**
+ * 判据生效的下界：1.9.2 起（含尚未发布的顶部段落）。
+ * 更早的段落保持历史原样——那些 Release 正文早已发出去，回改只会让「当时实际交付的内容」与说明脱节。
+ * 下界不是空转：下面用 1.9.1 的原文快照证明同一判据对旧段落是红的，豁免是刻意的。
+ */
+const VOICE_FLOOR = [1, 9, 2];
+/** 规则 9：一条 bullet 讲一件事。超长就是把两三件事塞进了一句，更新面板里会糊成一坨。 */
+const VOICE_BULLET_MAX = 200;
+/** 规则 5：仓库内部路径对读者没有意义，还会顺手把目录结构暴露出去。 */
+const VOICE_REPO_PATHS = ["tests/", "internal/", "src/", "scripts/", ".trellis/", ".github/"];
+/** 规则 4：开发口吻的内部词（中文按子串判）。 */
+const VOICE_CN_TERMS = [
+  "轮\\d",
+  "本轮",
+  "这一轮",
+  "实测",
+  "真机",
+  "复验",
+  "取证",
+  "变异对照",
+  "守卫",
+  "用例",
+  "普查",
+  "接线",
+  "判据",
+  "闸门",
+  "门禁",
+  "金丝雀",
+  "事实源",
+  "兜底",
+  "收口",
+  "水合",
+  "保活",
+  "演成",
+  "归位",
+];
+/** 规则 4：工具名（英文按词边界判，免得正常句子被误伤）。 */
+const VOICE_EN_TERMS = ["eslint", "gofmt", "retest", "tsc", "vitest"];
+/** 规则 5 的另一半：源码文件名。安装包的 .exe/.deb/.rpm/.dmg/.tar.gz 是用户要下载的东西，不算。 */
+const VOICE_SOURCE_EXT = String.raw`\.(?:mjs|nsi|nsh|ps1|sh|go|tsx?)(?![0-9A-Za-z])`;
+
+const VOICE_TERMS: Array<{ label: string; pattern: RegExp }> = [
+  ...VOICE_CN_TERMS.map((word) => ({ label: word, pattern: new RegExp(word) })),
+  ...VOICE_EN_TERMS.map((word) => ({ label: word, pattern: new RegExp(`(?<![0-9a-z])${word}(?![0-9a-z])`, "i") })),
+];
+
+const VOICE_SECTION_LABELS = new Set<string>(Object.values(SECTION_LABELS));
+
+function versionParts(version: string): number[] {
+  const normalized = normalizeVersion(version);
+  if (!normalized) return [0, 0, 0];
+  return normalized.split(".").map((seg) => Number(seg) || 0);
+}
+
+function compareVersionParts(a: number[], b: number[]): number {
+  for (let index = 0; index < 3; index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** 下界以上的段落才受口吻判据约束。数字比较，1.10.0 不会被当成比 1.9.2 旧。 */
+function voiceCoveredVersions(versions: string[], floor: number[] = VOICE_FLOOR): string[] {
+  return versions.filter((version) => compareVersionParts(versionParts(version), floor) >= 0);
+}
+
+/**
+ * 纯文本说明 → 「一条一件事」的列表。
+ * CHANGELOG 为了 140 列宽会把一条写成两行，抽取时只去了行首缩进，所以这里要把续行并回上一条：
+ * `- ` 起头算新条目，小节标题（SECTION_LABELS 的取值，或紧跟 bullet 之前的纯英文标题）算分隔。
+ * 内部词/路径/文件名那三项判的是全文每一行，不依赖这里的合并，合并只服务长度判据。
+ */
+function voiceBullets(notes: string): string[] {
+  const bullets: string[] = [];
+  let openBullet = false;
+  for (const rawLine of notes.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      openBullet = false;
+      continue;
+    }
+    const isLabel = VOICE_SECTION_LABELS.has(line) || (!openBullet && /^[A-Za-z][A-Za-z ]*$/.test(line));
+    if (isLabel) {
+      openBullet = false;
+      continue;
+    }
+    if (/^- \S/.test(line)) {
+      bullets.push(line.slice(2).trim());
+      openBullet = true;
+      continue;
+    }
+    if (openBullet) bullets[bullets.length - 1] = `${bullets[bullets.length - 1]} ${line}`;
+    else bullets.push(line);
+  }
+  return bullets;
+}
+
+/** 口吻判据。输入是抽取脚本渲染出来的 notes 文本（用户实际看到的形态），不是 CHANGELOG 原文。 */
+function notesVoiceProblems(notes: string): string[] {
+  const problems: string[] = [];
+  const bullets = voiceBullets(notes);
+  if (bullets.length === 0) problems.push("抽不出任何 bullet，这一版的说明是空的");
+
+  const seen = new Set<string>();
+  const push = (kind: string, key: string, detail: string, line: string) => {
+    const dedupe = `${kind}|${key}|${line}`;
+    if (seen.has(dedupe)) return;
+    seen.add(dedupe);
+    problems.push(`${kind}「${key}」会原样出现在用户眼前：${detail}（${line.slice(0, 90)}）`);
+  };
+  for (const rawLine of notes.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    for (const term of VOICE_TERMS) {
+      if (term.pattern.test(line)) push("开发口吻的内部词", term.label, term.label, line);
+    }
+    for (const repoPath of VOICE_REPO_PATHS) {
+      if (line.includes(repoPath)) push("仓库内部路径", repoPath, repoPath, line);
+    }
+    for (const hit of line.match(new RegExp(VOICE_SOURCE_EXT, "g")) ?? []) {
+      push("源码文件名", hit, hit, line);
+    }
+  }
+  for (const bullet of bullets) {
+    const length = [...bullet].length;
+    if (length > VOICE_BULLET_MAX) {
+      problems.push(`单条 bullet ${length} 字符，超过 ${VOICE_BULLET_MAX}，应该拆成两条：${bullet.slice(0, 60)}…`);
+    }
+  }
+  return problems;
+}
+
+describe("发布说明的口吻（面向用户，不是开发日志）", () => {
+  const changelog = readFileSync(join(PROJECT_ROOT, "CHANGELOG.md"), "utf8");
+  const covered = voiceCoveredVersions(changelogVersions(changelog));
+  const extracted = covered.map((version) => {
+    const run = runNotesScript([version]);
+    expect(run.code, `${version} 抽取失败：${run.stderr}`).toBe(0);
+    return { version, notes: run.stdout };
+  });
+
+  it("覆盖范围：最新段落一定在内，下界按数字序而非字符串序", () => {
+    expect(voiceCoveredVersions(["1.9.1", "1.9.2", "1.10.0", "2.0.0"])).toEqual(["1.9.2", "1.10.0", "2.0.0"]);
+    expect(covered.length).toBeGreaterThanOrEqual(3);
+    expect(covered[0]).toBe(changelogVersions(changelog)[0]);
+    expect(covered).toContain(PKG_VERSION);
+    expect(covered).not.toContain("1.9.1");
+  });
+
+  it(`${covered.length} 个段落的说明里没有内部词、内部路径、源码文件名`, () => {
+    const problems = extracted.flatMap(({ version, notes }) =>
+      notesVoiceProblems(notes).map((text) => `${version}：${text}`)
+    );
+    expect(problems, `\n${problems.join("\n")}`).toEqual([]);
+  });
+
+  it(`每条 bullet 不超过 ${VOICE_BULLET_MAX} 字符（更新面板按纯文本整段显示）`, () => {
+    const measured = extracted.flatMap(({ version, notes }) =>
+      voiceBullets(notes).map((bullet) => ({ version, length: [...bullet].length, bullet }))
+    );
+    const over = measured.filter((item) => item.length > VOICE_BULLET_MAX);
+    expect(over, `\n${over.map((item) => `${item.version} ${item.length}：${item.bullet}`).join("\n")}`).toEqual([]);
+    expect(measured.length).toBeGreaterThan(50);
+  });
+
+  it("变异对照：四类形态各来一发必须全被抓到，合格文案不判红", () => {
+    const withTerm = notesVoiceProblems("修复\n- 本轮实测确认这里少清了一个定时器。");
+    expect(withTerm.length, "内部词「实测」「本轮」").toBeGreaterThan(0);
+    expect(withTerm.join("\n")).toContain("实测");
+
+    const withRound = notesVoiceProblems("修复\n- 轮70 修掉了安装包的乱码。");
+    expect(withRound.join("\n"), "轮次编号").toContain("轮\\d");
+
+    const withPath = notesVoiceProblems("工程\n- 判据见 tests/ux/releaseChainContractStaysAligned.test.ts。");
+    expect(withPath.join("\n"), "内部路径与源码文件名").toContain("tests/");
+    expect(withPath.join("\n")).toContain(".ts");
+
+    const tooLong = notesVoiceProblems(`修复\n- ${"重".repeat(VOICE_BULLET_MAX + 1)}。`);
+    expect(tooLong.join("\n"), "超长 bullet").toContain("超过 200");
+
+    expect(notesVoiceProblems("修复\n- Windows 安装程序在安装进度页里的中文提示不再显示成乱码。"), "合格文案不该被判红").toEqual([]);
+  });
+
+  it("变异对照：走真实抽取链路的夹具同样判红（不是只在纯函数上自嗨）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "confscope-voice-"));
+    const file = join(dir, "CHANGELOG.md");
+    writeFileSync(
+      file,
+      "## [9.9.9] - 2026-01-01\n\n### Fixed\n- 本轮实测后补齐了门禁，判据见 scripts/verify-release-version.sh。\n\n## [9.9.8] - 2025-01-01\n\n- 无关段落\n",
+      "utf8"
+    );
+    const run = runNotesScript(["9.9.9", `--changelog=${file}`]);
+    expect(run.code, run.stderr).toBe(0);
+    const joined = notesVoiceProblems(run.stdout).join("\n");
+    for (const needle of ["本轮", "实测", "门禁", "scripts/", ".sh"]) {
+      expect(joined, `夹具里的「${needle}」应被抓到`).toContain(needle);
+    }
+  });
+
+  it("下界是刻意的豁免而非判据空转：1.9.1 段落的原文快照按同判据必红", () => {
+    // 摘自 1.9.1 段落（已发布的正文快照，不参与判定，只用来证明判据有牙）
+    const preFloorSample = [
+      "工程",
+      "- 前端主数据迁出 localStorage：以数据文件为唯一事实源，localStorage 降级为热缓存，损坏时隔离副本并回退。",
+      "- 数据护栏测试补充文件↔缓存双向兼容与损坏回退用例；smoke 环境代码与 NSIS 安装器脚手架入库，retest SSH 测试环境自助化。",
+    ].join("\n");
+    const joined = notesVoiceProblems(preFloorSample).join("\n");
+    for (const needle of ["事实源", "用例", "retest"]) {
+      expect(joined, `旧段落里的「${needle}」本该是红的`).toContain(needle);
+    }
   });
 });

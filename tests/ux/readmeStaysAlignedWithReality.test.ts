@@ -130,14 +130,14 @@ describe("README 的版本口径与工程文件同源", () => {
 describe("发布产物名与 release.yml 一致", () => {
   it("README 提到的每个资产名都在 workflow 里出现", () => {
     const assets = [
-      "ConfScope.exe",
+      "confscope-windows-amd64-portable.exe",
       // 轮62：安装版是 Windows 的推荐形态，产物名跟着 update.json 的 windows-amd64-installer 条目
       "confscope-windows-amd64-installer.exe",
       "confscope-linux-amd64.tar.gz",
       "confscope-linux-amd64.deb",
       "confscope-linux-amd64.rpm",
-      "ConfScope-darwin-arm64.dmg",
-      "ConfScope-darwin-amd64.dmg",
+      "confscope-macos-arm64.dmg",
+      "confscope-macos-amd64.dmg",
     ];
     for (const asset of assets) {
       expect(readme, `README 少了产物 ${asset}`).toContain(asset);
