@@ -114,15 +114,22 @@ else
 fi
 
 echo ">> 4) 静态守卫与单测"
-if npx vitest run --reporter=dot \
-    tests/ux/buildVersionSymbolResolvesToGoDeclaration.test.ts \
-    tests/ux/backgroundUpdateCheckSkipsUnreleasedBuild.test.ts \
-    tests/ux/releaseChainContractStaysAligned.test.ts \
-    src/lib/appVersion.test.ts >/dev/null 2>&1; then
+# 失败时把 vitest 的用例名与断言原文一起吐出来。此前一律进 /dev/null，只报一句「见上面用例名」，
+# 而上面根本没有——本地和 CI 的 preflight 撞上这条都得再手工跑一遍这 4 个文件才知道红在哪一条。
+GUARD_TESTS=(
+  tests/ux/buildVersionSymbolResolvesToGoDeclaration.test.ts
+  tests/ux/backgroundUpdateCheckSkipsUnreleasedBuild.test.ts
+  tests/ux/releaseChainContractStaysAligned.test.ts
+  src/lib/appVersion.test.ts
+)
+GUARD_LOG="$(mktemp -t confscope-release-guard.XXXXXX)"
+if npx vitest run --reporter=dot "${GUARD_TESTS[@]}" >"$GUARD_LOG" 2>&1; then
   ok "版本链路与发版契约相关的 4 个测试文件全绿"
 else
-  bad "版本号或发版契约的守卫/单测有红，见上面用例名"
+  bad "版本号或发版契约的守卫/单测有红，用例名与断言见下"
+  tail -80 "$GUARD_LOG" >&2
 fi
+rm -f "$GUARD_LOG"
 
 echo ">> 5) 发版说明能真的抽出来（update.json 的 notes 与 GitHub Release 正文都是给用户看的文字）"
 NOTES_OUT="$(node scripts/extract-release-notes.mjs "$VERSION" 2>/dev/null)" || NOTES_OUT=""
