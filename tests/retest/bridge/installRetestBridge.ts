@@ -20,10 +20,11 @@ const WAILS_METHODS = [
   "ConfigCenterGetConfig",
   "ConfigCenterPublishConfig",
   "ConfigCenterDeleteConfig",
+  // 只列 Go 侧真存在的绑定名：两个 ...RefFromApplyPlan 是历史幻影（App.d.ts 里查无此名，
+  // 产品侧调用的是 publishConfigRefFromApplyPlan → ConfigCenter*FromApplyPlan），
+  // 留着只会诱导出错误的参数形状（轮72C）。
   "ConfigCenterPublishConfigFromApplyPlan",
-  "ConfigCenterPublishConfigRefFromApplyPlan",
   "ConfigCenterDeleteConfigFromApplyPlan",
-  "ConfigCenterDeleteConfigRefFromApplyPlan",
   "ConfigCenterListHistory",
   "ConfigCenterGetHistoryDetail",
   "ConfigCenterTestConnection",

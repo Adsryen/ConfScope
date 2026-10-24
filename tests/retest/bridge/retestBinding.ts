@@ -1067,9 +1067,11 @@ export function createRetestInvoke(): RetestInvoke {
         throw new Error("直接发布被阻断：必须通过 ApplyPlan");
       case "ConfigCenterDeleteConfig":
         throw new Error("直接删除被阻断：必须通过 ApplyPlan");
-      case "ConfigCenterPublishConfigRefFromApplyPlan":
       case "ConfigCenterPublishConfigFromApplyPlan": {
         const ep = getEndpoint(args);
+        // 形状契约（按 frontend/wailsjs/go/app/App.d.ts 的签名，不是按猜）：
+        // 发布类 arg2 = provider.PublishConfigRequest = { ref, content, format } 信封。
+        // 删除类 arg2 = provider.ConfigRef 本体——两类不同形，见下方 delete 分支。
         const req = args[1] as { ref: unknown; content: string; format: string };
         const ref = normalizeRefLike(req.ref);
         if (ref.key && ref.key !== "__document") throw new Error(`Nacos 不支持键级发布: ${ref.dataId}/${ref.key}`);
@@ -1085,11 +1087,15 @@ export function createRetestInvoke(): RetestInvoke {
         bridgeLog("publish", ref.namespace, ref.group, ref.dataId, "type=ref");
         return null;
       }
-      case "ConfigCenterDeleteConfigRefFromApplyPlan":
       case "ConfigCenterDeleteConfigFromApplyPlan": {
         const ep = getEndpoint(args);
-        const req = args[1] as { ref: unknown };
-        const ref = normalizeRefLike(req.ref);
+        // arg2 就是 ConfigRef 本体（App.d.ts: ConfigCenterDeleteConfigFromApplyPlan(
+        // arg1 ConnectionProfile, arg2 ConfigRef)；native/smoke 用例同形状）。
+        // 这里曾照搬发布分支去解包 req.ref，拿到 undefined → dataId 空串发给 Nacos →
+        // 服务端回 "invalid dataId"，于是「计划删除」在复测里永远红、还查不到产品头上
+        // （轮72C ST-03 定位）。形状错就让它当场响，不要静默降级成空参数。
+        const ref = normalizeRefLike(args[1]);
+        if (!ref.dataId) throw new Error("retest bridge: 删除请求的 dataId 为空，arg2 形状与绑定契约不符（应为 ConfigRef 本体）");
         const text = await sendForm("DELETE", v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: ref.namespace }), {});
         if (text !== "true") throw new Error(`删除失败: ${text}`);
         writeStamp(ep, ref.namespace, ref.group, ref.dataId);
