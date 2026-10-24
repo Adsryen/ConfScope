@@ -33,7 +33,7 @@ $Installer = (Resolve-Path -LiteralPath $Installer).Path
 if (-not $WorkRoot) {
     # NSIS 的 /D= 取命令行里它之后的全部内容：路径带空格时 PowerShell 会加引号，
     # 引号会渗进 InstallDir，四个场景全变成测不到目标的假绿。挑一个不含空格的位置。
-    $candidates = @($env:TEMP, $env:LOCALAPPDATA, $env:USERPROFILE) | Where-Object { $_ -and ($_ -notmatch " ") }
+    $candidates = @(@($env:TEMP, $env:LOCALAPPDATA, $env:USERPROFILE) | Where-Object { $_ -and ($_ -notmatch " ") })
     if ($candidates.Count -eq 0) {
         throw "找不到没有空格的临时目录：NSIS 的 /D= 不接受带引号的路径，请用 -WorkRoot 指定一个不含空格的目录"
     }
