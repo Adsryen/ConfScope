@@ -712,6 +712,41 @@ export interface RetestInvoke {
   (method: string, args: unknown[]): Promise<unknown>;
 }
 
+/*
+ * 升级交接闸门的桥内替身（默认全关：别的用例照旧读到「已是最新 + 没有隧道」）。
+ *
+ * 为什么要有：这条链路以前只有真人在实机才走得到——桥里 CheckForUpdates 恒回无更新、
+ * 隧道表恒空，「退出并安装」的忙碌闸门从没被真机测过一次，所以 1.9.8 才会在实机上
+ * 把内部连接 ID 直接甩给用户、还不给任何出口。setter 由用例显式调用，
+ * installRetestBridge 每用例重置一次，不会把「有新版本」泄漏给同 worker 的下一条用例。
+ */
+let retestUpdateCheck: Record<string, unknown> | null = null;
+let retestDownloadedArtifact = "no-op";
+const retestActiveTunnels: string[] = [];
+
+/** 覆盖 CheckForUpdates 的返回（null = 恢复「已是最新」基线）；顺带指定下载完落地的产物路径。 */
+export function setRetestUpdateCheck(result: Record<string, unknown> | null, artifactPath = "/tmp/confscope-retest-installer.exe") {
+  retestUpdateCheck = result;
+  retestDownloadedArtifact = result ? artifactPath : "no-op";
+}
+
+/** 让 Go 侧隧道表替身里有这几条隧道（元素是连接 ID，与产品侧 CreateSSHTunnel 的键同源）。 */
+export function setRetestActiveTunnels(ids: string[]) {
+  retestActiveTunnels.length = 0;
+  retestActiveTunnels.push(...ids);
+}
+
+/** 用例侧读桥内隧道表：断言「产品真的把这条隧道关掉了」，不看界面文案自己说满意。 */
+export function getRetestActiveTunnels(): string[] {
+  return [...retestActiveTunnels];
+}
+
+export function resetRetestUpdateHandoff() {
+  retestUpdateCheck = null;
+  retestDownloadedArtifact = "no-op";
+  retestActiveTunnels.length = 0;
+}
+
 export function createRetestInvoke(): RetestInvoke {
   const versionCache = new Map<string, "v1" | "v3">();
   const snapshotCache = new Map<string, unknown>();
@@ -848,6 +883,7 @@ export function createRetestInvoke(): RetestInvoke {
       case "GetCurrentPlatform":
         return "linux";
       case "CheckForUpdates":
+        if (retestUpdateCheck) return retestUpdateCheck;
         return {
           hasUpdate: false,
           latestVersion: "1.9.2",
@@ -866,7 +902,7 @@ export function createRetestInvoke(): RetestInvoke {
         // 复测环境无真实下载任务；返回 done 状态，供 About 页轮询使用
         return { downloaded: 0, total: 0, percent: 0, done: true, error: "" };
       case "DownloadUpdate":
-        return "no-op";
+        return retestDownloadedArtifact;
       // 升级出路四条（与 internal/updatecheck/handoff.go 同名同义）：
       // 复测环境没有真实产物，一律按"还没有下载好的更新包"这条 Go 侧判据回绝，
       // 这样任何误起安装程序的调用都会在复测里暴露而不是静默成功。
@@ -879,8 +915,8 @@ export function createRetestInvoke(): RetestInvoke {
       case "UpdateInstallCommand":
         return "";
       case "ListActiveSSHTunnels":
-        // 复测桥不建真实隧道：交接闸门读到空表。
-        return [];
+        // 复测桥不建真实隧道：默认交接闸门读到空表（用例可用 setRetestActiveTunnels 播种）。
+        return [...retestActiveTunnels];
       case "QuitApplication":
         // 浏览器里没有可退出的进程，交接链路在此止步（断言看事件，不看真退出）。
         return undefined;
@@ -1221,8 +1257,16 @@ export function createRetestInvoke(): RetestInvoke {
         bridgeLog("ssh-test", host || "(empty)", "fail");
         throw new Error(`ssh: no route to host ${host || "(空)"}`);
       }
-      case "StopSSHTunnel":
+      case "StopSSHTunnel": {
+        // 与 Go 侧 Manager.StopTunnel 同语义：同步从隧道表里摘掉这条，
+        // 所以前端「等确认再重读」的闸门才能在复测里复现（产品侧不等就会二次读到它）。
+        const target = String(args[0] ?? "");
+        const at = retestActiveTunnels.indexOf(target);
+        if (at >= 0) retestActiveTunnels.splice(at, 1);
+        return null;
+      }
       case "StopAllSSHTunnels":
+        retestActiveTunnels.length = 0;
         return null;
       case "GetSSHTunnelLocalPort":
         return 0;

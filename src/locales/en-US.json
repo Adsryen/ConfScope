@@ -1448,7 +1448,12 @@
     "manualQuitHint": "You can also quit the app yourself and run the installer manually.",
     "busyBlocked": "Still busy, quitting blocked:",
     "busyTask": "Task “{name}” has not finished",
-    "busyTunnels": "{count} SSH tunnel(s) still open: {ids}",
+    "busyTunnels": "{count} SSH tunnel(s) still open: {names}",
+    "tunnelUnknownConnection": " (this connection is no longer in the list)",
+    "tunnelNameSeparator": ", ",
+    "closeTunnelsAndContinue": "Close these tunnels and continue",
+    "closingTunnels": "Closing tunnels…",
+    "closeTunnelsFailed": "The tunnels could not be closed, still busy: {detail}",
     "busyDataFlush": "Local data has not been written to disk yet; quitting now would drop the last change",
     "handoff": {
       "installer": "The installer takes over replacing the current version once the app quits.",

@@ -16,6 +16,9 @@ import {
   type UpdateHandoff,
 } from "../api/app";
 import { getTaskManager } from "../lib/taskmanager";
+import { closeTunnelAndWait } from "../api/nacos";
+import { loadConnections } from "../store/connections";
+import { connectionLabel } from "../lib/defaultNameCopy";
 import { pushAppDataDocument } from "../lib/appDataDoc";
 import { useTranslation } from "../i18n";
 import { reportError } from "../lib/errorCenter";
@@ -45,6 +48,20 @@ interface AboutProps {
  */
 type UpdatePhase = "idle" | "checking" | "upToDate" | "updateAvailable" | "downloading" | "verifying" | "ready" | "error";
 
+/*
+ * 忙碌闸门的每条理由。
+ *
+ * 为什么不再是一条纯文本：用户实测「退出并安装」被拦下时，界面只写
+ * 「仍有 1 条 SSH 隧道在线：c_mqze3n5l_19oeti」——内部连接 ID 他认不出是哪条，
+ * 而且没有任何可操作的出口，只能自己摸去 SSH 页关掉、再回到这页重敲一遍。
+ * 所以隧道那条必须带着连接 ID（用来点名、也用来真的关），其余理由（任务、落盘）
+ * 没有可代劳的动作，就只留文本，不给假按钮。
+ */
+interface BusyReason {
+  text: string;
+  tunnelIds?: string[];
+}
+
 interface WailsRuntime {
   EventsOn?: (eventName: string, callback: (progress: DownloadProgress) => void) => void;
   EventsOff?: (eventName: string) => void;
@@ -71,7 +88,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
   // 交接三件事实：落盘路径（Go 给的，不猜）、包管理器命令（Go 拼的，不抄）、忙碌闸门读数（点退出时才查）
   const [artifactPath, setArtifactPath] = useState("");
   const [handoffCommand, setHandoffCommand] = useState("");
-  const [busyReasons, setBusyReasons] = useState<string[]>([]);
+  const [busyReasons, setBusyReasons] = useState<BusyReason[]>([]);
+  const [closingTunnels, setClosingTunnels] = useState(false);
   const [handoffError, setHandoffError] = useState("");
   const [quitting, setQuitting] = useState(false);
 
@@ -278,24 +296,42 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
   // 忙碌闸门的三个事实源，全都取既有的唯一出口：任务表（写入还在跑）、
   // 隧道表（在 Go 侧）、主数据落盘（pushAppDataDocument 的成功与否）。
-  const collectBusyReasons = useCallback(async (): Promise<string[]> => {
-    const reasons: string[] = [];
+  // 隧道表里存的是连接 ID（内部键）。点名时用连接列表翻成「项目 / 环境 / 来源」，
+  // 读数在闸门这一刻才取：用户可能在别的页面改过名或删过连接，挂载时的快照会撒谎。
+  const describeTunnels = useCallback(
+    (ids: string[]): string => {
+      const connections = loadConnections();
+      return ids
+        .map((id) => {
+          const conn = connections.find((item) => item.id === id);
+          return conn ? connectionLabel(conn, t) : `${id}${t("about.tunnelUnknownConnection")}`;
+        })
+        .join(t("about.tunnelNameSeparator"));
+    },
+    [t]
+  );
+
+  const collectBusyReasons = useCallback(async (): Promise<BusyReason[]> => {
+    const reasons: BusyReason[] = [];
     const running = getTaskManager()
       .listTasks()
       .filter((task) => task.status === "running" || task.status === "pending");
     for (const task of running) {
-      reasons.push(t("about.busyTask", { name: task.name }));
+      reasons.push({ text: t("about.busyTask", { name: task.name }) });
     }
     try {
       const tunnels = await listActiveSSHTunnels();
       if (tunnels.length > 0) {
-        reasons.push(t("about.busyTunnels", { count: tunnels.length, ids: tunnels.join(", ") }));
+        reasons.push({
+          text: t("about.busyTunnels", { count: tunnels.length, names: describeTunnels(tunnels) }),
+          tunnelIds: tunnels,
+        });
       }
     } catch {
       // 读不到隧道表（非桌面运行时）：不拿它当理由，交给后面的落盘与退出步骤去报真错
     }
     return reasons;
-  }, [t]);
+  }, [describeTunnels, t]);
 
   // 唯一的人工闸门：现在退出并交给安装程序。
   // 顺序是硬的——先确认没有在写的任务与隧道，再强制落盘，最后才允许退出；
@@ -311,7 +347,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
     }
     const flushed = await pushAppDataDocument({ report: false });
     if (!flushed) {
-      setBusyReasons([t("about.busyDataFlush")]);
+      setBusyReasons([{ text: t("about.busyDataFlush") }]);
       return;
     }
     setQuitting(true);
@@ -323,6 +359,37 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       setHandoffError(`${errorText(e)}｜${t("about.manualQuitHint")}`);
     }
   }, [artifactPath, collectBusyReasons, quitting, t]);
+
+  const busyTunnelIds = useMemo(() => busyReasons.flatMap((reason) => reason.tunnelIds ?? []), [busyReasons]);
+
+  /*
+   * 被隧道挡住时的出口：关掉这些隧道，然后重跑同一套硬顺序（任务 → 落盘 → 退出）。
+   *
+   * 关掉它是可自愈的：隧道按需创建（resolveBaseUrl → createTunnelUrl），
+   * 传输错误时 withTunnelReconnect 还会自动重建一条——用户下次浏览就又有隧道了，
+   * 不值得为「留着这条隧道」把人堵在升级这一步。必须等停机确认（closeTunnelAndWait），
+   * 否则紧接着重读隧道表还是它，等于按了没反应。
+   */
+  const closeTunnelsAndContinue = useCallback(async () => {
+    if (closingTunnels || busyTunnelIds.length === 0) return;
+    setClosingTunnels(true);
+    setHandoffError("");
+    const failures: string[] = [];
+    for (const id of busyTunnelIds) {
+      try {
+        await closeTunnelAndWait(id);
+      } catch (e) {
+        failures.push(`${id}: ${errorText(e)}`);
+      }
+    }
+    setClosingTunnels(false);
+    if (failures.length > 0) {
+      // 一条都没关掉就说"继续"会骗人：停在闸门上，把底层原因原样报出来
+      setHandoffError(t("about.closeTunnelsFailed", { detail: failures.join(t("about.tunnelNameSeparator")) }));
+      return;
+    }
+    await quitAndInstall();
+  }, [busyTunnelIds, closingTunnels, quitAndInstall, t]);
 
   const runHandoff = useCallback(
     async (action: (path: string) => Promise<void>) => {
@@ -434,9 +501,19 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
             <div className="update-busy-title">{t("about.busyBlocked")}</div>
             <ul className="update-busy-list">
               {busyReasons.map((reason) => (
-                <li key={reason}>{reason}</li>
+                // ID 不扔进正文（用户认不出），但留在 title 里：反馈问题时有得可抄。
+                <li key={reason.tunnelIds?.join(",") ?? reason.text} title={reason.tunnelIds?.join(", ")}>
+                  {reason.text}
+                </li>
               ))}
             </ul>
+            {busyTunnelIds.length > 0 && (
+              <div className="update-busy-actions">
+                <button className="btn btn-primary btn-sm" onClick={() => void closeTunnelsAndContinue()} disabled={closingTunnels}>
+                  {closingTunnels ? t("about.closingTunnels") : t("about.closeTunnelsAndContinue")}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

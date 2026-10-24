@@ -1448,7 +1448,12 @@
     "manualQuitHint": "也可以自行退出应用后双击运行该安装程序。",
     "busyBlocked": "仍有操作在进行中，已阻止退出：",
     "busyTask": "任务「{name}」尚未结束",
-    "busyTunnels": "仍有 {count} 条 SSH 隧道在线：{ids}",
+    "busyTunnels": "仍有 {count} 条 SSH 隧道在线：{names}",
+    "tunnelUnknownConnection": "（这条连接已不在列表里）",
+    "tunnelNameSeparator": "；",
+    "closeTunnelsAndContinue": "关闭这些隧道并继续",
+    "closingTunnels": "正在关闭隧道…",
+    "closeTunnelsFailed": "隧道没能关闭，仍是忙碌状态：{detail}",
     "busyDataFlush": "本地数据尚未写入磁盘，现在退出会丢掉最后一次变更",
     "handoff": {
       "installer": "安装程序负责覆盖当前版本，退出应用后它会自行继续。",

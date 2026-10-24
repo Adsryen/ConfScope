@@ -30,6 +30,14 @@ vi.mock("../lib/appDataDoc", async (importOriginal) => {
   return { ...actual, pushAppDataDocument: docMocks.pushAppDataDocument };
 });
 
+// 闸门出口走的是 api/nacos 的 closeTunnelAndWait（清缓存 + 等 Go 侧确认隧道已摘）。
+// 真实现要碰 wails 绑定，jsdom 里只会以「拿不到绑定」失败，测不到闸门本身。
+const nacosMocks = vi.hoisted(() => ({ closeTunnelAndWait: vi.fn() }));
+vi.mock("../api/nacos", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/nacos")>();
+  return { ...actual, closeTunnelAndWait: nacosMocks.closeTunnelAndWait };
+});
+
 const taskMocks = vi.hoisted(() => ({ listTasks: vi.fn() }));
 vi.mock("../lib/taskmanager", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/taskmanager")>();
@@ -50,6 +58,53 @@ function writeSettings(lastCheckAt: string, skipVersion = "") {
       compare: { sortConnections: true, sortNamespaces: true },
     })
   );
+}
+
+/**
+ * 连接列表播种：隧道闸门要把 Go 侧隧道表里的内部 ID 翻成人能读的连接名，
+ * 靠的就是这一份（src/store/connections.ts 的存储键 cs.connections）。
+ */
+function writeConnections() {
+  localStorage.setItem(
+    "cs.connections",
+    JSON.stringify([
+      {
+        id: "tunnel-a",
+        name: "本地 Nacos",
+        projectName: "演示项目",
+        environmentName: "开发环境",
+        sourceName: "本地 Nacos",
+        baseUrl: "http://127.0.0.1:8848/nacos",
+        username: "",
+        password: "",
+        defaultNamespace: "",
+      },
+      {
+        id: "tunnel-b",
+        name: "生产 MSE",
+        projectName: "演示项目",
+        environmentName: "生产环境",
+        sourceName: "生产 MSE",
+        baseUrl: "https://mse.example/nacos",
+        username: "",
+        password: "",
+        defaultNamespace: "",
+      },
+    ])
+  );
+}
+
+/** Windows 安装版走到「下载完成」的交接面板，返回那颗「退出并安装」。 */
+async function readyInstallerHandoff(artifactPath = "C:\\Temp\\ConfScope-Setup.exe") {
+  disableAutoUpdateCheck();
+  apiMocks.checkForUpdates.mockResolvedValue(
+    checkResult({ platformKey: "windows-amd64-installer", handoff: "installer" })
+  );
+  apiMocks.downloadUpdate.mockResolvedValue(artifactPath);
+  renderAbout();
+  await screen.findByText("v1.0.0");
+  fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+  return screen.findByRole("button", { name: "退出并安装" });
 }
 
 /** 上次检查时间写「刚刚」：进页面时的被动自动检查不会跑，用例自己点。 */
@@ -317,12 +372,19 @@ describe("About", () => {
     expect(apiMocks.launchUpdateInstaller).not.toHaveBeenCalled();
     expect(apiMocks.quitApplication).not.toHaveBeenCalled();
 
-    // ② 还有 SSH 隧道在线：连带断掉用户的端口转发
+    // ② 还有 SSH 隧道在线：连带断掉用户的端口转发。
+    //    点名必须用人能读的连接名——内部 ID 甩在正文里用户认不出是哪条（1.9.8 实测）；
+    //    连接已被删除的那条退回 ID，但要说清为什么只能给 ID。
+    writeConnections();
     taskMocks.listTasks.mockReturnValue([]);
-    apiMocks.listActiveSSHTunnels.mockResolvedValue(["tunnel-a", "tunnel-b"]);
+    apiMocks.listActiveSSHTunnels.mockResolvedValue(["tunnel-a", "tunnel-gone"]);
     fireEvent.click(quitButton);
-    expect(await screen.findByText("仍有 2 条 SSH 隧道在线：tunnel-a, tunnel-b")).toBeInTheDocument();
+    expect(
+      await screen.findByText("仍有 2 条 SSH 隧道在线：演示项目 / 开发环境 / 本地 Nacos；tunnel-gone（这条连接已不在列表里）")
+    ).toBeInTheDocument();
     expect(apiMocks.launchUpdateInstaller).not.toHaveBeenCalled();
+    // 出口只在这条理由存在时给（任务/落盘那两条没有可代劳的动作，不给假按钮）
+    expect(screen.getByRole("button", { name: "关闭这些隧道并继续" })).toBeInTheDocument();
 
     // ③ 主数据还没落盘：带着未写的改动退出就是吃掉最后一次变更
     apiMocks.listActiveSSHTunnels.mockResolvedValue([]);
@@ -340,6 +402,90 @@ describe("About", () => {
     expect(
       apiMocks.launchUpdateInstaller.mock.invocationCallOrder[0] < apiMocks.quitApplication.mock.invocationCallOrder[0]
     ).toBe(true);
+  });
+
+  it("隧道挡住退出时给得出出口：关掉隧道后重走闸门，顺序一步不乱", async () => {
+    writeConnections();
+    // 第一次读隧道表是在线的；关掉后再读必须空了（Go 侧隧道表才是事实源）
+    apiMocks.listActiveSSHTunnels.mockResolvedValueOnce(["tunnel-a", "tunnel-b"]).mockResolvedValue([]);
+    nacosMocks.closeTunnelAndWait.mockResolvedValue(undefined);
+
+    const quitButton = await readyInstallerHandoff();
+    fireEvent.click(quitButton);
+    expect(await screen.findByText("仍有 2 条 SSH 隧道在线：演示项目 / 开发环境 / 本地 Nacos；演示项目 / 生产环境 / 生产 MSE")).toBeInTheDocument();
+    // 内部 ID 不再进正文（要抄的话 title 里还在）
+    expect(screen.queryByText(/tunnel-a/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭这些隧道并继续" }));
+
+    await waitFor(() => expect(nacosMocks.closeTunnelAndWait).toHaveBeenCalledWith("tunnel-a"));
+    expect(nacosMocks.closeTunnelAndWait).toHaveBeenCalledWith("tunnel-b");
+    // 关完不是终点：必须重跑同一套硬顺序（任务 → 落盘 → 交给安装程序 → 退出）
+    await waitFor(() => expect(apiMocks.launchUpdateInstaller).toHaveBeenCalledWith("C:\\Temp\\ConfScope-Setup.exe"));
+    expect(apiMocks.quitApplication).toHaveBeenCalled();
+    expect(screen.queryByText("仍有操作在进行中，已阻止退出：")).not.toBeInTheDocument();
+    expect(
+      nacosMocks.closeTunnelAndWait.mock.invocationCallOrder[0] < docMocks.pushAppDataDocument.mock.invocationCallOrder[0]
+    ).toBe(true);
+    expect(
+      docMocks.pushAppDataDocument.mock.invocationCallOrder[0] < apiMocks.launchUpdateInstaller.mock.invocationCallOrder[0]
+    ).toBe(true);
+  });
+
+  it("隧道关不掉就停在闸门上报底层原因，绝不假装继续退出", async () => {
+    writeConnections();
+    nacosMocks.closeTunnelAndWait.mockRejectedValue(new Error("tunnel stop refused"));
+
+    const quitButton = await readyInstallerHandoff();
+    apiMocks.listActiveSSHTunnels.mockResolvedValue(["tunnel-a"]);
+    fireEvent.click(quitButton);
+
+    expect(await screen.findByText("仍有 1 条 SSH 隧道在线：演示项目 / 开发环境 / 本地 Nacos")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭这些隧道并继续" }));
+
+    expect(await screen.findByText(/tunnel stop refused/)).toBeInTheDocument();
+    expect(apiMocks.quitApplication).not.toHaveBeenCalled();
+    expect(apiMocks.launchUpdateInstaller).not.toHaveBeenCalled();
+  });
+
+  it("关隧道要等 Go 侧确认摘掉后才重跑闸门，不等就会演成「点了没反应」", async () => {
+    writeConnections();
+    // 停机确认悬着不返回：这一档只有真等下去才测得出来（桥与 Go 都是同步摘表，测不到这个时序）
+    let settleStop!: () => void;
+    nacosMocks.closeTunnelAndWait.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          settleStop = resolve;
+        })
+    );
+    apiMocks.listActiveSSHTunnels.mockResolvedValueOnce(["tunnel-a"]).mockResolvedValue([]);
+
+    const quitButton = await readyInstallerHandoff();
+    fireEvent.click(quitButton);
+    expect(await screen.findByText("仍有 1 条 SSH 隧道在线：演示项目 / 开发环境 / 本地 Nacos")).toBeInTheDocument();
+    const readsBefore = apiMocks.listActiveSSHTunnels.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭这些隧道并继续" }));
+    await waitFor(() => expect(nacosMocks.closeTunnelAndWait).toHaveBeenCalledWith("tunnel-a"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // 停机还没确认 ⇒ 闸门一条都不许重跑，更不能悄悄退出去
+    expect(apiMocks.listActiveSSHTunnels.mock.calls.length, "隧道还没停确认就重读隧道表，等于关掉又报忙碌/点了没反应").toBe(readsBefore);
+    expect(apiMocks.launchUpdateInstaller).not.toHaveBeenCalled();
+
+    settleStop();
+    await waitFor(() => expect(apiMocks.launchUpdateInstaller).toHaveBeenCalledWith("C:\\Temp\\ConfScope-Setup.exe"));
+    expect(apiMocks.quitApplication).toHaveBeenCalled();
+  });
+
+  it("只有任务在跑时没有隧道可关，就不摆那颗关闭按钮", async () => {
+    taskMocks.listTasks.mockReturnValue([{ name: "批量写入配置", status: "running" }] as never);
+
+    const quitButton = await readyInstallerHandoff();
+    fireEvent.click(quitButton);
+
+    expect(await screen.findByText("任务「批量写入配置」尚未结束")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "关闭这些隧道并继续" })).not.toBeInTheDocument();
   });
 
   it("退出失败时把人工出路说清楚，不留「点了没反应」", async () => {

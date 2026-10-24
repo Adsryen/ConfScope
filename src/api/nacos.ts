@@ -120,11 +120,23 @@ export async function resolveBaseUrl(conn: Connection): Promise<string> {
   }
 }
 
-/** 清除某连接的 SSH 隧道。 */
-export function closeTunnel(connId: string) {
+/**
+ * 关闭隧道并等 Go 侧真的把它从隧道表里摘掉。
+ *
+ * 为什么要有这个「等」的版本：StopSSHTunnel 是异步绑定，只发不等的话，
+ * 升级交接的忙碌闸门紧接着重读隧道表还会看到它——用户点了「关闭这些隧道」，
+ * 界面却说仍然忙碌，等于给了出口又堵住。缓存必须同批清掉，
+ * 留着它们会把后续请求指向一个已经关掉的本地端口。
+ */
+export async function closeTunnelAndWait(connId: string): Promise<void> {
   tunnelUrlCache.delete(connId);
   tunnelCreationCache.delete(connId);
-  StopSSHTunnel(connId);
+  await StopSSHTunnel(connId);
+}
+
+/** 清除某连接的 SSH 隧道（不等停机确认：删除/改配置等场景本来就要重建）。 */
+export function closeTunnel(connId: string) {
+  void closeTunnelAndWait(connId).catch(() => undefined);
 }
 
 

@@ -6115,6 +6115,14 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.5;
 }
 
+/* 闸门出口：拦住退出时给一颗能真的把闸门打开的按钮，
+   只报"被挡住了"就是把用户堵在死胡同里（1.9.8 实测）。 */
+.update-busy-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .about-footer {
   text-align: center;
   padding: 18px 24px;

@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, resetRetestRevisions, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
+import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, resetRetestRevisions, resetRetestUpdateHandoff, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -94,6 +94,8 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
   resetRetestAppDataDoc();
   // 数据根替身同样每用例重置：避免上一个用例迁移后的 root 泄漏到下一个用例。
   resetRetestDataRoot();
+  // 升级交接替身同样每用例重置：泄漏的「有新版本」会让下一条用例的关于页直接停在更新面板上。
+  resetRetestUpdateHandoff();
   // 本机版本历史替身同样每用例重置：它是「这台机器见过哪几版」，跨用例残留会让
   // 「本机历史（N）」的条数断言读到上一个用例攒下的版本。
   resetRetestRevisions();
