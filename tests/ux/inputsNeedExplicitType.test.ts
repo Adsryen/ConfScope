@@ -71,9 +71,12 @@ describe("输入元素必须显式声明 type", () => {
     expect(missing.map((s) => `${s.file}:${s.line}`).join("\n")).toBe("");
   });
 
-  it('显式 type="text" 的数量只增不减（轮48 抽 FindBar 后 52）', () => {
+  it('显式 type="text" 的数量只增不减（轮72B 代理三框收进一份 map 后 51）', () => {
     // 53 → 52：两份重复的查找输入框合成 FindBar 里的一份，是去重不是漏标。
-    expect(textType.length).toBeGreaterThanOrEqual(52);
+    // 52 → 51：设置页 HTTP / HTTPS / 不使用代理 三个框收成 PROXY_FIELDS.map 里的一份
+    // （轮72B R-B2：三框要共用同一套 trim + 校验 + 失焦提交 + 字段级报错，写三遍必然各写各的）。
+    // 屏幕上仍然是三个框，少的是源码里的重复声明——和上面两次同性质。
+    expect(textType.length).toBeGreaterThanOrEqual(51);
     // 这条断言不能靠「所有 input 都是 text」成立：确实存在 password/checkbox 等其他类型
     const nonText = sites.filter((s) => /\btype\s*=/.test(s.attrs) && !/\btype=(?:"text"|\{\s*"text")/.test(s.attrs));
     expect(nonText.length).toBeGreaterThanOrEqual(10);

@@ -51,24 +51,32 @@ describe("提示落点单一出口（轮67 R67-WP1）", () => {
     expect(inlineError.match(/role="alert"/g), "错误块只能有一个 alert 根节点").toHaveLength(1);
   });
 
-  it("设置页数据目录一节的三条提示通道都接上了（轮67 R67-WP7）", () => {
+  it("设置页的提示通道都接上了（轮67 R67-WP7 + 轮72 R-B1）", () => {
     // 真机量过：面板滚到本节底部时，容器可视区底边 798，「需重启」提示块顶边 884，
     // 86px 在框外——用户点完「更改位置…」看不到反馈。三条通道一条都不能漏：
     // 漏 error 那条就是「失败被吞」，漏 warn 那条就是「换根完成但没人告诉我还要重启」。
     const calls = [...settings.matchAll(/useKeepVisible</g)].length;
-    expect(calls, "需重启 / 换根失败 / 打开文件夹失败 各要一次 useKeepVisible").toBeGreaterThanOrEqual(3);
+    expect(
+      calls,
+      "需重启 / 换根失败 / 打开文件夹失败 / 版本历史成功 / 版本历史失败 / 清理缓存失败 各要一次 useKeepVisible"
+    ).toBeGreaterThanOrEqual(6);
     expect(settings, "「需重启」提示的根节点没挂引用").toMatch(/<div ref=\{restartNoticeRef\} className="test-msg warn"/);
     expect(settings, "换根失败的根节点没挂引用").toMatch(/<div ref=\{dataRootErrorRef\} className="inline-error" role="alert"/);
     expect(settings, "打开文件夹失败的根节点没挂引用").toMatch(/<div ref=\{openFolderErrorRef\} className="inline-error" role="alert"/);
     // 不许为了挂引用多套一层包裹 div：面板是 flex column，多一层就改间距与播报节点。
-    // 本节 3 条短提示 = 2 条带引用 + 1 条「缓存清理失败」（就在按钮下方，本来看得见，不必滚）。
-    expect(settings.match(/className="inline-error" role="alert"/g), "短提示根节点数量变了").toHaveLength(3);
+    // 本节 2 条短提示 = 换根失败 + 打开文件夹失败（都紧跟在按钮下方，本来看得见）；
+    // 「清理缓存失败」（轮72 R-B1）改走 <InlineError>，它带的是异常原文，得有详情区与复制键。
+    expect(settings.match(/className="inline-error" role="alert"/g), "短提示根节点数量变了").toHaveLength(2);
     // 每一条都必须直接是 `<div …>` 的根节点本身：套一层包裹 div 就改 flex 间距，
     // 还会让 alert 节点离引用更远一步。
     expect(
       settings.match(/<div (?:ref=\{\w+Ref\} )?className="inline-error" role="alert"/g),
       "有短提示的 alert 根节点不是 <div 本体（套包裹层了？）"
-    ).toHaveLength(3);
+    ).toHaveLength(2);
+    expect(
+      settings,
+      "清理缓存失败改走 InlineError 后，引用仍要交给组件（组件把它落在 alert 根节点上）"
+    ).toMatch(/<InlineError[^\n]*containerRef=\{cacheErrorRef\}/);
     expect([...settings.matchAll(/scrollIntoView\(/g)], "设置页绕开 hook 自己写了一次滚动").toHaveLength(0);
   });
 

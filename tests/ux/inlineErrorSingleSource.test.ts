@@ -29,10 +29,12 @@ const WIRED = /<InlineError\b/g;
 /** 纯一句话的短提示：没有 head/body 结构，套组件会凭空多出复制按钮和详情框，保留裸 div。 */
 const SHORT_HINT_SITES = [
   "src/components/SettingsView.tsx|settings.openFolderFailed",
-  "src/components/SettingsView.tsx|settings.clearCacheFailed",
   // 轮62：换根失败与「打开文件夹失败」同一族——都是一句带原因的短提示，
   // 套 InlineError 会凭空多出复制按钮和详情区；就地显示在面板底部即可读。
   "src/components/SettingsView.tsx|settings.dataRootActionFailed",
+  // 轮72 R-B1：清理缓存失败原先在这张表里——它当时只有一句话，所以算「短提示」。
+  // 现在它带的是异常原文（权限 / 磁盘那种长句，用户要抄给别人），必须走 InlineError，
+  // 登记表里再留着这条只会把下一位作者往「一句裸 div」上带。
 ];
 /**
  * 裸容器块：用来区分「短提示」与「又手抄了一整套结构」。

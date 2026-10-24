@@ -761,7 +761,7 @@ export default function App() {
           ) : mode === "ssh" ? (
             <SSHManagerView connections={connections} />
           ) : mode === "settings" ? (
-            <SettingsView />
+            <SettingsView onOpenAbout={() => setMode("about")} />
           ) : mode === "about" ? (
             <About embedded />
           ) : mode === "apply" ? (

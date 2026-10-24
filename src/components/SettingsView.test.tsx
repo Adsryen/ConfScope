@@ -34,6 +34,31 @@ vi.mock("../lib/cacheCleanup", async (importOriginal) => {
   };
 });
 
+/*
+ * 轮72B 新增的三个出口（都在被测组件的下游）：
+ * - toast：设置页原先没有任何一条轻提示，「清空跳过版本」这种屏幕上不挪的动作点完没人应答；
+ * - clipboard：CopyButton 的复制动作要能断言（jsdom 没有剪贴板权限，走不到兜底那条路）；
+ * - getAppDataDocInfo：jsdom 里 appBindings() 为空 ⇒ 真实实现恒返回 null ⇒ 备份节那一行根本不渲染，
+ *   想钉「主数据文件路径可复制」必须先把这份信息喂进来。
+ */
+const toastMocks = vi.hoisted(() => ({ toast: vi.fn() }));
+
+vi.mock("../lib/toast", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/toast")>();
+  return { ...actual, toast: toastMocks.toast };
+});
+
+const clipboardMocks = vi.hoisted(() => ({ copyText: vi.fn(async () => true) }));
+
+vi.mock("../lib/clipboard", () => ({ copyText: clipboardMocks.copyText }));
+
+const docInfoMocks = vi.hoisted(() => ({ getAppDataDocInfo: vi.fn() }));
+
+vi.mock("../lib/appDataDoc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/appDataDoc")>();
+  return { ...actual, getAppDataDocInfo: docInfoMocks.getAppDataDocInfo };
+});
+
 const historyMocks = vi.hoisted(() => ({
   clearOperationHistory: vi.fn(),
 }));
@@ -176,6 +201,14 @@ const testMigrationResult = {
   error: "",
 };
 
+// 轮72B：备份节那一行的数据来源（真实实现在 jsdom 里恒空，见上面的 mock 说明）。
+const testDocInfo = {
+  path: "/tmp/confscope-retest/data/app-data/confscope-data.json",
+  savedAt: "2026-10-22T01:02:03.000Z",
+  corruptFile: "",
+  sizeBytes: 2048,
+};
+
 class MemoryStorage {
   private values = new Map<string, string>();
 
@@ -209,12 +242,15 @@ function installScrollTopProbe(): () => void {
   return () => Object.defineProperty(Element.prototype, "scrollTop", original!);
 }
 
+/** 「去关于页检查更新」的回调替身：设置页不自己检查更新，只负责把人送到那一页。 */
+const onOpenAbout = vi.fn();
+
 function renderSettings(locale: "zh-CN" | "en-US" = "en-US") {
   vi.stubGlobal("localStorage", new MemoryStorage());
   localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
-      <SettingsView />
+      <SettingsView onOpenAbout={onOpenAbout} />
     </I18nProvider>
   );
 }
@@ -248,6 +284,11 @@ describe("SettingsView", () => {
     historyMocks.clearOperationHistory.mockReset();
     cacheMocks.clearAppCache.mockReset();
     cacheMocks.clearAppCache.mockResolvedValue(0);
+    onOpenAbout.mockReset();
+    toastMocks.toast.mockReset();
+    clipboardMocks.copyText.mockReset();
+    docInfoMocks.getAppDataDocInfo.mockReset();
+    docInfoMocks.getAppDataDocInfo.mockResolvedValue(testDocInfo);
   });
 
   // ── 危险操作二次确认（2026-10-17 扫描 R3：不得用原生 confirm）──
@@ -399,10 +440,11 @@ describe("SettingsView", () => {
     renderSettings("en-US");
 
     fireEvent.click(screen.getByLabelText("Sort connection dropdowns by name"));
-    const httpInputs = screen.getAllByPlaceholderText("http://127.0.0.1:7890");
-    fireEvent.change(httpInputs[0], {
-      target: { value: "http://127.0.0.1:7890" },
-    });
+    // 代理的落库时机是「提交那一刻」（失焦 / Enter）：轮72 R-B2 之前是逐键写盘，
+    // 半成品（空格没 trim、协议都敢乱填）直接进 cs.settings，Go 侧静默用不上代理。
+    const httpInputs = screen.getByLabelText("HTTP Proxy");
+    fireEvent.change(httpInputs, { target: { value: " http://127.0.0.1:7890 " } });
+    fireEvent.blur(httpInputs);
 
     expect(screen.getByRole("button", { name: "Clear Local History" })).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("cs.settings") || "{}")).toEqual(
@@ -411,6 +453,152 @@ describe("SettingsView", () => {
         proxy: expect.objectContaining({ httpProxy: "http://127.0.0.1:7890" }),
       })
     );
+  });
+
+  // ── 轮72B R-B2：代理只在提交那一刻写盘，且写的是 Go 侧认得的那串 ──
+
+  it("代理失焦或 Enter 才落库，落库的是归一后的串", () => {
+    renderSettings("en-US");
+
+    const http = screen.getByLabelText("HTTP Proxy");
+    fireEvent.change(http, { target: { value: "  HTTP://127.0.0.1:7890  " } });
+    expect(localStorage.getItem("cs.settings"), "打字即落库的老路子被改回来了").toBeNull();
+
+    fireEvent.keyDown(http, { key: "Enter" });
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").proxy.httpProxy).toBe("http://127.0.0.1:7890");
+    // 回显与盘上是同一串：用户看到的不是自己刚打的那串半成品，而是真正生效的那串
+    expect(http).toHaveValue("http://127.0.0.1:7890");
+
+    const https = screen.getByLabelText("HTTPS Proxy");
+    fireEvent.change(https, { target: { value: "http://proxy.example.com:3128" } });
+    fireEvent.blur(https);
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").proxy.httpsProxy).toBe("http://proxy.example.com:3128");
+  });
+
+  it("三框各给各的示例，照着示例填的值一定生效", () => {
+    renderSettings("en-US");
+
+    expect(screen.getByLabelText("HTTP Proxy")).toHaveAttribute("placeholder", "http://127.0.0.1:7890");
+    expect(screen.getByLabelText("HTTPS Proxy")).toHaveAttribute("placeholder", "http://proxy.example.com:3128");
+    expect(screen.getByLabelText("No Proxy")).toHaveAttribute("placeholder", "localhost,127.0.0.1,.internal");
+    // 「只管更新」这句原先是躺着的死键（真机整屏截出来根本没有它），现在必须落在网络上
+    expect(screen.getByText(/proxy covers update checks and downloads only/i)).toBeInTheDocument();
+    expect(screen.getByText(/Separate no-proxy entries with commas/)).toBeInTheDocument();
+  });
+
+  it("代理填了 Go 侧认不得的值就不落库，并在这框下面点名问题", () => {
+    renderSettings("en-US");
+
+    const https = screen.getByLabelText("HTTPS Proxy");
+    fireEvent.change(https, { target: { value: "socks5://127.0.0.1:1080" } });
+    fireEvent.blur(https);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Only http / https proxies are supported");
+    // 非法值留在框里让用户改，不许被悄悄清掉（清掉就成了「我刚才写的东西没了」）
+    expect(https).toHaveValue("socks5://127.0.0.1:1080");
+    expect(localStorage.getItem("cs.settings"), "非法代理值又被写进盘上").toBeNull();
+
+    fireEvent.change(https, { target: { value: "http://127.0.0.1:7891" } });
+    fireEvent.blur(https);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").proxy.httpsProxy).toBe("http://127.0.0.1:7891");
+  });
+
+  it("「不走代理」逐项归一，出错那一项被点名而不是整框静默作废", () => {
+    renderSettings("zh-CN");
+
+    const noProxy = screen.getByLabelText("不走代理");
+    fireEvent.change(noProxy, { target: { value: " *.corp.example.com , localhost , http://x " } });
+    fireEvent.blur(noProxy);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("http://x 不能当「不走代理」的条目");
+    expect(localStorage.getItem("cs.settings"), "有一项非法时整框都不该落库").toBeNull();
+
+    fireEvent.change(noProxy, { target: { value: " *.corp.example.com , localhost " } });
+    fireEvent.blur(noProxy);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // *.x 在 Go 的 noProxyMatch 里永远匹配不上，归一成 .x 才是同一个意思的有效写法
+    expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").proxy.noProxy).toBe(".corp.example.com,localhost");
+    expect(noProxy).toHaveValue(".corp.example.com,localhost");
+  });
+
+  it("输入法组词期间的 Enter 是「选这个词」，不能当提交", () => {
+    renderSettings("en-US");
+
+    const http = screen.getByLabelText("HTTP Proxy");
+    fireEvent.change(http, { target: { value: "http://127.0.0.1:7890" } });
+    fireEvent.keyDown(http, { key: "Enter", isComposing: true });
+
+    expect(localStorage.getItem("cs.settings"), "组词中的 Enter 被当成提交，把还没选完的词写上了盘").toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  // ── 轮72B R-B3/R-B4/R-B5/R-B6：危险行一种长相、整行可点、路径可抄、更新有出口 ──
+
+  it("三颗不可逆删除共用同一种危险行长相", async () => {
+    renderSettings("zh-CN");
+
+    // 版本历史那一行等的是 GetConfigRevisionFacts：没有体量数字时这一行根本不渲染
+    expect(await screen.findByRole("button", { name: "清除本机版本历史" })).toBeInTheDocument();
+    const rows = Array.from(document.querySelectorAll<HTMLDivElement>(".settings-setting-row.settings-danger-zone"));
+    expect(rows.map((row) => row.querySelector("button")?.textContent)).toEqual(["清空本地历史", "清除本机版本历史", "清理缓存"]);
+    for (const row of rows) {
+      const button = row.querySelector("button");
+      expect(button, "危险行右侧没有那颗键").toBeTruthy();
+      expect(button!.className).toContain("btn-ghost");
+      expect(button!.className).toContain("btn-danger");
+    }
+  });
+
+  it("对比偏好整行可点，说明文字不进复选框的可访问名", () => {
+    renderSettings("en-US");
+
+    const connections = screen.getByLabelText("Sort connection dropdowns by name");
+    const namespaces = screen.getByLabelText("Sort namespace dropdowns by name");
+    for (const box of [connections, namespaces]) {
+      const row = box.closest("label") as HTMLElement;
+      expect(row).toHaveClass("settings-setting-row-clickable");
+      // 说明塞进 label 就等于每按一次复选框，读屏把整句说明书念一遍（可访问名被撑成一句话）
+      expect(within(row).queryByText(/sorted by name/), "说明文字被包进了 label").not.toBeInTheDocument();
+    }
+    expect(screen.getByText(/both connection dropdowns in the compare view are sorted by name/)).toBeInTheDocument();
+    expect(screen.getByText(/^When on, namespace dropdowns are sorted by name/)).toBeInTheDocument();
+  });
+
+  it("应用更新一节把人送去关于页检查，不在这里复制第二份检查逻辑", () => {
+    renderSettings("en-US");
+
+    expect(screen.getByText("Check, download and install updates")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    expect(onOpenAbout).toHaveBeenCalledTimes(1);
+    // 检查 / 下载 / 校验 / 交接那套只在关于页有一份实现：设置页不该冒出它的容器
+    expect(document.querySelector(".update-handoff")).toBeNull();
+    expect(document.querySelector(".update-progress")).toBeNull();
+  });
+
+  it("备份节的主数据文件路径带复制键", async () => {
+    renderSettings("en-US");
+
+    const copy = await screen.findByRole("button", { name: "Copy Local Data File path" });
+    // 数据位置那一节里也有同一个路径，所以这里按「复制键所在的那一行」取证：
+    // 键必须贴着主数据文件路径，而不是挂在别的位置行上。
+    const pathRow = copy.closest(".settings-data-file-path") as HTMLElement;
+    expect(pathRow, "复制键不在主数据文件路径那一行里").toBeTruthy();
+    expect(pathRow.textContent).toContain(testDocInfo.path);
+    fireEvent.click(copy);
+
+    const { copyText } = await import("../lib/clipboard");
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(testDocInfo.path));
+  });
+
+  it("主数据文件还没生成时不摆空复制键", async () => {
+    docInfoMocks.getAppDataDocInfo.mockResolvedValue({ ...testDocInfo, path: "", savedAt: "" });
+    renderSettings("en-US");
+
+    expect(await screen.findByText("Not created yet (auto-created on first data change)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy Local Data File path" })).not.toBeInTheDocument();
   });
 
   it("clears the saved indicator timeout when unmounted", () => {
@@ -643,7 +831,7 @@ describe("SettingsView", () => {
     );
     render(
       <I18nProvider>
-        <SettingsView />
+        <SettingsView onOpenAbout={onOpenAbout} />
       </I18nProvider>
     );
 
@@ -661,7 +849,7 @@ describe("SettingsView", () => {
     localStorage.setItem("cs.settings", JSON.stringify({ update: { skipVersion: "1.9.8", lastCheckAt: "", lastSeenVersion: "" } }));
     render(
       <I18nProvider>
-        <SettingsView />
+        <SettingsView onOpenAbout={onOpenAbout} />
       </I18nProvider>
     );
 
@@ -670,6 +858,8 @@ describe("SettingsView", () => {
     fireEvent.click(restore);
 
     expect(JSON.parse(localStorage.getItem("cs.settings") || "{}").update.skipVersion).toBe("");
+    // 这一行的清空是「点完屏幕上什么都不挪」的动作（只有 1.2s 的已保存徽章），补一条轻提示说明后果
+    expect(toastMocks.toast).toHaveBeenCalledWith("Reminders restored. The next check will mention that version again.", "success");
     expect(screen.queryByText("1.9.8")).not.toBeInTheDocument();
     expect(screen.getByText("None")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restore reminders" })).toBeDisabled();

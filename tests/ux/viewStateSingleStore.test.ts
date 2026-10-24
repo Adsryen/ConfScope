@@ -12,6 +12,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { stripComments } from "./scanUtils";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const STORE_PATH = "src/lib/viewState.ts";
@@ -30,6 +31,19 @@ const HOOK_CALL_RE = /use(?:RememberedState|ScrollMemory)</g;
 
 function read(rel: string): string {
   return readFileSync(join(PROJECT_ROOT, rel), "utf8");
+}
+
+/**
+ * 剥掉注释后的代码（轮72B）。
+ *
+ * 「四页不许自己碰存储」这条禁的是**行为**，不是这个词：解释为什么这里要一次读全量、
+ * 为什么不许逐行 getApplyPlan() 的注释里，本来就该能写 localStorage 这个名字。
+ * 原先直接对原文做子串判断，注释一提这个词就判红，等于在教后人把注释写含糊——
+ * 与本仓 scanUtils.stripComments 的口径也不一致（它专门带引号状态机，URL 里的 `//` 不算注释）。
+ * 剥注释只会让扫描更准，不会更松：真写了 `localStorage.setItem(...)` 一样命中。
+ */
+function code(rel: string): string {
+  return stripComments(read(rel));
 }
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -69,17 +83,28 @@ describe("视图状态的唯一实现", () => {
 
   it("四页不再自己写一套存储，也不手动摆弄 scrollTop", () => {
     PAGES.forEach(({ rel }) => {
-      const src = read(rel);
+      const src = code(rel);
       expect(src, `${rel} 直接用 sessionStorage 记状态`).not.toContain("sessionStorage");
       expect(src, `${rel} 直接用 localStorage 记状态`).not.toContain("localStorage");
       expect(src, `${rel} 自己给 scrollTop 赋值`).not.toMatch(/\.scrollTop\s*=[^=]/);
     });
   });
 
+  it("自检：剥注释不许把守卫看盲（轮72B）", () => {
+    // 同一段词，写在注释里放行、写在代码里必须照抓——这条是上面那条禁词用例的负控。
+    const inComment = stripComments(`// localStorage.setItem("k", "v")\nconst a = 1; /* sessionStorage.clear() */\n`);
+    expect(inComment.includes("localStorage"), "注释没剥掉").toBe(false);
+    expect(inComment.includes("sessionStorage"), "块注释没剥掉").toBe(false);
+    const inCode = stripComments(`localStorage.setItem("k", "v");\nconst url = "http://127.0.0.1:1420"; // 不是注释里的 localStorage\n`);
+    expect(inCode.includes("localStorage"), "真代码里的 localStorage 被剥没了，守卫等于空转").toBe(true);
+    // URL 里的 // 不能当注释：它后面的代码必须还在
+    expect(inCode.includes('const url = "http://127.0.0.1:1420"'), "字符串里的 // 被当成注释，剥完会连带吃掉真代码").toBe(true);
+  });
+
   it("整个 src 的非测试代码里，sessionStorage 只许出现在唯一实现的注释里", () => {
     const hits = walk(join(PROJECT_ROOT, "src"))
       .filter((full) => !full.endsWith(STORE_PATH))
-      .filter((full) => readFileSync(full, "utf8").includes("sessionStorage"))
+      .filter((full) => stripComments(readFileSync(full, "utf8")).includes("sessionStorage"))
       .map((full) => full.slice(PROJECT_ROOT.length + 1));
     expect(hits, "出现了这个文件自己记视图状态").toEqual([]);
   });

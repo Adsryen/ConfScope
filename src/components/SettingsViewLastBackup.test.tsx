@@ -59,7 +59,7 @@ describe("SettingsView 的最后备份", () => {
   it("挂载时没有成功备份就不显示这一行", async () => {
     render(
       <I18nProvider>
-        <SettingsView />
+        <SettingsView onOpenAbout={() => undefined} />
       </I18nProvider>
     );
     await screen.findByTestId("app-data-backup-panel");
@@ -69,7 +69,7 @@ describe("SettingsView 的最后备份", () => {
   it("面板上报新的成功备份后，这一行立刻出现，不靠设置页自己重渲染", async () => {
     render(
       <I18nProvider>
-        <SettingsView />
+        <SettingsView onOpenAbout={() => undefined} />
       </I18nProvider>
     );
     await screen.findByTestId("app-data-backup-panel");

@@ -1003,6 +1003,43 @@ textarea {
   font-size: 13px;
 }
 
+/*
+ * 「整行可点」的设置行（轮72 R-B4）。原先只有那颗 16px 的复选框能按，点在标题上什么都不发生，
+ * 而这一行的文字正是「这是什么开关」——鼠标停在上面却是个 I 形光标，等于界面在说这里不能点。
+ * 用 label 包整行是浏览器原生就支持的形态：多出来的可点面积不给键盘添负担（Tab 仍落在复选框本身），
+ * 所以这里只补三个「能点」的信号：指针形状、悬停底色、复选框拿到焦点时整行描边。
+ * 焦点环必须画在整行上：只圈那颗 16px 的方框时，键盘用户在 520px 宽的整行里找不着自己在哪。
+ * 左右 padding 与负 margin 成对写：底色正好盖住面板内容宽度，文字位置一个字不挪。
+ * 不加 transition——reduced-motion 那条通配规则压平的是 animation/transition，
+ * 这里本就不需要动效，写了只会让悬停慢半拍。
+ */
+.settings-setting-row.settings-setting-row-clickable {
+  cursor: pointer;
+  margin: 0 -8px;
+  padding: 10px 8px;
+  border-radius: 6px;
+}
+
+.settings-setting-row.settings-setting-row-clickable:hover {
+  background: var(--bg-hover);
+}
+
+.settings-setting-row.settings-setting-row-clickable:focus-within {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 1px;
+}
+
+/* 轮72 R-B4 真机复跑：这两行的复选框还是浏览器固有的 13x13——比其它页面的 15px 小一圈，
+   而命中区靠的是整行可点（实测行高 39~40px），所以只把字形补到和 .check-row 一样大，
+   不放大控件本身（视觉密度不变）。 */
+.settings-setting-row-clickable input[type="checkbox"],
+.settings-setting-row-clickable input[type="radio"] {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  cursor: pointer;
+}
+
 /* 设置页·数据位置：分组容器与行内对齐（R6 / D7，堆叠结果与块布局等价，
    额外保证在 flex/grid 祖先下可收缩，并把多行路径行改为顶对齐） */
 .settings-data-locations {
@@ -3613,6 +3650,26 @@ button.diff-workflow-step-btn:hover {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/*
+ * 字段级报错的颜色与字号，必须由这一条自己拿回来（轮72B 真机截图判出来的静默失效）。
+ * 上面 .field > span 是按位置给「字段标题」上灰阶的，特异度 (0,1,1) 高于 .field-error 的 (0,1,0)——
+ * 于是直挂在 .field 下的报错文字被它吃掉颜色，和旁边的说明文字长得一模一样：
+ * 设置页代理校验的报错就是这么「看不出是报错」的。其它几处 .field-error 套在 .field-error-box
+ * 这个 div 里，隔了一层才侥幸躲开。
+ * 三个前缀都要列：.conn-form / .ssh-config 各有一份同族的按位置标题规则，
+ * 只补基础那条，连接表单里的报错仍然是灰的。字号一并钉回 11px——
+ * .conn-form .field > span 的 12px 是给标题的，不该顺手改报错文字的大小。
+ * 用提特异度而不是改标题规则加 :not()：后者会把基础规则抬到 (0,2,1)，
+ * 和 .conn-form .field > span 打平，又变成赌文档顺序。
+ */
+.field > .field-error,
+.conn-form .field > .field-error,
+.ssh-config .field > .field-error {
+  font-size: 11px;
+  color: var(--red-h);
+}
+
 .namespace-pick-row {
   display: flex;
   align-items: center;
@@ -6958,13 +7015,6 @@ button.diff-workflow-step-btn:hover {
   border-radius: 6px;
 }
 
-.settings-danger-zone h5 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #e57373;
-}
-
 /* 危险按钮配色。DeleteConfirm.tsx 用的是 `btn btn-danger`（没有 .btn-ghost），
    SettingsView 的两处是 `btn btn-ghost btn-danger`——只把选择器提成 .btn-ghost.btn-danger
    会打死前者，所以裸类名和复合类名并列写（R80）：两种写法作用面都在，danger 恒赢 ghost。 */
@@ -8769,6 +8819,28 @@ button.diff-workflow-step-btn:hover {
   font-size: 11px;
   color: #c8c8d2;
   word-break: break-all;
+}
+
+/*
+ * 主数据文件路径那一行（轮72 R-B5）：值是可长可短的绝对路径，右侧跟着复制键。
+ * 整列右对齐（.data-file-info），所以这一行也靠右排；路径长时在 code 内部折行，
+ * 键不参与收缩——否则一条 120 字符的路径会把「复制」压成一条缝。
+ */
+.settings-data-file-path {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-data-file-path code {
+  min-width: 0;
+  text-align: right;
+}
+
+.settings-data-file-path > .btn {
+  flex-shrink: 0;
 }
 
 /* ── 选中行上的次要文本换用 raised 令牌（R15）──

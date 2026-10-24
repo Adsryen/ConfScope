@@ -8,7 +8,10 @@ import { formatBytes } from "../lib/formatBytes";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
 import { loadAppDataBackupState } from "../store/appDataBackup";
 import { clearOperationHistory } from "../store/operationHistory";
-import { loadSettings, saveSettings, type AppSettings } from "../store/settings";
+import { loadSettings, saveSettings, type AppSettings, type ProxySettings } from "../store/settings";
+import { useSettings } from "../lib/useSettings";
+import { toast } from "../lib/toast";
+import { PROXY_FIELDS, isSameProxy, readProxyField, type ProxyField, type ProxyIssue } from "../lib/proxySettings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
@@ -64,12 +67,45 @@ const DATA_ROOT_SOURCE_KEYS: Record<string, string> = {
   "os-user-data": "settings.dataRootSourceOsUserData",
 };
 
-export default function SettingsView() {
+/*
+ * 代理三框的标签、示例与报错文案（轮72 R-B2）。
+ *
+ * 三框共用一段渲染，差别只有这三张表。原来三份手写 JSX 里连 placeholder 都是同一条
+ * `http://127.0.0.1:7890`：HTTPS 代理框提示 7890、「不走代理」框也提示一个地址，
+ * 用户照着示例填 —— 填进去的正是 Go 侧认不得、静默不生效的那种值。
+ */
+const PROXY_LABEL_KEYS: Record<ProxyField, string> = {
+  httpProxy: "settings.httpProxy",
+  httpsProxy: "settings.httpsProxy",
+  noProxy: "settings.noProxy",
+};
+const PROXY_PLACEHOLDERS: Record<ProxyField, string> = {
+  httpProxy: "http://127.0.0.1:7890",
+  httpsProxy: "http://proxy.example.com:3128",
+  noProxy: "localhost,127.0.0.1,.internal",
+};
+const PROXY_ISSUE_KEYS: Record<ProxyIssue, string> = {
+  url: "settings.proxyErrorUrl",
+  noProxyItem: "settings.proxyErrorNoProxyItem",
+};
+
+interface SettingsViewProps {
+  /**
+   * 「检查更新」与下载/安装整套动作都在关于页（About）里，设置页不复制第二份检查逻辑：
+   * 这颗键只把用户送到那一页（轮72 R-B6）。原先设置页的「应用更新」一节只读不回，
+   * 用户在这儿看完「上次检查：三天前」只能自己回想关于页在哪儿。
+   */
+  onOpenAbout: () => void;
+}
+
+export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   const { t } = useTranslation();
   // 关闭键与全局轻提示共用 common.close（轮67 R67-WP7）：两处都是「这条我看完了」，
   // 不该有第二种念法；不新增文案键。
   const closeLabel = t("common.close");
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  // 设置读侧走 lib/useSettings 那一份出口（轮47 R47-04）：本页原先自己攥一份 state + 自己读盘，
+  // About 写完 skipVersion 后回到设置页看到的是旧值，得切走再切回才刷新。
+  const settings = useSettings();
   const [saved, setSaved] = useState(false);
   const [credentialPending, setCredentialPending] = useState(() => countMigratableStoredCredentials());
   const [credentialSummary, setCredentialSummary] = useState<CredentialMigrationSummary | null>(null);
@@ -77,6 +113,11 @@ export default function SettingsView() {
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheResult, setCacheResult] = useState<"" | "ok" | "fail">("");
+  /*
+   * 清理缓存失败的原因（轮72 R-B1）：原先 catch 把异常整个丢掉，界面上只剩一句「清理缓存失败」，
+   * 用户既不知道是什么被拦住了，也没法把那句话抄给别人——而这条失败通常是文件权限或磁盘。
+   */
+  const [cacheError, setCacheError] = useState("");
   const [docInfo, setDocInfo] = useState<AppDataDocInfo | null>(null);
   // 轮47 R47-03：「最后备份」不再在渲染体里读盘。原来那段 IIFE 有两个毛病：
   // 一是设置页每次重渲染（包括在任意输入框里打字）都要解析整个备份活动列表；
@@ -131,19 +172,32 @@ export default function SettingsView() {
   const openFolderErrorRef = useKeepVisible<HTMLDivElement>(!!openFolderError, openFolderError);
   const revisionOkRef = useKeepVisible<HTMLDivElement>(revisionResult === "ok");
   const revisionErrorRef = useKeepVisible<HTMLDivElement>(!!revisionError, revisionError);
+  const cacheErrorRef = useKeepVisible<HTMLDivElement>(!!cacheError, cacheError);
+  /*
+   * 代理三框的草稿（轮72 R-B2）：草稿活在这一框里，落盘只发生在失焦 / Enter 那一刻。
+   * 原来每次按键都原样写进 cs.settings —— 打进 `   not-a-url   ` 就直接进盘，界面上一处
+   * 都不说它不对，直到下一次检查更新才发现「代理静默失效」，那时已经没人怀疑设置页了。
+   */
+  const [proxyDraft, setProxyDraft] = useState<ProxySettings>(() => ({ ...settings.proxy }));
+  const [proxyIssues, setProxyIssues] = useState<Partial<Record<ProxyField, { issue: ProxyIssue; detail: string }>>>({});
 
   const sectionLinks = SECTION_NAV.map((item) => ({ id: item.id, label: t(item.labelKey) }));
 
   const update = (patch: Partial<AppSettings>) => {
-    const next = {
-      ...settings,
+    /*
+     * 合并基准从盘上读，不用渲染闭包里那份 settings（轮72 R-B2）：代理一框改成失焦提交后，
+     * 同一次交互里可能连着两次 update（先提交代理、再动别的开关），第二次拿的闭包还是渲染前的旧值，
+     * 整段合并会把第一次刚写进去的字段吃掉。写完由 saveSettings 广播，读侧（useSettings）自己跟上。
+     */
+    const current = loadSettings();
+    saveSettings({
+      ...current,
       ...patch,
-      proxy: { ...settings.proxy, ...(patch.proxy ?? {}) },
-      compare: { ...settings.compare, ...(patch.compare ?? {}) },
-      update: { ...settings.update, ...(patch.update ?? {}) },
-    };
-    setSettings(next);
-    saveSettings(next);
+      proxy: { ...current.proxy, ...(patch.proxy ?? {}) },
+      compare: { ...current.compare, ...(patch.compare ?? {}) },
+      update: { ...current.update, ...(patch.update ?? {}) },
+      startup: { ...current.startup, ...(patch.startup ?? {}) },
+    });
     setSaved(true);
     if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
     savedTimerRef.current = window.setTimeout(() => {
@@ -160,6 +214,36 @@ export default function SettingsView() {
       }
     };
   }, []);
+
+  /*
+   * 已提交的值变了（About 写了 skipVersion、清理缓存后重新水合、别的页面写完广播），草稿才跟着走。
+   * 「草稿仍等于盘上的值」时不动它：否则用户正在打的字会被整片覆盖成上一次提交的结果。
+   */
+  useEffect(() => {
+    setProxyDraft((draft) => (isSameProxy(draft, settings.proxy) ? draft : { ...settings.proxy }));
+  }, [settings.proxy]);
+
+  /** 提交一框代理：非法只在本框下方说清哪里不对，不写盘；合法才落库并回显归一值。 */
+  const commitProxyField = (field: ProxyField, raw: string) => {
+    const outcome = readProxyField(field, raw);
+    if (!outcome.valid) {
+      setProxyIssues((issues) => ({ ...issues, [field]: { issue: outcome.issue, detail: outcome.detail ?? "" } }));
+      return;
+    }
+    setProxyIssues((issues) => {
+      if (!issues[field]) return issues;
+      const next = { ...issues };
+      delete next[field];
+      return next;
+    });
+    // 回显归一后的值：用户看到的和盘上存的是同一串（trim、协议小写、noProxy 逐项整理）
+    setProxyDraft((draft) => (draft[field] === outcome.value ? draft : { ...draft, [field]: outcome.value }));
+    if (outcome.value !== settings.proxy[field]) {
+      const nextProxy: ProxySettings = { ...settings.proxy };
+      nextProxy[field] = outcome.value;
+      update({ proxy: nextProxy });
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -358,11 +442,13 @@ export default function SettingsView() {
   const runClearCache = async () => {
     setCacheBusy(true);
     setCacheResult("");
+    setCacheError("");
     try {
       await clearAppCache();
       setCacheResult("ok");
-    } catch {
+    } catch (e) {
       setCacheResult("fail");
+      setCacheError(errorText(e));
     } finally {
       setCacheBusy(false);
     }
@@ -445,37 +531,40 @@ export default function SettingsView() {
               <div className="settings-panel-description">{t("settings.networkDescription")}</div>
             </div>
             <div className="settings-proxy-grid">
-              <label className="field">
-                <span>{t("settings.httpProxy")}</span>
-                <input
-                  type="text"
-                  className="search-input"
-                  value={settings.proxy.httpProxy}
-                  placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => update({ proxy: { ...settings.proxy, httpProxy: e.target.value } })}
-                />
-              </label>
-              <label className="field">
-                <span>{t("settings.httpsProxy")}</span>
-                <input
-                  type="text"
-                  className="search-input"
-                  value={settings.proxy.httpsProxy}
-                  placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => update({ proxy: { ...settings.proxy, httpsProxy: e.target.value } })}
-                />
-              </label>
-              <label className="field">
-                <span>{t("settings.noProxy")}</span>
-                <input
-                  type="text"
-                  className="search-input"
-                  value={settings.proxy.noProxy}
-                  placeholder="localhost,127.0.0.1"
-                  onChange={(e) => update({ proxy: { ...settings.proxy, noProxy: e.target.value } })}
-                />
-              </label>
+              {PROXY_FIELDS.map((field) => {
+                const issue = proxyIssues[field];
+                return (
+                  <label key={field} className="field">
+                    <span>{t(PROXY_LABEL_KEYS[field])}</span>
+                    <input
+                      type="text"
+                      className="search-input"
+                      spellCheck={false}
+                      value={proxyDraft[field]}
+                      placeholder={PROXY_PLACEHOLDERS[field]}
+                      onChange={(e) => setProxyDraft((draft) => ({ ...draft, [field]: e.target.value }))}
+                      onBlur={(e) => commitProxyField(field, e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter 提交；输入法组词期间的 Enter 是「选这个词」，不能当提交（与查找框同口径）
+                        if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                        e.preventDefault();
+                        // currentTarget 才是这一框（React 给 onKeyDown 的 target 只标到 EventTarget，取不到 value）
+                        commitProxyField(field, e.currentTarget.value);
+                      }}
+                    />
+                    {issue && (
+                      <span className="field-error" role="alert">
+                        {t(PROXY_ISSUE_KEYS[issue.issue], { item: issue.detail })}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
             </div>
+            {/* 两条早就写好却没被显示出来的说明（轮72）：proxyOnlyForUpdate 是 settings 里躺着的死键，
+                用户按「网络」这一节的标题会以为代理管着 Nacos 请求，实际上它只管更新检查与下载。 */}
+            <div className="field-hint">{t("settings.proxyOnlyForUpdate")}</div>
+            <div className="field-hint">{t("settings.noProxyPatternHint")}</div>
           </section>
 
           <section id="settings-compare" className="settings-panel" tabIndex={-1} aria-labelledby="settings-compare-title">
@@ -483,7 +572,12 @@ export default function SettingsView() {
               <h4 id="settings-compare-title">{t("settings.comparePreferences")}</h4>
               <div className="settings-panel-description">{t("settings.compareDescription")}</div>
             </div>
-            <label className="settings-setting-row">
+            {/*
+              * 整行可点（轮72 R-B4）：原先只有那颗 16px 的方框能按，点标题什么都不发生。
+              * label 包住「标题 + 复选框」，说明文字放在 label 外面——包进去会连整句说明
+              * 一起变成这个复选框的可访问名（读屏每按一次就念一遍说明书）。
+              */}
+            <label className="settings-setting-row settings-setting-row-clickable">
               <span>{t("settings.sortConnections")}</span>
               <input
                 type="checkbox"
@@ -491,7 +585,8 @@ export default function SettingsView() {
                 onChange={(e) => update({ compare: { ...settings.compare, sortConnections: e.target.checked } })}
               />
             </label>
-            <label className="settings-setting-row">
+            <div className="field-hint">{t("settings.compareSortConnectionsHint")}</div>
+            <label className="settings-setting-row settings-setting-row-clickable">
               <span>{t("settings.sortNamespaces")}</span>
               <input
                 type="checkbox"
@@ -499,6 +594,7 @@ export default function SettingsView() {
                 onChange={(e) => update({ compare: { ...settings.compare, sortNamespaces: e.target.checked } })}
               />
             </label>
+            <div className="field-hint">{t("settings.compareSortNamespacesHint")}</div>
           </section>
 
           <section id="settings-credentials" className="settings-panel" tabIndex={-1} aria-labelledby="settings-credentials-title">
@@ -550,8 +646,14 @@ export default function SettingsView() {
                   <div className="settings-panel-description">{t("settings.dataFileDescription")}</div>
                 </div>
                 <div className="data-file-info">
-                  <div>
-                    {t("settings.dataFilePath")}: <code>{docInfo.path || t("settings.dataFileNone")}</code>
+                  {/* 路径可复制（轮72 R-B5）：这一节右边七行数据位置每行都有复制键，
+                      偏偏最该抄的主数据文件路径没有——排查问题时用户要的正是这一串。 */}
+                  <div className="settings-data-file-path">
+                    <span>{t("settings.dataFilePath")}</span>
+                    <code>{docInfo.path || t("settings.dataFileNone")}</code>
+                    {!!docInfo.path && (
+                      <CopyButton text={docInfo.path} ariaLabel={t("settings.copyPathAria", { name: t("settings.dataFile") })} />
+                    )}
                   </div>
                   {docInfo.savedAt && (
                     <div>
@@ -702,7 +804,7 @@ export default function SettingsView() {
               * 标题 = 动作、说明 = 后果、右侧 = 一颗同名的键。
               */}
             {revisionFacts && (
-              <div className="settings-setting-row">
+              <div className="settings-setting-row settings-danger-zone">
                 <div>
                   <strong>{t("settings.clearRevisions")}</strong>
                   <div className="settings-panel-description">{t("settings.revisionHistoryHint")}</div>
@@ -769,11 +871,27 @@ export default function SettingsView() {
                   type="button"
                   className="btn btn-ghost btn-sm"
                   disabled={!settings.update.skipVersion}
-                  onClick={() => update({ update: { ...settings.update, skipVersion: "" } })}
+                  onClick={() => {
+                    update({ update: { ...settings.update, skipVersion: "" } });
+                    // 清空是「点了一下、但屏幕上什么都没挪」的动作（右上角那条徽章 1.2s 就没了），
+                    // 补一条轻提示说明接下来会发生什么：下次检查会重新提示这个版本。
+                    toast(t("settings.updateReminderRestored"), "success");
+                  }}
                 >
                   {t("settings.restoreUpdateReminder")}
                 </button>
               </div>
+            </div>
+            {/* 检查更新的整套动作（检查 / 下载 / 校验 / 安装 / 交接）只在关于页有一份实现，
+                这里不复制第二个按钮逻辑，只负责把人送过去（轮72 R-B6）。 */}
+            <div className="settings-setting-row">
+              <div>
+                <strong>{t("settings.checkUpdatesInAbout")}</strong>
+                <div className="settings-panel-description">{t("settings.checkUpdatesInAboutHint")}</div>
+              </div>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onOpenAbout}>
+                {t("about.checkUpdate")}
+              </button>
             </div>
           </section>
 
@@ -782,7 +900,7 @@ export default function SettingsView() {
               <h4 id="settings-developer-title">{t("settings.developer")}</h4>
               <div className="settings-panel-description">{t("settings.developerDescription")}</div>
             </div>
-            <div className="settings-setting-row">
+            <div className="settings-setting-row settings-danger-zone">
               <div>
                 <strong>{t("settings.clearCache")}</strong>
                 <div className="settings-panel-description">{t("settings.clearCacheHint")}</div>
@@ -801,10 +919,8 @@ export default function SettingsView() {
                 {t("settings.clearCacheSuccess")}
               </div>
             )}
-            {cacheResult === "fail" && (
-              <div className="inline-error" role="alert">
-                {t("settings.clearCacheFailed")}
-              </div>
+            {cacheResult === "fail" && cacheError && (
+              <InlineError title={t("settings.clearCacheFailed")} message={cacheError} containerRef={cacheErrorRef} />
             )}
           </section>
         </div>
