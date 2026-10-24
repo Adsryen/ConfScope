@@ -6742,6 +6742,19 @@ button.diff-workflow-step-btn:hover {
   border-color: var(--accent);
 }
 
+/* 「只看可回退」开关（轮72A）：与 .log-viewer .log-toggle 同形——inline-flex 把命中区补到 24 高，
+   文字仍垂直居中（口径见 tests/ux 的目标尺寸实测）。 */
+.history-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .history-filter-input::placeholder {
   color: var(--text-dim);
 }
@@ -6892,6 +6905,19 @@ button.diff-workflow-step-btn:hover {
 
 .history-rollback-state.unavailable {
   color: var(--text-dim);
+}
+
+/* 行上的「可回退」chip（轮72A）：列表行本身是 <button>，只能放非交互元素，
+   读屏会把这段文字并进行的可访问名——所以措辞就是判据措辞，与详情徽章同源。 */
+.history-rollback-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(76, 175, 80, 0.15);
+  color: #81c784;
 }
 
 /* R83：原来共用规则里写 border: 1px solid var(--border)，和下面 .history-detail-error 的

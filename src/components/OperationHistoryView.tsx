@@ -9,7 +9,6 @@ import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import {
   buildPromotionEntryFromVerification,
-  buildRollbackEntryFromApplyRecord,
   canBuildRollbackEntry,
   executableItemsForRecord,
   fingerprintsForCurrentTargets,
@@ -17,12 +16,17 @@ import {
 import {
   loadOperationHistory,
   filterOperationHistory,
-  isRollbackableOperation,
-  rollbackUnavailableReason,
   type OperationRecord,
   type OperationType,
 } from "../store/operationHistory";
-import { getApplyPlan } from "../store/applyPlans";
+// 轮72A：回退能力只认 lib/historyRollback 这一份判据；store 里那套恒 false 的死口径已删。
+import {
+  assessHistoryRollback,
+  buildHistoryRollbackEntry,
+  type HistoryRollbackAssessment,
+  type HistoryRollbackContext,
+} from "../lib/historyRollback";
+import { getApplyPlan, listApplyPlanIds } from "../store/applyPlans";
 import {
   loadApplyVerifications,
   saveApplyVerification,
@@ -106,6 +110,11 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
   const [filterType, setFilterType] = useRememberedState<OperationType | "">("history.filterType", "");
   const [filterDataId, setFilterDataId] = useRememberedState<string>("history.filterDataId", "");
   const [selectedRecord, setSelectedRecord] = useRememberedState<OperationRecord | null>("history.selectedRecord", null);
+  // 「只看可回退」与行上那枚 chip 共用同一份判据（下面 rollbackByRecord），不在这里再算一套。
+  const [filterRollbackableOnly, setFilterRollbackableOnly] = useRememberedState<boolean>("history.filterRollbackable", false);
+  // 本机还在不在这些变更计划的快照：挂载时一次读全量 id（listApplyPlanIds）。
+  // 逐行 getApplyPlan() 会把同一份 localStorage 在渲染期解析上百遍，口径见 tests/ux/renderTimeStorageReads.test.ts。
+  const [knownPlanIds] = useState<ReadonlySet<string>>(() => new Set(listApplyPlanIds()));
   const [verifications, setVerifications] = useState<ApplyVerification[]>(() => loadApplyVerifications());
   const [followupBusy, setFollowupBusy] = useState<string | null>(null);
   const [followupError, setFollowupError] = useState<FollowupError | null>(null);
@@ -186,15 +195,30 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
   }, [filterConnection, fetchCenterHistory]);
 
   // 合并并筛选记录
+  const rollbackContext = useMemo<HistoryRollbackContext>(
+    () => ({ connections, knownPlanIds }),
+    [connections, knownPlanIds]
+  );
+
   const allRecords = useMemo(() => {
     const combined = [...localRecords, ...centerRecords];
     combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return filterOperationHistory(combined, {
+    const filtered = filterOperationHistory(combined, {
       connectionId: filterConnection || undefined,
       type: filterType || undefined,
       dataId: filterDataId || undefined,
     });
-  }, [localRecords, centerRecords, filterConnection, filterType, filterDataId]);
+    return filterRollbackableOnly
+      ? filtered.filter((record) => assessHistoryRollback(record, rollbackContext).available)
+      : filtered;
+  }, [localRecords, centerRecords, filterConnection, filterType, filterDataId, filterRollbackableOnly, rollbackContext]);
+
+  // 判据按记录算一次，列表 chip / 徽章 / 按钮 / 面板可见性都读这一份，避免同一行出现两种答案。
+  const rollbackByRecord = useMemo(() => {
+    const map = new Map<string, HistoryRollbackAssessment>();
+    for (const record of allRecords) map.set(record.id, assessHistoryRollback(record, rollbackContext));
+    return map;
+  }, [allRecords, rollbackContext]);
 
   // 列表滚动位置：本地记录要挂载后才同步进来，条数作为列表版本，内容变多时再恢复一次
   const listScroll = useScrollMemory("history.scroll.list", allRecords.length);
@@ -258,7 +282,8 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
     setFollowupBusy(busyKey);
     setFollowupError(null);
     try {
-      const result = await buildRollbackEntryFromApplyRecord(record, {
+      // 按判据分派：apply 家族走备份快照，遗留单条记录走「记录里存的写前正文」。
+      const result = await buildHistoryRollbackEntry(record, rollbackContext, {
         connections,
         getApplyPlan,
         getSnapshot,
@@ -466,6 +491,14 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
           value={filterDataId}
           onChange={(e) => setFilterDataId(e.target.value)}
         />
+        <label className="history-filter-toggle">
+          <input
+            type="checkbox"
+            checked={filterRollbackableOnly}
+            onChange={(e) => setFilterRollbackableOnly(e.target.checked)}
+          />
+          {t("operationHistory.rollbackableOnly")}
+        </label>
       </div>
 
       {error && <InlineError title={t("operationHistory.loadFailed")} message={error} />}
@@ -509,6 +542,9 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                   <span className={`history-type ${record.type}`}>{t(OPERATION_LABELS[record.type])}</span>
                   <span className={`history-result ${record.result}`}>{t(RESULT_LABELS[record.result])}</span>
                   <span className="history-time">{formatDateTime(record.timestamp)}</span>
+                  {rollbackByRecord.get(record.id)?.available && (
+                    <span className="history-rollback-chip">{t("operationHistory.rollbackable")}</span>
+                  )}
                 </div>
                 <div className="history-dataid" title={record.dataId}>
                   {record.dataId}
@@ -528,11 +564,12 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
           {selectedVisibleRecord ? (
             <>
                 {(() => {
-                  const rollbackable = isRollbackableOperation(selectedVisibleRecord);
-                  const rollbackReason = rollbackUnavailableReason(selectedVisibleRecord);
                   const followupRecord = isApplyFollowupRecord(selectedVisibleRecord);
-                  // 回退入口的现场齐不齐（planId + 备份快照）；失败记录只有齐了才谈得上回退。
-                  const rollbackEntryAvailable = canBuildRollbackEntry(selectedVisibleRecord);
+                  // 徽章、原因行、主按钮、面板可见性全部读同一份判定（lib/historyRollback）。
+                  const rollback =
+                    rollbackByRecord.get(selectedVisibleRecord.id) ?? assessHistoryRollback(selectedVisibleRecord, rollbackContext);
+                  const rollbackAvailable = rollback.available;
+                  const rollbackReason = rollback.reasonKey;
                   // 沙箱验证与晋级只对成功执行过的记录有意义，失败记录不给这两个入口。
                   const followupSucceeded = selectedVisibleRecord.result === "success";
                   const verification = findVerification(verifications, selectedVisibleRecord);
@@ -601,22 +638,24 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                   )}
                   <div className="info-row">
                     <span className="info-label">{t("operationHistory.rollbackState")}:</span>
-                    <span className={`info-value history-rollback-state ${rollbackable ? "available" : "unavailable"}`}>
-                      {rollbackable ? t("operationHistory.rollbackable") : t("operationHistory.notRollbackable")}
+                    <span className={`info-value history-rollback-state ${rollbackAvailable ? "available" : "unavailable"}`}>
+                      {rollbackAvailable ? t("operationHistory.rollbackable") : t("operationHistory.notRollbackable")}
                     </span>
                   </div>
-                  {!rollbackable && rollbackReason && (
+                  {!rollbackAvailable && rollbackReason && (
                     <div className="info-row">
                       <span className="info-label">{t("operationHistory.rollbackReason")}:</span>
                       <span className="info-value">{t(rollbackReason)}</span>
                     </div>
                   )}
                 </div>
-                {followupRecord && onStartApply && (
+                {(rollbackAvailable || followupRecord) && onStartApply && (
                   <div className="history-followup-panel">
-                    {!followupSucceeded && <div className="field-hint">{t("operationHistory.partialFailureFollowupHint")}</div>}
+                    {followupRecord && !followupSucceeded && (
+                      <div className="field-hint">{t("operationHistory.partialFailureFollowupHint")}</div>
+                    )}
                     <div className="history-detail-actions">
-                      {rollbackEntryAvailable && (
+                      {rollbackAvailable && (
                         <button
                           className="btn btn-primary btn-sm"
                           type="button"
@@ -625,10 +664,10 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                         >
                           {rollbackBusy
                             ? t("operationHistory.generatingFollowup")
-                            : t(followupSucceeded ? "operationHistory.generateRollbackPlan" : "operationHistory.rollbackFromBackupPlan")}
+                            : t(rollback.actionLabelKey || "operationHistory.generateRollbackPlan")}
                         </button>
                       )}
-                      {followupSucceeded && (
+                      {followupRecord && followupSucceeded && (
                         <button
                           className="btn btn-ghost btn-sm"
                           type="button"
@@ -643,7 +682,7 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                         </button>
                       )}
                     </div>
-                    {followupSucceeded && (
+                    {followupRecord && followupSucceeded && (
                     <>
                       <div className="history-promote-row">
                         <label className="field-label" htmlFor={`promotion-target-${selectedVisibleRecord.id}`}>

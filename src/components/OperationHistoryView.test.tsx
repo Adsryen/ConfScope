@@ -360,23 +360,89 @@ describe("OperationHistoryView", () => {
     expect(screen.getByText("app.yaml")).toBeDefined();
   });
 
-  it("hides direct rollback for legacy rollbackable operation records", async () => {
+  // 轮72A：这条用例的口径翻了个面。以前它钉的是「遗留记录一律说不可回滚」，
+  // 而那句恒 false 的死口径与下面真能点的按钮互相打脸。现在钉的是判据本身：
+  // 有写前正文 + 目标可写 ⇒ 徽章「可回退」并放出计划入口；仍然没有任何直写按钮。
+  it("routes legacy records with recorded previous content to a rollback plan", async () => {
     localStorage.setItem("locale", "en-US");
     localStorage.setItem("cs.operationHistory", JSON.stringify([rollbackablePublishRecord]));
-
-    render(
-      <I18nProvider>
-        <OperationHistoryView connections={[conn]} />
-      </I18nProvider>
-    );
+    const { onStartApply } = renderHistory([conn]);
 
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
 
     expect(screen.getByText("1 records")).toBeDefined();
-    expect(screen.getByText("Not rollbackable")).toBeDefined();
-    expect(screen.getByText("Rollback requires a change-plan dry-run and cannot publish previous content directly.")).toBeDefined();
+    // 详情徽章与行 chip 都叫「可回退」，这里只断言徽章（行 chip 由专门的用例覆盖）。
+    const rollbackStateCell = document.querySelector(".history-rollback-state");
+    expect(rollbackStateCell?.textContent).toBe("Rollbackable");
+    expect(rollbackStateCell?.className).toContain("available");
+    expect(screen.queryByText("Rollback requires a change-plan dry-run and cannot publish previous content directly.")).toBeNull();
     expect(screen.getByRole("button", { name: "Copy Record" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Rollback this operation" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Build a rollback plan from the recorded previous content" }));
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0];
+    expect(payload).toMatchObject({
+      sourceType: "rollback",
+      target: { connectionId: "conn-1" },
+      // 从操作历史进来的，计划页「返回」要落回操作历史，而不是被扔到配置浏览
+      origin: { mode: "rollback", returnMode: "history" },
+    });
+    expect(payload.items[0]).toMatchObject({ dataId: "app.yaml", sourceValueOverride: { exists: true, content: "old: true" } });
+    expect(nacosMocks.publishConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not offer rollback for a legacy record whose target is not writable", async () => {
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem("cs.operationHistory", JSON.stringify([rollbackablePublishRecord]));
+    const readonlyConn: Connection = { ...conn, readonly: true };
+    renderHistory([readonlyConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    expect(screen.getByText("Not rollbackable")).toBeDefined();
+    expect(screen.getByText("The target of this record is a non-writable source (local snapshot or read-only connection); rollback only goes through a change plan, so no entry is offered.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /rollback plan/i })).toBeNull();
+  });
+
+  it("explains why an apply record whose plan is gone cannot roll back", async () => {
+    localStorage.setItem("locale", "en-US");
+    // 没有 saveApplyPlan()：计划快照已不在本机（只保留最近 100 份），记录还在
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
+    renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    expect(screen.getByText("Not rollbackable")).toBeDefined();
+    expect(screen.getByText(/no longer keeps a snapshot of that change plan/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /rollback/i })).toBeNull();
+  });
+
+  it("marks rollbackable rows with a chip and filters the list by it", async () => {
+    savedApplyPlan();
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        followupApplyRecord(),
+        { ...rollbackablePublishRecord, id: "legacy-publish-1" },
+        { ...rollbackablePublishRecord, id: "snapshot-1", type: "snapshot", dataId: "*", group: "*", rollbackReason: "operationHistory.rollbackSnapshotOnly" },
+      ])
+    );
+    renderHistory([devConn, sandboxConn, prodConn, conn]);
+
+    const rows = () => Array.from(document.querySelectorAll(".op-history-item"));
+    const chipRows = () => rows().filter((row) => row.querySelector(".history-rollback-chip"));
+
+    // apply（备份快照现场齐）与遗留 publish（有写前正文）各带一枚 chip；snapshot 行没有
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    expect(chipRows()).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "只看可回退" }));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(chipRows()).toHaveLength(2);
+    // 关掉开关回到全量，筛选口径记在 viewState（与其余筛选项同一处）
+    fireEvent.click(screen.getByRole("checkbox", { name: "只看可回退" }));
+    await waitFor(() => expect(rows()).toHaveLength(3));
   });
 
   it("shows and filters apply operation records", async () => {
@@ -573,17 +639,21 @@ describe("OperationHistoryView", () => {
     expect(onStartApply).not.toHaveBeenCalled();
   });
 
-  it("shows a copyable follow-up error when rollback plan data is missing", async () => {
+  it("shows a copyable follow-up error when the backup snapshot cannot be loaded", async () => {
     localStorage.setItem("locale", "en-US");
-    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ planId: "missing-plan" })]));
+    // 计划还在本机（判定放行），但备份快照文件读不出来：这是入口放行后唯一剩下的失败面，
+    // 必须仍然给出可复制的错误，而不是把用户丢给 toast 一闪而过。
+    savedApplyPlan();
+    snapshotMocks.getSnapshot.mockRejectedValue(new Error("snapshot file is gone"));
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
     const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
 
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
     fireEvent.click(screen.getByRole("button", { name: "Generate rollback plan" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Configuration change plan missing-plan is missing.")).toBeDefined();
-    });
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("snap-before-1");
+    expect(alert.textContent).toContain("snapshot file is gone");
     expect(screen.getByRole("button", { name: "Copy Error" })).toBeDefined();
     expect(onStartApply).not.toHaveBeenCalled();
   });

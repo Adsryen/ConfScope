@@ -64,8 +64,14 @@ export interface OperationRecord {
   beforeContent?: string; // 操作前内容，用于回滚恢复
   afterContent?: string; // 操作后内容，用于审计展示
   configType?: string; // Nacos 配置类型
-  rollbackable?: boolean; // 是否允许从该记录回滚
-  rollbackReason?: string; // 不可回滚原因的 i18n key
+  /**
+   * 存档元数据，不是能力判定（轮72A）。
+   *
+   * 「这条记录能不能回退」只由 lib/historyRollback 判定；这里保留两个字段是因为
+   * 快照/导出这类不写配置中心的操作会把原因文案记在这儿，供判定的兜底文案使用。
+   */
+  rollbackable?: boolean;
+  rollbackReason?: string;
   resourceId?: string; // 快照、历史版本等关联资源 ID
   resourceName?: string; // 快照、导出文件等关联资源名称
   error?: string; // 失败时的错误信息
@@ -257,25 +263,6 @@ export function recordOperation(record: Omit<OperationRecord, "id" | "timestamp"
   history.unshift(fullRecord);
   saveOperationHistory(history);
   return fullRecord;
-}
-
-/** 判断操作是否能通过重新发布旧内容回滚。 */
-export function isRollbackableOperation(record: OperationRecord): boolean {
-  if (record.result !== "success") return false;
-  if (record.rollbackable === false) return false;
-  return false;
-}
-
-/** 返回不可回滚原因的 i18n key；可回滚时返回空字符串。 */
-export function rollbackUnavailableReason(record: OperationRecord): string {
-  if (isRollbackableOperation(record)) return "";
-  if (record.result !== "success") return "operationHistory.rollbackOnlySuccess";
-  if (["publish", "delete", "rollback"].includes(record.type)) return "operationHistory.rollbackRequiresApplyPlan";
-  if (record.rollbackable === false) return record.rollbackReason || "operationHistory.rollbackDisabled";
-  if (record.type === "apply") return "operationHistory.rollbackApplyRequiresPlan";
-  if (!["publish", "delete", "rollback"].includes(record.type)) return record.rollbackReason || "operationHistory.rollbackUnsupportedType";
-  if (typeof record.beforeContent !== "string") return "operationHistory.rollbackMissingContent";
-  return "operationHistory.rollbackDisabled";
 }
 
 /** 清空操作历史 */

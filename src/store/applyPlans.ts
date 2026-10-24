@@ -39,6 +39,17 @@ export function getApplyPlan(id: string): ApplyPlan | null {
   return loadApplyPlans().find((plan) => plan.id === id) ?? null;
 }
 
+/**
+ * 本机还在不在这些计划的快照（轮72A R7）。
+ *
+ * 操作历史要按记录判断「能不能按备份快照回退」，逐行调 getApplyPlan() 会在渲染期把
+ * 同一份 localStorage 解析上百遍（口径见 tests/ux/renderTimeStorageReads.test.ts）。
+ * 这里一次读全量、只回 id，调用方挂到状态里复用。
+ */
+export function listApplyPlanIds(): string[] {
+  return loadApplyPlans().map((plan) => plan.id);
+}
+
 export function deleteApplyPlan(id: string): void {
   saveAll(loadApplyPlans().filter((plan) => plan.id !== id));
 }

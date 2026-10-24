@@ -4,8 +4,6 @@ import {
   recordOperation,
   clearOperationHistory,
   filterOperationHistory,
-  isRollbackableOperation,
-  rollbackUnavailableReason,
   type OperationRecord,
 } from "./operationHistory";
 
@@ -114,8 +112,8 @@ describe("loadOperationHistory", () => {
 
     expect(record.beforeContent).toBe("old");
     expect(record.afterContent).toBe("new");
-    expect(isRollbackableOperation(record)).toBe(false);
-    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackRequiresApplyPlan");
+    // 轮72A：store 不再判定「能不能回退」——那只剩一句恒 false 的死口径，
+    // 与同一块面板下面真能点的按钮互相打脸。判据见 lib/historyRollback.test.ts。
   });
 
   it("加载 apply 记录并保留计划、备份和源目标摘要", () => {
@@ -373,10 +371,11 @@ describe("recordOperation", () => {
       rollbackReason: "operationHistory.rollbackExportOnly",
     });
 
-    expect(isRollbackableOperation(snapshotRecord)).toBe(false);
-    expect(isRollbackableOperation(exportRecord)).toBe(false);
-    expect(rollbackUnavailableReason(snapshotRecord)).toBe("operationHistory.rollbackSnapshotOnly");
-    expect(rollbackUnavailableReason(exportRecord)).toBe("operationHistory.rollbackExportOnly");
+    // 存档原因键还在（读屏与详情兜底文案要用），但它不再是能力判定，只是「为什么没有回退这回事」的说明。
+    expect(snapshotRecord.rollbackable).toBe(false);
+    expect(exportRecord.rollbackable).toBe(false);
+    expect(snapshotRecord.rollbackReason).toBe("operationHistory.rollbackSnapshotOnly");
+    expect(exportRecord.rollbackReason).toBe("operationHistory.rollbackExportOnly");
   });
 
   it("treats snapshot compare records as snapshot-only and not rollbackable", () => {
@@ -402,8 +401,8 @@ describe("recordOperation", () => {
     const [record] = loadOperationHistory();
 
     if (!record) throw new Error("snapshot_compare record was not loaded");
-    expect(isRollbackableOperation(record)).toBe(false);
-    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackSnapshotOnly");
+    expect(record.rollbackable).toBe(false);
+    expect(record.rollbackReason).toBe("operationHistory.rollbackSnapshotOnly");
   });
 
   it("只有成功且带操作前内容的配置变更可回滚", () => {
@@ -420,8 +419,9 @@ describe("recordOperation", () => {
       rollbackable: true,
     });
 
-    expect(isRollbackableOperation(record)).toBe(false);
-    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackRequiresApplyPlan");
+    expect(record.beforeContent).toBe("old");
+    expect(record.afterContent).toBe("new");
+    // 这类遗留记录今天正是「按记录的原正文生成回退计划」的入口对象，判定见 lib/historyRollback.test.ts。
   });
 
   it("记录 apply 操作并保存计划、备份和源目标字段", () => {
@@ -477,7 +477,7 @@ describe("recordOperation", () => {
     });
   });
 
-  it("apply 记录不可通过直接发布旧内容回滚", () => {
+  it("apply 记录带着计划与备份快照存档，回退能力不在 store 判定", () => {
     const record: OperationRecord = {
       id: "apply-1",
       type: "apply",
@@ -493,8 +493,10 @@ describe("recordOperation", () => {
       backupSnapshotId: "snap-before-1",
     };
 
-    expect(isRollbackableOperation(record)).toBe(false);
-    expect(rollbackUnavailableReason(record)).toBe("operationHistory.rollbackApplyRequiresPlan");
+    // 现场齐不齐由这几个字段决定，但「齐了就能回退」的结论不在 store 里下（轮72A）。
+    expect(record.planId).toBe("plan-1");
+    expect(record.backupSnapshotId).toBe("snap-before-1");
+    expect(record.beforeContent).toBe("old: true");
   });
 });
 

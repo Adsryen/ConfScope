@@ -177,8 +177,9 @@ export function buildApplyOperationHistoryInput(
     targetNamespace: plan.target.namespace,
     error: params.error,
     operator: params.operator,
-    rollbackable: false,
-    rollbackReason: "operationHistory.rollbackApplyRequiresPlan",
+    // 轮72A：这里不再写 `rollbackable:false` + 「需要生成回退 dry-run」的原因键。
+    // 那对字段是直写回滚时代的存档，落到 apply 记录上就变成了「详情页说不可以、下面按钮却可以用」的
+    // 那句谎话。回退能力只由 lib/historyRollback 按现场（planId + 备份快照 + 计划还在不在本机）判定。
   };
 }
 
