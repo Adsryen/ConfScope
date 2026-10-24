@@ -35,7 +35,7 @@ export default function CopyButton({ text, label, ariaLabel }: Props) {
   };
 
   return (
-    <button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} aria-label={ariaLabel} title={t("common.copyToClipboard")}>
+    <button className="btn btn-ghost btn-sm copy-action-btn" onClick={onClick} disabled={!text} aria-label={ariaLabel} title={t("common.copyToClipboard")}>
       {done ? t("common.copied") : (label ?? t("common.copy"))}
     </button>
   );

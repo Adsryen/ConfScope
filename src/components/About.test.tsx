@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCenter";
 import About from "./About";
+import { ARRIVE_FLASH_CLASS } from "../lib/arriveFlash";
 
 const apiMocks = vi.hoisted(() => ({
   getAppInfo: vi.fn(),
@@ -164,11 +165,15 @@ function latestError(): AppErrorItem | undefined {
   return errors[errors.length - 1];
 }
 
-function renderAbout(locale = "zh-CN") {
+/**
+ * props 从组件签名取（不另抄一份形状）：到达高亮那组用例要按线上形态渲染——
+ * App 里的关于页是 `embedded` 页面，不是弹层，焦点交接才不会被焦点陷阱掺和。
+ */
+function renderAbout(locale = "zh-CN", props: Parameters<typeof About>[0] = {}) {
   localStorage.setItem("locale", locale);
   return render(
     <I18nProvider>
-      <About onClose={vi.fn()} />
+      <About onClose={vi.fn()} {...props} />
     </I18nProvider>
   );
 }
@@ -736,5 +741,64 @@ describe("About", () => {
     items[items.length - 1].focus();
     fireEvent.keyDown(items[items.length - 1], { key: "Tab" });
     expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  // 轮74 D2：设置页「检查更新」和后台新版提醒都把人送到关于页。
+  // 落地必须停在「应用更新」这一节——来源点的就是「更新」，不能让用户在满页信息里重新找那件事。
+  it("带着到达标记进来：落点在「应用更新」，闪一下、焦点交给它、并回报已消费", async () => {
+    disableAutoUpdateCheck();
+    const onArriveConsumed = vi.fn();
+
+    renderAbout("zh-CN", { embedded: true, arriveAtUpdate: true, onArriveConsumed });
+
+    await screen.findByText("v1.0.0");
+    const target = document.getElementById("about-update");
+    expect(target).not.toBeNull();
+    expect(target).toHaveClass(ARRIVE_FLASH_CLASS);
+    // 焦点交接：读屏与 Tab 从这一节继续，不必从页头重走一遍
+    expect(document.activeElement).toBe(target);
+    expect(onArriveConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("普通进关于页不闪，也不替 App 消费到达标记", async () => {
+    disableAutoUpdateCheck();
+    const onArriveConsumed = vi.fn();
+
+    renderAbout("zh-CN", { embedded: true, onArriveConsumed });
+
+    await screen.findByText("v1.0.0");
+    const target = document.getElementById("about-update");
+    expect(target).not.toHaveClass(ARRIVE_FLASH_CLASS);
+    expect(document.activeElement).not.toBe(target);
+    expect(onArriveConsumed).not.toHaveBeenCalled();
+  });
+
+  it("App 清掉标记的那次重渲染，不能把正在播的闪烁掐掉", async () => {
+    disableAutoUpdateCheck();
+
+    const view = renderAbout("zh-CN", { embedded: true, arriveAtUpdate: true, onArriveConsumed: vi.fn() });
+    await screen.findByText("v1.0.0");
+    const target = document.getElementById("about-update")!;
+    expect(target).toHaveClass(ARRIVE_FLASH_CLASS);
+
+    // onArriveConsumed 一置假，arriveAtUpdate 就从真翻到假：
+    // 这一轮只是清标记，不是离开页面。把撤销挂在 effect cleanup 上，动画会在这里半路断掉。
+    view.rerender(
+      <I18nProvider>
+        <About embedded arriveAtUpdate={false} onArriveConsumed={vi.fn()} />
+      </I18nProvider>
+    );
+    expect(target).toHaveClass(ARRIVE_FLASH_CLASS);
+  });
+
+  it("闪完自己收掉类名，不给这一节留下常亮底色", async () => {
+    disableAutoUpdateCheck();
+
+    renderAbout("zh-CN", { embedded: true, arriveAtUpdate: true, onArriveConsumed: vi.fn() });
+
+    await screen.findByText("v1.0.0");
+    const target = document.getElementById("about-update")!;
+    expect(target).toHaveClass(ARRIVE_FLASH_CLASS);
+    await waitFor(() => expect(target).not.toHaveClass(ARRIVE_FLASH_CLASS), { timeout: 4000 });
   });
 });

@@ -57,9 +57,12 @@ describe("PasswordField 语义（轮67 R67-WP6）", () => {
   it("可访问名恰好是标题，不带上那颗回显按钮", () => {
     renderField();
     const input = probe();
-    // 按钮和输入框同在一只 <label> 里，label 的 textContent 确实带上了按钮字形——
-    // 这条是「不显式 aria-labelledby 就会被并进名字」的前提，前提在而名字仍干净才算修好。
-    expect(input.closest("label")?.textContent).toContain("👁");
+    // 前提：开关按钮就在输入框那只 <label> 的子树里，且自己带可访问名——按 contents 算名字时
+    // 它会被并进输入框的名字。轮74 C1 后按钮里是 SVG（没有文字节点），所以前提改成直接验 DOM 结构，
+    // 前提在而名字仍干净才算修好。
+    const box = input.closest("label") as HTMLElement;
+    expect(box.querySelector('button.pwd-toggle[aria-label="显示密码"]'), "回显开关不在 label 子树里，这条前提已失效").toBeTruthy();
+    expect(box.querySelector(".pwd-toggle-icon"), "回显开关没有图标").toBeTruthy();
     expect(document.querySelector(`#${CSS.escape(input.getAttribute("aria-labelledby") as string)}`)?.textContent).toBe("Nacos 密码");
 
     fireEvent.click(screen.getByRole("button", { name: "显示密码" }));

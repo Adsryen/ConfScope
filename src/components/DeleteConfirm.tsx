@@ -131,7 +131,7 @@ export default function DeleteConfirm({
           <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>
             {t('common.cancel')}
           </button>
-          <button className="btn btn-danger" onClick={confirm} disabled={!match || busy}>
+          <button className="btn btn-danger-fill" onClick={confirm} disabled={!match || busy}>
             {busy ? (busyLabel ?? t("config.deleting")) : (confirmLabel ?? t("common.delete"))}
           </button>
         </div>

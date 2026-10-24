@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { ConfigItem, getConfig, listAllConfigs, listNamespaces, Namespace } from "../api/nacos";
 import { detectFormat, Format } from "../lib/format";
 import { environmentTone, environmentSortWeight, type EnvironmentTone } from "../lib/envTone";
-import { scrollBehavior } from "../lib/motion";
+import { revealArrival } from "../lib/arriveFlash";
 import { diffLines } from "../lib/diff";
 import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
 import { validateConfig } from "../lib/validate";
@@ -2168,25 +2168,23 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   // ── 工作流 stepper 导航（仅回退：任意回退保留状态；前进走页面内操作按钮） ──
   // 回退 = 滚动到目标区域 + 目标区域高亮闪烁（已停留在目标区域时，滚动本身无可见变化）
-  const flashTimerRef = useRef<number | null>(null);
+  const cancelArrivalFlashRef = useRef<(() => void) | null>(null);
   const focusWorkflowStep = useCallback((step: WorkflowStepId) => {
     const target = step === "choose" ? sourcesRef.current : resultsRef.current;
     if (step === "choose") setSourcesCollapsed(false);
-    if (target && typeof target.scrollIntoView === "function") {
-      target.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
-    }
-    if (target) {
-      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-      target.classList.remove("workflow-flash");
-      // 强制 reflow，连续点击同一目标时重新触发动画
-      void target.offsetWidth;
-      target.classList.add("workflow-flash");
-      flashTimerRef.current = window.setTimeout(() => {
-        target.classList.remove("workflow-flash");
-        flashTimerRef.current = null;
-      }, 1200);
-    }
+    if (!target) return;
+    // 滚动 + 闪烁的算式只在 lib/arriveFlash 里有一份（轮74 D2）：
+    // 页内回退不抢焦点，所以不传 focus —— 抢焦点会把用户正在填的表单光标带走。
+    cancelArrivalFlashRef.current?.();
+    cancelArrivalFlashRef.current = revealArrival(target);
   }, []);
+  useEffect(
+    () => () => {
+      cancelArrivalFlashRef.current?.();
+      cancelArrivalFlashRef.current = null;
+    },
+    []
+  );
   useEffect(() => {
     // `!active` 这支是常驻挂载换来的新风险：计划页「返回」若把 focusStep 递给看不见的对比页，
     // focusWorkflowStep 就在隐藏子树里找元素抢焦点。App 侧已经只在 diff 是回程目标时才递，

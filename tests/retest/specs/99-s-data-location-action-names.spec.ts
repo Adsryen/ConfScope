@@ -10,18 +10,31 @@ import { navigate, dismissStartupDialog } from "./ui";
 import { writeFileSync } from "node:fs";
 
 const readActions = `(() => {
+  // 轮74 A3 之后忙态文案与静息文案同占一格（不可见那一档 visibility:hidden + aria-hidden），
+  // textContent 会把两档一起读回来——可见文字必须按「屏幕上真看得见」算，否则 WCAG 2.5.3 判错对象。
+  const visibleText = (node) => {
+    const parts = [];
+    const walk = (el) => {
+      const cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden" || el.getAttribute("aria-hidden") === "true") return;
+      if (el.children.length === 0) parts.push(el.textContent || "");
+      else Array.from(el.children).forEach(walk);
+    };
+    Array.from(node.childNodes).forEach((n) => (n.nodeType === 3 ? parts.push(n.textContent || "") : walk(n)));
+    return parts.join("").replace(/\s+/g, " ").trim();
+  };
   const section = document.getElementById("settings-data-locations");
   // 只数「带路径的那 7 行」：第一行运行形态与数据根只有一个动作按钮，不是同名动作的来源
   const rows = Array.from(section.querySelectorAll(".settings-setting-row")).filter((row) => row.querySelector(".settings-data-location-path"));
   const perRow = rows.map((row) => ({
     rowName: (row.querySelector("strong")?.textContent ?? "").trim(),
     actions: Array.from(row.querySelectorAll(".settings-data-location-actions button")).map((btn) => ({
-      visible: (btn.textContent ?? "").trim(),
+      visible: visibleText(btn),
       ariaLabel: btn.getAttribute("aria-label"),
     })),
   }));
   // 整节范围内所有按钮的可访问名（没标 aria-label 时 accname 取可见文字）
-  const allNames = Array.from(section.querySelectorAll("button")).map((btn) => (btn.getAttribute("aria-label") ?? btn.textContent ?? "").trim());
+  const allNames = Array.from(section.querySelectorAll("button")).map((btn) => (btn.getAttribute("aria-label") ?? visibleText(btn)).trim());
   return { perRow, allNames };
 })()`;
 

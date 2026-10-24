@@ -30,6 +30,7 @@ import { formatDateTime } from "../lib/formatDateTime";
 import { getTaskManager } from "../lib/taskmanager";
 import { useKeepVisible } from "../lib/useKeepVisible";
 import { toast } from "../lib/toast";
+import BusyLabel from "./BusyLabel";
 import InlineError from "./InlineError";
 import PasswordField from "./PasswordField";
 import {
@@ -552,11 +553,11 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
         </div>
         <div className="app-data-backup-action-row">
           <button type="button" className="btn btn-primary btn-sm" onClick={saveBackupPassword} disabled={busy === "backup-password-save"}>
-            {busy === "backup-password-save" ? t("appDataBackup.savingPassword") : t("appDataBackup.savePassword")}
+            <BusyLabel busy={busy === "backup-password-save"} idle={t("appDataBackup.savePassword")} busyText={t("appDataBackup.savingPassword")} />
           </button>
           {backupState.backupPasswordSecretRef?.status === "stored" && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={clearBackupPassword} disabled={busy === "backup-password-clear"}>
-              {busy === "backup-password-clear" ? t("appDataBackup.clearingPassword") : t("appDataBackup.clearSavedPassword")}
+              <BusyLabel busy={busy === "backup-password-clear"} idle={t("appDataBackup.clearSavedPassword")} busyText={t("appDataBackup.clearingPassword")} />
             </button>
           )}
         </div>
@@ -595,7 +596,7 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
             </div>
             <div className="app-data-backup-action-row">
               <button type="button" className="btn btn-primary btn-sm" onClick={exportLocalBackup} disabled={busy === "local-export"}>
-                {busy === "local-export" ? t("appDataBackup.exporting") : t("appDataBackup.exportEncryptedFile")}
+                <BusyLabel busy={busy === "local-export"} idle={t("appDataBackup.exportEncryptedFile")} busyText={t("appDataBackup.exporting")} />
               </button>
             </div>
           </div>
@@ -620,8 +621,9 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
               onChange={setRestorePassword}
             />
             <div className="app-data-backup-action-row">
-              <button type="button" className="btn btn-primary btn-sm" onClick={previewLocalBackup} disabled={busy === "local-preview"}>
-                {busy === "local-preview" ? t("appDataBackup.previewing") : t("appDataBackup.previewLocalBackup")}
+              {/* 轮74 C2：预览只是「看一眼再决定」，与远端那颗预览同为次要动作，不再抢主色 */}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={previewLocalBackup} disabled={busy === "local-preview"}>
+                <BusyLabel busy={busy === "local-preview"} idle={t("appDataBackup.previewLocalBackup")} busyText={t("appDataBackup.previewing")} />
               </button>
             </div>
           </div>
@@ -683,7 +685,7 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
                 {t("appDataBackup.saveWebdavTarget")}
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={testWebDAVTarget} disabled={busy === "webdav-test"}>
-                {busy === "webdav-test" ? t("appDataBackup.testingWebdav") : t("appDataBackup.testWebdav")}
+                <BusyLabel busy={busy === "webdav-test"} idle={t("appDataBackup.testWebdav")} busyText={t("appDataBackup.testingWebdav")} />
               </button>
             </div>
           </div>
@@ -703,10 +705,10 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
                 onChange={setWebdavBackupPassword}
               />
               <button type="button" className="btn btn-primary btn-sm" onClick={uploadWebDAVBackup} disabled={busy === "webdav-upload"}>
-                {busy === "webdav-upload" ? t("appDataBackup.uploading") : t("appDataBackup.uploadCurrentData")}
+                <BusyLabel busy={busy === "webdav-upload"} idle={t("appDataBackup.uploadCurrentData")} busyText={t("appDataBackup.uploading")} />
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={refreshRemoteBackups} disabled={busy === "webdav-list"}>
-                {busy === "webdav-list" ? t("appDataBackup.refreshing") : t("appDataBackup.refreshRemoteList")}
+                <BusyLabel busy={busy === "webdav-list"} idle={t("appDataBackup.refreshRemoteList")} busyText={t("appDataBackup.refreshing")} />
               </button>
             </div>
 
@@ -759,8 +761,10 @@ export default function AppDataBackupPanel({ onRestored, onActivitiesChange }: P
           </div>
           <SummaryPreview preview={preview} />
           <div className="app-data-backup-restore-warning">{t("appDataBackup.restoreWarning")}</div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={restorePreview} disabled={busy === "restore"}>
-            {busy === "restore" ? t("appDataBackup.restoring") : t("appDataBackup.restoreThisBackup")}
+          {/* 轮74 C2：这颗是「用备份件覆盖本机数据」的提交键，走实心危险档——
+              原先与「保存密码」「导出」同为 btn-primary，一整片蓝里读不出哪一步会动现有数据 */}
+          <button type="button" className="btn btn-danger-fill btn-sm" onClick={restorePreview} disabled={busy === "restore"}>
+            <BusyLabel busy={busy === "restore"} idle={t("appDataBackup.restoreThisBackup")} busyText={t("appDataBackup.restoring")} />
           </button>
         </section>
       )}

@@ -1,17 +1,27 @@
-// 轮67 R67-WP7：「清理缓存」的忙态文案不许让按钮宽度跳一下（真机量宽）。
+// 轮67 R67-WP7 立，轮74 A3 换实现：会换文案的按钮，忙态那一帧宽度不许跳。
 //
-// 缺陷长什么样（修前真机读数见 /tmp/cs/wp7-probe.txt）：忙态写的是硬编码一个「…」，
-// 在 .btn 下实测只有 3px——按钮从 82px 塌成一条缝。用户点了「确定」之后，
-// 眼前那颗按钮缩成一个点，看不出是「正在清理」还是「点坏了」，于是回头再点一次。
+// 缺陷一开始长这样（修前真机读数见 /tmp/cs/wp7-probe.txt）：忙态写死一个「…」，
+// 在 .btn 下实测只有 3px——按钮从 82 塌成一条缝，用户分不清是「在忙」还是「点坏了」。
+// 轮67 的修法分两步：① 忙态换成完整文案（走 locale）；② 给那颗按钮钉 min-width 地板。
 //
-// 修法是两步，缺一不可，所以两条都钉：
-//   ① 忙态换成完整文案（走 locale，不再硬编码省略号）；
-//   ② 给这颗按钮一条 min-width 地板（= 最宽静息值 + 4px 余量）。
-// 只做①还是会跳：en 静息 "Clear Cache" 102 → 忙态 "Clearing..." 89，一帧缩 13px。
+// 轮74 真机复测发现②这套地板本身是个新缺陷：
+//   · 106px 是按「清理缓存」一颗按钮、英文档一种语种量出来的；
+//   · 同一族里 134px 的「清除本机版本历史」挂上它，忙态反而从 134 塌到 106（−28px）；
+//   · 会跳的「迁移凭据」根本没挂这个 class（82→80）；
+//   · 只禁用不换文案的那几颗（更改位置… / 打开）点下去 1~3s 屏幕上毫无信号。
+// 现在的地板由 DOM 自己提供：两档文案同占一格（BusyLabel + .busy-label-stack），
+// 宽度恒等于较宽的一档，中英文、长短文案都自适应，不再有任何写死的像素。
 //
-// 为什么必须真机量：宽度是 font/padding/letter-spacing 算出来的，jsdom 一律给 0，
-// 静态守卫只能钉「文案来自 locale」这一半，钉不住「跳不跳」。
-import { readFileSync, writeFileSync } from "node:fs";
+// 为什么必须真机量：宽度是 font/padding/letter-spacing 算出来的，jsdom 一律给 0。
+// 静态那一半（文案来自 locale、不许再出现 min-width 地板）在最后一节，另有
+// tests/ux/busyLabelsStackBothStates.test.ts 盯「所有会换文案的按钮都走 BusyLabel」。
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// playwright 的工作目录是 tests/retest，静态那一半必须按文件位置取仓库根，不能吃 cwd
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const sourceFile = (rel: string) => readFileSync(join(PROJECT_ROOT, rel), "utf8");
 // `retest` 是本项目 fixture（见 ./retestTest），必须从它拿 test，不能直接用 @playwright/test
 import { expect, test } from "./retestTest";
 import type { Page } from "@playwright/test";
@@ -19,77 +29,89 @@ import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog } from "./ui";
 
-const SECTION = "#settings-developer";
-
-interface WidthReading {
+interface SwapReading {
   locale: string;
+  /** 哪一颗按钮（节 + 可见文案），只进报告，不参与判定 */
+  button: string;
   restLabel: string;
   busyLabel: string;
-  /** 静息实际渲染宽（含 min-width 地板）。 */
+  /** 静息渲染宽 */
   rest: number;
-  /** 忙态文案渲染宽（含地板）。 */
+  /** 忙态那一帧的渲染宽 */
   busy: number;
-  /** 摘掉地板后的两档宽度，用来看「地板到底有没有在干活」。 */
-  restNoFloor: number;
-  busyNoFloor: number;
-  /** 忙态那一帧文字有没有被地板以外的因素截断（scrollWidth 超出 clientWidth）。 */
+  /** 摘掉「另一档也占一格」之后的忙态宽——有人退回单标签就是这个数 */
+  busyWithoutStack: number;
+  /** 忙态那一帧文字有没有被截断 */
   busyOverflow: boolean;
-  /** 渲染出来的静息文字是否等于 locale 里的那个值（i18n 真接上了）。 */
-  rendered: string;
-  /** 关闭整条守卫的牙：地板值与最宽静息值的关系。 */
-  minWidth: string;
+  /** 两档文案在 DOM 里的顺序（证明两档都真的在场） */
+  options: string[];
+  /** 静息帧的 data-shown / aria-hidden 读数（读屏只许念当前那一档） */
+  shownAtRest: string[];
+  hiddenAtRest: string[];
+  /** 还原后的宽度，用来证明探针自己没留下痕迹 */
+  restored: number;
 }
 
 /**
- * 浏览器侧：把忙态文案临时铺到真按钮上量宽，量完原样还原节点。
- * 用 replaceChildren 而不是 textContent=，是为了把 React 自己那个文本节点原封不动放回去。
+ * 浏览器侧：找到那颗带 BusyLabel 的按钮，量静息宽 → 翻到忙态那一帧再量 → 还原。
+ * 翻页的做法是改 data-shown（两档本来都在 DOM 里），不是往按钮上贴文本——
+ * 贴文本那种量法量的其实是「min-width 地板有没有生效」，替不了现在的机制。
  */
-function measureButton(args: [string, string, string]): WidthReading {
-  const [restLabel, busyLabel, section] = args;
-  const buttons = Array.from(document.querySelectorAll<HTMLElement>(`${section} button`));
-  const button = buttons.find((b) => (b.textContent ?? "").trim() === restLabel);
-  if (!button) return { locale: "", restLabel, busyLabel, rest: -1, busy: -1, restNoFloor: -1, busyNoFloor: -1, busyOverflow: false, rendered: "", minWidth: "MISSING" };
-  const original = Array.from(button.childNodes);
-  const widthWith = (label: string) => {
-    button.replaceChildren(document.createTextNode(label));
-    const rect = button.getBoundingClientRect();
-    const overflow = button.scrollWidth > button.clientWidth + 1;
-    return { width: Math.round(rect.width), overflow };
-  };
-  // 先取用户真正看到的静息文案：改过文本之后再读就成了忙态文案（上一版就是这么读错的）
-  const rendered = (button.textContent ?? "").trim();
-  const rest = widthWith(restLabel);
-  const busy = widthWith(busyLabel);
-  // 还原静息文案，再摘掉地板量一次：这一档只用来证明「地板在干活」，不参与判定
-  button.replaceChildren(...original);
-  const floor = button.style.minWidth;
-  button.style.minWidth = "0px";
-  const restNoFloor = widthWith(restLabel);
-  const busyNoFloor = widthWith(busyLabel);
-  button.style.minWidth = floor;
-  button.replaceChildren(...original);
-  return {
+function measureSwap(args: [string, string, string, string]): SwapReading {
+  const [section, restLabel, busyLabel, button] = args;
+  const out: SwapReading = {
     locale: "",
+    button,
     restLabel,
     busyLabel,
-    rest: rest.width,
-    busy: busy.width,
-    restNoFloor: restNoFloor.width,
-    busyNoFloor: busyNoFloor.width,
-    busyOverflow: busy.overflow,
-    rendered,
-    minWidth: getComputedStyle(button).minWidth,
+    rest: -1,
+    busy: -1,
+    busyWithoutStack: -1,
+    busyOverflow: false,
+    options: [],
+    shownAtRest: [],
+    hiddenAtRest: [],
+    restored: -1,
   };
+  const text = (el: Element) => (el.textContent ?? "").trim();
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>(`${section} button`));
+  const target = buttons.find((b) => {
+    const options = Array.from(b.querySelectorAll<HTMLElement>(".busy-label-option"));
+    return options.length === 2 && text(options.find((o) => o.getAttribute("data-shown") === "true") ?? b) === restLabel;
+  });
+  if (!target) return out;
+  const options = Array.from(target.querySelectorAll<HTMLElement>(".busy-label-option"));
+  const width = () => Math.round(target!.getBoundingClientRect().width);
+  const setShow = (want: string) => options.forEach((o) => o.setAttribute("data-shown", text(o) === want ? "true" : "false"));
+
+  out.options = options.map(text);
+  out.shownAtRest = options.map((o) => o.getAttribute("data-shown") ?? "null");
+  out.hiddenAtRest = options.map((o) => o.getAttribute("aria-hidden") ?? "null");
+  out.rest = width();
+
+  setShow(busyLabel);
+  out.busy = width();
+  out.busyOverflow = target.scrollWidth > target.clientWidth + 1;
+  // 摘掉机制：不再让另一档占格（等价于有人把 BusyLabel 换回单个文本节点）
+  const offscreen = options.find((o) => o.getAttribute("data-shown") === "false");
+  const previousDisplay = offscreen ? offscreen.style.display : "";
+  if (offscreen) offscreen.style.display = "none";
+  out.busyWithoutStack = width();
+  if (offscreen) offscreen.style.display = previousDisplay;
+
+  setShow(restLabel);
+  out.restored = width();
+  return out;
 }
 
-function localeCopy(locale: "zh-CN" | "en-US") {
-  const doc = JSON.parse(readFileSync(`src/locales/${locale}.json`, "utf8")) as {
-    settings: Record<string, string>;
+/** 按 `命名空间.键名` 取文案：判据必须盯 locale 里的真值，别再抄一遍字符串。 */
+function localeCopy(locale: "zh-CN" | "en-US", restKey: string, busyKey: string) {
+  const doc = JSON.parse(sourceFile(`src/locales/${locale}.json`)) as Record<string, Record<string, string>>;
+  const pick = (key: string) => {
+    const [ns, name] = key.split(".");
+    return doc[ns][name];
   };
-  return {
-    rest: doc.settings.clearCache,
-    busy: doc.settings.clearingCache,
-  };
+  return { rest: pick(restKey), busy: pick(busyKey) };
 }
 
 async function openSettings(page: Page, retest: unknown, locale: "zh-CN" | "en-US") {
@@ -99,61 +121,61 @@ async function openSettings(page: Page, retest: unknown, locale: "zh-CN" | "en-U
   await page.addInitScript((value) => window.localStorage.setItem("locale", value), locale);
   await page.goto("/");
   await dismissStartupDialog(page);
-  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await navigate(page, locale === "en-US" ? "Settings" : "设置");
   await page.waitForSelector(".settings-workbench");
   await page.waitForTimeout(900);
 }
 
-const readings: WidthReading[] = [];
+/** 两颗在纯浏览器构建里也一定渲染的换文案按钮（数据根那几颗要 Go 绑定，真机由 retest 侧的 Go 跑覆盖）。 */
+const CASES = [
+  { key: "clearCache", section: "#settings-developer", restKey: "settings.clearCache", busyKey: "settings.clearingCache" },
+  { key: "migrateCredentials", section: "#settings-credentials", restKey: "settings.migrateCredentials", busyKey: "settings.migratingCredentials" },
+];
 
-test("R67-WP7 中文档：清理缓存静息→忙态一帧不跳", async ({ page, retest }) => {
-  test.setTimeout(240_000);
-  const { rest, busy } = localeCopy("zh-CN");
-  expect(busy, "zh-CN 缺 settings.clearingCache").toBeTruthy();
-  expect(busy).not.toBe(rest);
+for (const locale of ["zh-CN", "en-US"] as const) {
+  test(`R67-WP7/轮74 A3 ${locale}：换文案的按钮忙态一帧不跳`, async ({ page, retest }) => {
+    test.setTimeout(240_000);
+    await openSettings(page, retest, locale);
 
-  await openSettings(page, retest, "zh-CN");
-  const reading = await page.evaluate(measureButton, [rest, busy, SECTION] as [string, string, string]);
-  reading.locale = "zh-CN";
-  readings.push(reading);
-  writeFileSync("/tmp/cs/wp7-readings.txt", JSON.stringify(readings, null, 2));
+    for (const item of CASES) {
+      const { rest, busy } = localeCopy(locale, item.restKey, item.busyKey);
+      expect(busy, `${locale} 缺 ${item.busyKey}`).toBeTruthy();
+      expect(busy).not.toBe(rest);
 
-  expect(reading.rest, "找不到渲染静息文案的按钮，后面全是空断言").toBeGreaterThan(0);
-  expect(reading.rendered, "静息文案与 locale 不一致").toBe(rest);
-  expect(Math.abs(reading.rest - reading.busy), `忙态一帧宽度从 ${reading.rest} 跳到 ${reading.busy}`).toBeLessThanOrEqual(1);
-  expect(reading.busyOverflow, `忙态文案被截断了（${reading.busyLabel} 放不下）`).toBe(false);
-  // 地板真的在干活：摘掉它就会跳（修前实测 82 vs 80）。这条不是判据，是把「假绿」暴露出来
-  expect(reading.minWidth, "按钮没有 min-width 地板").not.toBe("0px");
-  expect(reading.restNoFloor, `摘掉地板后静息宽 ${reading.restNoFloor}，说明地板其实没生效`).toBeLessThan(reading.rest);
-});
+      const reading = await page.evaluate(measureSwap, [item.section, rest, busy, item.key] as [string, string, string, string]);
+      reading.locale = locale;
+      console.log(JSON.stringify(reading));
 
-test("R67-WP7 英文档：Clear Cache → Clearing... 同样不跳", async ({ page, retest }) => {
-  test.setTimeout(240_000);
-  const { rest, busy } = localeCopy("en-US");
-  expect(busy, "en-US 缺 settings.clearingCache").toBeTruthy();
+      expect(reading.rest, `${item.key}：找不到带 BusyLabel 的按钮（${rest}），后面全是空断言`).toBeGreaterThan(0);
+      expect(reading.options, `${item.key}：两档文案没有都在 DOM 里，宽度地板无从谈起`).toEqual([rest, busy]);
+      expect(Math.abs(reading.rest - reading.busy), `${item.key}：忙态一帧宽度从 ${reading.rest} 跳到 ${reading.busy}`).toBeLessThanOrEqual(1);
+      expect(reading.busyOverflow, `${item.key}：忙态文案被截断了（${busy} 放不下）`).toBe(false);
+      // 牙：摘掉「另一档也占一格」就必须跳——证明这条判据真的在盯机制本身，不是盯一个恒真的宽度
+      expect(reading.busyWithoutStack, `${item.key}：摘掉机制仍是 ${reading.busyWithoutStack}，说明地板不是 BusyLabel 给的`).toBeLessThan(
+        reading.busy
+      );
+      // 还原干净（探针不许留下痕迹）
+      expect(reading.restored, `${item.key}：量完没还原，静息宽已经变了`).toBe(reading.rest);
+      // 读屏只念当前那一档：另一档必须同时是 data-shown=false 与 aria-hidden=true
+      expect(reading.shownAtRest, `${item.key}：静息帧的 data-shown 不对`).toEqual(["true", "false"]);
+      expect(reading.hiddenAtRest, `${item.key}：不可见那一档没被摘出可访问名，读屏会把两个状态名一起念`).toEqual(["null", "true"]);
+      // 浏览器算出来的可访问名才是地面真相：另一档留在 DOM 里但不许进名字
+      const button = page.locator(`${item.section} button:has(.busy-label-stack)`).filter({ hasText: rest }).first();
+      await expect(button, `${item.key}：静息帧的可访问名掺进了忙态文案`).toHaveAccessibleName(rest);
+    }
+  });
+}
 
-  await openSettings(page, retest, "en-US");
-  const reading = await page.evaluate(measureButton, [rest, busy, SECTION] as [string, string, string]);
-  reading.locale = "en-US";
-  readings.push(reading);
-  writeFileSync("/tmp/cs/wp7-readings.txt", JSON.stringify(readings, null, 2));
+// 静态那一半：文案仍来自 locale，且轮67 那套写死的像素地板不许回来。
+test("R67-WP7/轮74 A3 忙态文案来自 locale，写死的宽度地板已收掉", () => {
+  const source = sourceFile("src/components/SettingsView.tsx");
+  expect(source, "忙态文案不走 locale 了").toContain('busyText={t("settings.clearingCache")}');
+  expect(source, "静息文案不走 locale 了").toContain('idle={t("settings.clearCache")}');
+  expect(source, "忙态又用硬编码符号了").not.toMatch(/cacheBusy\s*\?\s*["'“‘]/);
+  expect(source, "又退回不换文案的写法（点下去毫无信号，轮74 A4）").not.toMatch(/\{cacheBusy \? t\("settings\.clearingCache"\) : t\("settings\.clearCache"\)\}/);
 
-  expect(reading.rest, "找不到渲染静息文案的按钮，后面全是空断言").toBeGreaterThan(0);
-  expect(reading.rendered, "静息文案与 locale 不一致").toBe(rest);
-  // 这一档是地板存在的理由：只把「…」换成 "Clearing..." 而不钉地板，en 静息 102 → 忙态 89 缩 13px。
-  expect(Math.abs(reading.rest - reading.busy), `忙态一帧宽度从 ${reading.rest} 跳到 ${reading.busy}`).toBeLessThanOrEqual(1);
-  expect(reading.busyOverflow, `忙态文案被截断了（${reading.busyLabel} 放不下）`).toBe(false);
-  // 方向别写反：摘掉地板是「变窄」，所以拿静息减忙态。
-  expect(reading.restNoFloor - reading.busyNoFloor, `摘掉地板后应从 ${reading.restNoFloor} 缩到 ${reading.busyNoFloor}（缩不到 8px 说明地板没生效）`).toBeGreaterThanOrEqual(8);
-});
-
-// 静态那一半：忙态文案必须走 locale。真机量宽能守住「不跳」，守不住「谁把文案又改回 …」——
-// 改回省略号后宽度只要仍然 >= 地板，两条判据都会绿灯。
-test("R67-WP7 忙态文案来自 locale，不写死省略号", () => {
-  const source = readFileSync("src/components/SettingsView.tsx", "utf8");
-  expect(source, "忙态又用硬编码符号了").toContain("{cacheBusy ? t(\"settings.clearingCache\") : t(\"settings.clearCache\")}");
-  expect(source, "忙态不许再回到硬编码省略号（实测 3px，按钮塌成一条缝）").not.toMatch(/cacheBusy\s*\?\s*["'“‘]/);
-  const css = readFileSync("src/styles.css", "utf8");
-  expect(css, "地板规则被删了").toMatch(/\.settings-busy-btn\s*\{[^}]*min-width:\s*106px/);
+  const css = sourceFile("src/styles.css");
+  expect(css, "按一颗按钮量出来的 min-width 地板又回来了").not.toMatch(/\.settings-busy-btn/);
+  expect(css, "两档同占一格这条机制被删了").toMatch(/\.busy-label-option\[data-shown="false"\]\s*\{\s*visibility:\s*hidden\s*;\s*\}/);
 });

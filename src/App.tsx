@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Connection,
   connectionEnvironmentName,
@@ -217,6 +217,20 @@ export default function App() {
   const [diffFocusStep, setDiffFocusStep] = useState<WorkflowStepId | null>(null);
   // 变更计划页半截写入后跳来操作历史时要定位的记录（轮66 WP-2）：只由跳转写入，历史页消费完即清。
   const [historyFocusRecordId, setHistoryFocusRecordId] = useState<string | null>(null);
+  // 关于页的到达定位（轮74 D2）：设置页「检查更新」与新版本提醒都指向「应用更新」这一节，
+  // 只由跳转写入，关于页消费完即清 —— 下次从导航栏进关于页不该再闪一下。
+  const [aboutArriveAtUpdate, setAboutArriveAtUpdate] = useState(false);
+  /**
+   * 进关于页看更新（轮74 D2）：设置页那颗按钮与消息中心的新版本提醒共用这一个出口。
+   *
+   * 为什么不由关于页自己判「我是被谁叫起来的」：那样要么每次挂载都闪一下（从导航栏进也闪），
+   * 要么谁都闪不到。标记留在跳转发起方，与 diffFocusStep / historyFocusRecordId 同一形状——
+   * 一次性意图只活在 props 里，不进任何存储。useCallback 是为了让后台检查那条 effect 能把它写进依赖。
+   */
+  const openAboutAtUpdate = useCallback(() => {
+    setAboutArriveAtUpdate(true);
+    setMode("about");
+  }, []);
   // 自增即重新拉取命名空间（用于「重试」）。
   const [nsReload, setNsReload] = useState(0);
   // 跨视图导航参数（BackupView / AuditView → DiffView）。轮46：只由跳转设置，
@@ -326,7 +340,7 @@ export default function App() {
             source: t("about.updateTitle"),
             message: result.releaseNotes || "",
             actionLabel: t("about.openDownload"),
-            onAction: () => setMode("about"),
+            onAction: openAboutAtUpdate,
           });
         } catch {
           // 后台检查失败静默忽略
@@ -335,7 +349,7 @@ export default function App() {
       5 * 60 * 1000
     );
     return () => clearTimeout(timer);
-  }, [t]);
+  }, [openAboutAtUpdate, t]);
 
   // 记住此刻所在的作用域。必须声明在下面的回落 effect 之前：回落只认这份内存里的记忆，
   // 而持久化 effect（也声明在前）在 activeConn 为空时会把 cs.ui 的 browse* 写成空串——
@@ -761,9 +775,9 @@ export default function App() {
           ) : mode === "ssh" ? (
             <SSHManagerView connections={connections} />
           ) : mode === "settings" ? (
-            <SettingsView onOpenAbout={() => setMode("about")} />
+            <SettingsView onOpenAbout={openAboutAtUpdate} />
           ) : mode === "about" ? (
-            <About embedded />
+            <About embedded arriveAtUpdate={aboutArriveAtUpdate} onArriveConsumed={() => setAboutArriveAtUpdate(false)} />
           ) : mode === "apply" ? (
             <ApplyPlanView
               entry={pendingApplyEntry}

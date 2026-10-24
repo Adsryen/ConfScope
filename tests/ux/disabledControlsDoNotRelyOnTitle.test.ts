@@ -71,7 +71,7 @@ const BASELINE: Record<string, string[]> = {
   ],
   "src/components/CopyButton.tsx": [
     // 轮67 WP5：这颗按钮补了 aria-label 给同名动作点名（键随标签头变化，disabled+title 的取舍本身没动）
-    '<button className="btn btn-ghost btn-sm" onClick={onClick} disabled={!text} aria-label={ariaLabel} title={t("common.copyToClipboard")}>',
+    '<button className="btn btn-ghost btn-sm copy-action-btn" onClick={onClick} disabled={!text} aria-label={ariaLabel} title={t("common.copyToClipboard")}>',
   ],
   "src/components/DeleteConfirm.tsx": [
     '<button className="modal-x" onClick={onCancel} disabled={busy} title={t("common.close")} aria-label={t("common.close")}>',
@@ -181,7 +181,7 @@ function attributeNames(mask: string): Set<string> {
   return names;
 }
 
-/** 基线条目的键长度：够唯一，又不至于把整段 JSX 抄进测试。 */
+/** 标签头参与键比较的最大长度：够唯一，又不至于把整段 JSX 钉死在测试里。 */
 const KEY_LENGTH = 150;
 
 interface Site {
@@ -204,15 +204,24 @@ function disabledWithTitleSites(): Site[] {
         if (!found) continue;
         const attrs = attributeNames(topLevelMask(found.header));
         if (!attrs.has("disabled") || !attrs.has("title")) continue;
-        const key = `${file}|${found.header.replace(/\s+/g, " ").trim().slice(0, KEY_LENGTH)}`;
+        const key = siteKey(file, found.header);
         sites.push({ key, file, line: src.slice(0, m.index).split("\n").length, tag: m[1] });
       }
     });
   return sites;
 }
 
+/**
+ * 基线条目的键推导：和 disabledWithTitleSites() 用同一套规则。
+ * 抄标签头的时候可以把整行原样贴进来，超长部分由 KEY_LENGTH 截掉——
+ * 早先是人工截到 150 字再贴，贴错一格就「新增站点 + 基线过期」双双判红（轮74 踩过）。
+ */
+function siteKey(file: string, header: string): string {
+  return `${file}|${header.replace(/\s+/g, " ").trim().slice(0, KEY_LENGTH)}`;
+}
+
 function baselineKeys(): Set<string> {
-  return new Set(Object.entries(BASELINE).flatMap(([file, keys]) => keys.map((key) => `${file}|${key}`)));
+  return new Set(Object.entries(BASELINE).flatMap(([file, keys]) => keys.map((key) => siteKey(file, key))));
 }
 
 describe("disabled 的原生控件不许靠 title 表达禁用理由", () => {

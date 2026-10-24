@@ -22,6 +22,10 @@
   /* 需要承载白字的红色填充：--red #f44747 上白字只有 3.60:1，降到 #c8353a 后 5.22:1。
      注意 --red 继续用于描边与文字（图形按 3:1 口径），别把它也一起改暗。 */
   --red-fill: #c8353a;
+  /* 轮74 A1：实心危险档的 hover 底色。必须比 --red-fill 亮一档（与 --accent / --accent-h 同构），
+     且白字仍达 AA——实测 #d03e43 上白字 4.72、#d94a4f 只剩 4.16，所以停在 43 这一档；
+     再亮就得换黑字，而黑字在 --red-fill 上只有 4.03（无解）。 */
+  --red-fill-h: #d03e43;
   /* tint chip（半透明着色底）上的 tone 文字：--red-h #ff6b6b 叠在 rgba(244,71,71,.16)∘--bg3
      上只有 4.19:1，#ff8f8f 同位置 5.31:1；紫色同理 #ba68c8 3.59 → #ce93d8 5.34。 */
   --red-text: #ff8f8f;
@@ -742,6 +746,31 @@ textarea {
 .btn-ghost:hover:not(:disabled) {
   background: var(--bg-hover);
 }
+/* 轮74 A2：禁用只有一种长相——描边 + 淡字，实心档禁用时不再画实心。
+   原先禁用只靠 `.btn:disabled{opacity:.45}`，实心蓝被压成「一团灰蓝 + 黑字」（真机实测
+   color rgb(0,0,0)、bg rgba(0,122,204,.45)），读起来像控件坏了而不是「现在还不能点」；
+   同一页的 ghost 禁用（恢复提醒）却是正常淡出，两种形状并存。
+   特异度：`.btn-primary:disabled` (0,2,0) 严格高于 `.btn-primary` (0,1,0)，不赌文档顺序。 */
+.btn-primary:disabled,
+.btn-danger-fill:disabled {
+  background: transparent;
+  border-color: var(--border);
+  /* 与 ghost 禁用同一支笔：`.btn:disabled` 已经压了 0.45 透明度，这里再挑暗一档
+     就是双重变暗（真机实测 --text-dim 落在 .45 上只剩 #5c5c5c，比同一页的
+     「恢复提醒」还淡）。写字色沿用 --text，靠那层透明度淡出，两种禁用控件读数一致。 */
+  color: var(--text);
+}
+
+/* 轮74 B1：全站按钮的键盘焦点环。原先 `.btn` 族 0 处 :focus-visible，Tab 到达时落到浏览器
+   默认的 `outline: auto`（真机截图：白粗环），与自研焦点环（--focus-outline，2px 青）两套语言，
+   且 auto 环的颜色/形状由 UA 决定——同一份代码在 WebView2 与 WKWebView 上不一样。
+   鼠标点击不画（:focus-visible 只对键盘/程序化聚焦生效），与 .settings-rail-item / .browser-item 同口径。 */
+.btn:focus-visible,
+.pwd-toggle:focus-visible,
+.modal-x:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+}
 /* ── Workspace ── */
 .workspace {
   flex: 1;
@@ -1006,16 +1035,32 @@ textarea {
 }
 
 /*
- * 忙态按钮的宽度地板（轮67 R67-WP7）。真机在 .btn 下量四档：
- *   静息 清理缓存 82 / Clear Cache 102，忙态 清理中... 80 / Clearing... 89。
- * 原先忙态硬编码一个「…」，实测 3px——按钮从 82 塌成一条缝，用户分不清
- * 是「在忙」还是「点坏了」。换成完整文案后仍会缩（en 静息→忙态差 13px），
- * 所以按「最宽静息值 102 + 4px 余量 = 106」钉住地板：zh 静息 82→106 是让一步，
- * 之后一次都不跳。地板只给这一颗按钮，不进 .btn（全站按钮宽度由文案决定，
- * 给 .btn 钉 min-width 会把别的节挤变形）。
+ * 忙态按钮的宽度地板（轮67 R67-WP7 立，轮74 A3 换实现）。
+ * 轮67 的做法是给那颗按钮写死 `min-width: 106px`（106 = 英文档最宽静息值 102 + 4px 余量）。
+ * 三个毛病都在轮74 真机读数里量出来了：
+ *   ① 地板值是按一颗按钮量的——套到 134px 的「清除本机版本历史」上，忙态反而从 134 塌到 106（−28px）；
+ *   ② 同一族的「迁移凭据」压根没挂这个 class，82→80 一样在跳；
+ *   ③ 106 这个数是英文档量出来的，换语种 / 改文案就得重新数像素。
+ * 现在两档文案都在 DOM 里，用 grid 叠进同一格，盒子宽度恒等于「两者里宽的一档」：
+ * 中英文自适应，谁都不跳，也不需要任何写死的数值。
+ *
+ * 为什么忙态仍然换文案（而不是回到 spinner）：轮67 的结论——硬编码一个「…」实测只有 3px，
+ * 按钮塌成一条缝，用户分不清「在忙」还是「点坏了」；完整文案（走 locale）才说得出在做什么。
+ * 为什么用 visibility 而不是 hidden/display:none：hidden 那族在本仓有 `*-cache [hidden]{display:none!important}`
+ * 一类规则，会把节点整段摘出布局，宽度就白钉了；visibility:hidden 保住占位，
+ * 同时按 accname 从可访问名里排除——读屏仍然只念当前可见的那一档，不会把两个状态名一起念。
  */
-.settings-busy-btn {
-  min-width: 106px;
+.busy-label-stack {
+  display: inline-grid;
+  place-items: center;
+}
+
+.busy-label-option {
+  grid-area: 1 / 1 / 2 / 2;
+}
+
+.busy-label-option[data-shown="false"] {
+  visibility: hidden;
 }
 
 .settings-panel-note {
@@ -1864,7 +1909,7 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* 系统开了「减少动态效果」就把全站动效压平：三条 keyframes（草稿加载脉冲 / 工作流闪烁 /
+  /* 系统开了「减少动态效果」就把全站动效压平：三条 keyframes（草稿加载脉冲 / 到达高亮 /
      轻提示入场）和所有 transition 一起降速，scroll-behavior 也回退成直接跳位。
      JS 里发起的 smooth 滚动由 lib/motion 同步判断（轮6 R50）。
      这里不用 animation: none，保留 0.01ms 的时长是为了让依赖动画结束的代码照常收到事件。 */
@@ -3143,8 +3188,9 @@ button.diff-workflow-step-btn:hover {
   color: var(--on-accent);
 }
 
-/* stepper 回退时，目标区域（来源面板 / 对比结果）的高亮闪烁提示 */
-@keyframes workflow-flash {
+/* 到达高亮：跨页落地（关于页「应用更新」）与 stepper 回退（来源面板 / 对比结果）共用的一条时间线。
+   实现只有一份，见 src/lib/arriveFlash.ts；这里的 1.1s 与 ARRIVE_FLASH_MS 对齐。 */
+@keyframes arrive-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(79, 195, 247, 0);
   }
@@ -3156,8 +3202,8 @@ button.diff-workflow-step-btn:hover {
   }
 }
 
-.workflow-flash {
-  animation: workflow-flash 1.1s ease;
+.arrive-flash {
+  animation: arrive-flash 1.1s ease;
 }
 
 
@@ -5294,15 +5340,36 @@ button.diff-workflow-step-btn:hover {
 }
 .pwd-toggle {
   flex-shrink: 0;
-  width: 34px;
+  width: 30px;
+  /* 轮74 C1：这颗开关原先高 26px（无纵向 padding，只靠 emoji 撑），紧挨 29px 的输入框差 3px，
+     一行里 26/28/29 三种高度混排。改成与输入框同高，图标自己居中。 */
+  height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--text);
-  font-size: 14px;
+  color: var(--text-dim);
 }
 .pwd-toggle:hover {
-  background: var(--bg-hover);
+  color: var(--text);
+}
+.pwd-toggle-icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 回显态：图标压成「划掉的眼睛」不够醒目，改用强调色描边说明此刻是明文 */
+.pwd-toggle[aria-pressed="true"] {
+  color: var(--accent-text);
+  border-color: rgba(0, 122, 204, 0.5);
 }
 
 .conn-form {
@@ -5693,6 +5760,15 @@ button.diff-workflow-step-btn:hover {
 .btn.btn-sm {
   padding: 5px 8px;
   font-size: 11px;
+}
+/* 轮74 C3：复制键的宽度地板。真机量过——静息「复制」40px，点击后换成「✓ 已复制」62px，
+   整行左缘从 1253 顶到 1231，1.2s 后再弹回；数据位置一节有 7 行，每行都在抖。
+   地板按两档里较宽的一档写死（11px 字号下 5.6em ≈ 62px，中英文两档都落在这个值以内），
+   文字居中，于是切换文案只换内容不换盒子。
+   只给这一族，不给 .btn.btn-sm 整体加 min-width：全站 100 多处小按钮，多数只有一个文案。 */
+.copy-action-btn {
+  min-width: 5.6em;
+  text-align: center;
 }
 
 .confirm-msg {
@@ -6114,6 +6190,12 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 竖排容器默认的 align-items: stretch 会把孤零零的一颗按钮拉成整行宽
+   （真机读数 784px，全站唯一）：面板要铺满，按钮按内容收。 */
+.update-body > .btn {
+  align-self: flex-start;
 }
 
 .update-release-notes {
@@ -7116,13 +7198,26 @@ button.diff-workflow-step-btn:hover {
   border-radius: 6px;
 }
 
-/* 危险按钮配色。DeleteConfirm.tsx 用的是 `btn btn-danger`（没有 .btn-ghost），
-   SettingsView 的两处是 `btn btn-ghost btn-danger`——只把选择器提成 .btn-ghost.btn-danger
-   会打死前者，所以裸类名和复合类名并列写（R80）：两种写法作用面都在，danger 恒赢 ghost。 */
-.btn-danger,
+/* 危险按钮配色（轮74 A1 拆成两型，DeleteConfirm / ConfirmModal 的确认键改走实心档）。
+   这一族当年写成 `.btn-danger, .btn-ghost.btn-danger` 一条规则，只声明 color + border-color，
+   静止态 background 无人接管——于是裸 `btn btn-danger`（确认框里那颗「确定」）直接漏给浏览器
+   UA 的 ButtonFace：真机实测 rgb(107,107,107) 一团灰 + 淡红字，读起来像「这颗点不动」，
+   而它是整个流程里唯一真删数据的一刻；macOS WKWebView 的 ButtonFace 不是这档灰，跨平台还会渲成浅底。
+   现在两型各写满自己的底色，不再由 UA 兜。
+   - 描边档 `btn btn-ghost btn-danger`：面板「危险区」里的入口键，静息透明底 + 红字红边，
+     与所在节的红色 tint 卡片同族，不该比卡片更抢眼（SettingsView 三处，见 settingsDangerZoneUniform）。
+   - 实心档 `btn btn-danger-fill`：真正执行不可逆动作的那一颗（ConfirmModal 确定 / DeleteConfirm
+     确认删除 / 回滚二次确认）。刻意不复用 `btn-danger` 加 :not(.btn-ghost) 区分——
+     hoverToneRulesResolveBySpecificity 的解析器明写「:not(其它东西)：语义太多，不猜」，
+     那种写法会掉进跳过名单；独立类名让三张 CSS 守卫都能真的算到它。 */
 .btn-ghost.btn-danger {
   color: #e57373;
   border-color: rgba(244, 67, 54, 0.35);
+}
+.btn-danger-fill {
+  background: var(--red-fill);
+  border-color: var(--red-fill);
+  color: #ffffff;
 }
 
 /* R85（轮26）：hover 必须也变红，而且要**同时**写满两条选择器，理由两条各自独立——
@@ -7134,10 +7229,13 @@ button.diff-workflow-step-btn:hover {
       hoverToneRulesResolveBySpecificity 这条守卫（伪类进特异度）才落地。
    2) `:not(:disabled)` 与 ghost/primary 同口径：danger 原来没写，于是 DeleteConfirm 的确认按钮
       在 busy 期间（disabled + opacity .45）照样画红色 hover 底色，给出「能点但其实不能点」的假可点性。 */
-.btn-danger:hover:not(:disabled),
 .btn-ghost.btn-danger:hover:not(:disabled) {
   background: rgba(244, 67, 54, 0.15);
   border-color: rgba(244, 67, 54, 0.6);
+}
+.btn-danger-fill:hover:not(:disabled) {
+  background: var(--red-fill-h);
+  border-color: var(--red-fill-h);
 }
 
 /* ── BackupView 备份管理 ── */

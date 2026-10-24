@@ -23,6 +23,27 @@ export interface PasswordFieldProps {
 }
 
 /**
+ * 回显开关的图标（轮74 C1）。原先用 👁 / 🙈 两个彩色 emoji：设置页一行里因此出现
+ * 26（emoji 撑高）/ 28（.btn.btn-sm）/ 29（输入框）三种高度，且 emoji 是彩色字形，
+ * 与全站线性图标（NavIcon、.browser-tool-icon）不同族，Windows 与 macOS 还渲染成不同图案。
+ * 换成同族的描边线性图标，两态共用一只眼睛，回显时多一条斜线。
+ */
+function RevealIcon({ shown }: { shown: boolean }) {
+  const paths = [
+    "M2.6 12S6.2 6.4 12 6.4 21.4 12 21.4 12 17.8 17.6 12 17.6 2.6 12 2.6 12Z",
+    "M12 9.8a2.2 2.2 0 1 1 0 4.4 2.2 2.2 0 0 1 0-4.4Z",
+  ];
+  if (shown) paths.push("M4.6 4.6 19.4 19.4");
+  return (
+    <svg className="pwd-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+/**
  * 口令输入框（轮67 R67-WP6）：全站 18 处遮码框的唯一实现。
  *
  * 修前这三件事在 18 处各自漏一遍，且互相不一致：
@@ -84,7 +105,7 @@ export default function PasswordField({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setShown((v) => !v)}
         >
-          {shown ? "🙈" : "👁"}
+          <RevealIcon shown={shown} />
         </button>
       </span>
     </label>

@@ -445,7 +445,7 @@ export default function HistoryView({
                     <CopyButton text={contents[viewing]?.content ?? ""} label={t('history.copyVersion')} />
                     {canRollback && (
                       <button
-                        className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
+                        className={`btn btn-sm ${rbConfirm ? "btn-danger-fill" : "btn-ghost"}`}
                         onClick={rollback}
                         onBlur={() => setRbConfirm(false)}
                         disabled={generatingPlan}

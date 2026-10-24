@@ -31,6 +31,10 @@
  * 8. 把 styles.css 的 `.field-error` 基础规则改名 → 行首锚定那条红。这条必须锚行首：
  *    `.field-error-box .field-error {` 里也含 `.field-error {` 这段字面量，不锚就假绿（实测过）。
  * 9. 可点行把 `:hover` 改成别的伪类（只有按下才有反馈）→ R-B4 样式那条红。
+ * 10. 轮74 C2：把「恢复此备份」写回 `btn-primary`、或把「预览本地备份」写成主色 → 备份节权重那条红。
+ *     判的是「一整片蓝里读不出哪一步会动现有数据」：主色只留给提交动作，预览降到次要档。
+ * 11. 轮74 D2：把 App 的 `onOpenAbout` 改回 `() => setMode("about")`（丢掉到达标记）→ R-B6 红。
+ *     到达高亮自身的判据在 tests/ux/arrivalHighlightSingleSource.test.ts。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,6 +44,7 @@ import { PROJECT_ROOT, loadLocale, readScannedSource, sourceFiles } from "./scan
 const SETTINGS = "src/components/SettingsView.tsx";
 const STYLES = "src/styles.css";
 const DIFFVIEW = "src/components/DiffView.tsx";
+const BACKUP_PANEL = "src/components/AppDataBackupPanel.tsx";
 const APP = "src/App.tsx";
 const SHORT_HINT_GUARD = "tests/ux/inlineErrorSingleSource.test.ts";
 
@@ -82,6 +87,18 @@ function objectLiteralValues(source: string, name: string): Record<string, strin
   const body = source.slice(source.indexOf("{", start), source.indexOf("\n};", start));
   const out: Record<string, string> = {};
   for (const match of body.matchAll(/(\w+):\s*"([^"]*)"/g)) out[match[1]] = match[2];
+  return out;
+}
+
+/**
+ * 按 `className="btn …" onClick={handler}` 成对取每颗按钮的配色档位。
+ * 只认「类名紧挨着 onClick」的写法（备份节全是这个形状），箭头包一层也照样取到函数名。
+ */
+function toneByHandler(source: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of source.matchAll(/className="(btn[^"]*)"[\s\S]{0,40}?onClick=\{(?:\(\)\s*=>\s*)?([A-Za-z_$][\w$]*)/g)) {
+    out[m[2]] = m[1];
+  }
   return out;
 }
 
@@ -186,7 +203,13 @@ describe("提示落点与复制能力不许倒退（R-B1 / R-B5 / R-B6）", () =
     // 检查 / 下载 / 校验 / 安装 / 交接这套能力都从 api/app 出口走，只有关于页消费它。
     expect(settings, "检查逻辑在关于页只有一份实现，设置页不许再引 api/app 那一套").not.toContain('"../api/app"');
     expect(settings).not.toMatch(/\bcheckForUpdates\b|\blaunchUpdateInstaller\b/);
-    expect(app, "App 没有把 onOpenAbout 接到关于页").toMatch(/<SettingsView onOpenAbout=\{\(\) => setMode\("about"\)\} \/>/);
+    expect(app, "App 没有把 onOpenAbout 接到关于页").toMatch(/<SettingsView onOpenAbout=\{openAboutAtUpdate\} \/>/);
+    // 轮74 D2：落地那一页得认得出自己是来干什么的。标记只由跳转方给、关于页消费完必须清掉，
+    // 否则下次从导航栏进关于页也会白闪一下。
+    expect(app, "关于页没收到到达标记：从设置页跳过去仍是一片静止的 logo 页").toMatch(
+      /<About embedded arriveAtUpdate=\{aboutArriveAtUpdate\} onArriveConsumed=\{\(\) => setAboutArriveAtUpdate\(false\)\} \/>/
+    );
+    expect(app, "新版本提醒另开了一条进关于页的路，标记会漏给关于页").toMatch(/onAction: openAboutAtUpdate,/);
     // 恢复提醒是「点完屏幕上什么都不挪」的动作，必须补一条轻提示。
     expect(settings, "清空跳过版本后没有任何回执").toMatch(/toast\(t\("settings\.updateReminderRestored"\), "success"\)/);
   });
@@ -239,5 +262,22 @@ describe("连接排序开关是真的（R-B9）", () => {
   it("两处来源选择器都把设置里的值传进去", () => {
     const passes = diffView.match(/sortConnections=\{settings\.compare\.sortConnections\}/g) ?? [];
     expect(passes, "只有一侧传了开关：另一侧的比较页又回到不排序").toHaveLength(2);
+  });
+
+});
+
+describe("备份节的按钮权重只有一个提交焦点（轮74 C2）", () => {
+  it("备份节只给提交动作用主色：预览降次要档，覆盖本机数据走实心危险档（轮74 C2）", () => {
+    const tones = toneByHandler(readScannedSource(BACKUP_PANEL));
+    expect(Object.keys(tones).length, "一颗按钮都没解析到，锚点写法变了").toBeGreaterThan(6);
+    ["saveBackupPassword", "exportLocalBackup", "uploadWebDAVBackup"].forEach((fn) => {
+      expect(tones[fn], `${fn} 是本节的提交动作，主色不能丢`).toContain("btn-primary");
+    });
+    ["previewLocalBackup", "previewRemoteBackup"].forEach((fn) => {
+      expect(tones[fn], `${fn} 只是「看一眼再决定」，不该和提交动作抢主色`).toContain("btn-ghost");
+    });
+    expect(tones.restorePreview, "这颗会用备份件覆盖本机数据，必须是最重的一档").toContain("btn-danger-fill");
+    const primaryCount = Object.values(tones).filter((cls) => cls.includes("btn-primary")).length;
+    expect(primaryCount, `主色按钮共 ${primaryCount} 颗：一个面板里这么多蓝，等于没有蓝`).toBe(3);
   });
 });

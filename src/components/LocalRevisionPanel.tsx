@@ -389,7 +389,7 @@ export default function LocalRevisionPanel({
                     <CopyButton text={contentOf(viewingEntry)} label={t("history.copyVersion")} />
                     {canRollback && !omitted && (
                       <button
-                        className={`btn btn-sm ${rbConfirm ? "btn-danger" : "btn-ghost"}`}
+                        className={`btn btn-sm ${rbConfirm ? "btn-danger-fill" : "btn-ghost"}`}
                         onClick={() => rollback(viewingEntry)}
                         onBlur={() => setRbConfirm(false)}
                         disabled={generatingPlan}

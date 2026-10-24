@@ -29,12 +29,21 @@ import { useDialogFocus } from "../lib/useDialogFocus";
 import { useOverlayDismiss } from "../lib/useOverlayDismiss";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
+import { revealArrival } from "../lib/arriveFlash";
 import { openExternalLink } from "../lib/externalLink";
 import ExternalLink from "./ExternalLink";
 
 interface AboutProps {
   onClose?: () => void;
   embedded?: boolean;
+  /**
+   * 从设置页「检查更新」或新版本提醒跳过来时置真：落地后把「应用更新」这块滚到位、
+   * 闪一下并交焦点（轮74 D2）。修前是整页一动不动——来源点的是「更新」，
+   * 落地看到的却是 logo 与版本号，得自己在满页信息里重新找那件事。
+   */
+  arriveAtUpdate?: boolean;
+  /** 到达动作已消费，让 App 清掉标记：否则下次从导航栏进关于页也会白闪一下。 */
+  onArriveConsumed?: () => void;
 }
 
 /*
@@ -69,7 +78,12 @@ interface WailsRuntime {
 
 type WindowWithRuntime = Window & { runtime?: WailsRuntime };
 
-export default function About({ onClose = () => {}, embedded = false }: AboutProps) {
+export default function About({
+  onClose = () => {},
+  embedded = false,
+  arriveAtUpdate = false,
+  onArriveConsumed,
+}: AboutProps) {
   const { t } = useTranslation();
   const [appInfo, setAppInfo] = useState<AppInfo>({
     name: "ConfScope",
@@ -99,6 +113,8 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
   // 焦点陷阱：内嵌在设置页里时它不是弹层，不该吃掉页面其余部分的 Tab。
   const modalRef = useRef<HTMLDivElement>(null);
+  /** 「应用更新」这一节：到达高亮的目标，也是焦点交接的落点。 */
+  const updateSectionRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus({ active: !embedded, containerRef: modalRef });
   const overlayDismiss = useOverlayDismiss(onClose);
@@ -275,6 +291,25 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       runUpdateCheck();
     }
   }, [appInfoLoaded, runUpdateCheck, updatePhase]);
+
+  // 到达高亮：撤销函数存 ref，不挂在 effect 的 cleanup 上。
+  // 挂在 cleanup 上的话，onArriveConsumed 一翻转 arriveAtUpdate 就重跑 effect，
+  // 上一轮的 cleanup 会在动画播到一半时把类名摘掉——闪烁等于没发生。
+  const cancelArriveFlashRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!arriveAtUpdate) return;
+    const target = updateSectionRef.current;
+    cancelArriveFlashRef.current?.();
+    if (target) cancelArriveFlashRef.current = revealArrival(target, { focus: true });
+    onArriveConsumed?.();
+  }, [arriveAtUpdate, onArriveConsumed]);
+  useEffect(
+    () => () => {
+      cancelArriveFlashRef.current?.();
+      cancelArriveFlashRef.current = null;
+    },
+    []
+  );
 
   // 桌面 webview 里 window.open 开不出窗口（R66），外链一律走共享出口：
   // 有 Wails 运行时就走系统浏览器，都不行时复制链接并提示，不再「点了没反应」。
@@ -644,8 +679,14 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
       </div>
 
       <div className="about-content">
-        <div className="about-section about-full">
-          <h3>{t("about.updateTitle")}</h3>
+        <div
+          className="about-section about-full"
+          ref={updateSectionRef}
+          id="about-update"
+          tabIndex={-1}
+          aria-labelledby="about-update-title"
+        >
+          <h3 id="about-update-title">{t("about.updateTitle")}</h3>
           <div className="update-body">{renderUpdateSection()}</div>
           <div className="update-source-list">
             {(appInfo.updateSources.length ? appInfo.updateSources : []).map((source) => (
@@ -687,7 +728,7 @@ export default function About({ onClose = () => {}, embedded = false }: AboutPro
 
         <div className="about-section about-full about-links">
           <ExternalLink href="https://github.com/Adsryen/ConfScope" className="btn btn-ghost btn-sm">
-            ⭐ GitHub
+            GitHub
           </ExternalLink>
           <ExternalLink href="https://github.com/Adsryen/ConfScope/issues" className="btn btn-ghost btn-sm">
             {t("about.feedback")}

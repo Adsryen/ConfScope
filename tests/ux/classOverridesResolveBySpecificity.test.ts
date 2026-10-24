@@ -428,9 +428,11 @@ describe("跨类覆盖由特异度决胜，不赌文档顺序（R83）", () => {
 
   it("轮24/轮25 提特异度的那批成对写法必须两边都在", () => {
     // 任何一处被改回裸类名，上面的用例会红；这里再钉住「并列写法不许只留一条」，
-    // 否则 .btn-danger / .check-field 的裸用法会被打死。
+    // 否则 .check-field 的裸用法会被打死。
+    // 轮74 A1：`.btn-danger,` 这条并列没了——danger 拆成描边档（只以 .btn-ghost.btn-danger 出现）
+    // 和实心档 .btn-danger-fill 两个类名，裸 btn-danger 在全站 0 处用法，
+    // 「静止态必须有底色」由 hoverToneRulesResolveBySpecificity 的 danger-fill 用例钉。
     const PAIRS = [
-      [".btn-danger,", ".btn-ghost.btn-danger {"],
       [".check-field,", ".field.check-field {"],
       [".data-split,", ".data-split.backup-content,"],
       [".data-split,", ".data-split.history-content,"],

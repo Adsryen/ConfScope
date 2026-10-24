@@ -9,6 +9,7 @@ import DiffView from "./DiffView";
 import { listAllConfigsBridge } from "../test/listAllConfigsBridge";
 import { __clearWheelSurfacesForTest } from "../lib/wheelScroll";
 import { publishConfigChange } from "../lib/configChangeBus";
+import { ARRIVE_FLASH_CLASS } from "../lib/arriveFlash";
 import { listAuditSessions } from "../lib/auditSessionLog";
 
 const apiMocks = vi.hoisted(() => ({
@@ -223,14 +224,14 @@ describe("DiffView", () => {
     fireEvent.click(steps[1].querySelector("button")!);
     expect(onStartApply).not.toHaveBeenCalled();
     const resultEl = document.querySelector(".diff-result") as HTMLElement;
-    expect(resultEl.classList.contains("workflow-flash")).toBe(true);
+    expect(resultEl.classList.contains(ARRIVE_FLASH_CLASS)).toBe(true);
 
     // 回退到第 1 步：来源面板闪烁高亮（来源面板保持展开）
     steps = stepEls();
     fireEvent.click(steps[0].querySelector("button")!);
     expect(onStartApply).not.toHaveBeenCalled();
     const sourcesEl = document.querySelector(".diff-sources") as HTMLElement;
-    expect(sourcesEl.classList.contains("workflow-flash")).toBe(true);
+    expect(sourcesEl.classList.contains(ARRIVE_FLASH_CLASS)).toBe(true);
     expect(document.querySelector(".diff-source-panel")?.classList.contains("collapsed")).toBe(false);
   });
 
@@ -1962,7 +1963,7 @@ describe("DiffView 保活可见性闸门（轮44 AC3：看不见 ≠ 没挂载�
     await settle();
     expect(onFocusStepConsumed).not.toHaveBeenCalled();
     // 隐藏子树里不该被抢焦点/加闪烁
-    expect(document.querySelector(".workflow-flash")).toBeNull();
+    expect(document.querySelector(`.${ARRIVE_FLASH_CLASS}`)).toBeNull();
 
     view.rerender(
       <I18nProvider>
@@ -1970,7 +1971,7 @@ describe("DiffView 保活可见性闸门（轮44 AC3：看不见 ≠ 没挂载�
       </I18nProvider>
     );
     await waitFor(() => expect(onFocusStepConsumed).toHaveBeenCalledTimes(1));
-    expect(document.querySelector(".diff-sources")).toHaveClass("workflow-flash");
+    expect(document.querySelector(".diff-sources")).toHaveClass(ARRIVE_FLASH_CLASS);
   });
 
   /**

@@ -436,8 +436,10 @@ test("轮38 R92 hover 态蓝底按钮标签达标（白字在 --accent-h 上无�
   await navigate(page, "设置");
   await page.waitForTimeout(800);
 
-  const btn = page.locator(".btn-primary:visible").first();
-  await expect(btn, "设置页找不到 .btn-primary，本用例失去意义").toBeVisible({ timeout: 20_000 });
+  // 轮74 A2：禁用中的实心档淡成描边（透明底），这条量的是「蓝底上的字」，必须盯启用那颗
+  const btn = page.locator(".btn-primary:visible:not(:disabled)").first();
+  await expect(btn, "设置页找不到启用的 .btn-primary，本用例失去意义").toBeVisible({ timeout: 20_000 });
+  expect(await btn.evaluate((el) => getComputedStyle(el).backgroundColor), "量到的那颗没有实心底，配对无从算起").not.toBe("rgba(0, 0, 0, 0)");
   const rest = await btn.evaluate(measurePair, OPTS);
   await btn.hover();
   await page.waitForTimeout(200);

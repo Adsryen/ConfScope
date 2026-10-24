@@ -21,6 +21,7 @@ import { useSettings } from "../lib/useSettings";
 import { toast } from "../lib/toast";
 import { PROXY_FIELDS, isSameProxy, readProxyField, type ProxyField, type ProxyIssue } from "../lib/proxySettings";
 import AppDataBackupPanel from "./AppDataBackupPanel";
+import BusyLabel from "./BusyLabel";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
@@ -47,6 +48,9 @@ import { useScrollMemory } from "../lib/viewState";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
 import { useKeepVisible } from "../lib/useKeepVisible";
+
+/** 数据根三条在途流程（空串 = 空闲）。既是「别再点第二下」的闸，也是忙态信号该挂在哪颗键上的依据。 */
+type DataRootPhase = "" | "change" | "migrate" | "rollback";
 
 /**
  * 左栏索引与章节的一一对应（顺序 = 文档顺序）。
@@ -155,7 +159,10 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   const [backupActivities, setBackupActivities] = useState(() => loadAppDataBackupState().activities);
   const lastBackupAt = backupActivities.find((item) => item.status === "success")?.createdAt ?? "";
   const [dataLocations, setDataLocations] = useState<DataLocations | null>(null);
-  const [openFolderBusy, setOpenFolderBusy] = useState(false);
+  // 哪一行正在开目录（轮74 A4）：原先只有一只布尔闸、7 行共用，点其中一颗会把 7 颗一起画成忙态
+  // ——那读起来不是「在忙」而是「整片都坏了」。闸与「是谁」合成一个状态，禁用仍由它非空决定。
+  const [openingFolderKey, setOpeningFolderKey] = useState("");
+  const openFolderBusy = openingFolderKey !== "";
   const [openFolderError, setOpenFolderError] = useState("");
   // 本机版本历史（R57-WP14）：体量事实 + 独立清除入口的状态。
   const [revisionFacts, setRevisionFacts] = useState<ConfigRevisionFacts | null>(null);
@@ -165,7 +172,11 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   // 轮62：数据根运行形态（便携/安装 + 命中哪一档解析规则）与换根迁移状态。
   const [runtimeLayout, setRuntimeLayout] = useState<RuntimeLayoutInfo | null>(null);
   const [rollbackStatus, setRollbackStatus] = useState<DataRootRollbackStatus | null>(null);
-  const [dataRootBusy, setDataRootBusy] = useState(false);
+  // 三条流程（选目录算计划 / 写迁移 / 回退指针）共用一只闸，但忙态信号只许挂在真在忙的那颗上：
+  // 原先只有一个布尔，点「回退」时「更改位置…」禁用却不出声（轮74 A4）。
+  // 闸与「是哪条流程」合成一个状态，别留两只互相漂移的 flag。
+  const [dataRootPhase, setDataRootPhase] = useState<DataRootPhase>("");
+  const dataRootBusy = dataRootPhase !== "";
   const [dataRootError, setDataRootError] = useState("");
   // 迁移/回退写完指针后的「需重启」提示：数据目录没真的换，别让界面假装已经换好了。
   const [restartNotice, setRestartNotice] = useState("");
@@ -368,13 +379,13 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
 
   const runOpenDataFolder = async (key: string) => {
     setOpenFolderError("");
-    setOpenFolderBusy(true);
+    setOpeningFolderKey(key);
     try {
       await OpenDataFolder(key);
     } catch (e) {
       setOpenFolderError(errorText(e));
     } finally {
-      setOpenFolderBusy(false);
+      setOpeningFolderKey("");
     }
   };
 
@@ -384,7 +395,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   const runChangeDataRoot = async () => {
     if (dataRootBusy) return;
     setDataRootError("");
-    setDataRootBusy(true);
+    setDataRootPhase("change");
     try {
       const target = ((await SelectDataRootDirectory()) ?? "").trim();
       // 取消目录选择：原生绑定返回空串，此时什么都不改，也不报「目标位置为空」。
@@ -419,13 +430,13 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     } catch (e) {
       setDataRootError(errorText(e));
     } finally {
-      setDataRootBusy(false);
+      setDataRootPhase("");
     }
   };
 
   const runMigrateDataRoot = async (target: string) => {
     setDataRootError("");
-    setDataRootBusy(true);
+    setDataRootPhase("migrate");
     try {
       const result = await MigrateDataRoot(target);
       if (!result) {
@@ -442,7 +453,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     } catch (e) {
       setDataRootError(errorText(e));
     } finally {
-      setDataRootBusy(false);
+      setDataRootPhase("");
     }
   };
 
@@ -469,7 +480,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
 
   const runRollbackDataRoot = async () => {
     setDataRootError("");
-    setDataRootBusy(true);
+    setDataRootPhase("rollback");
     try {
       const result = await RollbackDataRoot();
       if (!result) {
@@ -485,7 +496,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     } catch (e) {
       setDataRootError(errorText(e));
     } finally {
-      setDataRootBusy(false);
+      setDataRootPhase("");
     }
   };
 
@@ -675,7 +686,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                 disabled={credentialBusy || credentialPending === 0}
                 onClick={runCredentialMigration}
               >
-                {credentialBusy ? t("settings.migratingCredentials") : t("settings.migrateCredentials")}
+                <BusyLabel busy={credentialBusy} idle={t("settings.migrateCredentials")} busyText={t("settings.migratingCredentials")} />
               </button>
             </div>
             {credentialSummary && (
@@ -804,12 +815,19 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                   )}
                 </div>
                 <div className="settings-data-location-actions">
+                  {/* 轮74 A4：这三颗原先忙时只禁用、不换文案，点下去 1~3s 屏幕上没有任何「在进行」的信号。
+                      dataRootBusy 是三条流程（更改 / 迁移 / 回退）共用的闸，信号只许挂在真在忙的那颗上，
+                      否则点「回退」时「更改位置…」也跟着亮。 */}
                   <button type="button" className="btn btn-ghost btn-sm" disabled={dataRootBusy} onClick={() => void runChangeDataRoot()}>
-                    {t("settings.dataRootChange")}
+                    <BusyLabel
+                      busy={dataRootPhase === "change" || dataRootPhase === "migrate"}
+                      idle={t("settings.dataRootChange")}
+                      busyText={t("settings.changingDataRoot")}
+                    />
                   </button>
                   {rollbackStatus?.available && (
                     <button type="button" className="btn btn-ghost btn-sm" disabled={dataRootBusy} onClick={askRollbackDataRoot}>
-                      {t("settings.dataRootRollback")}
+                      <BusyLabel busy={dataRootPhase === "rollback"} idle={t("settings.dataRootRollback")} busyText={t("settings.rollingBackDataRoot")} />
                     </button>
                   )}
                 </div>
@@ -847,7 +865,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                             void runOpenDataFolder(entry.key);
                           }}
                         >
-                          {t("settings.openFolder")}
+                          <BusyLabel busy={openingFolderKey === entry.key} idle={t("settings.openFolder")} busyText={t("settings.openingFolder")} />
                         </button>
                       </div>
                     </div>
@@ -878,7 +896,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                 <div className="settings-data-location-actions">
                   <button
                     type="button"
-                    className="btn btn-ghost btn-danger settings-busy-btn"
+                    className="btn btn-ghost btn-danger"
                     disabled={revisionBusy}
                     onClick={() =>
                       askConfirm(t("settings.clearRevisions"), t("settings.confirmClearRevisions"), () => void runClearConfigRevisions(), [
@@ -888,7 +906,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                       ])
                     }
                   >
-                    {revisionBusy ? t("settings.clearingRevisions") : t("settings.clearRevisions")}
+                    <BusyLabel busy={revisionBusy} idle={t("settings.clearRevisions")} busyText={t("settings.clearingRevisions")} />
                   </button>
                 </div>
               </div>
@@ -969,11 +987,11 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
               </div>
               <button
                 type="button"
-                className="btn btn-ghost btn-danger settings-busy-btn"
+                className="btn btn-ghost btn-danger"
                 disabled={cacheBusy}
                 onClick={() => askConfirm(t("settings.clearCache"), t("settings.confirmClearCache"), () => void runClearCache())}
               >
-                {cacheBusy ? t("settings.clearingCache") : t("settings.clearCache")}
+                <BusyLabel busy={cacheBusy} idle={t("settings.clearCache")} busyText={t("settings.clearingCache")} />
               </button>
             </div>
             {cacheResult === "ok" && (

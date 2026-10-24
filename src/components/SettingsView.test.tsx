@@ -255,6 +255,17 @@ function renderSettings(locale: "zh-CN" | "en-US" = "en-US") {
   );
 }
 
+/**
+ * 屏幕上此刻真正可见的那档文案（轮74 A3）。
+ * BusyLabel 把静息与忙态两档都留在 DOM 里叠进同一格（这是「宽度不跳」的代价），
+ * 所以 textContent 读到的是两档串联；jsdom 又不做外链样式表的级联，
+ * 判「用户此刻看到什么」只能走 data-shown。
+ */
+const visibleLabel = (el: Element | null | undefined): string => {
+  const shown = el?.querySelector<HTMLElement>('.busy-label-option[data-shown="true"]');
+  return (shown?.textContent ?? el?.textContent ?? "").trim();
+};
+
 describe("SettingsView", () => {
   beforeEach(() => {
     credentialMocks.countMigratableStoredCredentials.mockReset();
@@ -364,7 +375,7 @@ describe("SettingsView", () => {
     // 用户分不清是「在忙」还是「点坏了」。
     const busy = await screen.findByRole("button", { name: "清理中..." });
     expect(busy).toBeDisabled();
-    expect(busy.textContent).toBe("清理中...");
+    expect(visibleLabel(busy)).toBe("清理中...");
     expect(screen.queryByRole("button", { name: "…" })).not.toBeInTheDocument();
 
     release();
@@ -542,12 +553,15 @@ describe("SettingsView", () => {
     // 版本历史那一行等的是 GetConfigRevisionFacts：没有体量数字时这一行根本不渲染
     expect(await screen.findByRole("button", { name: "清除本机版本历史" })).toBeInTheDocument();
     const rows = Array.from(document.querySelectorAll<HTMLDivElement>(".settings-setting-row.settings-danger-zone"));
-    expect(rows.map((row) => row.querySelector("button")?.textContent)).toEqual(["清空本地历史", "清除本机版本历史", "清理缓存"]);
+    expect(rows.map((row) => visibleLabel(row.querySelector("button")))).toEqual(["清空本地历史", "清除本机版本历史", "清理缓存"]);
     for (const row of rows) {
       const button = row.querySelector("button");
       expect(button, "危险行右侧没有那颗键").toBeTruthy();
-      expect(button!.className).toContain("btn-ghost");
-      expect(button!.className).toContain("btn-danger");
+      // classList 而不是 toContain：轮74 A1 后 danger 有描边档与实心档两个类名，
+      // 子串匹配会让 btn-danger-fill 蒙过「危险行必须是描边档」这条判据。
+      expect(button!.classList.contains("btn-ghost"), button!.className).toBe(true);
+      expect(button!.classList.contains("btn-danger"), button!.className).toBe(true);
+      expect(button!.classList.contains("btn-danger-fill"), "危险行入口键不该抢确认键的红底").toBe(false);
     }
   });
 
@@ -693,13 +707,13 @@ describe("SettingsView", () => {
     for (const row of rows) {
       const buttons = within(row).getAllByRole("button");
       expect(buttons).toHaveLength(2);
-      expect(buttons.map((button) => (button.textContent ?? "").trim())).toEqual(["Copy", "Open"]);
+      expect(buttons.map(visibleLabel)).toEqual(["Copy", "Open"]);
       const rowName = (row.querySelector("strong")?.firstChild?.textContent ?? "").trim();
       for (const button of buttons) {
         const label = button.getAttribute("aria-label");
         expect(label, `${rowName} 这行的动作没有可访问名`).not.toBeNull();
         // WCAG 2.5.3：可见文字必须含在可访问名里，否则键盘念到的和看到的不是一回事
-        expect(label).toContain((button.textContent ?? "").trim());
+        expect(label).toContain(visibleLabel(button));
         names.push(label as string);
       }
       expect(names[names.length - 2], "名字里点的行和屏幕上那行不是同一行").toBe(`Copy ${rowName} path`);

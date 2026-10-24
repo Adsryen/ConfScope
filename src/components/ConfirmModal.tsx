@@ -73,7 +73,7 @@ export default function ConfirmModal({ title, message, details, confirmLabel, ca
             {cancelLabel || t("common.cancel")}
           </button>
           <button
-            className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
+            className={`btn ${danger ? "btn-danger-fill" : "btn-primary"}`}
             onClick={onConfirm}
             {...(danger ? {} : { "data-dialog-autofocus": "" })}
           >

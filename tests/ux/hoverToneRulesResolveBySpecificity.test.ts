@@ -201,14 +201,15 @@ const COMBOS: Array<{ classes: string[]; hoverBackground: string; where: string 
     where: "AuditView 三元拼出来的那一条（顺序与上一条相反，值必须一样）",
   },
   {
-    classes: ["btn", "btn-danger"],
-    hoverBackground: "rgba(244, 67, 54, 0.15)",
-    where: "DeleteConfirm.tsx:113 确认删除",
+    // 轮74 A1：真正执行不可逆动作的确认键走实心危险档，底色必须由作者声明（不再是 UA ButtonFace）。
+    classes: ["btn", "btn-danger-fill"],
+    hoverBackground: "var(--red-fill-h)",
+    where: "ConfirmModal.tsx:76 确定（danger）/ DeleteConfirm.tsx:134 确认删除",
   },
   {
-    classes: ["btn", "btn-sm", "btn-danger"],
-    hoverBackground: "rgba(244, 67, 54, 0.15)",
-    where: "HistoryView.tsx:375 回滚（三元 danger/ghost）",
+    classes: ["btn", "btn-sm", "btn-danger-fill"],
+    hoverBackground: "var(--red-fill-h)",
+    where: "HistoryView.tsx:448 / LocalRevisionPanel.tsx:392 回滚二次确认（三元 danger-fill/ghost）",
   },
   {
     classes: ["btn", "btn-ghost", "btn-danger"],
@@ -259,6 +260,37 @@ function redWinsBySpecificityProblems(css: string): string[] {
   if (Math.max(...candidates.map((d) => d.spec)) !== redSpec) {
     problems.push("还有比红底特异度更高的规则压着它（赢家见用例日志）");
   }
+  return problems;
+}
+
+/**
+ * 禁用态的「同一支笔」（轮74 A2）：实心 tone 禁用时必须淡成描边档，字色与 ghost 禁用同值。
+ * 真机修前读数是 color rgb(0,0,0) + bg rgba(0,122,204,.45)——实心蓝被透明度压成灰蓝团，
+ * 同一页的 ghost 禁用（恢复提醒）却是正常淡出，两种形状并存；改成淡成描边后若再把字色
+ * 调到 --text-dim，就叠在 `.btn:disabled{opacity:.45}` 上双重变暗（实测只剩 #5c5c5c，
+ * 比 ghost 禁用还淡），禁用控件反而读不出「这里有个按钮」。
+ */
+function disabledToneProblems(css: string): string[] {
+  const { decls } = collectDecls(withoutAtBlocks(blankComments(css)));
+  const ctx: Context = { hover: false, disabled: true };
+  const solids: Array<{ classes: string[]; where: string }> = [
+    { classes: ["btn", "btn-primary"], where: "SettingsView 迁移凭据 / ConfigEditor 发布" },
+    { classes: ["btn", "btn-primary", "btn-sm"], where: "AppDataBackupPanel 保存密码" },
+    { classes: ["btn", "btn-danger-fill"], where: "ConfirmModal 确定（busy 期间）" },
+  ];
+  const ghostColor = resolve(decls, ["btn", "btn-ghost"], "color", ctx);
+  const problems: string[] = [];
+  if (ghostColor.value !== "var(--text)") return [`ghost 禁用的字色读不到（实得 ${ghostColor.value}），先修解析口径`];
+  solids.forEach(({ classes, where }) => {
+    const bg = resolve(decls, classes, "background", ctx);
+    const bc = resolve(decls, classes, "border-color", ctx);
+    const color = resolve(decls, classes, "color", ctx);
+    if (bg.value !== "transparent") problems.push(`${where}: 禁用底色是 ${bg.value}（赢家 ${bg.winner}），实心档禁用不该还画实心`);
+    if (bc.value !== "var(--border)") problems.push(`${where}: 禁用边框是 ${bc.value}（赢家 ${bc.winner}），应与 ghost 同为 var(--border)`);
+    if (color.value !== ghostColor.value) {
+      problems.push(`${where}: 禁用字色 ${color.value} 比 ghost 禁用的 ${ghostColor.value} 更暗，叠在 opacity .45 上是双重变暗`);
+    }
+  });
   return problems;
 }
 
@@ -334,9 +366,12 @@ describe("按钮 hover 底色由特异度决胜（轮26 R85）", () => {
     expect(blind, "这些 hover 规则没进决胜，先扩口径再收工：\n" + blind.join("\n")).toEqual([]);
   });
 
-  it("自检：摘掉 danger×ghost 复合 hover 选择器必须判红", () => {
+  it("自检：danger×ghost 复合 hover 退回单类名必须判红", () => {
+    // 轮74 A1 把 danger 拆成两型后，红底只写在复合类 `.btn-ghost.btn-danger:hover` 上；
+    // 把它写回单类名 `.btn-danger:hover`，特异度从 4 掉到 3，与中性 `.btn-ghost:hover` 打平，
+    // 此刻值仍是红的（写在文件后面所以赌顺序赢了）——只有本条能抓到「设计退回巧合」。
     const mutated = CSS.replace(
-      ".btn-danger:hover:not(:disabled),\n.btn-ghost.btn-danger:hover:not(:disabled) {",
+      ".btn-ghost.btn-danger:hover:not(:disabled) {",
       ".btn-danger:hover:not(:disabled) {"
     );
     expect(mutated, "变异锚点没命中，样式写法变了要一起改这条自检").not.toBe(CSS);
@@ -350,11 +385,54 @@ describe("按钮 hover 底色由特异度决胜（轮26 R85）", () => {
   });
 
   it("自检：摘掉 danger hover 的 :not(:disabled) 必须判红", () => {
-    const mutated = CSS.replace(".btn-danger:hover:not(:disabled),", ".btn-danger:hover,");
+    const mutated = CSS.replace(".btn-danger-fill:hover:not(:disabled) {", ".btn-danger-fill:hover {");
     expect(mutated, "变异锚点没命中").not.toBe(CSS);
     const decls = collectDecls(withoutAtBlocks(blankComments(mutated))).decls;
-    const off = resolve(decls, ["btn", "btn-danger"], "background", { hover: false, disabled: true });
-    const on = resolve(decls, ["btn", "btn-danger"], "background", { hover: true, disabled: true });
+    const off = resolve(decls, ["btn", "btn-danger-fill"], "background", { hover: false, disabled: true });
+    const on = resolve(decls, ["btn", "btn-danger-fill"], "background", { hover: true, disabled: true });
     expect(on.value, "禁用中的 danger 按钮又画红底了，假可点性必须被抓住").not.toBe(off.value);
   });
+
+  it("自检：摘掉 danger×ghost hover 的 :not(:disabled) 同样必须判红", () => {
+    const mutated = CSS.replace(".btn-ghost.btn-danger:hover:not(:disabled) {", ".btn-ghost.btn-danger:hover {");
+    expect(mutated, "变异锚点没命中").not.toBe(CSS);
+    const decls = collectDecls(withoutAtBlocks(blankComments(mutated))).decls;
+    const combo = ["btn", "btn-ghost", "btn-danger"];
+    const off = resolve(decls, combo, "background", { hover: false, disabled: true });
+    const on = resolve(decls, combo, "background", { hover: true, disabled: true });
+    expect(on.value, `禁用中的危险行按钮又画红底：${off.value} → ${on.value}`).not.toBe(off.value);
+  });
+
+  it("实心危险档静止态必须有作者声明的底色（轮74 A1：不许再漏给浏览器 UA ButtonFace）", () => {
+    for (const combo of [["btn", "btn-danger-fill"], ["btn", "btn-sm", "btn-danger-fill"]]) {
+      const atRest = resolve(DECLS, combo, "background", { hover: false, disabled: false });
+      expect(atRest.value, `${combo.join(" ")} 静止态没有底色，会漏给 UA 的 ButtonFace`).toBe("var(--red-fill)");
+      const winner = atRest.winner ?? "";
+      expect(winner, "底色必须由 danger-fill 自己声明，别借 primary/ghost 的底").toContain(".btn-danger-fill");
+      expect(DECLS.some((d) => d.sel === ".btn-danger-fill" && d.prop === "color" && d.value.includes("#ffffff")), "白字声明不能丢").toBe(
+        true
+      );
+    }
+    // 变异自检：摘掉那条 background 必须判红
+    const mutated = CSS.replace(/\.btn-danger-fill \{\n  background: var\(--red-fill\);\n/, ".btn-danger-fill {\n");
+    expect(mutated, "变异锚点没命中").not.toBe(CSS);
+    const decls = collectDecls(withoutAtBlocks(blankComments(mutated))).decls;
+    expect(
+      resolve(decls, ["btn", "btn-danger-fill"], "background", { hover: false, disabled: false }).value,
+      "摘掉底色后仍解析到某个底色，说明这条判据没真的指向 danger-fill"
+    ).not.toBe("var(--red-fill)");
+  });
+  it("禁用态只有一个长相：实心档淡成描边，字色与 ghost 同值（轮74 A2）", () => {
+    expect(disabledToneProblems(CSS), "禁用态的按钮长相又分叉了：\n").toEqual([]);
+    // 变异自检：把禁用字色改回更暗的一档必须判红
+    const head = ".btn-primary:disabled,\n.btn-danger-fill:disabled {";
+    const at = CSS.indexOf(head);
+    expect(at, "禁用态那条规则的写法变了，这条自检的锚点要一起改").toBeGreaterThanOrEqual(0);
+    const close = CSS.indexOf("}", at);
+    const block = CSS.slice(at, close);
+    const mutated = CSS.slice(0, at) + block.replace("color: var(--text);", "color: var(--text-dim);") + CSS.slice(close);
+    expect(mutated, "变异锚点没命中").not.toBe(CSS);
+    expect(disabledToneProblems(mutated).length, "改暗一档仍然判绿，说明这条判据没真的指向字色").toBeGreaterThan(0);
+  });
+
 });

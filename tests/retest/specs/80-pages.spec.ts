@@ -198,7 +198,7 @@ test("T-PG-05 设置页: 开发者清理缓存（localStorage + audit-trail）",
   await clearBtn.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await dialog.locator(".modal-footer .btn-danger").click({ timeout: 10_000 });
+  await dialog.locator(".modal-footer .btn-danger-fill").click({ timeout: 10_000 });
 
   // 成功提示
   await expect(page.locator("#settings-developer .test-msg.ok")).toBeVisible({ timeout: 10_000 });
