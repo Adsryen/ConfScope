@@ -108,7 +108,7 @@ function scanTargets({ minTarget, REVEAL }: { minTarget: number; REVEAL: string[
   const hoverOnlySel = REVEAL.join(", ");
   let scanned = 0;
   let exemptHits = 0;
-  let extended = extras.length;
+  const extended = extras.length;
   let hoverOnly = 0;
   const fails: TargetReport["fails"] = [];
 
@@ -186,7 +186,8 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数
   let revealHandle: ElementHandle<HTMLElement> | null = null;
   const setReveal = async (on: boolean) => {
     if (on && !revealHandle) {
-      revealHandle = await page.addStyleTag({ content: `${HOVER_ONLY_CONTAINERS.join(", ")} { display: flex !important; }` });
+      // addStyleTag 的返回签名只承诺 Node，插进 head 的实际上是 <style> 元素，摘除时按元素处理
+      revealHandle = (await page.addStyleTag({ content: `${HOVER_ONLY_CONTAINERS.join(", ")} { display: flex !important; }` })) as ElementHandle<HTMLElement>;
     }
     if (!on && revealHandle) {
       const handle = revealHandle;

@@ -13,7 +13,7 @@
  * 只扫生产 JSX（排除 *.test.tsx）：测试夹具里的类名不代表线上观感。
  */
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import ts from "typescript";

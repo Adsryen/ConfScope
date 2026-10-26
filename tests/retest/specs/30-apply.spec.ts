@@ -1,7 +1,6 @@
 import { test, expect, fetchNacosContent } from "./retestTest";
 import { readFileSync } from "node:fs";
 import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
-import { loadRetestState } from "../state";
 import { republishRetestData } from "../bridge/republishData";
 import { backToBrowseFromPlan, expectNoDisabledWriteError, planRows } from "./planExit";
 
@@ -10,7 +9,9 @@ async function republishAndVerifyBaseline() {
   await republishRetestData();
   for (let i = 0; i < 5; i++) {
     try {
-      const tenant = NS_B === "public" ? "" : NS_B;
+      // public 这一支不是摆设：B 侧命名空间换了值就得走它，所以 NS_B 故意不标成字面量类型
+      // （写成 const NS_B = "retest-qa" 会被推成字面量，tsc 判这个比较恒假，见轮85 记账）。
+      const tenant = NS_B === PUBLIC_NAMESPACE ? "" : NS_B;
       const res = await fetch(
         `${BASE_B}/v1/cs/configs?dataId=svc-gateway.yaml&group=${encodeURIComponent(GROUP)}&tenant=${encodeURIComponent(tenant)}`,
         { cache: "no-store" }
@@ -24,7 +25,11 @@ async function republishAndVerifyBaseline() {
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 
 const NS_A = "retest-dev";
-const NS_B = "retest-qa";
+// 故意标成 string：B 侧命名空间若换成 public，上面那个 public 分支必须还接得住。
+// 写成字面量常量会被推成 "retest-qa"，tsc 判 `NS_B === "public"` 恒假（TS2367），
+// 分支在编译器眼里就是死代码——轮85 把 tests/ 纳入 typecheck 时捞出来的第一条真缺陷。
+const NS_B: string = "retest-qa";
+const PUBLIC_NAMESPACE = "public";
 const BASE_A = "http://127.0.0.1:19848/nacos";
 const BASE_B = "http://127.0.0.1:19849/nacos";
 const GROUP = "RETEST-PROD";
@@ -34,7 +39,7 @@ async function optionalText(page: import("@playwright/test").Page, selector: str
   const loc = page.locator(selector).first();
   try {
     await loc.waitFor({ state: "attached", timeout: timeoutMs });
-    return await loc.textContent({ timeout: 1_000 });
+    return (await loc.textContent({ timeout: 1_000 })) ?? undefined;
   } catch {
     return undefined;
   }

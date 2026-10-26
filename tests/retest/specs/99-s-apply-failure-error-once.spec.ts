@@ -44,7 +44,6 @@ function readFailureScreen(): {
   }));
   const copyErr = Array.from(document.querySelectorAll(".inline-error button")).find((btn) => (btn.textContent ?? "").includes("复制"));
   const retry = Array.from(document.querySelectorAll(".inline-error button")).find((btn) => (btn.textContent ?? "").includes("重试"));
-  const idRow = document.querySelector(".apply-task-progress-id");
   return {
     blocks,
     messageOnce: message ? blocks.filter((block) => block.text === message).length : 0,

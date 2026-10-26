@@ -153,7 +153,7 @@ describe("渲染期不摸磁盘（轮47 R47-05）", () => {
     expect(app).toMatch(/useRef<ScopeHint>\(scopeHintFromUI\(ui0\)\)/);
     expect(app, "回落必须用 lastValidScopeRef，而不是任何存储读取").toMatch(/preferredConnection\(connections, lastValidScopeRef\.current\)/);
     expect(app, "挂载初值用 ui0 快照，不读盘").toMatch(/preferredConnection\(connections, scopeHintFromUI\(ui0\)\)/);
-    expect(app, "记住有效作用域的 effect 必须声明在回落 effect 之前").satisfies((source) =>
+    expect(app, "记住有效作用域的 effect 必须声明在回落 effect 之前").satisfies((source: string) =>
       source.indexOf("lastValidScopeRef.current = {") < source.indexOf("preferredConnection(connections, lastValidScopeRef.current)")
     );
     // 回落时 ref 不许被空值覆盖：activeConn 为空必须直接返回

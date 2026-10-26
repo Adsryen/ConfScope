@@ -91,7 +91,7 @@ function bridgeWaterline() {
 }
 
 /** 首尾都要把复测基线写回去：整批是串行的，后面 99-s-* 还指着这份数据。 */
-async function restoreBaseline(page: Page_, probe: { dataId: string; group: string } | null, side: "A" | "B" = "A"): Promise<void> {
+async function restoreBaseline(probe: { dataId: string; group: string } | null, side: "A" | "B" = "A"): Promise<void> {
   await republishRetestData();
   const base = side === "A" ? BASE_A : BASE_B;
   const ns = side === "A" ? NS_A : NS_B;
@@ -165,7 +165,7 @@ test("ST-01 编辑执行后回浏览页: 正文=服务端真值 + 草稿不被�
   log("正文与列表都反映新值 ✓");
 
   await page.screenshot({ path: "results/r43-st01-body-after-apply.png", fullPage: true });
-  await restoreBaseline(page, null);
+  await restoreBaseline(null);
 });
 
 test("ST-02 新建执行后回浏览页: 新配置直接出现在当前列表", async ({ page }) => {
@@ -221,7 +221,7 @@ test("ST-02 新建执行后回浏览页: 新配置直接出现在当前列表", 
   log(`列表 ${countBefore} → ${countAfter}，新条目直接可见 ✓`);
 
   await page.screenshot({ path: "results/r43-st02-created-in-list.png", fullPage: true });
-  await restoreBaseline(page, { dataId: NEW_ID, group: GROUP });
+  await restoreBaseline({ dataId: NEW_ID, group: GROUP });
 });
 
 test("ST-03 计划删掉当前选中项: 详情清空并给出可见说明", async ({ page }) => {
@@ -279,7 +279,7 @@ test("ST-03 计划删掉当前选中项: 详情清空并给出可见说明", asy
   log("详情给出说明、正文与编辑入口都不再挂着已删配置 ✓");
 
   await page.screenshot({ path: "results/r43-st03-removed-notice.png", fullPage: true });
-  await restoreBaseline(page, { dataId: PROBE_ID, group: GROUP });
+  await restoreBaseline({ dataId: PROBE_ID, group: GROUP });
 });
 
 test("ST-04 A→B 执行后回对比页: 结果过期提示 + 一键重比后两侧一致", async ({ page }) => {
@@ -371,5 +371,5 @@ test("ST-05 保活收益不回退: 无写入时切走切回仍 0 次列表请求
   await expect(page.locator(".browser-item.active").filter({ visible: true }).first()).toContainText(EDIT_TARGET, { timeout: T });
   log("无写入切走切回 0 次列表请求 ✓");
 
-  await restoreBaseline(page, null);
+  await restoreBaseline(null);
 });

@@ -5,7 +5,7 @@
 // S5   设置/SSH 隧道档案 CRUD：新建（必填校验+保存落盘）→ 测试 SSH（成功+失败路径）→ 编辑 → 删除
 // S6   备份快照「与云端对比」：快照条目 → 跳转对比页（快照来源 + autoCompare）→ 对比面板出现
 // S7   备份快照 WebDAV 同步：填地址 → 测试 → 上传当前快照 → 刷新远端列表 → 导入远端快照包
-import { test, expect, fetchNacosContent } from "./retestTest";
+import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, ensureSourcesPanelExpanded, clickSourcesToggle } from "./ui";

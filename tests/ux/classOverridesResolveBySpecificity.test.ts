@@ -362,9 +362,9 @@ describe("跨类覆盖由特异度决胜，不赌文档顺序（R83）", () => {
     const weakened = orderDecidedConflicts(CSS.replace(".btn.btn-sm {", ".btn-sm {"));
     expect(weakened.length, "探测器失去牙齿（改解析口径或改 CSS 结构时要一起看这里）").toBeGreaterThan(0);
     expect(
-      weakened.some((row) => row.startsWith(".btn-sm { padding:")),
-      true
-    );
+      weakened.some((row) => row.startsWith(".btn { padding-")),
+      `复合选择器退回裸类名后，.btn/.btn-sm 的 padding 必须回到竞争名单里：\n${weakened.join("\n")}`
+    ).toBe(true);
   });
 
   it("自检：新冒出的同特异度竞争者，写在前面和后面都必须判红", () => {
@@ -402,8 +402,8 @@ describe("跨类覆盖由特异度决胜，不赌文档顺序（R83）", () => {
     ).toEqual(expect.arrayContaining([expect.stringMatching(/border-top-color/)]));
     expect(
       weakened.some((row) => row.startsWith(".about-section { padding-top:")),
-      true
-    );
+      "padding 简写没摊成长写，.about-section 的上边距竞争就看不见"
+    ).toBe(true);
   });
 
   it("自检：基础规则写在媒体块之后要把覆盖吃掉，必须判红", () => {

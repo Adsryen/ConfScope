@@ -25,6 +25,7 @@ const sourceFile = (rel: string) => readFileSync(join(PROJECT_ROOT, rel), "utf8"
 // `retest` 是本项目 fixture（见 ./retestTest），必须从它拿 test，不能直接用 @playwright/test
 import { expect, test } from "./retestTest";
 import type { Page } from "@playwright/test";
+import type { RetestState } from "../state";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog } from "./ui";
@@ -114,7 +115,7 @@ function localeCopy(locale: "zh-CN" | "en-US", restKey: string, busyKey: string)
   return { rest: pick(restKey), busy: pick(busyKey) };
 }
 
-async function openSettings(page: Page, retest: unknown, locale: "zh-CN" | "en-US") {
+async function openSettings(page: Page, retest: RetestState, locale: "zh-CN" | "en-US") {
   await installRetestBridge(page, retest);
   await republishRetestData();
   // 语种在导航前就写好：i18n 只在 Provider 初始化时读一次 localStorage.locale

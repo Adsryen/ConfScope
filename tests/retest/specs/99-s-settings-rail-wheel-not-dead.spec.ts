@@ -23,6 +23,13 @@ const readPanels = `(() => {
   };
 })()`;
 
+interface PanelsReading {
+  scrollTop: number;
+  railScrollTop: number;
+  railOverflowY: string;
+  activeText: string | null;
+}
+
 test("R73-I1 左栏不是滚轮死区：同一手势落在左栏与正文上滚得一样多", async ({ page, retest }) => {
   test.setTimeout(240_000);
   await installRetestBridge(page, retest);
@@ -35,10 +42,12 @@ test("R73-I1 左栏不是滚轮死区：同一手势落在左栏与正文上滚�
   await page.waitForTimeout(900);
 
   await page.evaluate(() => {
-    document.querySelector(".settings-panels").scrollTop = 0;
+    const panels = document.querySelector(".settings-panels");
+    if (!panels) throw new Error("找不到 .settings-panels，正文滚动位置无从归零");
+    panels.scrollTop = 0;
   });
   await page.waitForTimeout(300);
-  const atTop = await page.evaluate(readPanels);
+  const atTop = await page.evaluate<PanelsReading>(readPanels);
   expect(atTop.scrollTop, "起点应停在正文顶部").toBe(0);
   expect(atTop.railOverflowY, "左栏不许再自己滚动（必要条件的守卫在 tests/ux/settingsPageRhythmStaysAligned）").toBe("visible");
 
@@ -46,7 +55,7 @@ test("R73-I1 左栏不是滚轮死区：同一手势落在左栏与正文上滚�
   await page.hover(".settings-rail");
   await page.mouse.wheel(0, 600);
   await page.waitForTimeout(500);
-  const afterRail = await page.evaluate(readPanels);
+  const afterRail = await page.evaluate<PanelsReading>(readPanels);
   expect(afterRail.railScrollTop, "左栏自己攒出滚动条就是兜底失活的前兆").toBe(0);
   expect(afterRail.scrollTop, "指针停在左栏上滚 600px，正文一格都没动 —— 又变成死区了").toBeGreaterThanOrEqual(500);
 
@@ -54,19 +63,19 @@ test("R73-I1 左栏不是滚轮死区：同一手势落在左栏与正文上滚�
   await page.hover(".settings-panel-head h4");
   await page.mouse.wheel(0, 600);
   await page.waitForTimeout(500);
-  const afterHead = await page.evaluate(readPanels);
+  const afterHead = await page.evaluate<PanelsReading>(readPanels);
   expect(afterHead.scrollTop, "落在正文上的同一手势应比落在左栏上滚得更多或一样多").toBeGreaterThanOrEqual(afterRail.scrollTop);
 
   // ③ 兜底写的是 scrollTop，容器收不到 wheel：位置判定必须被交还，高亮不许赖在刚点过的那一节
   await page.locator(".settings-rail-item").nth(2).click();
   await page.waitForTimeout(1_500);
-  const pinned = await page.evaluate(readPanels);
+  const pinned = await page.evaluate<PanelsReading>(readPanels);
   expect(pinned.activeText, "点完索引应当钉住这一节").toBe("智能对比");
   await page.hover(".settings-rail");
   await page.mouse.wheel(0, -3_000);
   await page.waitForTimeout(700);
-  const released = await page.evaluate(readPanels);
-  const expected = await page.evaluate(`(() => {
+  const released = await page.evaluate<PanelsReading>(readPanels);
+  const expected = await page.evaluate<string | null>(`(() => {
     const panels = document.querySelector(".settings-panels");
     const panelsTop = panels.getBoundingClientRect().top;
     let expected = null;

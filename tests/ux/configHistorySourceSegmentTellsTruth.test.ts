@@ -237,7 +237,7 @@ function segmentViolations(source: string): string[] {
     const key = labelKeyOf(end < 0 ? "" : group.body.slice(region.bodyStart, end));
     return !EXPECTED.some((exp) => exp.labelKey === key);
   });
-  for (const b of others) violations.push("分段出现未知按钮名（非恒定文案或新档位）");
+  for (const b of others) violations.push(`分段出现未知按钮名（非恒定文案或新档位）：${b[0].replace(/\s+/g, " ").slice(0, 80)}`);
 
   // 能力收口：服务端那一档必须由能力表判定，不可达时退回本机
   if (!new RegExp(`const ${SERVER_FLAG} = supportsConfigHistory\\(conn\\);`).test(source)) {

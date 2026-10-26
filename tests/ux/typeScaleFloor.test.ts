@@ -68,7 +68,7 @@ function ruleBody(source: string, selector: string): string {
   if (hits.length !== 1) {
     throw new Error(`${selector}: 期望在 ` + CSS + ` 里唯一定位到一条规则，实际 ${hits.length} 处`);
   }
-  let cursor = hits[0] + anchor.length - 1;
+  const cursor = hits[0] + anchor.length - 1;
   let depth = 0;
   for (let i = cursor; i < source.length; i += 1) {
     const ch = source[i];

@@ -279,7 +279,6 @@ function isoToMs(iso: string): number {
 }
 
 function nacosTime(ms: number): string {
-  const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
   // 秒级时间戳，且向下取整：Nacos v1 的 Last-Modified 头精度为秒级，
   // 若取整方式不一致（如 Date.now() 取整），计划构建与执行之间的 updateTime 会漂移，
@@ -664,6 +663,9 @@ interface RawConfigItem {
   type: string;
   md5: string | null;
   appName?: string;
+  // /cs/configs blur 列表在部分 Nacos 版本带这个字段，带时是 ISO 字符串或毫秒数；
+  // 声明出来，免得下面用 `as Record<string, unknown>` 绕（那行被 tsc 判成 TS2352）。
+  lastModifiedTime?: string | number;
 }
 
 interface RawHistory {
@@ -679,8 +681,10 @@ interface RawHistory {
 interface RawHistoryDetail extends RawConfigItem {
   nid: string;
   opType: string;
-  createTime: number;
-  lastModifiedTime: number;
+  // 真机读数（本机 retest 容器抓下来的响应，同一份也钉在 internal/nacos/client_test.go:579）：
+  // createdTime / lastModifiedTime 都是 ISO 字符串，不是毫秒数——所以下面要过 isoToMs。
+  createTime: string;
+  lastModifiedTime: string;
 }
 
 function normalizeRefLike(input: unknown): {
@@ -1050,7 +1054,7 @@ export function createRetestInvoke(): RetestInvoke {
             },
             content: item.content,
             format: item.type,
-            updateTime: nacosTime(Number((item as Record<string, unknown>).lastModifiedTime ?? 0)),
+            updateTime: nacosTime(Number(item.lastModifiedTime ?? 0)),
           })),
         };
       }

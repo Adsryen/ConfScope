@@ -26,7 +26,6 @@ import {
   publishNacosConfig,
   waitForNacosContent,
   type SmokeNacosConfig,
-  type SmokeNacosConfigSummary,
 } from "../env/nacos";
 import type { SmokeConsulEndpoint, SmokeNacosEndpoint, SmokeState } from "../env/workspace";
 
@@ -710,8 +709,10 @@ function decodeXmlEntities(value: string): string {
 
 async function testConnection(profile: ConnectionProfile): Promise<void> {
   if (profile.provider === "local") {
-    const result = validateLocalSnapshotDirectory(profile.baseUrl);
-    if (!result.valid) throw new Error(result.message);
+    // validateLocalSnapshotDirectory 是桥处理函数，返回 unknown（Go 侧的 JSON 形状）；
+    // 1059 行那处早就显式窄化了，这里补成同一个形状，别再让 result 是 unknown。
+    const result = validateLocalSnapshotDirectory(profile.baseUrl) as { valid?: boolean; message?: string };
+    if (!result.valid) throw new Error(result.message ?? "本地快照目录校验失败");
     return;
   }
   if (profile.provider === "apollo") {

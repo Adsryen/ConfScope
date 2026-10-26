@@ -159,7 +159,7 @@ function scanSites(): Site[] {
     const labelFors = allAttrValues(source, "htmlFor");
     const stack: Frame[] = [];
     /** 本文件的站点先攒引用，等子树扫完（A/B 节点清单完整）再回填判定 */
-    const fileSites: Array<Site & { frame: Frame | null }> = [];
+    const fileSites: Array<Site & { frame?: Frame | null }> = [];
     for (const m of source.matchAll(/<(\/?)([A-Za-z][\w.:-]*)/g)) {
       const name = m[2];
       const at = m.index ?? 0;
@@ -195,7 +195,7 @@ function scanSites(): Site[] {
         if (!(name === "input" && EXEMPT_TYPES.has(type))) {
           const controlId = attrValue(head.attrs, "id");
           const frame = labelIdx >= 0 ? stack[labelIdx] : null;
-          const site: Site & { frame: Frame | null } = {
+          const site: Site & { frame?: Frame | null } = {
             file: rel,
             line,
             name,

@@ -43,7 +43,7 @@ function createConnections(state: SmokeState): unknown[] {
   ];
 }
 
-function nacosConnection(id: string, name: string, environmentName: string, baseUrl: string): unknown {
+function nacosConnection(id: string, name: string, environmentName: string, baseUrl: string): Record<string, unknown> {
   return {
     id,
     name,
@@ -62,7 +62,7 @@ function nacosConnection(id: string, name: string, environmentName: string, base
   };
 }
 
-function localConnection(id: string, name: string, localPath: string, legacy: boolean): unknown {
+function localConnection(id: string, name: string, localPath: string, legacy: boolean): Record<string, unknown> {
   return {
     id,
     name,

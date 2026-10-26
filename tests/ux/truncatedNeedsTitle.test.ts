@@ -315,7 +315,7 @@ describe("截断的文本必须能悬停看全文（R35）", () => {
   it("fixture：原生表单控件的省略号不算问题，button 算", () => {
     const inputs = 'const A = () => <input className="audit-dataid" value={v} />;\n';
     const button = 'const A = () => <button className="snapshot-action-btn">{label}</button>;\n';
-    const set = {
+    const set: Parameters<typeof findTruncatedWithoutTitle>[1] = {
       classSets: [
         [["audit-dataid"], ".audit-dataid"],
         [["snapshot-action-btn"], ".snapshot-action-btn"],

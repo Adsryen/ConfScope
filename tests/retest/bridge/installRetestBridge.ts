@@ -164,7 +164,7 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
       // 页面脚本阶段执行，若它已内联安装 window.go，必须在覆盖前清掉——否则 UI 的
       // wailsjs 绑定 import 到的 go.app.App 永远是内联旧版（旧版 TestSSHConnection
       // 直接 throw「SSH 隧道未启用」），retest 桥接管不生效。
-      delete (window as Record<string, unknown>).go;
+      delete (window as unknown as { go?: unknown }).go;
       const app: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
       for (const item of methods) {
         app[item] = (...args: unknown[]) => target.__confscopeRetestInvoke(item, args);

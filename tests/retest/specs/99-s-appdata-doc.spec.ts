@@ -26,7 +26,7 @@ import { navigate, dismissStartupDialog } from "./ui";
 const SCHEMA_VERSION = 2;
 
 interface DocSnapshot {
-  document: { schemaVersion: number; savedAt: string; data: Record<string, unknown> } | null;
+  document: { schemaVersion: number; savedAt: string; appVersion: string; data: Record<string, unknown> } | null;
   saves: number;
   gets: number;
 }

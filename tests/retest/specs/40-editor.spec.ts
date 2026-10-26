@@ -52,8 +52,6 @@ async function coordFor(page: import("@playwright/test").Page, lineOffset: numbe
     document.body.appendChild(m);
     const mTop0 = m.getBoundingClientRect().top;
     let acc = 0;
-    const walker = document.createTreeWalker(m, NodeFilter.SHOW_TEXT);
-    let node: Text | null = null;
     const targets: number[] = [];
     let off = 0;
     for (let i = 0; i <= lineOffset; i++) { targets.push(off); off += lines[i].length + 1; }
@@ -109,7 +107,7 @@ async function openLegacyEditor(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "编辑" }).first().click();
   const ta = page.locator(".code-editor-ta").first();
   await expect(ta).toBeVisible({ timeout: 15_000 });
-  const vlines = await ta.evaluate((el) => el.value.split("\n").length);
+  const vlines = await ta.evaluate((el) => (el as HTMLTextAreaElement).value.split("\n").length);
   console.log(`[T-ED] editor opened, lines=${vlines}`);
   return ta;
 }
@@ -123,20 +121,23 @@ test("T-ED-01 编辑器: 鼠标拖拽复制中间范围，选区精确不含两�
   // L11="  # 超时(秒)" L12="  timeout: 5" —— 拖拽取 L9~L11(中间三行, 行首/行尾坐标)
   const a = await coordFor(page, 8, 0, false);
   // 终点列 = 第 11 行真实长度（拖到行尾）
-  const line11Len = (await ta.evaluate((el) => el.value.split("\n")[10].length)) as number;
+  const line11Len = await ta.evaluate((el) => (el as HTMLTextAreaElement).value.split("\n")[10].length);
   const b = await coordFor(page, 10, line11Len, true);
   const expected = await ta.evaluate((el) => {
-    const lines = el.value.split("\n");
+    const lines = (el as HTMLTextAreaElement).value.split("\n");
     return lines.slice(8, 11).join("\n");
   });
   console.log(`[T-ED-01] start=${JSON.stringify(a)} end=${JSON.stringify(b)} expected=${JSON.stringify(expected)}`);
 
   await dragSelect(page, a.x + 2, a.y, b.x, b.y);
-  const sel = await ta.evaluate((el) => ({
-    start: el.selectionStart,
-    end: el.selectionEnd,
-    text: el.value.slice(el.selectionStart, el.selectionEnd),
-  }));
+  const sel = await ta.evaluate((el) => {
+    const area = el as HTMLTextAreaElement;
+    return {
+      start: area.selectionStart as number,
+      end: area.selectionEnd as number,
+      text: area.value.slice(area.selectionStart as number, area.selectionEnd as number),
+    };
+  });
   console.log(`[T-ED-01] selection=${JSON.stringify(sel)}`);
 
   await page.keyboard.press("Control+c");

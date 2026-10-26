@@ -1,9 +1,8 @@
 import { test, expect, fetchNacosContent } from "./retestTest";
-import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
+import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { loadRetestState } from "../state";
-import { readFileSync } from "node:fs";
 
 const state = loadRetestState();
 const BASE_B = state.nacos.b.baseUrl;

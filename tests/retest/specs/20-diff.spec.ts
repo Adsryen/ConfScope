@@ -4,7 +4,8 @@ import { navigate, dismissStartupDialog, setDiffSource, readDiffGroupOptions } f
 import { republishRetestData } from "../bridge/republishData";
 
 const NS_A = "retest-dev";
-const NS_B = "retest-qa";
+// 同 30-apply.spec.ts：标成 string，别让 public 分支被推成恒假比较（TS2367）。
+const NS_B: string = "retest-qa";
 const GROUP = "RETEST-PROD";
 const BASE_B = "http://127.0.0.1:19849/nacos";
 

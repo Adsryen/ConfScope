@@ -15,7 +15,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { readScannedSource, sourceFiles } from "./scanUtils";
-import { readFileSync } from "node:fs";
 
 /** 取 `<input`/`<textarea` 标签自身的属性文本（花括号内的 > 不算结束）。 */
 function openTagAttrs(source: string, start: number): string {

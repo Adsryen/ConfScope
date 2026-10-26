@@ -30,6 +30,16 @@ const readGeo = `(() => {
   };
 })()`;
 
+// 同 99-s-settings-rail-current-section：字符串形态的 evaluate 返回值推成 unknown，
+// 必须写显式泛型，否则下面 after.scrollTop - before.scrollTop 这类比较在编译器眼里毫无意义。
+interface GeoReading {
+  scrollTop: number;
+  scrollHeight: number;
+  backup: number | null;
+  developer: number | null;
+  activeText: string | null;
+}
+
 test("R67-WP3c 中途与接近底部两档位置，切走再回来都停在原处", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
@@ -47,7 +57,7 @@ test("R67-WP3c 中途与接近底部两档位置，切走再回来都停在原�
       (document.querySelector(".settings-panels") as HTMLElement).scrollTop = v;
     }, park);
     await page.waitForTimeout(600);
-    const before = await page.evaluate(readGeo);
+    const before = await page.evaluate<GeoReading>(readGeo);
     expect(before.scrollTop, "探针没把面板滚到位，后面全是空断言").toBe(park);
 
     await navigate(page, "配置浏览");
@@ -56,7 +66,7 @@ test("R67-WP3c 中途与接近底部两档位置，切走再回来都停在原�
     await navigate(page, "设置");
     await page.waitForSelector(".settings-workbench");
     await page.waitForTimeout(900);
-    const after = await page.evaluate(readGeo);
+    const after = await page.evaluate<GeoReading>(readGeo);
 
     expect(Math.abs(after.scrollTop - before.scrollTop), `停在 ${park} 再回来变成 ${after.scrollTop}`).toBeLessThanOrEqual(2);
     // 屏幕上是同一段内容：两节相对容器上缘的偏移必须一致（只有 scrollTop 相等还不够，

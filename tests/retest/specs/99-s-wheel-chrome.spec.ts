@@ -85,12 +85,6 @@ interface ProbePoint {
   rooms?: Record<string, number>;
 }
 
-const label = (el: Element): string => {
-  const h = el as HTMLElement;
-  const cls = (h.className || "").toString().trim().split(/\s+/).slice(0, 3).join(".");
-  return `${el.tagName.toLowerCase()}${cls ? "." + cls : ""}`;
-};
-
 /** 页面侧：给可见的监控容器打标记，并顺手把不可见副本排除在测量之外。 */
 async function markSurfaces(page: Page): Promise<string[]> {
   return page.evaluate((defs) => {

@@ -1,7 +1,7 @@
 import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog } from "./ui";
+import { dismissStartupDialog } from "./ui";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -203,8 +203,8 @@ test("K3 设置持久化: 改比较偏好刷新后保持", async ({ page }) => {
     .poll(async () => {
       const raw = await page.evaluate(() => window.localStorage.getItem("cs.settings"));
       return raw ? (JSON.parse(raw) as { compare?: { sortConnections?: boolean } }).compare?.sortConnections : undefined;
-    })
-    .toBe(false, { timeout: 5_000 });
+    }, { timeout: 5_000 })
+    .toBe(false);
 
   // 读路径：retest bridge 的 init 脚本在每次导航（含 reload）都会用种子无条件
   // 覆写 cs.settings（保证跨 run 基线干净），所以不能靠"刷新后读存储"断言。
@@ -270,8 +270,8 @@ test("L1 连接不可达: 浏览页错误展示与重试按钮", async ({ page }
         return raw ? (JSON.parse(raw) as Array<{ sourceName: string; environmentName?: string }>) : [];
       });
       return conns.find((c) => c.sourceName === "L1 坏连接")?.environmentName;
-    })
-    .toBe("开发", { timeout: 10_000 });
+    }, { timeout: 10_000 })
+    .toBe("开发");
 
   // 真人路径：配置浏览页先切「环境」→「开发」组（坏连接所在环境），再「来源」下拉选坏连接。
   // 浏览页 header 自绘 Select 触发器顺序固定：项目 / 环境 / 来源 / 命名空间 / 分组。

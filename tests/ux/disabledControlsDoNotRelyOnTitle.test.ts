@@ -50,6 +50,9 @@ import { readScannedSource, sourceFiles } from "./scanUtils";
 /** 需要禁用语义的原生表单控件——只有它们的 title 会被 Blink 整段跳过。 */
 const NATIVE_CONTROLS = new Set(["button", "input", "select", "textarea"]);
 
+/** 扫描用的标签正则由上面那份集合生成——两处口径不可能各走各的。 */
+const NATIVE_CONTROL_TAG_RE = new RegExp(`<(${[...NATIVE_CONTROLS].join("|")})(?=[\\s/>])`, "g");
+
 /** 基线：现存量，只减不增。键 = `文件|<标签> 折叠空白后的标签头前缀`（不用行号，挪动位置不算新增）。 */
 const BASELINE: Record<string, string[]> = {
   "src/components/BackupView.tsx": [
@@ -199,7 +202,7 @@ function disabledWithTitleSites(): Site[] {
     .filter((file) => file.endsWith(".tsx"))
     .forEach((file) => {
       const src = readScannedSource(file);
-      for (const m of src.matchAll(/<(button|input|select|textarea)(?=[\s/>])/g)) {
+      for (const m of src.matchAll(NATIVE_CONTROL_TAG_RE)) {
         const found = tagHeader(src, m.index);
         if (!found) continue;
         const attrs = attributeNames(topLevelMask(found.header));

@@ -38,14 +38,14 @@ describe("native global setup", () => {
       startConsulContainer: (endpoint) => calls.push(`consul:${endpoint.containerName}`),
       startSSHContainer: (endpoint, configFile) => calls.push(`ssh:${endpoint.containerName}:${configFile.replaceAll("\\", "/")}`),
       startWebDAVContainer: (endpoint) => calls.push(`webdav:${endpoint.containerName}`),
-      waitForNacos: async (endpoint) => calls.push(`wait-nacos:${endpoint.role}`),
-      cleanupNacosSeed: async (endpoint) => calls.push(`cleanup-seed:${endpoint.role}`),
-      seedNacos: async (endpoint) => calls.push(`seed-nacos:${endpoint.role}`),
-      waitForApollo: async (endpoint) => calls.push(`wait-apollo:${endpoint.containerName}`),
-      seedConsul: async (endpoint) => calls.push(`seed-consul:${endpoint.containerName}`),
-      waitForConsul: async (endpoint) => calls.push(`wait-consul:${endpoint.containerName}`),
-      waitForSSH: async (endpoint) => calls.push(`wait-ssh:${endpoint.containerName}`),
-      waitForWebDAV: async (endpoint) => calls.push(`wait-webdav:${endpoint.containerName}`),
+      waitForNacos: async (endpoint) => { calls.push(`wait-nacos:${endpoint.role}`); },
+      cleanupNacosSeed: async (endpoint) => { calls.push(`cleanup-seed:${endpoint.role}`); },
+      seedNacos: async (endpoint) => { calls.push(`seed-nacos:${endpoint.role}`); },
+      waitForApollo: async (endpoint) => { calls.push(`wait-apollo:${endpoint.containerName}`); },
+      seedConsul: async (endpoint) => { calls.push(`seed-consul:${endpoint.containerName}`); },
+      waitForConsul: async (endpoint) => { calls.push(`wait-consul:${endpoint.containerName}`); },
+      waitForSSH: async (endpoint) => { calls.push(`wait-ssh:${endpoint.containerName}`); },
+      waitForWebDAV: async (endpoint) => { calls.push(`wait-webdav:${endpoint.containerName}`); },
     };
 
     await startNativeDockerEnvironment(state, deps);

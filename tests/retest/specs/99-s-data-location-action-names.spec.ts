@@ -38,6 +38,20 @@ const readActions = `(() => {
   return { perRow, allNames };
 })()`;
 
+/** 与 readActions 那段页面脚本的返回结构对齐（脚本改了这里必须跟着改）。 */
+interface ActionReading {
+  visible: string;
+  ariaLabel: string | null;
+}
+interface RowReading {
+  rowName: string;
+  actions: ActionReading[];
+}
+interface ActionsReading {
+  perRow: RowReading[];
+  allNames: string[];
+}
+
 test("R67-WP5 数据位置每行的动作按钮都有各自的可访问名", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
@@ -49,7 +63,7 @@ test("R67-WP5 数据位置每行的动作按钮都有各自的可访问名", asy
   await page.waitForSelector(".settings-workbench");
   await page.waitForTimeout(900);
 
-  const { perRow, allNames } = await page.evaluate(readActions);
+  const { perRow, allNames } = await page.evaluate<ActionsReading>(readActions);
   writeFileSync("/tmp/cs/wp5-readings.txt", JSON.stringify({ perRow, allNames }, null, 2));
 
   expect(perRow.length, "数据位置一节没渲染出带路径的行来，后面全是空断言").toBeGreaterThanOrEqual(2);

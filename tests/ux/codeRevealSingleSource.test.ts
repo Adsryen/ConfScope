@@ -56,6 +56,8 @@ describe("查找命中的水平定位单一出口（波58 F-7）", () => {
   const read = readScannedSource;
 
   it("两个视图都从 lib 引水平定位，各自不再留一份算式", () => {
+    // 先钉住归属地本身：lib 里那一份实现没了的话，下面「组件不许有第二份」就成了空判据
+    expect(read(LIB), "src/lib/codeScroll.ts 里找不到 revealMarkHorizontally 的实现").toMatch(/export function revealMarkHorizontally\(/);
     for (const file of [CODE_VIEW, CODE_EDITOR]) {
       const src = read(file);
       expect(src, `${file} 没有引用 lib/codeScroll`).toMatch(LIB_IMPORT);

@@ -43,7 +43,7 @@ test("R67-WP9 连接表单：并排两只控件都有名，且名字里不掺按
   const projectSelect = page.getByRole("combobox", { name: "项目", exact: true });
   const projectInput = page.getByRole("textbox", { name: "项目", exact: true });
   await expect(projectSelect).toHaveCount(1, { timeout: T });
-  await expect(projectInput).toHaveCount(1, "同一只 label 里的第二只控件拿不到名字（隐式关联只认第一个）");
+  await expect(projectInput, "同一只 label 里的第二只控件拿不到名字（隐式关联只认第一个）").toHaveCount(1);
 
   // 选一个已存在的候选 ⇒ 文本框退场，名字仍归下拉框（证明两只确实是同一栏的两个分支）
   await projectSelect.selectOption({ index: 0 });
@@ -53,7 +53,7 @@ test("R67-WP9 连接表单：并排两只控件都有名，且名字里不掺按
   // 「默认命名空间」：动作按钮坐在同一只 label 里。
   const nsCaption = "默认命名空间 ID（留空=public）";
   await expect(page.getByRole("textbox", { name: nsCaption, exact: true })).toHaveCount(1, { timeout: T });
-  await expect(page.getByRole("textbox", { name: /加载命名空间|重试|复制/ })).toHaveCount(0, "按钮文字还是并进了命名空间框的名字");
+  await expect(page.getByRole("textbox", { name: /加载命名空间|重试|复制/ }), "按钮文字还是并进了命名空间框的名字").toHaveCount(0);
 
   // 单控件的干净 label 仍是合规来源（防止「为了干净把隐式关联全拆掉」的反向漂）
   await expect(page.getByRole("combobox", { name: "环境", exact: true })).toHaveCount(1);
@@ -61,7 +61,7 @@ test("R67-WP9 连接表单：并排两只控件都有名，且名字里不掺按
   // 「本地快照目录」：同 label 里坐着选择目录 + 校验两颗按钮。
   await page.locator(".conn-form label.field", { hasText: "配置中心" }).locator("select").selectOption("local");
   await expect(page.getByRole("textbox", { name: "本地快照目录", exact: true })).toHaveCount(1, { timeout: T });
-  await expect(page.getByRole("textbox", { name: /选择文件夹|校验目录/ })).toHaveCount(0, "按钮文字还是并进了路径框的名字");
+  await expect(page.getByRole("textbox", { name: /选择文件夹|校验目录/ }), "按钮文字还是并进了路径框的名字").toHaveCount(0);
 });
 
 test("R67-WP9 对比页：dataId 组合框的名字只有 dataId", async ({ page, retest }) => {
@@ -75,5 +75,5 @@ test("R67-WP9 对比页：dataId 组合框的名字只有 dataId", async ({ page
     const panel = page.locator(".source-picker").filter({ has: page.locator(`.source-title:has-text("${title}")`) }).first();
     await expect(panel.getByRole("combobox", { name: "dataId", exact: true })).toHaveCount(1, { timeout: T });
   }
-  await expect(page.getByRole("combobox", { name: /重试|复制/ })).toHaveCount(0, "重试/复制的按钮文字还是并进了 dataId 组合框的名字");
+  await expect(page.getByRole("combobox", { name: /重试|复制/ }), "重试/复制的按钮文字还是并进了 dataId 组合框的名字").toHaveCount(0);
 });

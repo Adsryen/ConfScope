@@ -1,4 +1,4 @@
-import type { AppDataBackupPayload } from "../../src/lib/appDataBackup";
+import type { AppDataBackupData, AppDataBackupPayload } from "../../src/lib/appDataBackup";
 import type { ApplyPlan } from "../../src/lib/applyPlan";
 import type { ApplyVerification } from "../../src/store/applyVerifications";
 
@@ -256,7 +256,17 @@ function parsedObject(key: keyof typeof legacyLocalStorageSnapshot): Record<stri
   return value;
 }
 
-export const legacyAppDataBackupPayload: AppDataBackupPayload = {
+/**
+ * schemaVersion 1 的真实导出里没有 snapshots / snapshotWebDAV 两节（这两节是后续版本才加上的），
+ * 而护栏用例要吃的正是「旧备份缺节」这个形态 —— `validateAppDataBackupPayload` 对这两节是宽容读取
+ * （缺 ⇒ snapshots 记空数组、snapshotWebDAV 记 `{ webdav: {} }`）。把 fixture 补齐成当前合同
+ * 等于把被测的那个旧事实源伪造掉，所以这里在类型上显式建模「缺节的旧 payload」。
+ */
+export type LegacyAppDataBackupPayload = Omit<AppDataBackupPayload, "data"> & {
+  data: Omit<AppDataBackupData, "snapshots" | "snapshotWebDAV">;
+};
+
+export const legacyAppDataBackupPayload: LegacyAppDataBackupPayload = {
   schemaVersion: 1,
   appVersion: "1.6.1",
   sourcePlatform: "windows",

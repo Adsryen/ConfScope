@@ -117,7 +117,7 @@ describe("createSmokeAppBinding app data backup methods", () => {
         }
         if (method === "GET") {
           const body = remoteFiles.get(url.pathname);
-          return body ? new Response(body) : new Response("not found", { status: 404 });
+          return body ? new Response(new Uint8Array(body)) : new Response("not found", { status: 404 });
         }
         if (method === "PROPFIND") {
           const responses = [...remoteFiles.entries()]

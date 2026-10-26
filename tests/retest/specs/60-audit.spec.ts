@@ -22,7 +22,7 @@ async function republishAndVerify(page: import("@playwright/test").Page) {
   }
 }
 import { test, expect } from "./retestTest";
-import { installRetestBridge, RETEST_BRIDGE_MARKER, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
+import { installRetestBridge, RETEST_AUDIT_FILE } from "../bridge/installRetestBridge";
 import { navigate, dismissStartupDialog } from "./ui";
 
 const GROUP = "RETEST-PROD";

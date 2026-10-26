@@ -73,6 +73,17 @@ const readConfirmation = `(() => {
   };
 })()`;
 
+// evaluate 的返回值是字符串源码形态（Playwright 的 PageFunction 联合类型），
+// 不写显式泛型就一路推成 unknown：下面 18 处字段访问全是 TS18046，
+// 而且一旦拼错字段名（text / textContent）编译器不会拦，真机跑绿也是空转。
+interface ConfirmationRead {
+  text: string;
+  userSelect: string;
+  copyLabel: string | null;
+  blockers: string[];
+  exec: Array<{ text: string; disabled: boolean }>;
+}
+
 test("R67-WP10 受保护目标的确认文本敲得完、抄得走，敲错时说的是不一致", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
@@ -80,7 +91,7 @@ test("R67-WP10 受保护目标的确认文本敲得完、抄得走，敲错时�
   await republishRetestData();
   await openProtectedPlan(page);
 
-  const before = await page.evaluate(readConfirmation);
+  const before = await page.evaluate<ConfirmationRead>(readConfirmation);
   writeFileSync("/tmp/cs/wp10-readings.txt", JSON.stringify(before, null, 2));
 
   // 1) 长度：旧格式实测 80 字符（生产 110），手敲不可能；现在只留 `APPLY <planId>`。
@@ -107,14 +118,14 @@ test("R67-WP10 受保护目标的确认文本敲得完、抄得走，敲错时�
   expect(before.blockers.join("|")).toContain("还没输入");
   expect(before.blockers.join("|")).not.toContain("不一致");
   await page.locator("#apply-confirmation-text").fill(`${before.text}x`);
-  const mismatch = await page.evaluate(readConfirmation);
+  const mismatch = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(mismatch.blockers.join("|"), "敲错一个字符时报的仍是「还没输入」，用户看不出自己已经输入过").toContain("不一致");
   expect(mismatch.blockers.join("|")).not.toContain("还没输入");
   expect(mismatch.exec.find((item) => item.text.startsWith("执行"))?.disabled, "文本不对却给了执行按钮").toBe(true);
 
   // 5) 尾随空格不算错：手敲 26 个字符带进一个看不见的空格，不该永远灰着。
   await page.locator("#apply-confirmation-text").fill(`${before.text}  `);
-  const filled = await page.evaluate(readConfirmation);
+  const filled = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(filled.exec.find((item) => item.text.startsWith("执行"))?.disabled, "多敲了看不见的首尾空格就过不去").toBe(false);
   expect(filled.blockers, "灰掉的原因清单该随就绪清空").toEqual([]);
 });
@@ -135,7 +146,7 @@ test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（�
   await republishRetestData();
   await openProtectedPlan(page);
 
-  const required = (await page.evaluate(readConfirmation)).text;
+  const required = (await page.evaluate<ConfirmationRead>(readConfirmation)).text;
   expect(required.startsWith("APPLY "), "没拿到真实的确认文本，后面全是空转").toBe(true);
 
   const copyButton = page.getByRole("button", { name: "复制确认文本" });
@@ -156,7 +167,7 @@ test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（�
   await input.click();
   await page.keyboard.press("Control+v");
   await expect(input).toHaveValue(required);
-  const pasted = await page.evaluate(readConfirmation);
+  const pasted = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(pasted.blockers, "粘贴正确文本后仍列着灰掉原因").toEqual([]);
   expect(pasted.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴正确文本却不放开执行按钮").toBe(false);
 
@@ -167,7 +178,7 @@ test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（�
   await input.click();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Control+v");
-  const pastedSpaces = await page.evaluate(readConfirmation);
+  const pastedSpaces = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(pastedSpaces.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴带首尾空格就过不去").toBe(false);
   expect(pastedSpaces.blockers, "带空格的正确文本仍列着灰掉原因").toEqual([]);
 
@@ -176,7 +187,7 @@ test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（�
   await input.click();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Control+v");
-  const pastedNewline = await page.evaluate(readConfirmation);
+  const pastedNewline = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(pastedNewline.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘贴带尾换行就过不去").toBe(false);
 
   // 4) 反向对照：粘贴路径不许绕开逐字比对——错文粘进去必须仍然灰着，且说的是「不一致」
@@ -184,7 +195,7 @@ test("R68 确认文本点复制键写进剪贴板，粘贴回来能过校验（�
   await input.click();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Control+v");
-  const pastedWrong = await page.evaluate(readConfirmation);
+  const pastedWrong = await page.evaluate<ConfirmationRead>(readConfirmation);
   expect(pastedWrong.exec.find((item) => item.text.startsWith("执行"))?.disabled, "粘错文本却给了执行按钮").toBe(true);
   expect(pastedWrong.blockers.join("|"), "粘贴错文本时报的仍是「还没输入」").toContain("不一致");
 });

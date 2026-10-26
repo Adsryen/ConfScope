@@ -6,7 +6,6 @@ const state = loadRetestState();
 export default defineConfig({
   testDir: "./specs",
   timeout: 480_000,
-  testTimeout: undefined,
   expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,

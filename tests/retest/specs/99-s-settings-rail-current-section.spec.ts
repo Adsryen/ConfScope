@@ -58,27 +58,29 @@ test("R67-WP3 左栏跟随位置、点击钉住、焦点交接", async ({ page, 
     document.querySelectorAll(".settings-rail-item").forEach((el, index) => el.setAttribute("data-nav-id", ids[index]));
   });
 
-  const atTop = await page.evaluate(readSpy);
+  const atTop = await page.evaluate<SpyReading>(readSpy);
   expect(atTop.activeId, "停在面板顶部时高亮应在第一节").toBe("settings-general");
   expect(atTop.activeHasClass).toBe(true);
 
   // ① 用户自己滚：高亮必须跟着真实位置走
   await page.evaluate(() => {
-    const panels = document.querySelector(".settings-panels");
-    const target = document.getElementById("settings-backup");
+    // 这里刻意用 ! ：设置页的工作台在上一行已经 waitForSelector 过，
+    // 真取不到就该当场炸，而不是抛一个 "panels is possibly null" 的运行时 TypeError 混在噪声里。
+    const panels = document.querySelector<HTMLElement>(".settings-panels")!;
+    const target = document.getElementById("settings-backup")!;
     panels.scrollTop = panels.scrollTop + target.getBoundingClientRect().top - panels.getBoundingClientRect().top - 100;
   });
   await page.waitForTimeout(400);
-  const scrolled = await page.evaluate(readSpy);
+  const scrolled = await page.evaluate<SpyReading>(readSpy);
   expect(scrolled.activeId, `滚到 ${scrolled.expectedId} 附近时高亮应跟着位置，实际停在 ${scrolled.activeId}`).toBe(scrolled.expectedId);
   expect(scrolled.activeId).not.toBe("settings-general");
 
   // ② 点最后一项：立刻钉住，动画结束也不许被中间章节抢走
-  const before = await page.evaluate("document.querySelector('.settings-panels').scrollTop");
+  const before = await page.evaluate<number>("document.querySelector('.settings-panels').scrollTop");
   await page.locator(".settings-rail-item").nth(7).click();
   await page.waitForTimeout(1_500);
-  const jumped = await page.evaluate(readSpy);
-  expect(jumped.scrollAfter).toBeGreaterThan(before as number);
+  const jumped = await page.evaluate<SpyReading>(readSpy);
+  expect(jumped.scrollAfter).toBeGreaterThan(before);
   expect(jumped.activeId, "点「开发者」后高亮不许赖在中间某一节").toBe("settings-developer");
   expect(jumped.focusId, "焦点没交给目标章节").toBe("settings-developer");
 
@@ -86,15 +88,15 @@ test("R67-WP3 左栏跟随位置、点击钉住、焦点交接", async ({ page, 
   await page.hover(".settings-panels");
   await page.mouse.wheel(0, -1_200);
   await page.waitForTimeout(500);
-  const wheeled = await page.evaluate(readSpy);
+  const wheeled = await page.evaluate<SpyReading>(readSpy);
   expect(wheeled.activeId, `滚轮之后高亮应回到位置判定的 ${wheeled.expectedId}`).toBe(wheeled.expectedId);
 
   // ④ 输入框里按方向键不算滚页面
   await page.locator(".settings-proxy-grid input").first().click();
-  const pinnedBefore = await page.evaluate(readSpy);
+  const pinnedBefore = await page.evaluate<SpyReading>(readSpy);
   await page.keyboard.press("ArrowDown");
   await page.waitForTimeout(300);
-  const typed = await page.evaluate(readSpy);
+  const typed = await page.evaluate<SpyReading>(readSpy);
   expect(typed.activeId).toBe(pinnedBefore.activeId);
 
   await page.screenshot({ path: "results/r67-wp3-rail-spy.png", fullPage: false });

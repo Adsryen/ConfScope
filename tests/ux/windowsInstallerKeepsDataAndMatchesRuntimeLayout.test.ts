@@ -444,6 +444,8 @@ describe("G. 安装包的中文不能是码页错读出来的乱码", () => {
     const tools = read(TOOLS);
     const wf = yamlCode(read(WORKFLOW));
     const preflight = stepChunk(wf, "Validate Windows installer script (makensis)");
+    // 先确认这一步还在：整块被删/改名时，下面那句「放宽 REQUIRE_STRING_CHECK」的变异是在不存在的文本上做文章
+    expect(preflight, "release.yml 里找不到 makensis 校验那一步").toContain("makensis");
 
     const noBom = Buffer.concat([Buffer.from("Unicode true\n"), nsiBytes.subarray(3)]);
     expect(encodingProblems({ nsiBytes: noBom }).length).toBeGreaterThan(0);

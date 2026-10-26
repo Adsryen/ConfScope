@@ -27,7 +27,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { lineAt, PROJECT_ROOT, readScannedSource, sourceFiles } from "./scanUtils";
+import { lineAt, PROJECT_ROOT, readScannedSource } from "./scanUtils";
 
 /** 四个渲染查找条的宿主：浏览态、编辑态、并排差异（轮48）、单列差异（轮49）。 */
 const JSX_HOSTS = [

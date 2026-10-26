@@ -18,7 +18,7 @@ export async function bumpRetestBridgeBust(page: Page): Promise<void> {
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       let url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.includes("/tests/retest/bridge/retestBinding.ts") && !url.includes("retestBust=")) {
-        url += (url.includes("?") ? "&" : "?") + "retestBust=" + window.__retestBust;
+        url += (url.includes("?") ? "&" : "?") + "retestBust=" + (window as unknown as Record<string, number>).__retestBust;
       }
       return origFetch(url as RequestInfo, init);
     };
@@ -208,14 +208,6 @@ async function fieldByAnyLabel(panel: Locator, labels: string[]): Promise<Locato
     if ((await candidate.count()) > 0) return candidate;
   }
   throw new Error(`fieldByAnyLabel: 字段都不存在，试过的字段名=${JSON.stringify(labels)}`);
-}
-
-function page_span(panel: Locator, text: string): Locator {
-  // label.field 的直接子 span 才是字段名；panel.locator("> span") 会误中 .source-title 等
-  // 其他直接子 span（hasText 全标签子串匹配导致字段数 0 或错配）。
-  // 注：filter({has: 这个 locator}) 无效（子选择器相寳页面解析），
-  // 需用 :has(> span:has-text(...)) 内联写法。
-  return panel.locator(`label.field:has(> span:has-text("${text}"))`);
 }
 
 /** 填对比页指定侧的 group（先清空，再输入，等待候选出现后回车确认）。 */

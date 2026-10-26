@@ -10,7 +10,6 @@ import {
   _resetAppDataDocStateForTests,
   type AppDataDocument,
 } from "../../src/lib/appDataDoc";
-import type { AppDataBackupPayload } from "../../src/lib/appDataBackup";
 import { restoreAppDataBackupPayload, validateAppDataBackupPayload } from "../../src/lib/appDataBackup";
 import { loadAppDataBackupState } from "../../src/store/appDataBackup";
 import { loadApplyPlans } from "../../src/store/applyPlans";
@@ -19,6 +18,7 @@ import { loadConnections } from "../../src/store/connections";
 import { loadOperationHistory } from "../../src/store/operationHistory";
 import { loadSettings } from "../../src/store/settings";
 import { loadSSHProfiles } from "../../src/store/sshProfiles";
+import type { LegacyAppDataBackupPayload } from "../fixtures/legacyAppData";
 import { legacyAppDataBackupPayload, legacyApplyPlan, legacyApplyVerification, legacyLocalStorageSnapshot, seedStorage } from "../fixtures/legacyAppData";
 
 class MemoryStorage implements Storage {
@@ -169,7 +169,7 @@ describe("main data document (app-data/confscope-data.json)", () => {
     };
   }
 
-  function docFromBackupPayload(payload: AppDataBackupPayload): AppDataDocument {
+  function docFromBackupPayload(payload: LegacyAppDataBackupPayload): AppDataDocument {
     return {
       schemaVersion: 2,
       savedAt: "2026-07-08T00:00:00.000Z",

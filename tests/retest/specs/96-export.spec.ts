@@ -36,14 +36,17 @@ async function hookBlobCapture(page: import("@playwright/test").Page, itemCount:
     const w = window as unknown as { __captured?: string[] };
     const orig = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (blob: Blob) => {
-      const url = orig(blob as unknown as object as typeof URL);
+      // orig 就是 URL.createObjectURL.bind(URL)，签名收 Blob|MediaSource：
+      // 上一版那串 `blob as unknown as object as typeof URL` 是把形参当成了构造器类型，编译器第一次进来就判红。
+      const url = orig(blob);
       void (async () => {
         const text = await (blob as unknown as Blob).text();
         try {
           const parsed = JSON.parse(text) as { metadata?: { total: number }; items?: Array<{ dataId?: string }> };
           const items = parsed?.items ?? (Array.isArray(parsed) ? (parsed as Array<{ dataId?: string }>) : null);
           if (!items) throw new Error("no items");
-          w.__captured = items.map((x) => x.dataId);
+          // 保留缺 dataId 的槽位（空串），否则条数与列表对不上，下面的长度断言会假绿
+          w.__captured = items.map((x) => x.dataId ?? "");
           (window as unknown as { __capturedTotal?: number }).__capturedTotal = parsed?.metadata?.total ?? n;
         } catch {
           w.__captured = [text.slice(0, 60)];
@@ -55,7 +58,7 @@ async function hookBlobCapture(page: import("@playwright/test").Page, itemCount:
 }
 
 async function readCapturedDataIds(page: import("@playwright/test").Page): Promise<string[]> {
-  return page.waitForFunction(
+  const handle = await page.waitForFunction(
     () => {
       const w = window as unknown as { __captured?: string[] };
       return w.__captured ?? null;
@@ -63,7 +66,8 @@ async function readCapturedDataIds(page: import("@playwright/test").Page): Promi
     undefined,
     { timeout: 15_000 }
   );
-  // waitForFunction 返回 JSHandle，取 jsonValue
+  // waitForFunction 给的是 JSHandle，必须 jsonValue 才是页面里的值
+  return (await handle.jsonValue()) as string[];
 }
 
 // A10-a: 浏览页「导出当前列表」→ 真实 download 事件（configs_*.json）
@@ -89,15 +93,7 @@ test("A10 导出当前列表: 产生真实 json 下载且任务中心出现成�
   expect(download.suggestedFilename()).toMatch(/^configs_\d+\.json$/);
 
   // 下载内容（blob）为合法 JSON，dataId 集合与当前列表一致
-  const handle = await page.waitForFunction(
-    () => {
-      const w = window as unknown as { __captured?: string[] };
-      return w.__captured ?? null;
-    },
-    undefined,
-    { timeout: 15_000 }
-  );
-  const captured = (await handle.jsonValue()) as string[];
+  const captured = await readCapturedDataIds(page);
   expect(Array.isArray(captured)).toBeTruthy();
   expect(captured.length).toBe(itemCount);
   for (const id of visibleDataIds) {

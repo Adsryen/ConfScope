@@ -171,7 +171,9 @@ test("DF-01/02 对比正文：两个入口都开栏，命中标红 + 行号变�
   expect(probe.barCount, "两个视图同时接管 = 弹两条查找栏").toBe(1);
 
   await diffInput(page).fill(TERM);
-  await expect.poll(async () => (await readDiff(page)).marks, "正文里一处都不标红").toBeGreaterThan(0, { timeout: 15_000 });
+  await expect
+    .poll(async () => (await readDiff(page)).marks, { message: "正文里一处都不标红", timeout: 15_000 })
+    .toBeGreaterThan(0);
   probe = await readDiff(page);
 
   // 命中词标红（红底由 .search-hit 给，守卫另有静态钉）
@@ -208,7 +210,9 @@ test("DF-03/04 Enter 逐行步进并真的滚动；关栏后净空归零、首�
 
   await openFindOnBody(page);
   await diffInput(page).fill(STEP_TERM);
-  await expect.poll(async () => (await readDiff(page)).marks, "没有命中就无法步进").toBeGreaterThan(0, { timeout: 15_000 });
+  await expect
+    .poll(async () => (await readDiff(page)).marks, { message: "没有命中就无法步进", timeout: 15_000 })
+    .toBeGreaterThan(0);
 
   const first = await readDiff(page);
   const total = totalCount(first.countText) ?? 0;
@@ -255,7 +259,9 @@ test("DF-05/06 Aa 与 ab| 只会收窄命中；勾「仅显示变更」后编号
 
   await openFindOnBody(page);
   await diffInput(page).fill(TOGGLE_TERM);
-  await expect.poll(async () => (await readDiff(page)).marks, "没有命中，口径开关无从验证").toBeGreaterThan(0, { timeout: 15_000 });
+  await expect
+    .poll(async () => (await readDiff(page)).marks, { message: "没有命中，口径开关无从验证", timeout: 15_000 })
+    .toBeGreaterThan(0);
   const base = await readDiff(page);
   const baseTotal = totalCount(base.countText) ?? 0;
   expect(baseTotal, "默认口径下没有命中").toBeGreaterThan(1);
@@ -339,7 +345,9 @@ test("DF-07 批量态换文件：正文滚动归零，不把上一份文件的�
   // 先把这份文件滚到底部，再换文件
   await openFindOnBody(page);
   await diffInput(page).fill(STEP_TERM);
-  await expect.poll(async () => (await readDiff(page)).marks, "批量态也没命中").toBeGreaterThan(0, { timeout: 15_000 });
+  await expect
+    .poll(async () => (await readDiff(page)).marks, { message: "批量态也没命中", timeout: 15_000 })
+    .toBeGreaterThan(0);
   for (let i = 0; i < 4; i += 1) await diffInput(page).press("Enter");
   await page.waitForTimeout(300);
   const scrolled = await readDiff(page);
@@ -363,8 +371,8 @@ test("DF-07 批量态换文件：正文滚动归零，不把上一份文件的�
     .poll(async () => {
       const p = await readDiff(page);
       return p.scrollTop;
-    }, "换文件后正文还停在上一份的滚动位置")
-    .toBe(0, { timeout: 15_000 });
+    }, { message: "换文件后正文还停在上一份的滚动位置", timeout: 15_000 })
+    .toBe(0);
   const next = await readDiff(page);
   expect(next.scrollTop).toBe(0);
   console.log(`[DF-07] 换文件前 scrollTop=${scrolled.scrollTop} 换文件后=${next.scrollTop}`);

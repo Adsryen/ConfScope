@@ -259,8 +259,8 @@ test("DF2-01/02 高亮变更正文：两个入口都开栏，命中标红 + 行�
   expect(probe.barCount, "两个视图同时接管 = 弹两条查找栏").toBe(1);
 
   await expect
-    .poll(async () => (await read(page)).marks, "正文里一处都不标红")
-    .toBeGreaterThan(0, { timeout: 15_000 });
+    .poll(async () => (await read(page)).marks, { message: "正文里一处都不标红", timeout: 15_000 })
+    .toBeGreaterThan(0);
   probe = await read(page);
 
   // 命中标红 + 计数文案 + 当前命中恒为一组（单列视图每行只有一侧有文本）
@@ -300,8 +300,8 @@ test("DF2-03/05 Enter 逐行步进并真的滚动；关栏后净空归零、首�
   await openFindWithShortcut(page);
   await barInput(page).fill(STEP_TERM);
   await expect
-    .poll(async () => (await read(page)).marks, "没有命中就无法步进")
-    .toBeGreaterThan(0, { timeout: 15_000 });
+    .poll(async () => (await read(page)).marks, { message: "没有命中就无法步进", timeout: 15_000 })
+    .toBeGreaterThan(0);
 
   const first = await read(page);
   const total = totalCount(first.countText) ?? 0;
@@ -349,8 +349,8 @@ test("DF2-04 Aa 与 ab| 只会收窄；勾「仅显示变更」后每步都落�
   await openFindWithShortcut(page);
   await barInput(page).fill(TERM);
   await expect
-    .poll(async () => (await read(page)).marks, "没有命中，口径开关无从验证")
-    .toBeGreaterThan(0, { timeout: 15_000 });
+    .poll(async () => (await read(page)).marks, { message: "没有命中，口径开关无从验证", timeout: 15_000 })
+    .toBeGreaterThan(0);
 
   const base = await read(page);
   const baseTotal = totalCount(base.countText) ?? 0;
@@ -398,8 +398,8 @@ test("DF2-04 Aa 与 ab| 只会收窄；勾「仅显示变更」后每步都落�
   await onlyChanges.check();
   await barInput(page).fill(TERM);
   await expect
-    .poll(async () => totalCount((await read(page)).countText) ?? 0, "只剩变更行后没命中")
-    .toBeGreaterThan(0, { timeout: 15_000 });
+    .poll(async () => totalCount((await read(page)).countText) ?? 0, { message: "只剩变更行后没命中", timeout: 15_000 })
+    .toBeGreaterThan(0);
   const filtered = await read(page);
   const filteredTotal = totalCount(filtered.countText) ?? 0;
   expect(filteredTotal, "勾掉等行后命中数反而变多（隐藏行还留在编号里）").toBeLessThanOrEqual(baseTotal);
@@ -518,8 +518,8 @@ test("DF2-07 外部内容搜索词与栏内查找互斥：开栏时外部词不�
   await openFindWithShortcut(page);
   await barInput(page).fill(IN_BAR_ONLY_TERM);
   await expect
-    .poll(async () => (await read(page)).marks, "栏内词没接管标红")
-    .toBeGreaterThan(0, { timeout: 15_000 });
+    .poll(async () => (await read(page)).marks, { message: "栏内词没接管标红", timeout: 15_000 })
+    .toBeGreaterThan(0);
   const inBar = await read(page);
   const inBarTotal = totalCount(inBar.countText) ?? 0;
   expect(inBarTotal, "栏内词没算出分母").toBeGreaterThan(0);
@@ -530,15 +530,17 @@ test("DF2-07 外部内容搜索词与栏内查找互斥：开栏时外部词不�
 
   // 清空栏内词：一处都不标（外部词不许在栏开着的时候偷偷回来）
   await barInput(page).fill("");
-  await expect.poll(async () => (await read(page)).marks, "空词仍在标红（外部词偷偷回来了）").toBe(0, { timeout: 15_000 });
+  await expect
+    .poll(async () => (await read(page)).marks, { message: "空词仍在标红（外部词偷偷回来了）", timeout: 15_000 })
+    .toBe(0);
   const cleared = await read(page);
   expect(cleared.hitGutters, "空词还留着命中行号").toBe(0);
 
   // 关栏：外部词回来，红字与行号都回到开栏前的样子
   await closeFind(page);
   await expect
-    .poll(async () => (await read(page)).marks, "关栏后外部词没回来")
-    .toBe(extMarks, { timeout: 15_000 });
+    .poll(async () => (await read(page)).marks, { message: "关栏后外部词没回来", timeout: 15_000 })
+    .toBe(extMarks);
   const back = await read(page);
   expect(back.hitGutters, "关栏后行号命中态没跟着回来").toBe(ext.hitGutters);
   expect(back.barCount).toBe(0);

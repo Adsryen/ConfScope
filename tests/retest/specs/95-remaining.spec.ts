@@ -14,7 +14,6 @@ const BASE_B = state.nacos.b.baseUrl;
 const NS_A = state.nacos.a.namespace;
 const NS_B = state.nacos.b.namespace;
 const GROUP = "RETEST-PROD";
-const PORT_KEY = "server.port";
 
 /** 标准启动：装桥 + 播种 + 进首页关启动弹窗。 */
 async function boot(page: import("@playwright/test").Page) {
@@ -114,7 +113,6 @@ test("C3 矩阵一致性: 抽查 server.port 单元格值与 Nacos 回读一致"
   await expect(rowByPort.first()).toBeVisible({ timeout: 15_000 });
   const portRow = rowByPort.first();
   const cellTexts = (await portRow.locator(".audit-cell.value").allInnerTexts()).map((s) => s.trim());
-  const joined = cellTexts.join("|");
   console.log(`[C3] server.port 单元格=${JSON.stringify(cellTexts)} A=${portA} B=${portB}`);
   // 两侧单元格分别等于 Nacos 回读值（顺序 = 环境卡顺序 A, B）
   expect(cellTexts[0]).toBe(portA);

@@ -73,7 +73,7 @@ const ABOVE_MODAL_ALLOWLIST = [".modal-overlay", ".startup-overlay", ".modal-ove
 
 describe("浮层层叠阶梯", () => {
   it("每一层都是 fixed 定位（有 position 才有 z-index 可谈）", () => {
-    FIXED_LAYERS.forEach(({ selector, fixedBy }) => {
+    FIXED_LAYERS.forEach(({ fixedBy }) => {
       expect(declarations(fixedBy), `${fixedBy} 不再是 position: fixed`).toMatch(/position:\s*fixed/);
     });
   });

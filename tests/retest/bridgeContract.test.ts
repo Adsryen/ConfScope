@@ -11,7 +11,7 @@
  *  1) 桥里出现的绑定名必须能在 Go 侧找到同名 App 方法（幻影名只会诱导出错误的参数形状）；
  *  2) 桥对写绑定的取值方式必须与 Go 签名的参数类型一致，且产品 api 层的调用形状与之一致。
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadRetestState } from "./state";

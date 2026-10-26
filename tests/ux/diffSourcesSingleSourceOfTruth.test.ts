@@ -99,10 +99,10 @@ describe("对比来源收敛到单一事实源（轮46 R01）", () => {
     expect(restore, "找不到恢复 effect，这条守卫就成了空转").not.toBeNull();
     expect(restore![0]).toMatch(/isCompleteDiffSourcePair\(restored\.left, restored\.right\)/);
 
-    const jump = source.match(/if \(initialParams\.autoCompare\) setPendingAutoCompare\(/);
-    expect(jump, "跳转路径的自动对比入口没了").not.toBeNull();
+    const jumpIndex = source.search(/if \(initialParams\.autoCompare\) setPendingAutoCompare\(/);
+    expect(jumpIndex, "跳转路径的自动对比入口没了").toBeGreaterThan(-1);
     // 两侧 dataId 为空在跳转语义里是「跳过去跑智能匹配」（loadBoth 的 needMatch 分支），是有意为之
-    expect(source.slice(jump!.index - 400, jump!.index)).not.toMatch(/isCompleteDiffSourcePair/);
+    expect(source.slice(Math.max(0, jumpIndex - 400), jumpIndex)).not.toMatch(/isCompleteDiffSourcePair/);
   });
 
   it("retest 种子写的是 prefs、不再写 cs.ui 的镜像键", () => {
