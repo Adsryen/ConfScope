@@ -430,9 +430,14 @@ test("DF2-06 分段控件：在屏视图与 active + aria-pressed 同名，文�
   const readSeg = () =>
     page.evaluate(() => {
       const vis = (list: NodeListOf<HTMLElement>) => Array.from(list).filter((e) => e.offsetParent !== null);
-      const group = vis(document.querySelectorAll<HTMLElement>(".view-mode"))[0] ?? null;
+      // 按 aria-label 取组，不按 DOM 顺序：轮79 在同一页并列出的「历史来源」分段控件
+      // （ConfigHistoryPanel.tsx:68）在 DOM 里排在「正文视图」（HistoryView.tsx:427）之前，
+      // 写死 .view-mode[0] 的探针会抓错元素——这正是这条用例当初红的方式。
+      const groups = vis(document.querySelectorAll<HTMLElement>(".view-mode"));
+      const group = groups.find((g) => g.getAttribute("aria-label") === "正文视图") ?? null;
       const buttons = group ? vis(group.querySelectorAll<HTMLElement>(".btn")) : [];
       return {
+        labels: groups.map((g) => g.getAttribute("aria-label") ?? "(无标签)"),
         role: group ? group.getAttribute("role") : null,
         groupLabel: group ? group.getAttribute("aria-label") : null,
         buttons: buttons.map((b) => ({
@@ -448,6 +453,9 @@ test("DF2-06 分段控件：在屏视图与 active + aria-pressed 同名，文�
     });
 
   const sameDirection = (seg: Awaited<ReturnType<typeof readSeg>>, pressedView: "高亮变更" | "原始内容") => {
+    // 反向守卫：可见分段控件的标签不得重名（重名就没法靠 aria-label 定位），且必须读得到正文视图那一组。
+    expect(seg.labels, `可见分段控件标签出现重名：${JSON.stringify(seg.labels)}`).toEqual(Array.from(new Set(seg.labels)));
+    expect(seg.labels, `可见分段控件里读不到「正文视图」那一组：${JSON.stringify(seg.labels)}`).toContain("正文视图");
     expect(seg.role, "两颗按钮不成组").toBe("group");
     expect(seg.groupLabel, "分组名应当是恒定的「正文视图」").toBe("正文视图");
     expect(seg.buttons.map((b) => b.text).sort(), "按钮文案不许随状态变").toEqual(["原始内容", "高亮变更"]);

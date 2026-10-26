@@ -83,8 +83,11 @@ test("C1 配置矩阵: 双环境执行审计生成一致性矩阵", async ({ pag
   await page.screenshot({ path: "results/c1-audit-matrix.png", fullPage: true });
 });
 
-// E2: 沙箱验证标记 → 晋级入口出现（A 侧作为沙箱来源，B 已应用后到操作历史标记验证）
-test("E2 操作历史: 沙箱验证标记 + 晋级目标选择", async ({ page, retest }) => {
+// E2: 沙箱验证标记 + 「历史页不得再长出写入口」（轮76 把晋级入口整体搬去变更计划第5步）。
+//
+// 保留的原价值：标记沙箱验证这条只读状态戳仍必须能在历史页就地打下（审计面不能空转）。
+// 新增的反向守卫：历史页不许再出现任何晋级写入口——旧用例钉的正是已废弃的设计。
+test("E2 操作历史: 沙箱验证标记 + 历史页不再有晋级入口", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
@@ -102,9 +105,17 @@ test("E2 操作历史: 沙箱验证标记 + 晋级目标选择", async ({ page, 
   await expect(verifyBtn).toBeVisible({ timeout: 30_000 });
   await verifyBtn.click();
   await expect(page.getByText("已保存沙箱验证").first()).toBeVisible({ timeout: 30_000 });
-  // 晋级入口出现：目标选择 + 「晋级到所选目标」
-  const promoteBtn = page.getByRole("button", { name: /晋级到所选目标|晋级/ }).first();
-  await expect(promoteBtn).toBeVisible({ timeout: 15_000 });
+  // 反向守卫（轮76 的当前契约，全部锁在 .history-page 作用域内）：
+  // ① 历史页整页不许有「晋级」按钮；② 旧的 .history-promote-row 不许长回来；
+  // ③ 跟进面板只留一句指路文案，把人送去第5步。
+  // 为什么必须限定作用域：计划页常驻保活，第5步晋级面板里那颗「按本次验证晋级」仍在 DOM 中
+  // （只是不可见）。写成全站计数 0 就把「历史页没有晋级入口」这条真契约
+  // 测成「全站不许存在晋级按钮」的假命题——S31 能全站计数 0 只是因为它先把晋级点掉了。
+  await expect(page.locator(".history-page button", { hasText: "晋级" })).toHaveCount(0);
+  await expect(page.locator(".history-page .history-promote-row")).toHaveCount(0);
+  await expect(page.locator(".history-page .history-followup-panel")).toContainText(
+    "晋级到生产的入口在变更计划第5步"
+  );
   await page.screenshot({ path: "results/e2-sandbox-verify.png", fullPage: true });
 });
 

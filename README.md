@@ -222,6 +222,11 @@ npx playwright test -c tests/retest/shots/playwright.config.ts  # 重拍本文�
 retest 与截图取证都依赖 `scripts/retest-data/` 的合成数据，跑之前先按
 [`scripts/retest-data/README.md`](scripts/retest-data/README.md) 起好容器。
 
+改动**操作历史 / 变更计划第5步晋级 / 分段控件**这类跨页 UI，收口必须跑一次**全量** retest
+（不带 spec 参数的那条命令），只跑相关的那几个文件不算：静态守卫与 jsdom 单测挡得住
+「代码写回旧设计」，挡不住「真机用例停在旧设计」——轮76 把晋级入口搬出操作历史之后，
+`93-matrix-history` / `98-remaining` 两条用例红了一个多星期没人撞见，就是因为全量批不在任何门禁里。
+
 ## 发布产物与下载
 
 从 [Releases](https://github.com/Adsryen/ConfScope/releases) 下载对应平台的产物，
