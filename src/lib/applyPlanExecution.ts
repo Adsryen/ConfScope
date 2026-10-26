@@ -1,6 +1,6 @@
 import type { Connection } from "../store/connections";
 import type { ConfigDocument } from "../api/nacos";
-import type { OperationRecord } from "../store/operationHistory";
+import type { AppliedConfigLocation, OperationRecord } from "../store/operationHistory";
 import type { TaskManager } from "./taskmanager";
 import {
   applyPlanItemLabel,
@@ -23,6 +23,7 @@ import {
   type ApplyBackupSummary,
   type ApplyTargetBeforeSnapshot,
 } from "./applyExecutionSafety";
+import { createAppliedLocationCollector } from "./applyRecordScope";
 import { detectFormat, nacosType, type Format } from "./format";
 import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "./concurrency";
 import { normalizeConfig } from "./normalize";
@@ -630,16 +631,30 @@ function staleIssueLabel(plan: ApplyPlan, issue: ApplyPlanFreshnessIssue): strin
   return `${itemRefLabel(ref)} · ${sideLabel(issue.side)}`;
 }
 
+interface RecordFailureExtras {
+  /** 是否落操作历史；dry-run 不落。 */
+  recordHistory?: boolean;
+  progress?: ApplyExecutionProgress;
+  verification?: ApplyWriteVerification;
+  /**
+   * 本次**真正落笔**的配置位置清单（轮79 E4）——必填。
+   *
+   * 失败记录里的 `appliedLocations` 会被回退入口、晋升入口和「本次改动」当成
+   * 「这次到底动了哪几份配置」的唯一依据，所以它只能是真正写成的那几条：
+   * 一条都没写成传 `[]`，半截失败传已经落成功的那些。传漏了编译不过，避免再退化成「全部勾选项」。
+   */
+  appliedLocations: AppliedConfigLocation[];
+}
+
 function recordFailure(
   plan: ApplyPlan,
   deps: ExecuteApplyPlanDeps,
   taskId: string,
   error: string,
   backup: ApplyBackupSummary = emptyBackup(),
-  recordHistory = true,
-  progress?: ApplyExecutionProgress,
-  verification?: ApplyWriteVerification
+  extras: RecordFailureExtras
 ): ExecuteApplyPlanResult {
+  const recordHistory = extras.recordHistory ?? true;
   let historyId = "";
   if (recordHistory) {
     const history = deps.recordOperation(
@@ -648,14 +663,20 @@ function recordFailure(
         backup,
         taskId,
         error,
+        appliedLocations: extras.appliedLocations,
       })
     );
     historyId = history.id;
   }
   deps.taskManager.completeTask(taskId, false, error);
   return recordHistory
-    ? { ok: false, taskId, historyId, error, progress, verification }
-    : { ok: false, taskId, error, progress, verification };
+    ? { ok: false, taskId, historyId, error, progress: extras.progress, verification: extras.verification }
+    : { ok: false, taskId, error, progress: extras.progress, verification: extras.verification };
+}
+
+/** 前置失败（一条都没写出去）的公共 extras：dry-run 不落历史，落笔范围恒空。 */
+function failureExtras(options: ExecuteApplyPlanOptions, appliedLocations: AppliedConfigLocation[]): RecordFailureExtras {
+  return { recordHistory: !options.dryRun, appliedLocations };
 }
 
 export async function executeApplyPlan(
@@ -671,6 +692,9 @@ export async function executeApplyPlan(
   const taskId = createTask(workingPlan, deps, options.onTaskCreated);
   // 本轮真正落成功的写入位置（按命名空间分组成多条 notice 广播）；dry-run 恒空。
   const writtenRefs: { namespace: string; dataId: string; group: string }[] = [];
+  // 落笔位置清单（轮79 E4）：与 writtenRefs 同一判定点逐条累积，失败记录/成功记录都拿它说话。
+  // 声明在 try 外面，半截失败与外层 catch 都还能读到「前面到底写成了哪几条」。
+  const writtenLocations = createAppliedLocationCollector();
   const notifyConfigsChanged = () => {
     if (!deps.onConfigsChanged || !writtenRefs.length) return;
     const grouped = new Map<string, ConfigChangeRef[]>();
@@ -686,9 +710,11 @@ export async function executeApplyPlan(
     }
   };
   const sourceConnection = findConnection(deps, workingPlan.source.connectionId);
-  if (typeof sourceConnection === "string") return recordFailure(workingPlan, deps, taskId, sourceConnection, emptyBackup(), !options.dryRun);
+  if (typeof sourceConnection === "string")
+      return recordFailure(workingPlan, deps, taskId, sourceConnection, emptyBackup(), failureExtras(options, []));
   const targetConnection = findConnection(deps, workingPlan.target.connectionId);
-  if (typeof targetConnection === "string") return recordFailure(workingPlan, deps, taskId, targetConnection, emptyBackup(), !options.dryRun);
+  if (typeof targetConnection === "string")
+      return recordFailure(workingPlan, deps, taskId, targetConnection, emptyBackup(), failureExtras(options, []));
 
   try {
     const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
@@ -697,11 +723,12 @@ export async function executeApplyPlan(
       const error = translate("apply.planStale", {
         items: freshness.staleItems.map((issue) => staleIssueLabel(workingPlan, issue)).join(", "),
       });
-      return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), !options.dryRun);
+      return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), failureExtras(options, []));
     }
 
     const writes = planWrites(workingPlan);
-    if (typeof writes === "string") return recordFailure(workingPlan, deps, taskId, writes, emptyBackup(), !options.dryRun);
+    if (typeof writes === "string")
+      return recordFailure(workingPlan, deps, taskId, writes, emptyBackup(), failureExtras(options, []));
 
     if (options.dryRun) {
       deps.taskManager.updateProgress(taskId, writes.length, writes.length, writes.length);
@@ -799,6 +826,7 @@ export async function executeApplyPlan(
         if (!itemError) {
           writtenRefs.push({ namespace: ref.namespace, dataId: ref.dataId, group: ref.group });
           writtenWrites.push({ write, refLabel: itemRefLabel(ref) });
+          writtenLocations.add(write.item);
         }
         if (itemError) throw new Error(itemError);
       }
@@ -807,21 +835,36 @@ export async function executeApplyPlan(
       // 再广播失效——回读排在广播之前，免得保活视图在可见窗口里重取到旧值。
       const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
       notifyConfigsChanged();
-      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, true, {
-        completedWrites,
-        totalWrites: writes.length,
-        failedIndex: attemptedIndex,
-        failedRef: attemptedRefLabel,
-      }, verification);
+      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, {
+        progress: {
+          completedWrites,
+          totalWrites: writes.length,
+          failedIndex: attemptedIndex,
+          failedRef: attemptedRefLabel,
+        },
+        verification,
+        appliedLocations: writtenLocations.list(),
+      });
     }
 
     const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
-    const history = deps.recordOperation(safety.historyInput);
+    // prepare 那份 historyInput 里的范围是「计划要写的全部可执行项」；落记录时换成逐条攒出来的
+    // 落笔清单（轮79 E4）——正常路径两者等值，但来源必须是这一份，失败/成功才共用同一口径。
+    const history = deps.recordOperation({
+      ...safety.historyInput,
+      appliedLocations: writtenLocations.list(),
+      scopeIsWritten: true,
+    });
     deps.taskManager.completeTask(taskId, true);
     notifyConfigsChanged();
     return { ok: true, taskId, historyId: history.id, verification };
   } catch (error) {
     notifyConfigsChanged();
-    return recordFailure(workingPlan, deps, taskId, errorText(error), emptyBackup(), !options.dryRun);
+    // 外层兜底：异常可能发生在写入循环之后（回读确认、快照等），此时前面几条已经落库，
+    // 落笔范围仍要按累积清单说，不能退回「全部勾选项」。
+    return recordFailure(workingPlan, deps, taskId, errorText(error), emptyBackup(), {
+      recordHistory: !options.dryRun,
+      appliedLocations: writtenLocations.list(),
+    });
   }
 }

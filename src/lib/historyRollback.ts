@@ -65,6 +65,11 @@ function unavailable(reasonKey: string): HistoryRollbackAssessment {
  * 缺任何一样都不放按钮——点了才收到「变更记录 X 没有关联变更计划」是本轮要消灭的体验。
  */
 function assessApplyBackup(record: OperationRecord, ctx: HistoryRollbackContext): HistoryRollbackAssessment {
+  // 轮79 E4：本次什么都没写成 ⇒ 没有要还原的现场，单独给原因，别混进「缺备份快照」。
+  // 这条必须排在 canBuildRollbackEntry 前面，否则空清单会被那条判据吞掉、说成「没有备份快照」。
+  if (record.appliedLocations && record.appliedLocations.length === 0) {
+    return unavailable("operationHistory.rollbackNothingWritten");
+  }
   // 现场齐不齐仍由 applyFollowup 判定（单一出处，含「失败记录也放行」这条 R55-A4 口径）；
   // 这里只负责把「缺了哪一样」翻译成人话。
   if (!canBuildRollbackEntry(record)) {

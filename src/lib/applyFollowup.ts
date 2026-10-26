@@ -142,6 +142,10 @@ function planFromRecord(
 export function canBuildRollbackEntry(record: OperationRecord): boolean {
   if (!["apply", "promote", "restore"].includes(record.type)) return false;
   if (!record.planId || !record.backupSnapshotId) return false;
+  // 轮79 E4：清单是「真正落笔的位置」，空清单说明一份配置都没写出去，没有要还原的现场。
+  // 放出口只会让用户点下去才收到「快照里没有可回退项」——那句谎话正是 R55-A4 要消灭的。
+  // 老记录没有这个字段（那时记的是全部勾选项，不可信），维持原判定。
+  if (record.appliedLocations && record.appliedLocations.length === 0) return false;
   return record.result === "success" || record.result === "failure";
 }
 

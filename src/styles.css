@@ -5194,6 +5194,21 @@ button.diff-workflow-step-btn:hover {
   padding: 1px 5px;
   border-radius: 3px;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* 徽标里的线性锁：与 .pwd-toggle-icon / .browser-tool-icon 同一族，尺寸跟着 11px 的徽标文字收小 */
+.conn-ssh-badge-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .conn-provider-badge {
   font-size: 11px;

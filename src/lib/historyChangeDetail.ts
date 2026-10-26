@@ -61,6 +61,20 @@ export interface HistoryChangeDetail {
   changedCount: number;
 }
 
+/**
+ * 这条记录能不能挂「本次改动」（轮79 E4 放开半截失败的口子）。
+ *
+ * - 成功记录：写成功即等于清单里的项都落了笔，照常给（轮66 之前的老记录虽然按「全部勾选项」记，
+ *   但成功记录里全部勾选项确实都写了，那份清单在成功语境下不撒谎）。
+ * - 失败记录：只有新链路的 `scopeIsWritten` 才能证明这份清单是**真正落笔的那几条**；
+ *   老记录那份是全部勾选项，拿它当「本次改动」会把没写过的配置说成写了，继续不给。
+ * - 空清单（一条都没写成，prepare 阶段就失败）：没有改动可看，不给。
+ */
+export function canShowChangeDetail(record: OperationRecord): boolean {
+  if (record.result === "success") return true;
+  return record.scopeIsWritten === true && (record.appliedLocations?.length ?? 0) > 0;
+}
+
 function textOf(value: { exists: boolean; content?: string; value?: string }): { text: string; known: boolean } {
   if (!value.exists) return { text: "", known: true };
   if (typeof value.content === "string") return { text: value.content, known: true };

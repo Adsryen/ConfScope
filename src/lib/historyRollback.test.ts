@@ -85,7 +85,6 @@ function legacyPublishRecord(overrides: Partial<OperationRecord> = {}): Operatio
     dataId: "app.yaml",
     configType: "yaml",
     beforeContent: "server:\n  port: 8080\n",
-    afterContent: "server:\n  port: 9090\n",
     rollbackable: true,
     ...overrides,
   };
@@ -175,11 +174,24 @@ describe("assessHistoryRollback：apply/promote/restore 按备份快照回退", 
     expect(
       assessHistoryRollback(applyRecord({ targetConnectionId: "conn-gone" }), ctx()).reasonKey
     ).toBe("operationHistory.rollbackTargetConnectionMissing");
-    for (const key of ["rollbackNoPlanOnRecord", "rollbackMissingBackupSnapshot", "rollbackPlanExpired", "rollbackTargetConnectionMissing"]) {
+    for (const key of ["rollbackNoPlanOnRecord", "rollbackMissingBackupSnapshot", "rollbackPlanExpired", "rollbackTargetConnectionMissing", "rollbackNothingWritten"]) {
       expect(assessHistoryRollback(applyRecord(), ctx()).available).toBe(true);
       expect(localeValue(zhCN, `operationHistory.${key}`)).toBeTypeOf("string");
       expect(localeValue(enUS, `operationHistory.${key}`)).toBeTypeOf("string");
     }
+  });
+
+  it("落笔清单为空的记录给专门原因，而不是混进「没有备份快照」（轮79 E4）", () => {
+    const nothingWritten = applyRecord({ appliedLocations: [], scopeIsWritten: true });
+    const assessment = assessHistoryRollback(nothingWritten, ctx());
+    expect(assessment.available).toBe(false);
+    expect(assessment.path).toBeNull();
+    expect(assessment.reasonKey).toBe("operationHistory.rollbackNothingWritten");
+    // 这条记录现场其实是齐的（planId + 备份快照都在），单说「缺备份」就是假话
+    expect(nothingWritten.backupSnapshotId).toBeTruthy();
+    // 半截失败写了 1 项：仍然放行，按钮叫「把已写入的那几条退回备份」
+    const halfWritten = applyRecord({ result: "failure", appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }], scopeIsWritten: true });
+    expect(assessHistoryRollback(halfWritten, ctx())).toMatchObject({ available: true, path: "apply-backup" });
   });
 
   it("apply 记录带 beforeContent 也不降级成「按记录正文回退」", () => {

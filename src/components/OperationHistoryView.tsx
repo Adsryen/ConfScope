@@ -37,6 +37,7 @@ import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
 import HistoryChangeDetailPanel from "./HistoryChangeDetailPanel";
+import { canShowChangeDetail } from "../lib/historyChangeDetail";
 import InlineError from "./InlineError";
 import { errorText } from "../lib/errorText";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
@@ -641,10 +642,12 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                * 「本次改动」（轮75 E1）：批量写入的记录里正文一块都不存在（`buildApplyOperationHistoryInput`
                * 不写 content，`beforeContent` 只在单条时才带），用户想知道改了什么只能先生成一份计划跳走看——
                * 那是把审计需求绕到写操作入口上解决。这里直接把计划里的写前/写后读成只读 diff。
-               * 只给成功记录：部分写入的失败记录里 `appliedLocations` 记的是**全部勾选项**而不是真正落笔的那几条
-               * （`applyPlanExecution.recordFailure` 复用同一条构造），拿它当「本次改动」会把没写过的说成写了。
+               * 挂载判据（轮79 E4）：成功记录照旧；半截失败的记录现在也能给——执行器已经把
+               * 「逐条写、逐条记」攒出来的落笔清单写进记录（`scopeIsWritten`），只列真正写过的那几条。
+               * 老那条口径（「失败记录一律不给」）是因为那时清单记的是全部勾选项，会撒谎；
+               * 判据本身收在 `lib/historyChangeDetail.canShowChangeDetail`，渲染层不许再自己算。
                */}
-              {followupRecord && followupSucceeded && (
+              {followupRecord && canShowChangeDetail(selectedVisibleRecord) && (
                 <HistoryChangeDetailPanel record={selectedVisibleRecord} getPlan={getApplyPlan} />
               )}
               {selectedVisibleRecord.content && (

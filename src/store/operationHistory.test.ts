@@ -111,7 +111,10 @@ describe("loadOperationHistory", () => {
     const [record] = loadOperationHistory();
 
     expect(record.beforeContent).toBe("old");
-    expect(record.afterContent).toBe("new");
+    // 轮79 E2：`afterContent` 从来没有生产方（`ApplyPlanView` 那几处同名键是 session event 的
+    // payload，不是 OperationRecord），归一化里那句 `?? content` 又把它复读成正文的副本。
+    // 字段删掉之后，老数据里真带这个键时也只会安静忽略，不许再冒出来误导调用方。
+    expect("afterContent" in record, "死字段又回来了").toBe(false);
     // 轮72A：store 不再判定「能不能回退」——那只剩一句恒 false 的死口径，
     // 与同一块面板下面真能点的按钮互相打脸。判据见 lib/historyRollback.test.ts。
   });
@@ -159,7 +162,9 @@ describe("loadOperationHistory", () => {
           targetConnectionName: "prod",
           targetNamespace: "public",
           beforeContent: "old: true",
+          // 轮79 E2：老数据里带死字段也照常读，键不会再被归一化器复读出来
           afterContent: "new: true",
+          scopeIsWritten: true,
         },
       ])
     );
@@ -197,14 +202,32 @@ describe("loadOperationHistory", () => {
       targetConnectionName: "prod",
       targetNamespace: "public",
       beforeContent: "old: true",
-      afterContent: "new: true",
     });
+    expect(record, "afterContent 是死字段，读了不该再冒出内容副本").not.toHaveProperty("afterContent");
     // 执行现场清单必须能原样读回来：回退入口是在重启后点的，字段被归一化器丢掉
     // 就等于退回「按完整计划回退」，那条误删路径又活了（轮66 R66-WP9）。
     expect(record.appliedLocations).toEqual([
       { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" },
       { namespace: "public", group: "DEFAULT_GROUP", dataId: "cache.yaml", key: "ttl" },
     ]);
+    // 轮79 E4：`scopeIsWritten` 是「这份清单是真正落笔的那几条」的唯一凭证，重启后必须还在——
+    // 半截失败的记录靠它才敢列「本次改动」、才敢放开退入口。丢了就等于退回老口径。
+    expect(record.scopeIsWritten).toBe(true);
+  });
+
+  it("scopeIsWritten 只认真布尔值：老记录没有这个键时保持 undefined", () => {
+    localStorageMock.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        { id: "legacy-bool", type: "apply", result: "failure", timestamp: "2026-07-04T00:00:00Z", scopeIsWritten: "true" },
+        { id: "legacy-none", type: "apply", result: "failure", timestamp: "2026-07-04T00:00:00Z" },
+      ])
+    );
+
+    const [bogus, missing] = loadOperationHistory();
+    // 字符串 "true" 不算：脏数据不能把「范围可信」这层意思蒙过去
+    expect(bogus.scopeIsWritten, "非布尔值不许当成 true").toBeUndefined();
+    expect(missing.scopeIsWritten).toBeUndefined();
   });
 
   it("老记录没有执行现场清单时保持 undefined，回退退到备份快照覆盖", () => {
@@ -415,12 +438,11 @@ describe("recordOperation", () => {
       group: "DEFAULT_GROUP",
       dataId: "app.yaml",
       beforeContent: "old",
-      afterContent: "new",
       rollbackable: true,
     });
 
     expect(record.beforeContent).toBe("old");
-    expect(record.afterContent).toBe("new");
+    expect(record, "正文副本字段（afterContent）已删除，写入侧不该还接受它").not.toHaveProperty("afterContent");
     // 这类遗留记录今天正是「按记录的原正文生成回退计划」的入口对象，判定见 lib/historyRollback.test.ts。
   });
 

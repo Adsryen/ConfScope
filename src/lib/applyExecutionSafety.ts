@@ -1,6 +1,6 @@
 // 应用执行安全合同：在真实写入前准备 before 备份和操作历史输入。
 import type { ApplyPlan, ApplyPlanItem } from "./applyPlan";
-import type { OperationRecord, OperationResult } from "../store/operationHistory";
+import type { AppliedConfigLocation, OperationRecord, OperationResult } from "../store/operationHistory";
 import { appliedLocationsFromItems } from "./applyRecordScope";
 import { errorText } from "./errorText";
 import { translate } from "../locales";
@@ -57,6 +57,14 @@ export interface ApplyExecutionSafetyDeps {
 
 interface BuildHistoryInputParams {
   result: OperationResult;
+  /**
+   * 本次**真正落笔**的配置位置清单（轮79 E4）。
+   *
+   * 显式传入（含空数组）即以它为准，并给记录打上 `scopeIsWritten`——「这条清单是写出来的，
+   * 不是计划要写的」。不传时退回「计划里全部可执行项」，那是 prepare 阶段成功记录的前置口径：
+   * 写之前谁也不知道最终落成什么样，这一份只表示「打算写哪儿」，落记录时由执行器换成真正写成的那份。
+   */
+  appliedLocations?: AppliedConfigLocation[];
   backup: ApplyBackupSummary;
   taskId?: string;
   operator?: string;
@@ -165,7 +173,9 @@ export function buildApplyOperationHistoryInput(
     planSummary: planSummary(plan),
     // 完整计划里用户可能只勾了一部分执行（轮66 R66-WP9）：这里记下本次真正执行的项，
     // 回退和晋升才有「本次现场」这条边界可依。
-    appliedLocations: appliedLocationsFromItems(executableItems(plan)),
+    // 轮79 E4：执行器会带上「逐条写、逐条记」攒出来的落笔清单；那一份才是可以拿去回退/审计的范围。
+    appliedLocations: params.appliedLocations ?? appliedLocationsFromItems(executableItems(plan)),
+    scopeIsWritten: params.appliedLocations === undefined ? undefined : true,
     backupSnapshotId: params.backup.snapshotId,
     backupSnapshotName: params.backup.snapshotName,
     taskId: params.taskId,
@@ -203,6 +213,9 @@ export async function prepareApplyExecutionSafety(
         taskId: deps.taskId,
         operator: deps.operator,
         error,
+        // prepare 阶段的失败一条都没写出去（轮79 E4）：落笔范围必须是空清单，
+        // 不能留成「全部勾选项」——那是计划范围，拿它当落笔范围会多出没碰过的回退项。
+        appliedLocations: [],
       }),
     };
   }
@@ -220,6 +233,9 @@ export async function prepareApplyExecutionSafety(
         taskId: deps.taskId,
         operator: deps.operator,
         error,
+        // prepare 阶段的失败一条都没写出去（轮79 E4）：落笔范围必须是空清单，
+        // 不能留成「全部勾选项」——那是计划范围，拿它当落笔范围会多出没碰过的回退项。
+        appliedLocations: [],
       }),
     };
   }
@@ -259,6 +275,9 @@ export async function prepareApplyExecutionSafety(
         taskId: deps.taskId,
         operator: deps.operator,
         error,
+        // prepare 阶段的失败一条都没写出去（轮79 E4）：落笔范围必须是空清单，
+        // 不能留成「全部勾选项」——那是计划范围，拿它当落笔范围会多出没碰过的回退项。
+        appliedLocations: [],
       }),
     };
   }

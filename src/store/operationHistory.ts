@@ -62,7 +62,6 @@ export interface OperationRecord {
   content?: string; // 操作内容（发布时的新内容）
   previousContent?: string; // 操作前的内容（回滚时的原始内容）
   beforeContent?: string; // 操作前内容，用于回滚恢复
-  afterContent?: string; // 操作后内容，用于审计展示
   configType?: string; // Nacos 配置类型
   /**
    * 存档元数据，不是能力判定（轮72A）。
@@ -80,6 +79,13 @@ export interface OperationRecord {
   planSummary?: OperationPlanSummary; // ApplyPlan 展示摘要
   backupSnapshotId?: string; // 写入前备份快照 ID
   appliedLocations?: AppliedConfigLocation[]; // 本次执行覆盖的配置位置（回退/晋升的作用范围）
+  /**
+   * 这条记录的 `appliedLocations` 是**真正落笔**的位置清单（轮79 E4）：
+   * 执行器逐条写、逐条记，一失败就停，所以失败记录也可能只写了前几条。
+   * 缺这个标记的老记录不能这么读——那时记的是「全部勾选项」，
+   * 拿它当「本次改动」会把没写过的配置说成写了。
+   */
+  scopeIsWritten?: boolean;
   backupSnapshotName?: string; // 写入前备份快照名称
   taskId?: string; // 任务中心 ID
   sourceConnectionId?: string; // 应用源连接 ID
@@ -195,7 +201,6 @@ function normalizeOperationRecord(value: unknown): OperationRecord | null {
   const content = stringValue(raw.content);
   const previousContent = stringValue(raw.previousContent);
   const beforeContent = stringValue(raw.beforeContent) ?? previousContent;
-  const afterContent = stringValue(raw.afterContent) ?? content;
   return {
     id,
     type,
@@ -209,7 +214,6 @@ function normalizeOperationRecord(value: unknown): OperationRecord | null {
     content,
     previousContent,
     beforeContent,
-    afterContent,
     configType: stringValue(raw.configType),
     rollbackable: booleanValue(raw.rollbackable),
     rollbackReason: stringValue(raw.rollbackReason),
@@ -221,6 +225,7 @@ function normalizeOperationRecord(value: unknown): OperationRecord | null {
     planSummary: normalizeOperationPlanSummary(raw.planSummary),
     backupSnapshotId: stringValue(raw.backupSnapshotId),
     appliedLocations: normalizeAppliedLocations(raw.appliedLocations),
+    scopeIsWritten: booleanValue(raw.scopeIsWritten),
     backupSnapshotName: stringValue(raw.backupSnapshotName),
     taskId: stringValue(raw.taskId),
     sourceConnectionId: stringValue(raw.sourceConnectionId),

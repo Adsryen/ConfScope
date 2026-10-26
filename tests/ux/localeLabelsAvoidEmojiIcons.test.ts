@@ -24,10 +24,9 @@ const EMOJI = /[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}\u{FE0F}]
  * 记账基线：本轮只清了关于页与设置页那一族，这两处同缺陷但改动面在别的页面，留给下一轮。
  * 每一项都必须仍然命中真实代码 —— 修掉之后要把这条一起删掉，别留着当下一次漏网的口子。
  */
-const SOURCE_BASELINE: { file: string; contains: string; why: string }[] = [
-  { file: "src/components/ConnectionManager.tsx", contains: "\u{1F512}SSH", why: "连接项前的彩色锁：与全站线性图标不同族" },
-  { file: "src/components/DeleteConfirm.tsx", contains: "\u{26A0}\u{FE0F}", why: "删除警告段的彩色三角：应改 CSS 装饰或线性图标" },
-];
+// 轮79 把最后两条记账还清了：连接项的彩色锁换成线性 SVG，删除警告段的三角去掉变体选择符。
+// 基线重新归零 —— 下一轮再冒出彩色 emoji 就是新增违规，必须当场修，不许再往里记条目。
+const SOURCE_BASELINE: { file: string; contains: string; why: string }[] = [];
 
 /** 署名白名单：页脚「Made with ❤️ by」是作者署名文案，不进任何控件的可访问名。 */
 const SIGNATURE_ALLOWLIST: { file: string; mustContain: string }[] = [{ file: "src/components/About.tsx", mustContain: "Made with" }];

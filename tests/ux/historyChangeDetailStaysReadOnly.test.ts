@@ -5,13 +5,14 @@
  * 唯一的出路是先生成一份计划跳去变更计划页看——那是把审计需求绕到写操作入口上解决。
  * 补了只读面板之后，风险反过来：审计视图一旦能碰到写路径，历史页就成了第二个执行入口。
  * 所以这里守四件事：
- *   1. 只给成功的执行记录挂（失败记录的 appliedLocations 记的是全部勾选项而非真正落笔的那几条）；
+ *   1. 挂的条件是「这份范围清单可信」：成功记录一律可信；失败记录只在新链路（scopeIsWritten）
+ *      且清单非空时才可信（轮79 E4 放开半截写入的口子，遗留失败记录那份是全部勾选项，不可信）；
  *   2. 面板与它的取数层都不许引 api 下的写接口，也不许带任何「开始执行」类回调；
  *   3. 范围与标签口径必须复用（executableItemsForRecord / applyPlanItemLabel），
  *      标签不再手拼第三份、正文未知时不许比出假 diff；
  *   4. 文案中英齐、占位符不偏科，命中区与焦点样式按全站口径来。
  * 变异自检（改坏任一条，本文件必须变红）：把 before 取成 afterValue / 范围换成整份计划 /
- * 删掉 followupSucceeded 条件 / 手拼 ns/group/dataId / 去掉 contentKnown 闸门。
+ * 删掉 canShowChangeDetail 闸门 / 手拼 ns/group/dataId / 去掉 contentKnown 闸门。
  */
 import { describe, expect, it } from "vitest";
 import { loadLocale, readScannedSource } from "./scanUtils";
@@ -26,15 +27,25 @@ const zh = loadLocale("zh-CN.json");
 const en = loadLocale("en-US.json");
 
 describe("历史页「本次改动」面板的挂载条件", () => {
-  it("只给成功的执行记录挂面板", () => {
+  it("按「范围清单可不可信」挂，判据只有 historyChangeDetail 这一处", () => {
     const history = readScannedSource(HISTORY);
     expect(history, "面板要引 HistoryChangeDetailPanel").toMatch(/import HistoryChangeDetailPanel from "\.\/HistoryChangeDetailPanel"/);
     expect(
-      /followupRecord && followupSucceeded && \(\s*<HistoryChangeDetailPanel record=\{selectedVisibleRecord\} getPlan=\{getApplyPlan\}/.test(
+      /followupRecord && canShowChangeDetail\(selectedVisibleRecord\) && \(\s*<HistoryChangeDetailPanel record=\{selectedVisibleRecord\} getPlan=\{getApplyPlan\}/.test(
         history
       ),
-      "面板的挂载条件必须是「apply 家族记录 + 执行成功」同时成立"
+      "面板的挂载条件必须是「apply 家族记录 + 范围清单可信」同时成立"
     ).toBe(true);
+    expect(history, "渲染层自己算范围可信度，判据就变成两份了").not.toMatch(/followupSucceeded && \(\s*<HistoryChangeDetailPanel/);
+
+    // 判据本身：成功记录一律给；失败记录要 scopeIsWritten 且清单非空
+    const lib = readScannedSource(LIB);
+    const gate = /export function canShowChangeDetail\(record: OperationRecord\): boolean \{[\s\S]*?\n\}/.exec(lib);
+    expect(gate, "canShowChangeDetail 找不到，判据被挪走了").not.toBeNull();
+    expect(gate![0]).toContain('record.result === "success"');
+    expect(gate![0], "失败记录不看 scopeIsWritten 就挂面板，遗留那条过宽清单会把没写过的说成写了").toContain("record.scopeIsWritten === true");
+    expect(gate![0], "空清单（一条都没写成）也挂面板的话，用户会看到一节空白").toContain("appliedLocations?.length ?? 0");
+    expect(gate![0].includes("> 0"), "空清单必须判为不可信").toBe(true);
   });
 
   it("面板在详情里排在「配置内容」之前，用户先看到改动清单再看单份正文", () => {

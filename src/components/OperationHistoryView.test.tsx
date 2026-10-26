@@ -486,9 +486,9 @@ describe("OperationHistoryView", () => {
     expect(within(panel).getByText(/app\.yaml/)).toBeDefined();
   });
 
-  // 失败记录的 appliedLocations 记的是**全部勾选项**而不是真正落笔的那几条
-  // （applyPlanExecution.recordFailure 复用同一条构造），拿它当「本次改动」会把没写过的说成写了。
-  it("keeps the change section off failed apply records", async () => {
+  // 遗留失败记录（轮79 之前那批）：那份 appliedLocations 记的是**全部勾选项**而不是真正落笔的几条，
+  // 没有 scopeIsWritten 就没法证明它说的是真话，继续不挂「本次改动」（轮75 E1 的保守口径）。
+  it("keeps the change section off legacy failed apply records", async () => {
     localStorage.setItem("locale", "en-US");
     savedApplyPlan(["app.yaml", "gateway.yaml"]);
     localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ result: "failure" })]));
@@ -496,6 +496,49 @@ describe("OperationHistoryView", () => {
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
     expect(await screen.findByText(/This run did not finish/)).toBeDefined();
     expect(document.querySelector(".history-change-detail")).toBeNull();
+  });
+
+  // 轮79 E4：新链路的失败记录带「真正落笔」清单，半截改动也要能审计——
+  // 但清单只列写过的那一条，并且要自己说清「只写成了 1 项」。
+  it("shows the change section for a partially written failed record, scoped to what was written", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        followupApplyRecord({
+          result: "failure",
+          error: "403 Forbidden",
+          scopeIsWritten: true,
+          appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }],
+        }),
+      ])
+    );
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    const panel = document.querySelector(".history-change-detail") as HTMLElement;
+    expect(panel, "半截写入的失败记录看不到「本次改动」，审计又只能跳去变更计划页").toBeTruthy();
+    expect(within(panel).getByText(/only 1 item\(s\) were actually written/)).toBeDefined();
+    expect(within(panel).getByText(/1 item\(s\) written, 1 actually changed/)).toBeDefined();
+    expect(within(panel).queryByText(/gateway\.yaml/), "没写过的配置不能出现在本次改动里").toBeNull();
+  });
+
+  // 一条都没写成的失败记录（prepare 阶段就被挡下）：没有改动可看，也不给回退入口。
+  it("says there is nothing to roll back when the run wrote nothing", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml"]);
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([followupApplyRecord({ result: "failure", error: "Nacos returned 403", scopeIsWritten: true, appliedLocations: [] })])
+    );
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    expect(document.querySelector(".history-change-detail")).toBeNull();
+    expect(await screen.findByText("Not rollbackable")).toBeDefined();
+    expect(screen.getByText(/Nothing was written in this run/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /rollback plan/i })).toBeNull();
   });
 
   it("says the plan is gone instead of inventing an empty diff", async () => {

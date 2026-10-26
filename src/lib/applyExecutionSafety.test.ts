@@ -120,6 +120,35 @@ describe("buildApplyOperationHistoryInput", () => {
     ]);
   });
 
+  it("显式传入落笔清单时以它为准，并打上 scopeIsWritten（轮79 E4）", () => {
+    const applyPlan = plan([
+      { ref: { ...baseRef, dataId: "changed.yaml" }, sourceValue: value(true, "new"), targetValue: value(true, "old") },
+      { ref: { ...baseRef, dataId: "removed.yaml", key: "__document" }, sourceValue: value(false, ""), targetValue: value(true, "old") },
+    ]);
+
+    const written = buildApplyOperationHistoryInput(applyPlan, {
+      result: "failure",
+      backup: { backedUpCount: 1, missingBeforeCount: 0 },
+      // 只写成第一条，第二条失败——执行器攒出来的清单必须原样进记录
+      appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "changed.yaml", key: "server.port" }],
+    });
+    expect(written.appliedLocations).toEqual([{ namespace: "public", group: "DEFAULT_GROUP", dataId: "changed.yaml", key: "server.port" }]);
+    expect(written.scopeIsWritten).toBe(true);
+
+    // 空清单也是「显式传入」，不能被 `??` 当成没传而退回全部可执行项
+    const nothing = buildApplyOperationHistoryInput(applyPlan, { result: "failure", backup: { backedUpCount: 0, missingBeforeCount: 0 }, appliedLocations: [] });
+    expect(nothing.appliedLocations).toEqual([]);
+    expect(nothing.scopeIsWritten, "空清单不是「没传」，它说的是「一条都没写成」").toBe(true);
+
+    // 不传才是计划范围口径（prepare 阶段那份），此时不许冒充落笔范围
+    const planned = buildApplyOperationHistoryInput(applyPlan, { result: "success", backup: { backedUpCount: 0, missingBeforeCount: 0 } });
+    expect(planned.appliedLocations).toEqual([
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "changed.yaml", key: "server.port" },
+      { namespace: "public", group: "DEFAULT_GROUP", dataId: "removed.yaml", key: "__document" },
+    ]);
+    expect(planned.scopeIsWritten, "计划范围不是落笔范围，不许带这个标记").toBeUndefined();
+  });
+
   it("maps rollback plans to restore operation history", () => {
     const applyPlan = plan(
       [{ ref: { ...baseRef, key: "__document" }, sourceValue: value(true, "old"), targetValue: value(true, "new") }],
@@ -205,6 +234,9 @@ describe("prepareApplyExecutionSafety", () => {
         planId: "plan-1",
         taskId: "task-1",
         error: translate("apply.safetyBlockedItems", { count: 1 }),
+        // 轮79 E4：prepare 阶段一条都没写出去，落笔范围必须是空清单
+        appliedLocations: [],
+        scopeIsWritten: true,
       },
     });
   });
@@ -226,6 +258,8 @@ describe("prepareApplyExecutionSafety", () => {
         result: "failure",
         planId: "plan-1",
         error: expect.stringContaining(applyPlan.items[0].id),
+        appliedLocations: [],
+        scopeIsWritten: true,
       },
     });
   });
@@ -258,6 +292,8 @@ describe("prepareApplyExecutionSafety", () => {
         result: "failure",
         planId: "plan-1",
         error: expect.stringContaining("disk full"),
+        appliedLocations: [],
+        scopeIsWritten: true,
       },
     });
   });

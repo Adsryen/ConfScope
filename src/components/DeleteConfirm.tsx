@@ -94,7 +94,7 @@ export default function DeleteConfirm({
           </button>
         </div>
         <div className="modal-body del-body">
-          <p className="del-warn">⚠️ {t('config.deleteWarning')}</p>
+          <p className="del-warn">⚠ {t('config.deleteWarning')}</p>
           <div className="del-target mono">
             {name}
             <span className="del-group"> · {group}</span>

@@ -32,6 +32,10 @@ export default function HistoryChangeDetailPanel({ record, getPlan }: Props) {
     () => buildHistoryChangeDetail(record.planId ? getPlan(record.planId) : null, record),
     [record, getPlan]
   );
+  // 半截失败的记录（轮79 E4）：这份清单只覆盖真正落笔的那几条，必须自己说清楚，
+  // 免得用户把「列了 2 项」读成「勾了 2 项」或「计划只有 2 项」。
+  const partialFailure = record.result !== "success" && record.scopeIsWritten === true;
+  const writtenScopeCount = record.appliedLocations?.length ?? 0;
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
@@ -68,6 +72,12 @@ export default function HistoryChangeDetailPanel({ record, getPlan }: Props) {
           <input type="checkbox" checked={onlyChanged} onChange={(event) => setOnlyChanged(event.target.checked)} />
           {t("operationHistory.changeDetailOnlyChanged")}
         </label>
+      )}
+
+      {partialFailure && (
+        <div className="field-hint" role="note">
+          {t("operationHistory.changeDetailPartialScope", { count: writtenScopeCount })}
+        </div>
       )}
 
       {detail.scopeUnverified && <div className="field-hint">{t("operationHistory.changeDetailScopeUnverified")}</div>}

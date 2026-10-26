@@ -412,6 +412,25 @@ function FieldLabel({
   );
 }
 
+const sshLockIconPaths = ["M8 10V7.5a4 4 0 0 1 8 0V10", "M5.5 10h13v9h-13z", "M12 13.5v2"];
+
+/**
+ * SSH 徽标前的线性锁（轮79 E3）。
+ *
+ * 以前这里挂的是彩色 emoji 🔒：它与全站线性图标不同族，会进徽标的可访问名（读屏念「锁 号 SSH」），
+ * 且 Windows/macOS 两套字形宽窄不同。图标语言只留一套：`fill:none` + `stroke:currentColor`，与
+ * `PasswordField` 的眼睛、`ConfigBrowser` 的工具图标同一档。
+ */
+function SshLockIcon() {
+  return (
+    <svg className="conn-ssh-badge-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {sshLockIconPaths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
 export default function ConnectionManager({ onClose, onChange, embedded = false }: Props) {
   const { t } = useTranslation();
   const defaultNewEnvironment = t("connection.environmentDev");
@@ -1190,7 +1209,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           )}
                           {(c.sshConfig || c.sshProfileId) && (
                             <span className="conn-ssh-badge" title={t("connection.sshConfig")}>
-                              🔒SSH
+                              <SshLockIcon />
+                              SSH
                             </span>
                           )}
                         </div>

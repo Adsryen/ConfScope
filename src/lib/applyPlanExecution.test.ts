@@ -495,6 +495,9 @@ describe("executeApplyPlan", () => {
         type: "apply",
         result: "failure",
         error: expect.stringContaining("plain.txt/feature.enabled"),
+        // 轮79 E4：写入清单都没构造出来 ⇒ 一条都没写，落笔范围是空清单
+        appliedLocations: [],
+        scopeIsWritten: true,
       })
     );
   });
@@ -571,6 +574,15 @@ describe("executeApplyPlan", () => {
     expect(runDeps.publishConfigRef).toHaveBeenCalledWith(apolloTarget, targetRef, "enabled", "properties");
     expect(runDeps.publishConfig).not.toHaveBeenCalled();
     expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+    // 轮79 E4：key 级写入的落笔范围记到 key 这一层。塌成 `__document` 的话，
+    // 回退会把整篇正文当成一项去覆盖，别人在同一个 dataId 下写的 key 也跟着遭殃。
+    const [recordInput] = runDeps.recordOperation.mock.calls[runDeps.recordOperation.mock.calls.length - 1];
+    expect(recordInput).toMatchObject({
+      appliedLocations: [
+        { namespace: "order-service", group: "default", dataId: "application", key: "feature.enabled" },
+      ],
+      scopeIsWritten: true,
+    });
   });
 
   it("executes Consul document writes through provider refs with expected ModifyIndex versions", async () => {
@@ -966,6 +978,148 @@ describe("executeApplyPlan", () => {
   });
 });
 
+
+describe("执行记录的落笔范围（轮79 E4）", () => {
+  /** 从 recordOperation 的调用里取那份记录输入。 */
+  function recorded(runDeps: ReturnType<typeof deps>) {
+    const calls = runDeps.recordOperation.mock.calls;
+    const call = calls[calls.length - 1];
+    if (!call) throw new Error("没有落操作历史，先确认这条路径该不该记");
+    return call[0];
+  }
+
+  const locationOf = (dataId: string, key = "__document") => ({
+    namespace: "public",
+    group: "DEFAULT_GROUP",
+    dataId,
+    key,
+  });
+
+  it("一条都没写成时记空清单，不再谎报成「全部勾选项都写了」", async () => {
+    const plan = applyPlan([{ ref: ref("changed.yaml"), sourceValue: documentValue("new"), targetValue: documentValue("old") }]);
+    // 新鲜度不过 ⇒ 连备份都没做，一条都没写出去
+    const runDeps = deps({
+      "conn-dev:changed.yaml": doc("newer"),
+      "conn-prod:changed.yaml": doc("old"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    const record = recorded(runDeps);
+    expect(record.result).toBe("failure");
+    expect(record.appliedLocations, "前置失败也记「全部可执行项」，回退入口就会多出没碰过的配置").toEqual([]);
+    expect(record.scopeIsWritten).toBe(true);
+  });
+
+  it("备份阶段失败同样记空清单：计划范围不能冒充落笔范围", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps(
+      {
+        "conn-dev:a.yaml": doc("a2"),
+        "conn-prod:a.yaml": doc("a1"),
+        "conn-dev:b.yaml": doc("b2"),
+        "conn-prod:b.yaml": doc("b1"),
+      },
+      { backupReject: new Error("snapshot disk full") }
+    );
+
+    await executeApplyPlan(plan, runDeps);
+
+    const record = recorded(runDeps);
+    expect(record.result).toBe("failure");
+    expect(record.appliedLocations).toEqual([]);
+    expect(record.scopeIsWritten).toBe(true);
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+  });
+
+  it("半截失败只记真正写成的那几条，并与进度里的 completedWrites 对齐", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const documents: Record<string, ConfigDocument | null> = {
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a1"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    };
+    const base = deps(documents);
+    const runDeps = {
+      ...base,
+      publishConfig: vi.fn(async (conn: Connection, _ns: string, dataId: string, _g: string, content: string, configType: string) => {
+        if (dataId === "b.yaml") throw new Error("403 Forbidden");
+        applyDocWrite(documents, conn.id, dataId, content, configType);
+      }),
+    };
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    const record = recorded(runDeps);
+    expect(record.result).toBe("failure");
+    expect(record.appliedLocations).toEqual([locationOf("a.yaml")]);
+    expect(record.scopeIsWritten).toBe(true);
+    // 两个来源必须是同一个数：进度说写成 1 项，范围就只能有 1 条位置
+    const scope = record.appliedLocations ?? [];
+    expect(scope.length, "落笔清单与 completedWrites 打脸").toBe(result.progress?.completedWrites);
+    expect(result.progress).toMatchObject({ completedWrites: 1, totalWrites: 2, failedIndex: 2 });
+  });
+
+  it("执行成功时清单等于全部落笔项，且带 scopeIsWritten 标记", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a1"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(true);
+    const record = recorded(runDeps);
+    expect(record.result).toBe("success");
+    expect(record.appliedLocations).toEqual([locationOf("a.yaml"), locationOf("b.yaml")]);
+    expect(record.scopeIsWritten).toBe(true);
+  });
+
+  it("只勾选一部分执行时，清单只含勾选项：没勾的不能出现在回退范围里", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a1"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { selectedItemIds: [plan.items[1].id] });
+
+    expect(result.ok).toBe(true);
+    expect(recorded(runDeps).appliedLocations).toEqual([locationOf("b.yaml")]);
+  });
+
+  it("dry-run 不落操作历史，也不该攒出落笔清单", async () => {
+    const plan = applyPlan([{ ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") }]);
+    const runDeps = deps({ "conn-dev:a.yaml": doc("a2"), "conn-prod:a.yaml": doc("a1") });
+
+    const result = await executeApplyPlan(plan, runDeps, { dryRun: true });
+
+    expect(result).toMatchObject({ ok: true, dryRun: true, plannedWrites: 1 });
+    expect(runDeps.recordOperation).not.toHaveBeenCalled();
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+  });
+});
 
 describe("content-replace 风格计划（source override + 原文基线指纹）", () => {
   const devRef: ApplyPlanRef = {

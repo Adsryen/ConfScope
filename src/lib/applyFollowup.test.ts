@@ -207,6 +207,20 @@ describe("canBuildRollbackEntry", () => {
     expect(canBuildRollbackEntry(record({ result: "failure", planId: undefined }))).toBe(false);
   });
 
+  it("落笔清单为空时不放出口：本次什么都没写成，没有要还原的现场（轮79 E4）", () => {
+    // 新链路（scopeIsWritten）的空清单：prepare 阶段就失败，一条都没落笔
+    expect(canBuildRollbackEntry(record({ appliedLocations: [], scopeIsWritten: true }))).toBe(false);
+    expect(canBuildRollbackEntry(record({ result: "failure", appliedLocations: [], scopeIsWritten: true }))).toBe(false);
+    // 有落笔项的半截失败仍然放行（R55-A4 那条口径不变）
+    expect(
+      canBuildRollbackEntry(
+        record({ result: "failure", appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }], scopeIsWritten: true })
+      )
+    ).toBe(true);
+    // 老记录没有这个字段，维持原判定：不能因为「没带清单」就判成什么都没写
+    expect(canBuildRollbackEntry(record({ result: "failure" }))).toBe(true);
+  });
+
   it("still rejects success records with an incomplete scene, and types without a plan-backed rollback", () => {
     expect(canBuildRollbackEntry(record({ planId: undefined }))).toBe(false);
     expect(canBuildRollbackEntry(record({ backupSnapshotId: undefined }))).toBe(false);

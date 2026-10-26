@@ -30,18 +30,41 @@ function writeLocation(item: ApplyPlanItem): ApplyPlanRef {
   return item.targetRef ?? item.ref;
 }
 
-/** 把本次真正执行的项记成位置清单，随操作历史一起存盘。 */
-export function appliedLocationsFromItems(items: ApplyPlanItem[]): AppliedConfigLocation[] {
+/** 单个落笔位置：与清单同一套归一口径，逐条累积与整批构造共用这一支笔。 */
+export function appliedLocationForItem(item: ApplyPlanItem): AppliedConfigLocation {
+  const ref = writeLocation(item);
+  return { namespace: ref.namespace, group: ref.group, dataId: ref.dataId, key: ref.key };
+}
+
+/**
+ * 落笔位置收集器（轮79 E4）。
+ *
+ * 执行器逐条写、逐条记，同一位置的重复落笔（同 dataId 先删后建这类）只留一条，
+ * 口径与 `appliedLocationsFromItems` 完全一致——「本次真正写了哪儿」不能有第二套算法。
+ */
+export function createAppliedLocationCollector(): {
+  add: (item: ApplyPlanItem) => void;
+  list: () => AppliedConfigLocation[];
+} {
   const seen = new Set<string>();
   const locations: AppliedConfigLocation[] = [];
-  for (const item of items) {
-    const ref = writeLocation(item);
-    const key = appliedLocationKey(ref.namespace, ref.group, ref.dataId, ref.key);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    locations.push({ namespace: ref.namespace, group: ref.group, dataId: ref.dataId, key: ref.key });
-  }
-  return locations;
+  return {
+    add(item: ApplyPlanItem) {
+      const location = appliedLocationForItem(item);
+      const key = appliedLocationKey(location.namespace, location.group, location.dataId, location.key);
+      if (seen.has(key)) return;
+      seen.add(key);
+      locations.push(location);
+    },
+    list: () => locations.slice(),
+  };
+}
+
+/** 把一批项记成位置清单（计划范围口径；落笔范围请走收集器）。 */
+export function appliedLocationsFromItems(items: ApplyPlanItem[]): AppliedConfigLocation[] {
+  const collector = createAppliedLocationCollector();
+  for (const item of items) collector.add(item);
+  return collector.list();
 }
 
 /**

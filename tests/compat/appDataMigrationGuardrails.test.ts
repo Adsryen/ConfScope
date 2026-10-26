@@ -74,10 +74,10 @@ function expectLegacyDataReadable(): void {
 
   const history = loadOperationHistory();
   expect(history.map((record) => record.id)).toEqual(["legacy-publish", "legacy-apply-history"]);
-  expect(history[0]).toMatchObject({
-    beforeContent: "server.port: 8080",
-    afterContent: "server.port: 9090",
-  });
+  expect(history[0]).toMatchObject({ beforeContent: "server.port: 8080" });
+  // 轮79 E2：这条老数据里存着从未有生产方的 `afterContent`。回读必须既不报错也不冒出该键——
+  // 数据文件格式版本号不动，未知键安静忽略，这是「删字段」唯一的兼容口径。
+  expect(history[0], "死字段回读后又冒出来了，调用方会把它当正文副本用").not.toHaveProperty("afterContent");
   expect(history[1]).toMatchObject({
     type: "apply",
     planId: legacyApplyPlan.id,
