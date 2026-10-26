@@ -816,6 +816,11 @@
 - v1.9.0 的 Release（轮83 补）：tag 在，但当时 CI 的 linux 构建失败，release 作业没跑，
   线上一直没有这一版说明。已按 CHANGELOG 补建（无安装包，标题写明「本次未出安装包，请使用 v1.9.1」，
   正文仍是 CHANGELOG 同源，带生成标记）。
+  补建时踩到一个此前没人注意的性质：GitHub 的 latest 指针不按版本号算，给老版本建 Release 会把它抢过去，
+  而应用内更新的官方源是 `releases/latest/download/update.json` —— 指针落到 0 资产的 v1.9.0 上，
+  这段时间（约 12 分钟）所有人点「检查更新」都会 404。已用 `gh release edit v1.9.13 --latest` 复位并回读确认
+  （latest 现在是 v1.9.13，8 个资产含 update.json）。`--list`/`--apply` 从此附带这条检查：
+  指针不在版本号最高的 Release 上就判红并给出现成的纠正命令，本地快照模式没有这个事实源所以跳过。
 
 ---
 

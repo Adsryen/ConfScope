@@ -40,7 +40,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SECTION_LABELS, listChangelogVersions, normalizeVersion } from "../../scripts/changelogSection.mjs";
-import { isGeneratedBody, manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
+import { isGeneratedBody, latestPointerProblem, manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
 import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
 const WORKFLOW = ".github/workflows/release.yml";
@@ -917,6 +917,31 @@ describe("发布说明的两个消费方同源（轮58）", () => {
     const fixture = runSyncScript(["--print-body=0.9.8", `--changelog=${join(fixtureDir(), "CHANGELOG.md")}`]);
     expect(fixture.code, "段落抽得出就不该非 0").toBe(0);
     expect(fixture.stdout, "CHANGELOG 的最后一段没有下一段可依，退回 commits 链接").toContain(`/commits/v0.9.8`);
+  });
+});
+
+describe("latest 指针必须还在版本号最高的 Release 上", () => {
+  const releases = [{ tag: "v1.9.13" }, { tag: "v1.9.0" }, { tag: "v1.0.0" }];
+
+  it("指针与最高版本号一致就没什么可说", () => {
+    expect(latestPointerProblem({ onlineLatestTag: "v1.9.13", releases })).toBeNull();
+    expect(latestPointerProblem({ onlineLatestTag: "", releases }), "读不到指针不当作错位").toBeNull();
+    expect(latestPointerProblem({ onlineLatestTag: "v1.9.0", releases: [] })).toBeNull();
+  });
+
+  it("老版本抢走指针就判红，并给出现成的纠正命令", () => {
+    const problem = latestPointerProblem({ onlineLatestTag: "v1.9.0", releases });
+    expect(problem, "应用内更新读 releases/latest/download/update.json，错位等于全量用户更新失败").not.toBeNull();
+    expect(problem).toContain("update.json");
+    expect(problem).toContain("gh release edit v1.9.13 --latest");
+  });
+
+  it("接线：--list / --apply 三条出口都把错位算成红，本地快照模式跳过", () => {
+    const syncSource = readFileSync(join(PROJECT_ROOT, SYNC_SCRIPT), "utf8");
+    expect(syncSource).toContain("latestPointerProblem({ onlineLatestTag: latestTag, releases })");
+    const exits = syncSource.match(/return [^\n]*latestProblem[^\n]*\? 1 : 0;/g) ?? [];
+    expect(exits.length, "list / 无写入 / 写入完成三条出口都要带上它").toBe(3);
+    expect(/let latestProblem = null;\s*if \(!opts\.bodiesDir\) \{/.test(syncSource), "快照模式没有线上指针这个事实源").toBe(true);
   });
 });
 

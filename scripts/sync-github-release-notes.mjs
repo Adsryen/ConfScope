@@ -23,7 +23,9 @@
 //      --force 只对单个版本生效（必须给 --version）：它是"我知道这段手写正文该被 CHANGELOG 顶掉"
 //      的人工裁决口子，批量版一旦允许就等于一次误判把整片 Release 的手写正文全冲掉；
 //   3. CHANGELOG 抽不到段落 ⇒ 非 0 退出。宁可红，也不往 Release 写一行空话（与轮52 同口径）；
-//   4. 写完逐条回读比对，不一致就算失败，不静默咽掉。
+//   4. 写完逐条回读比对，不一致就算失败，不静默咽掉；
+//   5. --list / --apply 附带检查 GitHub 的 latest 指针还在版本号最高的 Release 上（应用内更新读的就是
+//      releases/latest/download/update.json），错位判红——补建老版本 Release 会把它抢走，这不是理论风险。
 //
 // compare 链接的上一个 tag 取自 CHANGELOG 段落顺序（本文件按时间倒序，紧跟其下的段落就是
 // 上一版），不读 git tag 列表 —— CI 里是浅克隆，`git tag -l` 可能只有当前这一个。
@@ -208,6 +210,22 @@ export function planRelease(input) {
       ? `线上有 ${chars} 字符说明但未达手写正文篇幅（阈值 ${MANUAL_BODY_MIN_CHARS}），以 CHANGELOG 为准`
       : "线上正文只剩 compare 行",
   };
+}
+
+/**
+ * GitHub 的 latest 指针不按版本号算：给老版本补建 Release 会把它抢过去（2026-10-26 补 v1.9.0 时实测踩到）。
+ * 应用内更新的官方源是 releases/latest/download/update.json，指针落到没有这份资产的版本上，
+ * 所有「检查更新」都会 404。同步正文时顺手把这条不变量看一眼，别等人发现更新不来了再查。
+ */
+export function latestPointerProblem(input) {
+  const { onlineLatestTag, releases } = input;
+  const expected = byVersionDesc(releases ?? [])[0]?.tag;
+  if (!onlineLatestTag || !expected || onlineLatestTag === expected) return null;
+  return (
+    `线上 latest 指针在 ${onlineLatestTag}，而版本号最高的 Release 是 ${expected}：` +
+    `应用内更新读的是 releases/latest/download/update.json，指针落到没有这份资产的版本上，所有人的「检查更新」都会失败。` +
+    `纠正：gh release edit ${expected} --latest`
+  );
 }
 
 // ---- gh 调用层：只有 --list / --apply 联网，--print-body 完全不碰 ----
@@ -461,18 +479,30 @@ function main(argv) {
     }
   }
 
+  // latest 指针只能对着线上看，本地快照模式下没有这个事实源。
+  let latestProblem = null;
+  if (!opts.bodiesDir) {
+    try {
+      const latestTag = ghRun(["api", `repos/${opts.repo}/releases/latest`, "--jq", ".tag_name"]).trim();
+      latestProblem = latestPointerProblem({ onlineLatestTag: latestTag, releases });
+    } catch (error) {
+      latestProblem = `读不到线上 latest 指针：${error.message}`;
+    }
+    if (latestProblem) process.stderr.write(`\n${latestProblem}\n`);
+  }
+
   const missing = plans.filter((plan) => plan.action === "missing-section");
   const writable = plans.filter((plan) => plan.action === "add" || plan.action === "update");
 
   if (opts.mode === "list") {
     process.stdout.write(`\ndry-run：没有改动任何 Release。要落地用 --apply（写入前会先备份线上原正文）。\n`);
-    return missing.length ? 1 : 0;
+    return missing.length || latestProblem ? 1 : 0;
   }
 
   if (!writable.length) {
     process.stdout.write(`\n没有需要写入的 Release${missing.length ? "，但有缺段落" : ""}。\n`);
     for (const plan of missing) process.stderr.write(`缺段落 ${plan.tag}: ${plan.reason}\n`);
-    return missing.length ? 1 : 0;
+    return missing.length || latestProblem ? 1 : 0;
   }
 
   const backupDir = opts.backupDir ?? mkdtempSync(join(tmpdir(), "confscope-release-notes-backup-"));
@@ -508,7 +538,7 @@ function main(argv) {
   const kept = plans.filter((plan) => plan.action === "keep-manual").length;
   const synced = plans.filter((plan) => plan.action === "in-sync").length;
   process.stdout.write(`\n写入成功 ${writable.length - failures.length}/${writable.length}，保留手写 ${kept}，已同步 ${synced}。\n`);
-  return failures.length || missing.length ? 1 : 0;
+  return failures.length || missing.length || latestProblem ? 1 : 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
