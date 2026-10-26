@@ -114,9 +114,10 @@ test("UX-02 配置浏览编辑: 编辑流可用，保存走变更计划且不直
   await page.getByRole("button", { name: "确定" }).click();
 
   // 取消编辑：草稿非空 ⇒ 必须先问「放弃未保存的修改?」，确认后才退出编辑态（轮7 的脏草稿守卫）
+  // 轮90：这条路只退出编辑态、不跳到别的配置，确认按钮是「放弃修改」（旧文案「放弃并切换」在这里说谎）
   await page.getByRole("button", { name: "取消" }).click();
   await expect(page.getByRole("heading", { name: /放弃未保存的修改/ })).toBeVisible({ timeout: 5_000 });
-  await page.getByRole("button", { name: "放弃并切换" }).click();
+  await page.getByRole("button", { name: "放弃修改" }).click();
   await expect(ta).toBeHidden({ timeout: 5_000 });
   const nacosText = await fetchNacosContent(BASE_A, NS_A, "svc-pay.properties", GROUP);
   expect(nacosText).not.toContain("ux02");

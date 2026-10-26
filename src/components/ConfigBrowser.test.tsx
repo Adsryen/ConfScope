@@ -879,15 +879,18 @@ describe("ConfigBrowser", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+    // Esc 只退出编辑态，不发生任何跳转：文案必须照实说「放弃」，不许说「切换」
+    expect(document.querySelector(".modal")?.textContent).toContain("放弃后这些改动会丢失");
+    expect(document.querySelector(".modal")?.textContent).not.toContain("切换");
 
-    // 留在当前 → 仍是编辑态，草稿不丢
-    fireEvent.click(screen.getByRole("button", { name: "留在当前" }));
+    // 继续编辑 → 仍是编辑态，草稿不丢
+    fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
     await waitFor(() => expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument());
     expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
 
-    // 放弃并切换 → 退出编辑态
+    // 放弃修改 → 退出编辑态
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+    fireEvent.click(await screen.findByRole("button", { name: "放弃修改" }));
     await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
   });
@@ -899,9 +902,38 @@ describe("ConfigBrowser", () => {
 
     expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
     expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+    expect(document.querySelector(".modal")?.textContent).toContain("放弃后这些改动会丢失");
 
-    fireEvent.click(screen.getByRole("button", { name: "放弃并切换" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
     await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
+  });
+
+  it("放弃确认的文案跟着动作走：切换配置才说「切换并留在当前」", async () => {
+    // 两条动作共用同一个守卫（dirty 时先问再动），但用户按下去之前必须看清会发生什么：
+    // 切换配置 ⇒「放弃并切换 / 留在当前」；退出编辑 ⇒「放弃修改 / 继续编辑」（见上面两条 Esc/取消用例）。
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "other.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+      ])
+    );
+    await enterEditMode();
+
+    fireEvent.click(screen.getByText("other.json"));
+    expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
+    expect(document.querySelector(".modal")?.textContent).toContain("切换后将丢失这些改动");
+    expect(screen.getByRole("button", { name: "放弃并切换" })).toBeInTheDocument();
+
+    // 留在当前 ⇒ 不动选中项，草稿与编辑态原样
+    fireEvent.click(screen.getByRole("button", { name: "留在当前" }));
+    await waitFor(() => expect(screen.queryByText("放弃未保存的修改？")).not.toBeInTheDocument());
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    // 放弃并切换 ⇒ 真的换到另一份配置，草稿丢弃
+    fireEvent.click(screen.getByText("other.json"));
+    fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeInTheDocument());
+    await waitFor(() => expect(apiMocks.getConfigDocument).toHaveBeenLastCalledWith(conn, "public", "other.json", "DEFAULT_GROUP"));
   });
 
   it("leaves editing on Escape without confirmation when nothing changed", async () => {
@@ -1297,8 +1329,8 @@ describe("ConfigBrowser", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(await screen.findByText("放弃未保存的修改？")).toBeInTheDocument();
 
-    // 危险动作的默认焦点落在「留在当前」，不在执行侧
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "留在当前" }));
+    // 危险动作的默认焦点落在非执行侧（Esc 那条路径上是「继续编辑」）
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "继续编辑" }));
 
     const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
     textarea.focus();
@@ -1309,7 +1341,7 @@ describe("ConfigBrowser", () => {
     expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
 
     // 焦点回到弹框后 Tab 成环，不会跑到被遮住的编辑器上
-    const confirm = screen.getByRole("button", { name: "放弃并切换" });
+    const confirm = screen.getByRole("button", { name: "放弃修改" });
     confirm.focus();
     fireEvent.keyDown(confirm, { key: "Tab" });
     expect(document.activeElement?.closest(".modal")).not.toBeNull();

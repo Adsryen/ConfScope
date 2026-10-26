@@ -211,11 +211,12 @@ test("DWE-02 四个入口只生成计划: 覆盖/删除/新增/回滚 + Nacos �
   await expectNoDisabledWriteError(page);
   await backToBrowseFromPlan(page);
   // 草稿还在（生成计划不是写入成功），退出时必须有放弃确认，不能静默丢
+  // 轮90：取消编辑这一档的确认是「放弃修改」——它不切换到任何配置，旧文案「放弃并切换」是假话
   await page
     .locator(".fmt-bar button", { hasText: /^取消$/ })
     .first()
     .click();
-  await page.getByRole("button", { name: "放弃并切换" }).click();
+  await page.getByRole("button", { name: "放弃修改" }).click();
   await expect(page.locator(".code-editor-ta").filter({ visible: true })).toHaveCount(0, { timeout: T });
   mark("入口1 编辑 → 覆盖计划 ✓");
 

@@ -144,8 +144,11 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [snapshotSaving, setSnapshotSaving] = useState(false);
   // 源文件导出要先等用户在本机目录对话框里选路径，这段时间动作仍在途，按钮必须锁住
   const [sourceExporting, setSourceExporting] = useState(false);
-  // 编辑中有未保存改动时,切换配置先确认;pending 保存待执行的跳转动作
+  // 编辑中有未保存改动时，切换配置先确认；pending 保存待执行的跳转动作
   const [pending, setPending] = useState<(() => void) | null>(null);
+  // 这次待确认的去向会不会真的换配置：换配置与只退出编辑态共用一个确认框，
+  // 但两句文案不通用——「切换后将丢失」用在退出编辑态上就是假话，靠它取键。
+  const [pendingSwitches, setPendingSwitches] = useState(true);
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
   // 写后失效：选中项被计划删除/移走时清空选中，并在空态给出可见说明（不静默变空）
   const [removedByPlan, setRemovedByPlan] = useState<{ dataId: string; group: string } | null>(null);
@@ -224,9 +227,21 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
           { label: t("config.source"), value: metadata.source },
         ].filter((item) => item.value)
       : [];
-  const guardNav = (action: () => void) => {
-    if (dirty) setPending(() => action);
-    else action();
+  /**
+   * 有未保存草稿时先确认再执行 action，确认无草稿时直接执行。
+   *
+   * switches 只描述去向，不改变拦截条件：
+   * - true（默认）：action 会把用户带去另一个配置 → 确认框说「切换后将丢失这些改动」。
+   * - false：action 只收起编辑态、人还停在当前配置 → 确认框说「放弃后这些改动会丢失」。
+   * 拦截口径与轮90 之前完全一致，改的只是弹框里那两句要不要跟着动作走。
+   */
+  const guardNav = (action: () => void, switches = true) => {
+    if (dirty) {
+      setPendingSwitches(switches);
+      setPending(() => action);
+    } else {
+      action();
+    }
   };
   const rememberGroups = (list: ConfigItem[], fallbackGroup?: string) => {
     const extraGroup = fallbackGroup?.trim();
@@ -746,10 +761,12 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   /**
    * 退出编辑态：有未保存改动时先经 guardNav 弹确认，绝不静默丢弃草稿。
    * Esc 与「取消」按钮共用这一条路径，保证两个入口行为一致。
+   *
+   * switches=false：这条路径只退出编辑态，正文回到服务端那份，不发生任何「切换」。
    */
   const cancelEditing = () => {
     setSaveError(null);
-    guardNav(() => setEditing(false));
+    guardNav(() => setEditing(false), false);
   };
 
   // 编辑态按 Esc 取消编辑；更高一层的弹层（新建/删除/确认/替换/目标选择/校验提示）打开时不参与。
@@ -1635,9 +1652,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       {pending && (
         <ConfirmModal
           title={t("config.discardConfirm")}
-          message={t("config.discardMessage")}
-          confirmLabel={t("config.discardAndSwitch")}
-          cancelLabel={t("config.stayCurrent")}
+          message={t(pendingSwitches ? "config.discardSwitchMessage" : "config.discardCancelMessage")}
+          confirmLabel={t(pendingSwitches ? "config.discardAndSwitch" : "config.discardChanges")}
+          cancelLabel={t(pendingSwitches ? "config.stayCurrent" : "config.stayEditing")}
           danger
           onConfirm={() => {
             const act = pending;
