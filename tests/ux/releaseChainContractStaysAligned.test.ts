@@ -49,7 +49,11 @@ const NOTES_SCRIPT = "scripts/extract-release-notes.mjs";
 const SYNC_SCRIPT = "scripts/sync-github-release-notes.mjs";
 const REPO = "Adsryen/ConfScope";
 const VERIFY_SCRIPT = "scripts/verify-release-version.sh";
-const PKG_VERSION: string = JSON.parse(readFileSync(join(PROJECT_ROOT, "package.json"), "utf8")).version;
+const PKG = JSON.parse(readFileSync(join(PROJECT_ROOT, "package.json"), "utf8")) as {
+  version: string;
+  scripts: Record<string, string>;
+};
+const PKG_VERSION: string = PKG.version;
 
 /** update.json 里 Go 一定会读的顶层键（缺一个就等于界面上少一块信息）。 */
 const REQUIRED_TOP_LEVEL = ["version", "notes", "publishedAt", "mandatory", "platforms"];
@@ -386,7 +390,8 @@ function preflightProblems(text: string): string[] {
   const script = jobScript(jobs.preflight);
   const required: { label: string; pattern: RegExp }[] = [
     { label: "依赖按锁文件安装", pattern: /pnpm install\s+--frozen-lockfile/ },
-    { label: "类型检查", pattern: /tsc --noEmit/ },
+    { label: "类型检查", pattern: /pnpm typecheck|tsc --noEmit/ },
+    { label: "Lint", pattern: /pnpm lint/ },
     { label: "前端构建与生产守卫", pattern: /pnpm build:web/ },
     { label: "静态守卫与单测", pattern: /vitest run tests\/ux/ },
     { label: "gofmt 判据", pattern: /gofmt -l/ },
@@ -434,6 +439,14 @@ describe("发版链路的契约对齐（轮52）", () => {
 
   it("真实 release.yml：预检门禁在位且被 build 依赖", () => {
     expect(preflightProblems(text)).toEqual([]);
+  });
+
+  it("pnpm typecheck 这条规范入口里真的跑了两遍 tsc（src + tests/）", () => {
+    // 工作流认 pnpm typecheck，代价是判据挪进了 package.json：这一条把两端接起来，
+    // 否则哪天脚本被改成只查 src/，门禁就悄悄瞎了轮85 之前那块盲区。
+    expect(PKG.scripts.typecheck).toMatch(/tsc --noEmit/);
+    expect(PKG.scripts.typecheck, "tests/ 与 scripts/ 也必须进编译器").toMatch(/tsc -p tsconfig\.tests\.json --noEmit/);
+    expect(PKG.scripts.lint, "lint 不能只盯 src/，用例与脚本同样要过").toMatch(/eslint src\/ tests\/ scripts\//);
   });
 
   it("真实 release.yml：update.json 与 Go 解码器、矩阵、发布资产名四方一致", () => {
@@ -1038,6 +1051,7 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
 
   it("重跑幂等；生成标记不算进「人手写的字符数」", () => {
     const rendered = renderReleaseBody(FIXTURE_CHANGELOG, "2.2.0", { repo: REPO });
+    if (!rendered) throw new Error("夹具里的 2.2.0 段落渲染不出正文，这条幂等用例失去判据");
     expect(planRelease({ rendered, existingBody: rendered.body }).action, "线上已是刚渲染的那份 ⇒ 不该再写一遍").toBe("in-sync");
     const stripped = rendered.body.replace(/^<!-- confscope:release-notes.*-->$/gm, "").trim() + "\n";
     expect(manualBodyChars(rendered.body), "标记不计入手写字符数，否则脚本产物会被当手写保护起来").toBe(manualBodyChars(stripped));

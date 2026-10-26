@@ -41,8 +41,15 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # 轮85 起 typecheck 含两遍：src（基准 tsconfig）+ tests/（tsconfig.tests.json）。
+      # 用例层以前从不进编译器，helper 签名漂移、恒假断言、被静默吞掉的 expect 说明文案
+      # 都要等 21 分钟的全量 retest 才暴露 —— 现在在出包前就红。
       - name: Typecheck
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
+
+      # lint 同样从「只看 src/」扩到 tests/ 与 scripts/，跟着出包一起把关
+      - name: Lint
+        run: pnpm lint
 
       # 生产守卫（脚手架不得混进产物）跟着前端构建一起跑，别等到平台作业才发现
       - name: Build web bundle
