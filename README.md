@@ -113,6 +113,7 @@ ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置�
 | 凭据安全 | Windows 下小凭据迁移到系统凭据库，数据文件里只存 `secretRef`；备份包仍支持跨机器迁移 |
 | 数据位置 | 数据根按运行形态解析（便携版随程序目录走，安装版落系统用户数据目录），设置页展示命中档位与各类数据落点，并支持换根迁移与回退 |
 | 应用更新 | 应用内检查更新，更新说明与 GitHub Release 正文同源（都取自 CHANGELOG 同一段落） |
+| 反馈通道 | 关于页「反馈问题」打开 Issue 时预填问题描述、复现步骤、期望表现三段，并自动带上版本号、平台、运行形态、安装包名与界面语言；环境块就地可见可复制，不用手抄 |
 | 界面 | 中文/英文文案，环境名推断出统一色调档（dev/test/staging/canary/prod/local），键盘可达性与读屏语义持续收敛 |
 | 真实环境测试 | Docker Nacos/Apollo/Consul/WebDAV/SSH fixture + Windows native Wails smoke 覆盖主流程 |
 
@@ -137,6 +138,8 @@ ConfScope 是一个基于 **Wails 2 + Go + React + TypeScript** 的桌面配置�
 - SSH private key、SSH passphrase 等大 secret 尚未迁移到安全存储，拆在后续
   `windows-large-secret-protection` 任务线。
 - macOS Keychain 与 Linux Secret Service 尚未实现，非 Windows 平台走兼容回退。
+- 关于页「反馈问题」带出去的运行环境信息只有版本号、平台、运行形态、安装包名与界面语言，不含数据目录路径、
+  连接名、命名空间与配置内容；正文与剪贴板都只在用户明确点击时才动。
 - 本 README 的界面截图全部由 `tests/retest/shots/` 用合成数据集重拍产出，不含任何真实环境内容；
   公开截图与文档面的凭据形态由 `tests/ux/publicScreenshotsStaySanitized.test.ts` 在发布预检里
   把住。早期版本 tag 树里遗留的真实环境截图（已按泄露处理）见

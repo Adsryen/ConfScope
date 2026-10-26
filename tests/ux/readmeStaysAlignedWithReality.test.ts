@@ -163,6 +163,7 @@ describe("CHANGELOG 每个已发布版本的能力都要在 README 有据可查"
   const README_COVERAGE: Record<string, string[]> = {
     "1.9.12": ["生成回退计划", "只看可回退"],
     "1.9.13": ["本次改动", "点名生产命名空间"],
+    "1.9.14": ["反馈问题"],
   };
   const COVERAGE_FLOOR = "1.9.12";
 
