@@ -1,13 +1,14 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor, within } from "../test/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import type { Task } from "../lib/taskmanager";
 import { buildApplyPlan, type ApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
+import type { OperationRecord } from "../store/operationHistory";
 import { formatDateTime } from "../lib/formatDateTime";
 import { applyConfirmationText } from "../lib/applyPlanExecution";
 
@@ -23,6 +24,7 @@ const draftMocks = vi.hoisted(() => ({
 
 const storeMocks = vi.hoisted(() => ({
   saveApplyPlan: vi.fn((plan: ApplyPlan) => plan),
+  getApplyPlan: vi.fn(() => null),
 }));
 
 const executionMocks = vi.hoisted(() => ({
@@ -31,6 +33,7 @@ const executionMocks = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   getConfigDocument: vi.fn(),
+  listNamespaces: vi.fn(async () => []),
   publishConfigFromApplyPlan: vi.fn(),
   deleteConfigFromApplyPlan: vi.fn(),
   publishConfigRefFromApplyPlan: vi.fn(),
@@ -44,6 +47,8 @@ const snapshotMocks = vi.hoisted(() => ({
 
 const historyMocks = vi.hoisted(() => ({
   recordOperation: vi.fn(),
+  // 轮76：成功分支当场把本次记录读回来喂给晋级面板，缺这个导出整条成功路径都会炸在 try 里。
+  loadOperationHistory: vi.fn((): OperationRecord[] => []),
 }));
 
 const taskManagerMocks = vi.hoisted(() => ({
@@ -68,6 +73,7 @@ vi.mock("../lib/applyPlanDraft", () => ({
 
 vi.mock("../store/applyPlans", () => ({
   saveApplyPlan: storeMocks.saveApplyPlan,
+  getApplyPlan: storeMocks.getApplyPlan,
 }));
 
 vi.mock("../lib/applyPlanExecution", async () => {
@@ -80,6 +86,7 @@ vi.mock("../lib/applyPlanExecution", async () => {
 
 vi.mock("../api/nacos", () => ({
   getConfigDocument: apiMocks.getConfigDocument,
+  listNamespaces: apiMocks.listNamespaces,
   publishConfigFromApplyPlan: apiMocks.publishConfigFromApplyPlan,
   deleteConfigFromApplyPlan: apiMocks.deleteConfigFromApplyPlan,
   publishConfigRefFromApplyPlan: apiMocks.publishConfigRefFromApplyPlan,
@@ -93,6 +100,12 @@ vi.mock("../api/snapshot", () => ({
 
 vi.mock("../store/operationHistory", () => ({
   recordOperation: historyMocks.recordOperation,
+  loadOperationHistory: historyMocks.loadOperationHistory,
+}));
+
+// 晋级面板标记验证成功后会 toast 一句；真 toast 往 body 挂节点，用例之间会互相看见。
+vi.mock("../lib/toast", () => ({
+  toast: vi.fn(),
 }));
 
 vi.mock("../lib/taskmanager", () => ({
@@ -269,15 +282,44 @@ function stagedEntryPayload(): ApplyEntryPayload {
 function renderView(
   entry: ApplyEntryPayload | null = entryPayload,
   connections: Connection[] = [sourceConn, targetConn],
-  onOpenHistory = vi.fn()
+  onOpenHistory = vi.fn(),
+  onStartApply = vi.fn()
 ) {
   const onBack = vi.fn();
   render(
     <I18nProvider>
-      <ApplyPlanView entry={entry} connections={connections} onBack={onBack} onOpenHistory={onOpenHistory} />
+      <ApplyPlanView entry={entry} connections={connections} onBack={onBack} onOpenHistory={onOpenHistory} onStartApply={onStartApply} />
     </I18nProvider>
   );
-  return { onBack, onOpenHistory };
+  return { onBack, onOpenHistory, onStartApply };
+}
+
+/**
+ * 本次执行落到操作历史的那条记录（晋级面板按 id 从 loadOperationHistory 的返回值里认它）。
+ * 只给面板读数需要的字段：验证状态戳与生产目标候选都从这些字段出发。
+ */
+function appliedHistoryRecord(overrides: Partial<OperationRecord> = {}): OperationRecord {
+  return {
+    id: "history-1",
+    type: "apply",
+    result: "success",
+    timestamp: "2026-07-06T12:00:00Z",
+    connectionId: "conn-prod",
+    connectionName: "Prod",
+    namespace: "public",
+    group: "DEFAULT_GROUP",
+    dataId: "app.properties",
+    planId: "plan-preview-1",
+    backupSnapshotId: "snap-before-1",
+    sourceConnectionId: "conn-dev",
+    sourceConnectionName: "Dev",
+    sourceNamespace: "public",
+    targetConnectionId: "conn-prod",
+    targetConnectionName: "Prod",
+    targetNamespace: "public",
+    rollbackable: false,
+    ...overrides,
+  };
 }
 
 describe("ApplyPlanView", () => {
@@ -286,6 +328,10 @@ describe("ApplyPlanView", () => {
     localStorage.setItem("locale", "en-US");
     draftMocks.buildApplyPlanFromEntry.mockReset();
     storeMocks.saveApplyPlan.mockClear();
+    storeMocks.getApplyPlan.mockReset();
+    storeMocks.getApplyPlan.mockReturnValue(null);
+    historyMocks.loadOperationHistory.mockReset();
+    historyMocks.loadOperationHistory.mockReturnValue([]);
     executionMocks.executeApplyPlan.mockReset();
     executionMocks.executeApplyPlan.mockResolvedValue({ ok: true, taskId: "task-1", historyId: "history-1" });
     apiMocks.getConfigDocument.mockReset();
@@ -870,7 +916,7 @@ describe("ApplyPlanView", () => {
     const verifyStepLabel = await screen.findByText("Execute, verify, and promote");
     expect(verifyStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
     // 当前步的 hover 气泡含步骤说明（安全语义保留在气泡内）
-    expect(verifyStepLabel.closest("li")).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
+    expect(verifyStepLabel.closest("li")).toHaveAttribute("title", expect.stringContaining("mark the sandbox verified"));
     // 前四步已完成，第五步仍为当前（沙箱执行后未整体完结）
     expect(document.querySelectorAll(".diff-workflow-step.completed")).toHaveLength(4);
   });
@@ -895,7 +941,7 @@ describe("ApplyPlanView", () => {
     expect(steps[3].querySelector("button")).not.toBeInTheDocument();
     expect(steps[4].querySelector("button")).not.toBeInTheDocument();
     expect(steps[4].classList.contains("locked")).toBe(true);
-    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("mark the sandbox verified"));
     fireEvent.click(steps[2].querySelector("button")!);
     expect(onBack).toHaveBeenCalledWith("plan");
     fireEvent.click(steps[0].querySelector("button")!);
@@ -1651,7 +1697,7 @@ describe("ApplyPlanView", () => {
       fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
 
       expect(await screen.findByText("Read-back: 2/2 items match what was written")).toBeInTheDocument();
-      expect(screen.getByText(/Safe to mark the run verified/)).toBeInTheDocument();
+      expect(screen.getByText(/You can mark the sandbox verified here/)).toBeInTheDocument();
       expect(document.querySelector(".apply-post-write-verification.is-warning")).not.toBeInTheDocument();
     });
 
@@ -1679,6 +1725,102 @@ describe("ApplyPlanView", () => {
       fireEvent.click(screen.getByRole("button", { name: "Dry-run check" }));
       expect(await screen.findByText(/Dry-run passed/)).toBeInTheDocument();
       expect(document.querySelector(".apply-post-write-verification")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("第5步的晋级面板挂载条件（轮76）", () => {
+    // 目标端选 Staging：isSandboxTarget 认不出它，执行才会走「成功完成」这条档，
+    // 晋级面板挂的就是一条在沙箱写完了的执行记录。
+    function stubSandboxPlan() {
+      draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+        ok: true,
+        plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))], {
+          targetId: "conn-stage",
+          targetLabel: "Staging / public",
+        }),
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+    }
+
+    // 面板只在「真实写入 + 成功 + 拿得到本次记录」时出现：dry-run 什么也没写，
+    // 在它上面挂一颗「标记沙箱验证通过」等于让用户对一份不存在的现场盖章。
+    it("真实写入成功后给出晋级面板", async () => {
+      stubSandboxPlan();
+      historyMocks.loadOperationHistory.mockReturnValue([appliedHistoryRecord()]);
+      renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+
+      expect(await screen.findByText("Promote to production")).toBeInTheDocument();
+      // 没标记验证之前晋级按钮必须灰着，且灰的原因要能读出来。
+      const promote = screen.getByRole("button", { name: "Promote using this verification" }) as HTMLButtonElement;
+      expect(promote.disabled).toBe(true);
+      expect(promote.closest(".btn-guard")?.getAttribute("title")).toContain("Mark the sandbox verified before promoting.");
+    });
+
+    it("只跑 dry-run 时不给晋级面板", async () => {
+      stubSandboxPlan();
+      historyMocks.loadOperationHistory.mockReturnValue([appliedHistoryRecord()]);
+      renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
+      // 这一趟什么都不写：执行器返回 dryRun 档，页面只该有「干跑通过」的结论。
+      executionMocks.executeApplyPlan.mockResolvedValueOnce({ ok: true, dryRun: true, taskId: "task-promote-dry", plannedWrites: 1 });
+      fireEvent.click(await screen.findByRole("button", { name: "Dry-run check" }));
+      expect(await screen.findByText(/Dry-run passed/)).toBeInTheDocument();
+
+      expect(screen.queryByText("Promote to production")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Mark sandbox verified" })).toBeNull();
+    });
+  });
+
+  describe("步骤条的回退点击只对来自对比流程的计划开放（轮76）", () => {
+    function stubReadyPlan() {
+      draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+        ok: true,
+        plan: makePlan([item("__document", value("server.port=8080"), value("server.port=9090"))]),
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+    }
+
+    // 五步流程长在配置对比上：前三步的回退点击 = 离开本页回对比页聚焦那一步。
+    // 回退/晋级/审计/备份/配置浏览进来的计划没有可回的对比现场，点了只会把人丢到别的页面，
+    // 气泡那句「Back to ... (progress preserved)」就成了假话——轮76 把晋级入口搬回第5步后必然踩到。
+    it("history-origin plans keep steps 1-3 as a plain indicator", async () => {
+      stubReadyPlan();
+      for (const origin of [
+        { mode: "promote", returnMode: "history" },
+        { mode: "rollback", returnMode: "history" },
+        { mode: "audit", returnMode: "audit" },
+        { mode: "backup", returnMode: "backup" },
+      ] as const) {
+        const view = renderView({ ...entryPayload, origin: { ...origin } });
+        await screen.findByText("Generate & review plan (dry-run, no writes)");
+        const steps = Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
+        expect(steps).toHaveLength(5);
+        for (const step of steps.slice(0, 3)) {
+          expect(step.querySelector("button"), `${origin.mode} 的前三步不许给回退按钮`).toBeNull();
+          expect(step.classList.contains("clickable"), `${origin.mode} 的第3步不该装作可点`).toBe(false);
+          expect(step.getAttribute("title"), `${origin.mode} 的气泡不许承诺回退`).not.toContain("Back to");
+        }
+        // 退回纯指示后气泡回到「步骤名: 步骤说明」，信息一分没少
+        expect(steps[0]).toHaveAttribute("title", expect.stringContaining("Confirm direction"));
+        // 出口仍是「返回」：落点对着入口的来源页
+        fireEvent.click(screen.getByRole("button", { name: "Back" }));
+        expect(view.onBack).toHaveBeenCalledTimes(1);
+        cleanup();
+      }
+    });
+
+    it("compare-origin plans keep the clickable back steps", async () => {
+      stubReadyPlan();
+      renderView();
+      await screen.findByText("Generate & review plan (dry-run, no writes)");
+      const steps = Array.from(document.querySelectorAll(".diff-workflow-step")) as HTMLElement[];
+      expect(steps[0].querySelector("button")).toBeInTheDocument();
+      expect(steps[2].querySelector("button")).toBeInTheDocument();
+      expect(steps[0]).toHaveAttribute("title", expect.stringContaining("Back to"));
+      cleanup();
     });
   });
 });

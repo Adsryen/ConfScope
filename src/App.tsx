@@ -42,7 +42,7 @@ import { buildSnapshotConnection, mergeSnapshotRuntimeConnection } from "./lib/s
 import { toast } from "./lib/toast";
 import { hasExistingStartupData, startupDialogKind, type StartupDialogKind } from "./lib/startupDialog";
 import { recordOperation } from "./store/operationHistory";
-import type { ApplyEntryPayload } from "./lib/applyEntry";
+import { applyEntryReturnMode, type ApplyEntryPayload } from "./lib/applyEntry";
 import { errorText } from "./lib/errorText";
 import { statusMessageProps } from "./lib/statusSemantics";
 
@@ -166,7 +166,8 @@ function isNavigableMode(mode: string | undefined): mode is NavigableMode {
 }
 
 function applyReturnMode(payload: ApplyEntryPayload): NavigableMode {
-  const mode = payload.origin.returnMode ?? payload.origin.mode;
+  // 落点判据收在 applyEntry.ts：计划页的步骤条按同一个答案决定能不能点（轮76）。
+  const mode = applyEntryReturnMode(payload);
   return isNavigableMode(mode) ? mode : "browse";
 }
 
@@ -783,6 +784,7 @@ export default function App() {
               entry={pendingApplyEntry}
               connections={diffConnections}
               onOpenHistory={openHistoryAtRecord}
+              onStartApply={startApply}
               onBack={(focusStep) => {
                 // 只有回程目标是 diff 才递聚焦步：对比页现在常驻挂载，focusStep 落到
                 // 看不见的那一棵 = 替别的页面抢焦点（DiffView 里另有 active 闸门兜底）。

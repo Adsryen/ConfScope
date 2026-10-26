@@ -17,7 +17,7 @@ import { formatDateTime } from "../lib/formatDateTime";
 import CodeEditor from "./CodeEditor";
 import { validateConfig } from "../lib/validate";
 import { describeParseError } from "../lib/parseErrorCopy";
-import type { ApplyEntryPayload } from "../lib/applyEntry";
+import { applyEntryStepsAreNavigable, type ApplyEntryPayload } from "../lib/applyEntry";
 import { buildApplyPlanFromEntry } from "../lib/applyPlanDraft";
 import {
   applyConfirmationText,
@@ -27,7 +27,7 @@ import {
   type ApplyWriteVerification,
 } from "../lib/applyPlanExecution";
 import { getTaskManager, type Task, type TaskStatus } from "../lib/taskmanager";
-import { recordOperation } from "../store/operationHistory";
+import { loadOperationHistory, recordOperation, type OperationRecord } from "../store/operationHistory";
 import { publishConfigChange } from "../lib/configChangeBus";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
 import { saveApplyPlan } from "../store/applyPlans";
@@ -36,6 +36,7 @@ import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
 import DiffPanel from "./DiffPanel";
+import PostApplyPromotionPanel from "./PostApplyPromotionPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -50,6 +51,11 @@ interface Props {
    * 不传（比如脱离 App 单独渲染）就不摆按钮，不放一个点了没反应的空入口。
    */
   onOpenHistory?: (recordId: string) => void;
+  /**
+   * 换一份入口负载回到第1步（轮76：第5步的晋级入口要用它把沙箱→生产的新计划交给 App）。
+   * 它不写任何东西，产出的仍是变更计划入口，五步 + dry-run 一道不少。
+   */
+  onStartApply?: (payload: ApplyEntryPayload) => void;
 }
 
 type DraftState =
@@ -479,7 +485,10 @@ function ConfirmationPanel({
   executionSucceeded,
   writeVerification,
   executeHistoryId,
+  executeRecord,
+  connections,
   onOpenHistory,
+  onStartApply,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
@@ -502,7 +511,11 @@ function ConfirmationPanel({
   writeVerification: ApplyWriteVerification | null;
   /** 本次执行写进操作历史的记录 id；拿不到就没有回退入口可指。 */
   executeHistoryId: string | null;
+  /** 本次执行留下的那条记录（成功分支才有）：晋级面板要从它读验证状态与执行范围。 */
+  executeRecord: OperationRecord | null;
+  connections: Connection[];
   onOpenHistory?: (recordId: string) => void;
+  onStartApply?: (payload: ApplyEntryPayload) => void;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
@@ -696,11 +709,25 @@ function ConfirmationPanel({
           <span className="apply-rollback-entry-hint">{t("apply.openHistoryToRollbackHint")}</span>
         </div>
       )}
+      {/*
+       * 晋级的正规入口（轮76）：只在「真实写入 + 执行成功 + 拿得到本次记录」时出现。
+       * dry-run 什么都不写、失败记录连写前现场都没收口，这两种形态下「沙箱验证通过」是假话，
+       * 所以不给面板；半截写入同理，出口仍是上面那颗「到操作历史回退本次改动」。
+       */}
+      {executionSucceeded && executeRecord && onStartApply && (
+        <PostApplyPromotionPanel
+          record={executeRecord}
+          connections={connections}
+          readbackConfirmed={Boolean(writeVerification) && (writeVerification?.unconfirmedCount ?? 0) === 0}
+          readbackUnconfirmedCount={writeVerification?.unconfirmedCount ?? writeVerification?.total ?? 0}
+          onStartApply={onStartApply}
+        />
+      )}
     </div>
   );
 }
 
-export default function ApplyPlanView({ entry, connections, onBack, onOpenHistory }: Props) {
+export default function ApplyPlanView({ entry, connections, onBack, onOpenHistory, onStartApply }: Props) {
   const { t } = useTranslation();
   const [draftState, setDraftState] = useState<DraftState>({ status: "idle" });
   const [selectedId, setSelectedId] = useState("");
@@ -722,6 +749,9 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const [executeProgress, setExecuteProgress] = useState<ApplyExecutionProgress | null>(null);
   // 本次执行落到操作历史的记录 id（轮66 WP-2）：回退入口要指着这条记录，同样跟着 executeError 一起清
   const [executeHistoryId, setExecuteHistoryId] = useState<string | null>(null);
+  // 本次执行那条记录本身（轮76）：晋级面板要按它读沙箱验证状态和本次执行范围，
+  // 在成功分支一次性解析好，不在渲染期读 localStorage（判据见 tests/ux/renderTimeStorageReads.test.ts）。
+  const [executeRecord, setExecuteRecord] = useState<OperationRecord | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
   // 写后回读结论（R55-B2）：跟着执行态一起重置，换一次执行不能留着上一轮的结论
   const [writeVerification, setWriteVerification] = useState<ApplyWriteVerification | null>(null);
@@ -850,6 +880,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setExecuteError(null);
     setExecuteProgress(null);
     setExecuteHistoryId(null);
+    setExecuteRecord(null);
     setExecuteNotice(null);
     setWriteVerification(null);
     buildDraft();
@@ -1004,6 +1035,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     if (selectedItemIds.length === 0) {
       setExecuteNotice(null);
       setExecuteHistoryId(null);
+      setExecuteRecord(null);
       setExecuteError(t("apply.noSelectedItems"));
       return;
     }
@@ -1019,7 +1051,12 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     trackedTaskIdRef.current = null;
     setExecuteError(null);
     setExecuteProgress(null);
-    setExecuteHistoryId(null);
+    // dry-run 什么都不写，不该把上一次真实执行留下的记录引用一起抹掉：
+    // 写完再干跑一次核对现状是最自然的动作，抹掉就等于把晋级/回退入口藏起来（轮76）。
+    if (!dryRun) {
+      setExecuteHistoryId(null);
+      setExecuteRecord(null);
+    }
     setExecuteNotice(null);
     setWriteVerification(null);
     // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
@@ -1116,10 +1153,13 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
         trackedTaskIdRef.current = result.taskId;
         setExecutionTask(taskManager.getTask(result.taskId) ?? null);
       }
+      // 成功也要记住本次记录（F4）：轮66 只在失败分支设过，成功屏因此指不回自己的现场。
+      // 记录由执行器同步写进本地历史，这里当场读回来一次，不放进渲染期。
+      setExecuteHistoryId(resultHistoryId ?? null);
+      setExecuteRecord(resultHistoryId ? loadOperationHistory().find((item) => item.id === resultHistoryId) ?? null : null);
       if (!result.ok) {
         setExecuteError(result.error);
         setExecuteProgress(result.progress ?? null);
-        setExecuteHistoryId(resultHistoryId ?? null);
         auditSessionEvent(session, {
           kind: "apply_error",
           result: "failure",
@@ -1173,6 +1213,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       setExecuteError(errorText(error));
       setExecuteProgress(null);
       setExecuteHistoryId(null);
+      setExecuteRecord(null);
       auditSessionEvent(session, {
         kind: "apply_error",
         result: "failure",
@@ -1206,10 +1247,12 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
           <div className="page-subtitle">{entry ? t("apply.subtitle") : t("apply.missingEntry")}</div>
         </div>
         {plan && (
+          /* 回退点击只在「返回落点确实是对比页」时给出（轮76）：晋级/回退/审计/备份进来的计划
+             没有对比现场可回，按钮点下去落在别的页面，气泡那句「回到「确认方向」（进度保留）」就成了假话。 */
           <DiffWorkflowCard
             currentStep={workflowCurrentStep}
             completed={executionCompleted}
-            onStepClick={onWorkflowStepClick}
+            onStepClick={applyEntryStepsAreNavigable(entry) ? onWorkflowStepClick : undefined}
           />
         )}
         <div className="page-actions">
@@ -1304,7 +1347,10 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
               executionSucceeded={executionSucceeded}
               writeVerification={writeVerification}
               executeHistoryId={executeHistoryId}
+              executeRecord={executeRecord}
+              connections={connections}
               onOpenHistory={onOpenHistory}
+              onStartApply={onStartApply}
               onConfirmedChange={setConfirmed}
               onConfirmationTextChange={setConfirmationText}
               onExecute={() => runPlan(false)}

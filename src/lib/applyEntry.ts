@@ -75,6 +75,28 @@ export function applyEntryRiskSummary(items: ApplyEntryItem[], skippedCount = 0)
   };
 }
 
+/**
+ * 这份入口的「返回」该落到哪儿：写在入口里就按写的算，没写就退回它的来源模式。
+ * 判据只在这儿一份——App 用它决定模式跳转，计划页用它决定步骤条能不能点（轮76）。
+ */
+export function applyEntryReturnMode(payload: Pick<ApplyEntryPayload, "origin">): string {
+  return payload.origin.returnMode ?? payload.origin.mode;
+}
+
+/**
+ * 计划页的步骤条是不是真的能「回到某一步」。
+ *
+ * 那条五步流程长在配置对比上：点第 1/2/3 步 = 离开计划页回到对比页的那一步。
+ * 从操作历史（回退/晋级）、审计、备份、配置浏览进来的计划没有可回的对比现场，
+ * 同样这些按钮点下去只是把人丢到别的页面，气泡却写着「回到「确认方向」（进度保留）」——
+ * 轮76 把晋级入口搬回第5步后，这条谎每份晋级计划都会踩一次，所以在这里收口：
+ * 返回落点不是对比页时，步骤条退回纯指示（不可点，气泡回到「步骤名: 步骤说明」）。
+ */
+export function applyEntryStepsAreNavigable(payload: Pick<ApplyEntryPayload, "origin"> | null | undefined): boolean {
+  if (!payload) return false;
+  return applyEntryReturnMode(payload) === "diff";
+}
+
 export function applyEntryId(payload: ApplyEntryPayload): string {
   const first = payload.items[0];
   const targetRef = first?.targetRef ?? first;
