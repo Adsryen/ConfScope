@@ -206,8 +206,8 @@ bash scripts/build-latest.sh --clean                             # Windows 侧�
 
 ```bash
 go test ./... -count=1
-pnpm exec tsc --noEmit
-pnpm lint
+pnpm typecheck                  # 两遍 tsc：src（基准 tsconfig）+ tests/ 与 scripts/（tsconfig.tests.json）
+pnpm lint                       # eslint src/ tests/ scripts/（用例与脚本同样要过，轮85 起）
 pnpm test                       # Vitest：src 单测 + tests/ux 静态守卫 + tests/compat 数据护栏
 pnpm build:web                  # 前端构建 + 生产 bundle 守卫
 
@@ -220,7 +220,15 @@ npx playwright test -c tests/retest/shots/playwright.config.ts  # 重拍本文�
 ```
 
 retest 与截图取证都依赖 `scripts/retest-data/` 的合成数据，跑之前先按
-[`scripts/retest-data/README.md`](scripts/retest-data/README.md) 起好容器。
+[`scripts/retest-data/README.md`](scripts/retest-data/README.md) 起好容器，
+再跑一次 `python3 scripts/retest-data/init-namespaces.py` 把双 Nacos 需要的命名空间建齐（幂等，
+创建后回读确认，并复核 A 侧没有 `retest-qa`）。这一步不能省：往不存在的命名空间发布，Nacos v1
+会当成成功（POST 返回 true、blur 列表看得见这一行），但那套租户在命名空间列表里永远列不出来，
+应用的浏览页因此读不到它；而 `retest-qa` 在 A 上必须**不存在**——两条晋级用例验的正是
+「目标上这套租户还没建出来 ⇒ 提示晋级会新建它」。
+
+全量批也进了 GitHub Actions：`Retest` 作业（手动 dispatch，可选 `--grep` 调试口子），
+双 Nacos 与命名空间都由仓库里的脚本拉起，用来兜住「本机环境恰好是好的」这条依靠。
 
 改动**操作历史 / 变更计划第5步晋级 / 分段控件**这类跨页 UI，收口必须跑一次**全量** retest
 （不带 spec 参数的那条命令），只跑相关的那几个文件不算：静态守卫与 jsdom 单测挡得住
