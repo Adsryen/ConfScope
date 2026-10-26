@@ -966,6 +966,28 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
     expect(forced.code).not.toBe(0);
   });
 
+  it("参数口径：--force 只准逐版覆盖手写正文，批量回填拿不到这个口子", () => {
+    // 批量 --apply --force 一旦允许，一次判错就把整片 Release 的手写正文冲掉，
+    // 而备份只在写之前那份，恢复还得人工逐个对回线上。
+    // 探针仓库名：万一参数校验哪天被改回去，这条命令会打到不存在的仓库上直接失败，
+    // 而不是拿真实的 Adsryen/ConfScope 去批量覆盖手写正文（变异测试时踩过这个雷）。
+    const probeRepo = "--repo=confscope-ci-probe/no-such-release-repo";
+    for (const args of [["--apply", "--force"], ["--apply", "--all", "--force"]]) {
+      const run = runSyncScript([...args, probeRepo]);
+      expect(run.code, `${args.join(" ")} 必须被参数校验拦住`).toBe(2);
+      expect(run.stderr).toContain("--version");
+      expect(run.stderr, "要给出可用的替代写法，不能只说不行").toContain("--apply --all");
+    }
+
+    // 只读试算不受限：--list 不写任何东西，正是要用它逐版看清 force 会覆盖什么。
+    const forcedList = runSyncScript(["--list", "--force", `--bodies-dir=${snapshotDir}`, changelogArg]);
+    expect(snapshotRows(forcedList.stdout), "--list --force 仍然要走到试算").toMatchObject({ "v2.0.0": "覆盖" });
+
+    const help = runSyncScript(["--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain("--force 必须和 --version 一起给");
+  });
+
   it("生成标记是判据，长度只是没标记老正文的权宜口径", () => {
     expect(manualBodyChars(withoutMarker), "夹具正文必须够长，否则这条只在测阈值以下的分支").toBeGreaterThanOrEqual(200);
     const rows = snapshotRows(runSyncScript(["--list", `--bodies-dir=${snapshotDir}`, changelogArg]).stdout);

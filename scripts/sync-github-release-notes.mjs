@@ -12,13 +12,16 @@
 //   --print-body=<version> [--out=<路径>]    只渲染 markdown 正文，CI 出包用，不联网
 //   --list                                   对着线上 Release 试算，只读，不改任何东西
 //   --apply [--version=<x.y.z> | --all] [--force]
-//                                            真写：先备份原正文，再 gh release edit，写完回读校验
+//                                            真写：先备份原正文，再 gh release edit，写完回读校验；
+//                                            --force 只在给 --version 时允许
 //
 // 安全边界（对着"外部可见且难撤回"这个性质设计的）：
 //   1. 写入前必然先把线上原正文落盘（--backup-dir，默认 tmp 下带时间戳目录）并打印路径；
 //   2. 线上正文末尾带生成标记 ⇒ 是脚本产物，直接按 CHANGELOG 更新；认不出标记且剥掉 compare
 //      行后仍 ≥ 200 字符 ⇒ 认定是手写正文（v1.0.0 就是这种），默认不覆盖，要 --force。
 //      标记是 2026-10-26 补的，此前线上正文都没有它，所以那批老正文只能走长度这条权宜口径；
+//      --force 只对单个版本生效（必须给 --version）：它是"我知道这段手写正文该被 CHANGELOG 顶掉"
+//      的人工裁决口子，批量版一旦允许就等于一次误判把整片 Release 的手写正文全冲掉；
 //   3. CHANGELOG 抽不到段落 ⇒ 非 0 退出。宁可红，也不往 Release 写一行空话（与轮52 同口径）；
 //   4. 写完逐条回读比对，不一致就算失败，不静默咽掉。
 //
@@ -266,6 +269,7 @@ const USAGE = `用法:
   node scripts/sync-github-release-notes.mjs --print-body=<version> [--out=<路径>] [--repo=<名称>] [--changelog=<路径>]
   node scripts/sync-github-release-notes.mjs --list [--repo=<名称>] [--changelog=<路径>]
   node scripts/sync-github-release-notes.mjs --apply [--version=<x.y.z> | --all] [--force] [--backup-dir=<路径>]
+                                             （--force 必须和 --version 一起给）
 
   --print-body  渲染 markdown 正文（CI 出包用，不联网）；给 --out 就落盘，否则打 stdout
   --list        对线上每个 Release 试算处置，只读
@@ -273,7 +277,8 @@ const USAGE = `用法:
   --apply       真写：先把线上原正文备份到 --backup-dir（默认 tmp 带时间戳目录），再 gh release edit，写完回读校验
   --version     只处理一个版本；不给则 --all（默认全量回填）
   --force       连手写正文一起覆盖（认不出生成标记且 ≥200 字符才算手写，见脚本头部安全边界）；
-                语义是"正文只认 CHANGELOG"，所以抽不到段落的版本会报缺段落，而不是静默留在旧正文上
+                语义是"正文只认 CHANGELOG"，所以抽不到段落的版本会报缺段落，而不是静默留在旧正文上；
+                只允许配 --version 单版执行——有了生成标记，批量回填不需要它
   --changelog   默认仓库根的 CHANGELOG.md
   --repo        默认 ${DEFAULT_REPO}
 `;
@@ -330,6 +335,9 @@ function parseArgs(argv) {
   if (opts.mode === "print" && !opts.printBody) return { opts, problem: "--print-body= 后面要给版本号" };
   if (opts.bodiesDir && opts.mode !== "list") {
     return { opts, problem: "--bodies-dir 只能配 --list：写入前的备份与写后回读都必须对着线上做，本地快照给不了这两个保证" };
+  }
+  if (opts.force && opts.mode === "apply" && !opts.version) {
+    return { opts, problem: "--force 是逐版覆盖手写正文的口子，必须配 --version=<x.y.z>：批量加它一次误判就会把整片 Release 的手写正文冲掉。线上正文已带生成标记，批量回填用 --apply --all 即可，不需要 --force（要单版覆盖手写正文：--apply --version=<x.y.z> --force）" };
   }
   return { opts, problem: null };
 }

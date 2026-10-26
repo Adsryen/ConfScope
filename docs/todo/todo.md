@@ -804,11 +804,18 @@
 - 发布说明的口吻判据（轮70 立，轮82 取消版本豁免）：`tests/ux/releaseChainContractStaysAligned.test.ts`
   的「发布说明的口吻」一节覆盖 CHANGELOG 里每个带日期的段落，内部词 / 仓库内部路径 / 源码文件名 /
   表情符号 / 超长 bullet 一律判红；写作口径见 `.trellis/spec/guides/release-notes-voice.md`。
-- 待办（轮70 记）：`sync-github-release-notes.mjs` 分不清「脚本生成的旧正文」与「手写正文」，
-  只看长度阈值（≥200 字符判手写）。本轮改写 1.9.2–1.9.9 的文案后，线上正文虽然与旧 CHANGELOG
-  逐字节相同（显然由脚本生成），`--list` 仍报「保留手写」，得逐个 `--version=<v> --force --apply`。
-  后续做法：渲染时在正文尾部留一行 HTML 注释标记（形如 `<!-- generated-from: CHANGELOG 1.9.10 -->`），
-  同步时按标记识别——改写文案就不再需要人工判别，也不会误覆盖 v1.0.0 那种真正的手写正文。
+- 发布正文的生成标记（轮70 记为待办，轮83 做完）：`sync-github-release-notes.mjs` 原先只按长度
+  认「手写正文」（≥200 字符），脚本自己回填的老正文被误判成人的东西，改写文案后要逐个 `--force`。
+  现在渲染时在正文末尾贴一行 HTML 注释 `<!-- confscope:release-notes generated-from CHANGELOG.md v1.9.13 -->`
+  （GitHub 不显示），`--list`/`--apply` 先认标记再判长度：带标记一律按 CHANGELOG 更新，
+  抽不到段落也照样报缺段落，不再当手写护着。线上除 v1.0.0 外的 31 个 Release 已全部盖上标记
+  （逐版核对过：内容与 CHANGELOG 渲染逐字相同，只多这一行注释），今后改文案直接 `--apply --all`。
+  v1.0.0 的正文是真手写（下载表格 + macOS 暂不可用说明），保持无标记、默认保留。
+  `--force` 收紧为必须配 `--version`：它是逐版裁决「这段手写正文该被顶掉」的口子，
+  批量给一次判错就会把整片手写正文冲掉，而备份只有写前那一份。
+- v1.9.0 的 Release（轮83 补）：tag 在，但当时 CI 的 linux 构建失败，release 作业没跑，
+  线上一直没有这一版说明。已按 CHANGELOG 补建（无安装包，标题写明「本次未出安装包，请使用 v1.9.1」，
+  正文仍是 CHANGELOG 同源，带生成标记）。
 
 ---
 
