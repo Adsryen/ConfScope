@@ -199,7 +199,7 @@ describe("pickWheelSurface：只按几何选列，不按 class", () => {
     const code = mkColumn("code", 361, 1440);
     expect(pickWheelSurface([items, code], 120, 150, VIEWPORT)?.el.getAttribute("data-surface")).toBe("items");
     expect(pickWheelSurface([items, code], 1052, 159, VIEWPORT)?.el.getAttribute("data-surface")).toBe("code");
-    // 批量态横跨两列的 .batch-diff-toolbar / .diff-loadbar 同一条规则：x 在列表列滚列表，x 在主区滚主区
+    // 批量态横跨两列的 .batch-diff-failures-head / .diff-loadbar 同一条规则：x 在列表列滚列表，x 在主区滚主区（.batch-diff-toolbar 是 fixture 里的名字，真实组件从未渲染，轮89 已删其死样式）
     expect(pickWheelSurface([items, code], 1052, 881, VIEWPORT)?.el.getAttribute("data-surface")).toBe("code");
   });
 

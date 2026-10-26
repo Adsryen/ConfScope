@@ -1542,7 +1542,7 @@ describe("DiffView", () => {
  * 尤其 `.diff-stats` 在批量态被复用进左列列表项（`.batch-diff-nav-stats`），按类名挂处理器必然抢错。
  *
  * 注意取证口径：p3 的坐标来自手写 fixture `research/f_diff3.html`，不是真页面。fixture 里那行
- * `.batch-diff-toolbar` 在真实组件中根本不存在（只剩 styles.css 里的死样式），所以这里不钉它，
+ * `.batch-diff-toolbar` 在真实组件中根本不存在——它曾经只剩 styles.css 里的一条死样式，轮89 已连根删掉（styles.css 里已搜不到该类），所以这里不钉它，
  * 改成钉批量态真实存在的通栏条 `.batch-diff-failures-head`。真机复核（PRD 待办）必须按真实 DOM 重跑一遍。
  */
 describe("DiffView 滚轮兜底：chrome 条滚同一列正文（轮33 F-34）", () => {
