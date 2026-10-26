@@ -1,0 +1,150 @@
+name: Retest
+
+# 为什么要这个作业：真机用例（tests/retest/specs）不在任何门禁里。轮76 把「晋级」入口
+# 从操作历史搬到变更计划第5步之后，93-matrix-history E2 / 98-remaining E4 红了一个多星期
+# 没人撞见——jsdom 单测与静态守卫挡得住「代码写回旧设计」，挡不住「用例停在旧设计」，
+# 后者只有把全量批真跑起来才会暴露（见 .trellis/spec/frontend/smoke-testing.md
+# 「全量批是收口门禁的一部分」）。
+#
+# 这个作业覆盖什么、不覆盖什么（避免把"CI 绿了"读成"SSH 也测过了"）：
+# - 覆盖：tests/retest/specs 的全部真机用例（playwright 批）。其中 SSH 相关走 retest 桥的
+#   mock —— TestSSHConnection 只在 host 命中预设时返回 latencyMs，不建真连接。
+# - 不覆盖：tests/retest/j1-ssh-probe.test.ts 的真实握手（ssh2 + 私钥 forwardOut 到 Nacos-A，
+#   读回 HTTP 字节）。它要两个本作业给不了的东西：被 .gitignore 排除的私钥
+#   （.gitignore:104 /tests/retest/ssh-keys/id_ed25519）和本机常驻的 confscope-retest-sshd2
+#   容器。所以它是 vitest 侧的开发机证据，且没有私钥时自己 skip（不冒充通过）。
+#   想把它搬进 CI，得先决定密钥怎么进 runner——不在本轮范围。
+#
+# 环境事实的唯一口径：scripts/retest-data/init-namespaces.py 的两个常量——
+# ENVS（A 建 retest-dev、B 建 retest-qa）与 MUST_NOT_EXIST（A 不得有 retest-qa），
+# 它们与 tests/retest/state.ts 的 nacos.a/b.namespace 以及 specs 里的字面量同源
+# （改一处就要改三处，改漏的方向是 CI 红）。
+# 两个坑都踩过：
+# - 空容器上没建租户就跑 publish.py，写进一个不存在的 tenant，Nacos v1 当成功
+#   （POST=true、blur 列表可见），但那套租户在命名空间列表里列不出来 ⇒ 应用浏览页读不到，
+#   "环境没建全"伪装成"产品坏了"。
+# - 反过来把 retest-qa 也建到 A 上（2026-10-27 就这么改过 ENVS），98-remaining E4 与
+#   99-s-promote-entry S31 一起失真：它们验的是「A 上还没这套租户 ⇒ 提示晋级会新建它」，
+#   租户存在时产品如实不提醒，S31 红成 element(s) not found。
+# 所以「该没有的」和「该建的」一样是环境契约，由脚本非 0 退出把关，不靠人记。
+#
+# 触发口径（先只开手动，跑绿一次再挂夜巡）：
+# - workflow_dispatch：随时可点，支持只跑一条 grep 的调试口子。
+# - 夜巡 schedule 在第一次真实运行确认「空容器 + 本仓库脚本」能把环境拉起来之后再加，
+#   否则 main 上会挂一片没人认领的红点。
+
+on:
+  workflow_dispatch:
+    inputs:
+      grep:
+        description: "只跑标题匹配的 spec（Playwright --grep）；留空 = 全量 168 例"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  retest:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    name: Retest (dual Nacos · full batch)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # 双 Nacos：端口/镜像/JVM 全部照本机持久容器 docker inspect 的读数来，
+      # 免得 CI 与本机跑出两套环境事实。镜像钉 v2.5.2，不用 latest——
+      # 用例里有针对 Nacos v1 接口行为的断言（搜索口径、历史分页），版本漂移会把
+      # 「产品坏了」和「上游变了」混成同一条红。
+      - name: Start dual Nacos containers
+        run: |
+          set -euo pipefail
+          docker run -d --name cs-nacos-a \
+            -p 19848:8848 -p 19880:9848 \
+            -e MODE=standalone -e NACOS_AUTH_ENABLE=false \
+            -e PREFER_HOST_MODE=ip \
+            -e JVM_XMS=256m -e JVM_XMX=512m -e JVM_XMN=256m \
+            nacos/nacos-server:v2.5.2
+          docker run -d --name cs-nacos-b \
+            -p 19849:8848 -p 19881:9848 \
+            -e MODE=standalone -e NACOS_AUTH_ENABLE=false \
+            -e PREFER_HOST_MODE=ip \
+            -e JVM_XMS=256m -e JVM_XMX=512m -e JVM_XMN=256m \
+            nacos/nacos-server:v2.5.2
+          docker ps
+
+      # 命名空间必须由脚本来建，不能假设容器里有：往「不存在的 tenant」发布是静默半成功
+      # （POST 返回 true、blur 列表列得出这一行、精确 GET 404、命名空间列表列不出它），
+      # 真机读数见 scripts/retest-data/init-namespaces.py 文件头。
+      - name: Ensure namespaces and seed retest data
+        run: |
+          set -euo pipefail
+          python3 scripts/retest-data/init-namespaces.py
+          (cd scripts/retest-data && python3 gen.py && python3 publish.py)
+
+      - name: Start Vite dev server
+        run: |
+          set -euo pipefail
+          nohup npx vite --port 1420 --strictPort > /tmp/vite-retest.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:1420/ > /dev/null 2>&1; then
+              echo "vite ready on 1420"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::vite dev server 127.0.0.1:1420 120s 内没起来"
+          tail -50 /tmp/vite-retest.log || true
+          exit 1
+
+      - name: Run retest batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          GREP="${{ github.event.inputs.grep }}"
+          if [ -n "${GREP}" ]; then
+            npx playwright test -c tests/retest/playwright.config.ts --reporter=line --grep "${GREP}"
+          else
+            npx playwright test -c tests/retest/playwright.config.ts --reporter=line
+          fi
+
+      # 证据必须留在 runner 之外：retest 的失败信息一半在 results/*.png（用例自己截的），
+      # 一半在 test-results/trace.zip（Playwright 的 retain-on-failure），只传一边等于没传。
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p ci-logs
+          cp /tmp/vite-retest.log ci-logs/ 2>/dev/null || true
+          docker logs cs-nacos-a > ci-logs/nacos-a.log 2>&1 || true
+          docker logs cs-nacos-b > ci-logs/nacos-b.log 2>&1 || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retest-evidence-${{ github.run_id }}
+          path: |
+            test-results/
+            results/
+            ci-logs/
+          if-no-files-found: ignore
+          retention-days: 7
