@@ -6,6 +6,7 @@ import { buildApplyPlan, type BuildApplyPlanInput } from "../lib/applyPlan";
 import { saveApplyPlan } from "../store/applyPlans";
 import type { Connection } from "../store/connections";
 import { loadOperationHistory, type OperationRecord } from "../store/operationHistory";
+import { loadApplyVerifications } from "../store/applyVerifications";
 import { translate } from "../locales";
 import OperationHistoryView from "./OperationHistoryView";
 import { clearViewState, readViewState } from "../lib/viewState";
@@ -247,12 +248,12 @@ function followupApplyRecord(overrides: Partial<OperationRecord> = {}): Operatio
 }
 
 function renderHistory(connections: Connection[], onStartApply = vi.fn()) {
-  render(
+  const view = render(
     <I18nProvider>
       <OperationHistoryView connections={connections} onStartApply={onStartApply} />
     </I18nProvider>
   );
-  return { onStartApply };
+  return { onStartApply, view };
 }
 
 describe("OperationHistoryView", () => {
@@ -416,6 +417,113 @@ describe("OperationHistoryView", () => {
     expect(screen.getByText("Not rollbackable")).toBeDefined();
     expect(screen.getByText(/no longer keeps a snapshot of that change plan/)).toBeDefined();
     expect(screen.queryByRole("button", { name: /rollback/i })).toBeNull();
+  });
+
+  // 轮75 E1：批量写入的执行记录里根本没有正文（buildApplyOperationHistoryInput 不写 content），
+  // 用户想知道「这次改了什么」只能先生成一份计划跳走看。详情里必须直接读出逐项 before/after。
+  it("lists what this run actually wrote and opens the per-item diff", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        followupApplyRecord({
+          appliedLocations: [
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" },
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "gateway.yaml", key: "__document" },
+          ],
+        }),
+      ])
+    );
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    const panel = document.querySelector(".history-change-detail") as HTMLElement;
+    expect(panel, "成功的 apply 记录没有给出「本次改动」这一节").toBeTruthy();
+    expect(within(panel).getByText("This change")).toBeDefined();
+    expect(within(panel).getByText(/2 item\(s\) written, 2 actually changed/)).toBeDefined();
+    // 只列本次执行范围内的项，且每条都带位置与变化结论
+    const rows = within(panel).getAllByRole("button", { name: /DEFAULT_GROUP/ });
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("app.yaml"),
+      expect.stringContaining("gateway.yaml"),
+    ]);
+
+    fireEvent.click(rows[0]);
+    const diff = panel.querySelector(".udiff") as HTMLElement;
+    expect(diff, "展开某一项后没有渲染差异视图").toBeTruthy();
+    expect(diff.textContent).toContain("port: 8080");
+    expect(within(panel).getByText(/did not exist on target|already existed on target/)).toBeDefined();
+  });
+
+  it("filters the change list down to the items that really changed", async () => {
+    localStorage.setItem("locale", "en-US");
+    const plan = savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    // gateway.yaml 人工微调成正好等于目标：确实执行了覆盖写，但目标没变
+    saveApplyPlan({
+      ...plan,
+      items: plan.items.map((item) => (item.ref.dataId === "gateway.yaml" ? { ...item, afterValue: item.targetValue } : item)),
+    });
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        followupApplyRecord({
+          appliedLocations: [
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" },
+            { namespace: "public", group: "DEFAULT_GROUP", dataId: "gateway.yaml", key: "__document" },
+          ],
+        }),
+      ])
+    );
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    const panel = document.querySelector(".history-change-detail") as HTMLElement;
+    expect(within(panel).getByText(/2 item\(s\) written, 1 actually changed/)).toBeDefined();
+    const toggle = within(panel).getByRole("checkbox");
+    fireEvent.click(toggle);
+    expect(within(panel).queryByText(/gateway\.yaml/)).toBeNull();
+    expect(within(panel).getByText(/app\.yaml/)).toBeDefined();
+  });
+
+  // 失败记录的 appliedLocations 记的是**全部勾选项**而不是真正落笔的那几条
+  // （applyPlanExecution.recordFailure 复用同一条构造），拿它当「本次改动」会把没写过的说成写了。
+  it("keeps the change section off failed apply records", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan(["app.yaml", "gateway.yaml"]);
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord({ result: "failure" })]));
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    expect(await screen.findByText(/This run did not finish/)).toBeDefined();
+    expect(document.querySelector(".history-change-detail")).toBeNull();
+  });
+
+  it("says the plan is gone instead of inventing an empty diff", async () => {
+    localStorage.setItem("locale", "en-US");
+    // 不调用 savedApplyPlan：记录还在，计划快照已被 100 份上限挤掉
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
+    renderHistory([devConn, sandboxConn, prodConn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    const panel = await waitFor(() => {
+      const node = document.querySelector(".history-change-detail") as HTMLElement | null;
+      expect(node).toBeTruthy();
+      return node as HTMLElement;
+    });
+    expect(within(panel).getByText(/change plan is gone/)).toBeDefined();
+    expect(panel.querySelector(".udiff")).toBeNull();
+  });
+
+  it("keeps centre-history rows on the single-content view instead of an empty change list", async () => {
+    localStorage.setItem("locale", "en-US");
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([{ ...rollbackablePublishRecord, content: "server:\n  port: 8080" }])
+    );
+    renderHistory([conn]);
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    // 没有计划的行（配置中心历史 / 遗留单条）不硬凑一节空的「本次改动」
+    expect(document.querySelector(".history-change-detail")).toBeNull();
+    expect(await screen.findByText(/port: 8080/)).toBeDefined();
   });
 
   it("marks rollbackable rows with a chip and filters the list by it", async () => {
@@ -621,8 +729,10 @@ describe("OperationHistoryView", () => {
     // 回退留着，验证 / 晋级收掉——没跑成功的沙箱不配被标记为「已验证」。
     expect(screen.getByRole("button", { name: "Roll back written items from the backup snapshot" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Mark sandbox verified" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Promote to selected target" })).toBeNull();
-    expect(screen.queryByLabelText("Production target")).toBeNull();
+    // 晋级入口已整块撤出历史页（轮76）：半截写入的记录连状态戳那一行都不该出现。
+    expect(screen.queryByRole("button", { name: /Promote/ })).toBeNull();
+    expect(screen.queryByText("Production target")).toBeNull();
+    expect(screen.queryByText("Sandbox verification:")).toBeNull();
   });
 
   it("hides the follow-up panel when a failed record lacks a backup snapshot", async () => {
@@ -658,53 +768,59 @@ describe("OperationHistoryView", () => {
     expect(onStartApply).not.toHaveBeenCalled();
   });
 
-  it("keeps promotion disabled until the sandbox apply is manually verified", async () => {
+  it("marks the sandbox verification on the record and never offers promotion here", async () => {
     localStorage.setItem("locale", "en-US");
     savedApplyPlan();
     localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
-    renderHistory([devConn, sandboxConn, prodConn]);
-
-    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
-
-    const promoteButton = screen.getByRole("button", { name: "Promote to selected target" }) as HTMLButtonElement;
-    expect(promoteButton.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Mark sandbox verified" }));
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Promote to selected target" }) as HTMLButtonElement).disabled).toBe(false);
-    });
-  });
-
-  it("starts a promote dry-run from a verified sandbox apply record", async () => {
-    localStorage.setItem("locale", "en-US");
-    savedApplyPlan();
-    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
-    nacosMocks.getConfigDocument.mockResolvedValue({
-      content: "server:\n  port: 8080",
-      format: "yaml",
-      version: "sandbox-v2",
-      source: "nacos",
-      updateTime: "2026-07-06T02:00:00.000Z-sandbox-v2",
-    });
     const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
 
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+
+    // 历史页只剩「验过没有」这一行只读读数，没标记时是不带目标名的未验证。
+    expect(screen.getByText("Sandbox verification:")).toBeDefined();
+    expect(screen.getByText("Not verified")).toBeDefined();
+    // 选目标 + 晋级整块搬去变更计划第5步：这里连按钮带选择器都不该有，只留一句去处提示。
+    expect(screen.queryByRole("button", { name: /Promote/ })).toBeNull();
+    expect(screen.queryByText("Production target")).toBeNull();
+    expect(screen.getByText(/Promotion lives in step 5/)).toBeDefined();
+    expect(onStartApply).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole("button", { name: "Mark sandbox verified" }));
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Promote to selected target" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByText(/^Verified \(Sandbox/)).toBeDefined();
     });
-    fireEvent.change(screen.getByLabelText("Production target"), { target: { value: prodConn.id } });
-    fireEvent.click(screen.getByRole("button", { name: "Promote to selected target" }));
 
+    // 标记只是一枚本地状态戳：不产生写操作入口，也不碰目标中心。
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(nacosMocks.publishConfig).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Promote/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Re-mark sandbox verified" })).toBeDefined();
+    expect(loadApplyVerifications().map((item) => item.applyHistoryId)).toEqual(["history-apply-1"]);
+  });
+
+  it("keeps the verification stamp across remounts because it lives in the store", async () => {
+    localStorage.setItem("locale", "en-US");
+    savedApplyPlan();
+    localStorage.setItem("cs.operationHistory", JSON.stringify([followupApplyRecord()]));
+    const { view } = renderHistory([devConn, sandboxConn, prodConn]);
+
+    fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark sandbox verified" }));
     await waitFor(() => {
-      expect(onStartApply).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/^Verified \(Sandbox/)).toBeDefined();
     });
-    const payload = onStartApply.mock.calls[0][0];
-    expect(payload).toMatchObject({
-      sourceType: "promote",
-      source: { connectionId: sandboxConn.id },
-      target: { connectionId: prodConn.id },
-      origin: { mode: "promote", returnMode: "history" },
-    });
+
+    // 状态戳落在 store，不在组件内存里：整页卸载重挂（切页保活/重开应用）后读数必须还在，
+    // 否则会误导用户以为沙箱没核对过，再标记一次覆盖掉当时的指纹。
+    expect(loadApplyVerifications()).toHaveLength(1);
+    view.unmount();
+    cleanup();
+    renderHistory([devConn, sandboxConn, prodConn]);
+    // 选中的记录本身也走记忆态，重挂后详情就展开着，不用再去点行。
+    const stamp = await screen.findByText(/^Verified \(Sandbox/);
+    expect(stamp.textContent).toContain("Sandbox");
+    expect(screen.getByRole("button", { name: "Re-mark sandbox verified" })).toBeDefined();
+    expect(loadApplyVerifications()).toHaveLength(1);
   });
 
   it("does not call direct publish for legacy operation rollback records", async () => {

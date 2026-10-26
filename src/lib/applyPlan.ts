@@ -289,6 +289,18 @@ function classify(source: ApplyPlanValueSnapshot, target: ApplyPlanValueSnapshot
 /** 整篇文档级条目的哨兵 key（界面据此把内部串翻成人读文案）。 */
 export const DOCUMENT_KEY = "__document";
 
+/**
+ * 人读的项标签：`命名空间/分组/dataId`，key 级再补 `(key)`（R55-A3）。
+ *
+ * 漂移文案、阻塞项清单、操作历史的「本次改动」都要给同一串人读标签——以前执行器
+ * （`applyPlanExecution.itemRefLabel`）与后续动作层（`applyFollowup.itemLabel`）各抄一份，
+ * 口径靠注释维持。收在这里做唯一实现，两边只剩转发（轮75）。
+ */
+export function applyPlanItemLabel(ref: ApplyPlanRef): string {
+  const base = `${ref.namespace}/${ref.group}/${ref.dataId}`;
+  return ref.key && ref.key !== DOCUMENT_KEY ? `${base} (${ref.key})` : base;
+}
+
 /** 计划阶段拦下「空正文写 Nacos」的阻断码（界面对它有人读文案映射，R55-B4）。 */
 export const BLANK_CONTENT_REASON = "blank_content";
 

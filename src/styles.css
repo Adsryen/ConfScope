@@ -7132,11 +7132,14 @@ button.diff-workflow-step-btn:hover {
   border-top: 1px solid var(--border);
 }
 
-.history-promote-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) auto;
-  gap: 8px;
-  align-items: center;
+/* 沙箱验证状态（轮76）：历史页只陈述「验过没有」，晋级入口在变更计划第5步。
+   与上面 .history-rollback-state 同一读法，未验证不该看起来像出错，所以用次要文本而非红色。 */
+.history-verification-state.verified {
+  color: var(--green);
+}
+
+.history-verification-state.unverified {
+  color: var(--text-dim);
 }
 
 .history-rollback-state.available {
@@ -7185,6 +7188,159 @@ button.diff-workflow-step-btn:hover {
 .history-detail-error {
   border-color: rgba(244, 67, 54, 0.35);
   color: #e57373;
+}
+
+/* 操作历史「本次改动」（轮75 E1）：逐项 before/after 的只读差异清单。
+   行本身是 <button>（键盘可达守卫要求），所以行内只放非交互元素，展开态靠 .is-expanded 传。 */
+/* 面板根节点：详情列是 flex 容器里的窄列，长 dataId / 路径靠内部 ellipsis 截断，
+   不锁 min-width 就会把整列顶宽（只声明 .history-detail-field 没声明过的属性，
+   否则又是同特异度赌顺序）。 */
+.history-change-detail {
+  min-width: 0;
+}
+
+.history-change-summary {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.history-change-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* 命中区整行 label，复选框本体不放大，只把行高抬到 24（与 .diff-toggle 同一口径，轮44 R88）。 */
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--text-dim);
+  /* `.history-detail-field label` 给的是大写小标题；这一行是筛选控件，不是标题。 */
+  text-transform: none;
+  font-weight: 400;
+}
+
+.history-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.history-change-row + .history-change-row {
+  border-top: 1px solid var(--border);
+}
+
+.history-change-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.history-change-item:hover {
+  background: var(--bg-hover);
+}
+
+.history-change-item:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+}
+
+.history-change-row.is-expanded > .history-change-item {
+  background: var(--bg3);
+}
+
+.history-change-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-hi);
+}
+
+.history-change-action,
+.history-change-state,
+.history-change-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 动作胶囊只表达「这次对目标做了什么」，配色与变更计划页的动作词一致：新增绿、覆盖蓝、删除红。 */
+.history-change-action.is-create {
+  background: var(--diff-add-bg);
+  color: var(--green);
+}
+
+.history-change-action.is-overwrite {
+  background: rgba(79, 195, 247, 0.14);
+  color: var(--blue);
+}
+
+.history-change-action.is-delete {
+  background: var(--diff-del-bg);
+  color: var(--red-text);
+}
+
+.history-change-action.is-skip,
+.history-change-action.is-parse_error {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-dim);
+}
+
+.history-change-chip {
+  background: rgba(215, 186, 125, 0.16);
+  color: var(--amber);
+}
+
+/* 变化结论三态：正文取不到时是 unknown，不给绿色也不给红色——拿空串比出来的「无变化」是假结论。 */
+.history-change-state.is-changed {
+  background: var(--diff-mod-bg);
+  color: var(--text-hi);
+}
+
+.history-change-state.is-unchanged,
+.history-change-state.is-unknown {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-dim);
+}
+
+.history-change-caret {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.history-change-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg2);
+}
+
+.history-change-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* 设置页危险操作区
@@ -8476,6 +8632,98 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.6;
 }
 
+/* 变更计划第5步「晋级到生产」（轮76）：写后回读 → 标记沙箱验证 → 选生产目标 → 生成新计划，
+   四步一屏读完。命中高度沿用轮44 R88 的 24px 口径；灰按钮的原因挂在包裹的 .btn-guard 上
+   （disabled 元素收不到 pointer 事件，title 直接写在按钮上等于没写）。 */
+.apply-promote-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+}
+
+.apply-promote-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.apply-promote-head strong {
+  font-size: 13px;
+  color: var(--text-hi);
+}
+
+.apply-promote-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.apply-promote-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.apply-promote-step-label {
+  min-width: 96px;
+  color: var(--text-dim);
+}
+
+.apply-promote-step-value {
+  color: var(--text);
+}
+
+.apply-promote-step-value.is-ok {
+  color: var(--green);
+}
+
+.apply-promote-step-value.is-warn {
+  color: var(--amber);
+}
+
+.apply-promote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.apply-promote-actions .btn {
+  min-height: 28px;
+}
+
+/* R83：元素是 `field apply-promote-target` 两个类，裸类名和 .field{flex:1} 同为 (0,1,0)，
+   此前只是恰好写在后面才赢——把选择器提复合，靠特异度决胜，别再赌文档顺序。 */
+.apply-promote-actions .apply-promote-target {
+  /* .field 默认 flex:1，会把这一列撑满整行；这里要的是够用宽度，别把按钮挤出可视区 */
+  flex: 0 1 220px;
+}
+
+.apply-promote-target .sel {
+  display: block;
+  min-width: 0;
+}
+
+/* 选中的目标没有生产标记时的纠偏提示（第二条：命名空间在这套集群上根本不存在）。
+   不自带 .field-hint：那是灰色辅助说明语义，
+   而且 .field > span 按位置给字段标题上灰阶（特异度 0,1,1），单类写 color 会被它吃掉——
+   和轮72B 那条 .field-error 静默失效同一个坑，所以这里提特异度并把颜色/字号自己写全。 */
+.apply-promote-target > .apply-promote-target-note,
+.apply-promote-namespace > .apply-promote-namespace-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--amber);
+}
+
 .apply-execution-notice {
   padding: 8px 10px;
   color: var(--green);
@@ -9106,6 +9354,8 @@ button.diff-workflow-step-btn:hover {
 /* 轮67：发布来源（用户名/IP）单行截断，抄不走就只能凭眼睛记 IP，全文另挂在 title 上 */
 .history-item-src,
 .history-publisher,
+/* 轮75 E1：改动清单每行的 dataId/路径单行截断，抄不走就只能凭眼睛记（全文另挂 title）。 */
+.history-change-label,
 .backup-item-name,
 .backup-config-dataid,
 .task-item-name,

@@ -203,7 +203,7 @@ describe("DiffView", () => {
     }
     // hover 气泡：每步展示「步骤名: 步骤说明」
     expect(steps[1]).toHaveAttribute("title", expect.stringContaining("Click Load & Compare"));
-    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("After sandbox verification"));
+    expect(steps[4]).toHaveAttribute("title", expect.stringContaining("mark the sandbox verified"));
 
     // 前进 = 点页面内操作按钮（stepper 不提供前进入口）
     fireEvent.click(screen.getByRole("button", { name: "Load & Compare" }));

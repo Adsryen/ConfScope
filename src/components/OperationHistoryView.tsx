@@ -8,10 +8,9 @@ import { formatDateTime } from "../lib/formatDateTime";
 import { toast } from "../lib/toast";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import {
-  buildPromotionEntryFromVerification,
   canBuildRollbackEntry,
-  executableItemsForRecord,
-  fingerprintsForCurrentTargets,
+  findVerificationForRecord,
+  recordSandboxVerification,
 } from "../lib/applyFollowup";
 import {
   loadOperationHistory,
@@ -37,6 +36,7 @@ import { supportsCenterHistory } from "../lib/configCapabilities";
 import { useRememberedState, useScrollMemory } from "../lib/viewState";
 import { getSnapshot } from "../api/snapshot";
 import CopyButton from "./CopyButton";
+import HistoryChangeDetailPanel from "./HistoryChangeDetailPanel";
 import InlineError from "./InlineError";
 import { errorText } from "../lib/errorText";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
@@ -88,11 +88,6 @@ function isApplyFollowupRecord(record: OperationRecord): boolean {
   return canBuildRollbackEntry(record);
 }
 
-function findVerification(verifications: ApplyVerification[], record: OperationRecord): ApplyVerification | null {
-  if (!record.planId) return null;
-  return verifications.find((verification) => verification.planId === record.planId && verification.applyHistoryId === record.id) ?? null;
-}
-
 export default function OperationHistoryView({ connections, onStartApply, focusRecordId, onFocusConsumed }: Props) {
   const { t } = useTranslation();
 
@@ -118,7 +113,6 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
   const [verifications, setVerifications] = useState<ApplyVerification[]>(() => loadApplyVerifications());
   const [followupBusy, setFollowupBusy] = useState<string | null>(null);
   const [followupError, setFollowupError] = useState<FollowupError | null>(null);
-  const [promotionTargets, setPromotionTargets] = useState<Record<string, string>>({});
   // 带记录 id 跳过来、但本地历史里已经找不到那条（被清理过 / 记录本来在中心侧）时的说明。
   const [focusMissingId, setFocusMissingId] = useState<string | null>(null);
 
@@ -303,91 +297,28 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
     }
   };
 
+  /**
+   * 标记沙箱验证通过：只读目标现值存一枚状态戳（实现收在 lib/applyFollowup.recordSandboxVerification，
+   * 变更计划第5步的晋级面板走的是同一份）。轮76 之后历史页不再自带晋级按钮，
+   * 这里留的是记录级事实状态，不是写操作入口。
+   */
   const markSandboxVerified = async (record: OperationRecord) => {
     const busyKey = `verify:${record.id}`;
     setFollowupBusy(busyKey);
     setFollowupError(null);
     try {
-      if (!record.planId) {
-        setRecordFollowupError(record, t("apply.followupMissingPlanId", { id: record.id }));
-        return;
-      }
-      const plan = getApplyPlan(record.planId);
-      if (!plan) {
-        setRecordFollowupError(record, t("apply.followupPlanMissing", { id: record.planId }));
-        return;
-      }
-      const sandboxConnectionId = record.targetConnectionId || plan.target.connectionId || record.connectionId;
-      const sandboxConnection = connections.find((conn) => conn.id === sandboxConnectionId);
-      if (!sandboxConnection) {
-        setRecordFollowupError(record, t("apply.followupSandboxConnectionMissing", { id: sandboxConnectionId }));
-        return;
-      }
-      const verification = saveApplyVerification({
-        planId: plan.id,
-        applyHistoryId: record.id,
-        sandboxConnectionId: sandboxConnection.id,
-        sandboxConnectionName: sandboxConnection.name,
-        sandboxNamespace: record.targetNamespace ?? plan.target.namespace ?? record.namespace,
-        verifiedTargetFingerprints: await fingerprintsForCurrentTargets(executableItemsForRecord(plan, record), sandboxConnection, {
-          getConfigDocument,
-        }),
-      });
-      setVerifications(loadApplyVerifications());
-      toast(t("operationHistory.sandboxVerified"), "success");
-      setPromotionTargets((current) => {
-        const candidates = connections.filter((conn) => conn.id !== verification.sandboxConnectionId);
-        return current[record.id] || candidates.length === 0 ? current : { ...current, [record.id]: candidates[0].id };
-      });
-    } catch (e) {
-      const message = errorText(e);
-      setRecordFollowupError(record, message);
-      reportError({ title: t("operationHistory.followupFailed"), source: record.dataId, message, detail: message });
-    } finally {
-      setFollowupBusy(null);
-    }
-  };
-
-  const productionTargetsFor = (record: OperationRecord, verification: ApplyVerification | null): Connection[] => {
-    const sandboxConnectionId = verification?.sandboxConnectionId || record.targetConnectionId || record.connectionId;
-    return connections.filter((conn) => conn.id !== sandboxConnectionId);
-  };
-
-  const selectedPromotionTargetId = (record: OperationRecord, verification: ApplyVerification | null): string => {
-    const candidates = productionTargetsFor(record, verification);
-    const selected = promotionTargets[record.id];
-    return selected && candidates.some((conn) => conn.id === selected) ? selected : candidates[0]?.id ?? "";
-  };
-
-  const startPromotionDryRun = async (record: OperationRecord) => {
-    if (!onStartApply) return;
-    const verification = findVerification(verifications, record);
-    if (!verification) {
-      setRecordFollowupError(record, t("apply.followupNoVerification", { id: record.id }));
-      return;
-    }
-    const targetId = selectedPromotionTargetId(record, verification);
-    const productionTarget = connections.find((conn) => conn.id === targetId);
-    if (!productionTarget) {
-      setRecordFollowupError(record, t("operationHistory.noProductionTarget"));
-      return;
-    }
-
-    const busyKey = `promote:${record.id}`;
-    setFollowupBusy(busyKey);
-    setFollowupError(null);
-    try {
-      const result = await buildPromotionEntryFromVerification(record, verification, productionTarget, {
+      const result = await recordSandboxVerification(record, {
         connections,
         getApplyPlan,
-        getSnapshot,
         getConfigDocument,
+        saveVerification: saveApplyVerification,
       });
       if (!result.ok) {
         setRecordFollowupError(record, result.detail);
         return;
       }
-      onStartApply(result.entry);
+      setVerifications(loadApplyVerifications());
+      toast(t("operationHistory.sandboxVerified"), "success");
     } catch (e) {
       const message = errorText(e);
       setRecordFollowupError(record, message);
@@ -570,14 +501,11 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                     rollbackByRecord.get(selectedVisibleRecord.id) ?? assessHistoryRollback(selectedVisibleRecord, rollbackContext);
                   const rollbackAvailable = rollback.available;
                   const rollbackReason = rollback.reasonKey;
-                  // 沙箱验证与晋级只对成功执行过的记录有意义，失败记录不给这两个入口。
+                  // 标记沙箱验证只对成功执行过的记录有意义（轮76：晋级入口已移到变更计划第5步）。
                   const followupSucceeded = selectedVisibleRecord.result === "success";
-                  const verification = findVerification(verifications, selectedVisibleRecord);
-                  const productionTargets = productionTargetsFor(selectedVisibleRecord, verification);
-                  const promotionTargetId = selectedPromotionTargetId(selectedVisibleRecord, verification);
+                  const verification = findVerificationForRecord(verifications, selectedVisibleRecord);
                   const rollbackBusy = followupBusy === `rollback:${selectedVisibleRecord.id}`;
                   const verifyBusy = followupBusy === `verify:${selectedVisibleRecord.id}`;
-                  const promoteBusy = followupBusy === `promote:${selectedVisibleRecord.id}`;
                   const visibleFollowupError = followupError?.recordId === selectedVisibleRecord.id ? followupError.detail : "";
 
                   return (
@@ -648,6 +576,25 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                       <span className="info-value">{t(rollbackReason)}</span>
                     </div>
                   )}
+                  {/*
+                   * 沙箱验证状态是记录级事实（一枚状态戳 + 验证时的目标指纹），不是写操作入口：
+                   * 轮76 把「选生产目标 + 晋级」挪回变更计划第5步之后，历史页只留「验过没有」这一行读数，
+                   * 用户翻记录时仍然知道自己当初有没有核对过沙箱。
+                   */}
+                  {followupRecord && followupSucceeded && (
+                    <div className="info-row">
+                      <span className="info-label">{t("operationHistory.verificationState")}:</span>
+                      <span className={`info-value history-verification-state ${verification ? "verified" : "unverified"}`}>
+                        {verification
+                          ? t("operationHistory.verificationVerified", {
+                              target: verification.sandboxConnectionName,
+                              namespace: verification.sandboxNamespace,
+                              time: formatDateTime(verification.verifiedAt),
+                            })
+                          : t("operationHistory.verificationUnverified")}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 {(rollbackAvailable || followupRecord) && onStartApply && (
                   <div className="history-followup-panel">
@@ -677,53 +624,28 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
                           {verifyBusy
                             ? t("operationHistory.generatingFollowup")
                             : verification
-                              ? t("operationHistory.sandboxVerifiedState")
+                              ? t("operationHistory.remarkSandboxVerified")
                               : t("operationHistory.markSandboxVerified")}
                         </button>
                       )}
                     </div>
                     {followupRecord && followupSucceeded && (
-                    <>
-                      <div className="history-promote-row">
-                        <label className="field-label" htmlFor={`promotion-target-${selectedVisibleRecord.id}`}>
-                          {t("operationHistory.productionTarget")}
-                        </label>
-                        <select
-                          id={`promotion-target-${selectedVisibleRecord.id}`}
-                          className="history-filter-select"
-                          value={promotionTargetId}
-                          onChange={(event) =>
-                            setPromotionTargets((current) => ({ ...current, [selectedVisibleRecord.id]: event.target.value }))
-                          }
-                        >
-                          {productionTargets.length === 0 ? (
-                            <option value="">{t("operationHistory.noProductionTarget")}</option>
-                          ) : (
-                            productionTargets.map((conn) => (
-                              <option key={conn.id} value={conn.id}>
-                                {conn.name}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                        <button
-                          className="btn btn-primary btn-sm"
-                          type="button"
-                          onClick={() => startPromotionDryRun(selectedVisibleRecord)}
-                          disabled={!verification || !promotionTargetId || promoteBusy}
-                        >
-                          {promoteBusy ? t("operationHistory.generatingFollowup") : t("operationHistory.promoteToTarget")}
-                        </button>
-                      </div>
-                      {!verification && (
-                        <div className="field-hint">{t("operationHistory.promoteRequiresVerification")}</div>
-                      )}
-                    </>
-                  )}
+                      <div className="field-hint">{t("operationHistory.promoteEntryLocation")}</div>
+                    )}
                   {visibleFollowupError && (
                     <InlineError title={t("operationHistory.followupFailed")} message={visibleFollowupError} />
                   )}
                 </div>
+              )}
+              {/*
+               * 「本次改动」（轮75 E1）：批量写入的记录里正文一块都不存在（`buildApplyOperationHistoryInput`
+               * 不写 content，`beforeContent` 只在单条时才带），用户想知道改了什么只能先生成一份计划跳走看——
+               * 那是把审计需求绕到写操作入口上解决。这里直接把计划里的写前/写后读成只读 diff。
+               * 只给成功记录：部分写入的失败记录里 `appliedLocations` 记的是**全部勾选项**而不是真正落笔的那几条
+               * （`applyPlanExecution.recordFailure` 复用同一条构造），拿它当「本次改动」会把没写过的说成写了。
+               */}
+              {followupRecord && followupSucceeded && (
+                <HistoryChangeDetailPanel record={selectedVisibleRecord} getPlan={getApplyPlan} />
               )}
               {selectedVisibleRecord.content && (
                 <div className="history-detail-field">

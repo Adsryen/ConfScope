@@ -2,9 +2,10 @@
 import type { ConfigDocument } from "../api/nacos";
 import type { Snapshot } from "../api/snapshot";
 import type { Connection } from "../store/connections";
-import type { ApplyVerification } from "../store/applyVerifications";
+import { type ApplyVerification, type ApplyVerificationInput } from "../store/applyVerifications";
 import type { OperationRecord } from "../store/operationHistory";
 import {
+  applyPlanItemLabel,
   fingerprintApplyPlanValue,
   type ApplyPlan,
   type ApplyPlanItem,
@@ -12,6 +13,7 @@ import {
   type ApplyPlanValueInput,
 } from "./applyPlan";
 import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "./applyEntry";
+import { isProtectedApplyTarget } from "./applyPlanExecution";
 import {
   restrictItemsByAppliedLocations,
   restrictItemsToSnapshotCoverage,
@@ -119,7 +121,10 @@ function findConnection(connections: Connection[], connectionId: string): Connec
   return connections.find((conn) => conn.id === connectionId) ?? null;
 }
 
-function planFromRecord(record: OperationRecord, deps: ApplyFollowupDeps): ApplyPlan | string {
+function planFromRecord(
+  record: OperationRecord,
+  deps: Pick<ApplyFollowupDeps, "getApplyPlan">
+): ApplyPlan | string {
   if (!record.planId) return translate("apply.followupMissingPlanId", { id: record.id });
   const plan = deps.getApplyPlan(record.planId);
   return plan ?? translate("apply.followupPlanMissing", { id: record.planId });
@@ -243,12 +248,11 @@ function valueFromDocument(ref: ApplyPlanRef, document: ConfigDocument): ApplyPl
 }
 
 /**
- * 人读的项标签：`命名空间/分组/dataId`，key 级再补 `(key)`。
- * 与执行器 itemRefLabel 同一口径——漂移文案是要给人看的，不是给人解码的。
+ * 人读的项标签：唯一实现见 `applyPlan.applyPlanItemLabel`（轮75 收口，本处只转发）。
+ * 漂移文案是要给人看的，不是给人解码的，所以三处口径必须是同一份代码。
  */
 function itemLabel(ref: ApplyPlanRef): string {
-  const base = `${ref.namespace}/${ref.group}/${ref.dataId}`;
-  return ref.key && ref.key !== DOCUMENT_KEY ? `${base} (${ref.key})` : base;
+  return applyPlanItemLabel(ref);
 }
 
 function missingValue(ref: ApplyPlanRef): ApplyPlanValueInput {
@@ -283,7 +287,7 @@ export async function fingerprintsForCurrentTargets(
 async function verifySandboxStillMatches(
   verification: ApplyVerification,
   sandboxConnection: Connection,
-  deps: ApplyFollowupDeps,
+  deps: Pick<ApplyFollowupDeps, "connections" | "getConfigDocument">,
   items: ApplyPlanItem[]
 ): Promise<string | null> {
   const verifiedByItemId = new Map(verification.verifiedTargetFingerprints.map((item) => [item.itemId, item.fingerprint]));
@@ -311,7 +315,14 @@ export async function buildPromotionEntryFromVerification(
   record: OperationRecord,
   verification: ApplyVerification | null,
   productionTarget: Connection,
-  deps: ApplyFollowupDeps
+  // 晋级入口只读计划与沙箱现值，用不到备份快照（getSnapshot）：
+  // 参数收到真正需要的三项，调用方就不用为凑类型塞一个会抛错的空壳（轮76）。
+  deps: Pick<ApplyFollowupDeps, "connections" | "getApplyPlan" | "getConfigDocument">,
+  // 生产侧落在哪个命名空间（轮76 S31 真机量出来的洞）：以前一律沿用沙箱那个 namespace id，
+  // 而 Nacos/MSE 的命名空间 id 本来就是每套集群各发各的（MSE 是 36 位 UUID），
+  // 把沙箱的 id 原样盖到生产集群上，plan 只会报「新建」——写进一个没人读的租户。
+  // 不传就是沿用，保持旧口径；面板给得出候选时由用户点明（点「public」= 传空串，不是不传）。
+  options?: { targetNamespace?: string }
 ): Promise<ApplyFollowupResult> {
   if (!verification) return fail(translate("apply.followupNoVerification", { id: record.id }));
   const plan = planFromRecord(record, deps);
@@ -332,12 +343,18 @@ export async function buildPromotionEntryFromVerification(
     return fail(translate("apply.followupVerifySandboxFailed", { detail: errorText(error) }));
   }
 
+  // 「没传」才是沿用；传进来的空串就是 Nacos 的公共空间本身（接口里 public 写作空 tenant，
+  // Go 侧 normalizeMSERequestNamespace 也按这个方向归一），不能当假值退回沙箱那一个——
+  // 否则用户在面板里点了 public，实际写的还是沙箱那个租户。
+  const targetNamespace =
+    options?.targetNamespace === undefined ? plan.target.namespace : options.targetNamespace.trim();
   const items = executableItemsForRecord(plan, record).map((item) => {
     const sourceRef = toEntryRef(item.targetRef ?? item.ref);
     const targetRef: ApplyEntryRef = {
       ...sourceRef,
       provider: productionTarget.provider ?? "nacos",
       connectionId: productionTarget.id,
+      namespace: targetNamespace,
     };
     return {
       ...targetRef,
@@ -352,10 +369,127 @@ export async function buildPromotionEntryFromVerification(
       sourceType: "promote",
       scope: plan.scope,
       source: endpointFromConnection(sandboxConnection, plan.target.namespace),
-      target: endpointFromConnection(productionTarget, plan.target.namespace),
+      target: endpointFromConnection(productionTarget, targetNamespace),
       items,
       rangeSummary: applyEntryRiskSummary(items),
       origin: { mode: "promote", returnMode: "history" },
     },
   };
+}
+
+/**
+ * 这条执行记录对应的沙箱验证结果（轮76 F3）。
+ *
+ * 历史页的「沙箱验证」状态行和第5步的晋级面板读的是同一份事实，
+ * 判据留在页面里就会长成两份，将来谁改了 key 语义另一份不会跟着动。
+ */
+export function findVerificationForRecord(
+  verifications: ApplyVerification[],
+  record: OperationRecord
+): ApplyVerification | null {
+  if (!record.planId) return null;
+  return verifications.find((item) => item.planId === record.planId && item.applyHistoryId === record.id) ?? null;
+}
+
+/** 晋级目标所在的命名空间：以验证结果为准，没标记验证时退到记录里的目标命名空间。 */
+export function promotionTargetNamespace(record: OperationRecord, verification: ApplyVerification | null): string {
+  return verification?.sandboxNamespace ?? record.targetNamespace ?? record.namespace ?? "";
+}
+
+/**
+ * 这条连接的名字里有没有「生产」这一档的标记（轮76）。
+ *
+ * 判据不另起一套：直接复用执行层用来要求手敲确认的那组标记词，
+ * 否则「第五步要手敲确认的目标」和「晋级面板默认指向的目标」会各认各的。
+ */
+export function isProductionMarkedConnection(connection: Connection, namespace: string): boolean {
+  return isProtectedApplyTarget(connection, {
+    envId: connection.id,
+    label: `${connection.name} / ${namespace || "public"}`,
+    provider: connection.provider ?? "nacos",
+    connectionId: connection.id,
+    connectionName: connection.name,
+    namespace
+  });
+}
+
+/**
+ * 这条连接够不够格当晋级目标（轮76 S31 补的两条硬排除）。
+ *
+ * 与 lib/directWriteExit.isWritableConfigTarget 不同口径，而且是故意的：那颗判据管的是
+ * 「浏览页有没有直接写出路」，只认 nacos；晋级走的是变更计划那条写链路，apollo/consul
+ * 在 Go 侧同样有 PublishConfig，把它们从候选里剔掉等于夺走本来用得上的目标。
+ * 这里只挡真正写不进去的两类——本地快照与只读连接：它们挂在「生产目标」这一栏里，
+ * 用户要一路走到执行那一步才会收到一条永远不可能成功的错误（站规里叫「点了才报错」）。
+ */
+export function isPromotionTargetConnection(connection: Connection): boolean {
+  return connection.sourceType !== "local-snapshot" && !connection.readonly && !connection.forceLocalSnapshot;
+}
+
+/**
+ * 能作为晋级目标的连接（轮76 F3：同一份排除口径）。
+ *
+ * 沙箱自己不能当自己的生产目标；`sandboxConnectionId` 以验证结果为准，
+ * 还没标记验证时退到记录里的目标连接，保证候选列表和后面的校验不会各说一套。
+ * 带生产标记的排前面：下拉默认指着哪一条，用户多半就直接晋级哪一条，
+ * 让「Production target」这一栏默认停在 Dev 上是给错的环境盖章。
+ *
+ * 先过 isPromotionTargetConnection 那道资格线（轮76 S31 补）：本地快照与只读连接
+ * 从今往后不会出现在这一栏里。
+ */
+export function promotionTargetCandidates(
+  connections: Connection[],
+  record: OperationRecord,
+  verification: ApplyVerification | null
+): Connection[] {
+  const sandboxConnectionId =
+    verification?.sandboxConnectionId || record.targetConnectionId || record.connectionId;
+  const namespace = promotionTargetNamespace(record, verification);
+  const candidates = connections.filter(
+    (conn) => conn.id !== sandboxConnectionId && isPromotionTargetConnection(conn)
+  );
+  return [
+    ...candidates.filter((conn) => isProductionMarkedConnection(conn, namespace)),
+    ...candidates.filter((conn) => !isProductionMarkedConnection(conn, namespace)),
+  ];
+}
+
+export type SandboxVerificationResult =
+  | { ok: true; verification: ApplyVerification }
+  | { ok: false; detail: string };
+
+/**
+ * 标记沙箱验证通过：回读本次范围内各项目的现值，存成一枚状态戳（轮76 F3 从历史页组件提出）。
+ *
+ * 这里只读不写——`getConfigDocument` 拿现值算指纹，`saveVerification` 落本地状态，
+ * 一个 publish/delete 都不碰。真正的写出口仍然只有变更计划第5步那条 dry-run 链路。
+ * 存的是「验证时那一时刻目标上的指纹」，晋级时再比一次，沙箱被动过就会拒（`followupVerificationDrift`）。
+ */
+export async function recordSandboxVerification(
+  record: OperationRecord,
+  deps: Pick<ApplyFollowupDeps, "connections" | "getApplyPlan" | "getConfigDocument"> & {
+    saveVerification: (input: ApplyVerificationInput) => ApplyVerification;
+  }
+): Promise<SandboxVerificationResult> {
+  if (!record.planId) return { ok: false, detail: translate("apply.followupMissingPlanId", { id: record.id }) };
+  const plan = deps.getApplyPlan(record.planId);
+  if (!plan) return { ok: false, detail: translate("apply.followupPlanMissing", { id: record.planId }) };
+  const sandboxConnectionId = record.targetConnectionId || plan.target.connectionId || record.connectionId;
+  const sandboxConnection = findConnection(deps.connections, sandboxConnectionId);
+  if (!sandboxConnection) {
+    return { ok: false, detail: translate("apply.followupSandboxConnectionMissing", { id: sandboxConnectionId }) };
+  }
+  const verification = deps.saveVerification({
+    planId: plan.id,
+    applyHistoryId: record.id,
+    sandboxConnectionId: sandboxConnection.id,
+    sandboxConnectionName: sandboxConnection.name,
+    sandboxNamespace: record.targetNamespace ?? plan.target.namespace ?? record.namespace,
+    verifiedTargetFingerprints: await fingerprintsForCurrentTargets(
+      executableItemsForRecord(plan, record),
+      sandboxConnection,
+      { getConfigDocument: deps.getConfigDocument }
+    ),
+  });
+  return { ok: true, verification };
 }

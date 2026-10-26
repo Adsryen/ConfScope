@@ -3,6 +3,7 @@ import type { ConfigDocument } from "../api/nacos";
 import type { OperationRecord } from "../store/operationHistory";
 import type { TaskManager } from "./taskmanager";
 import {
+  applyPlanItemLabel,
   fingerprintApplyPlanValue,
   validateApplyPlanFreshness,
   type ApplyPlan,
@@ -602,10 +603,9 @@ function createTask(plan: ApplyPlan, deps: ExecuteApplyPlanDeps, onTaskCreated?:
   return task.id;
 }
 
-/** 人读的项标签：`命名空间/分组/dataId`，key 级再补 `(key)`（R55-A3）。 */
+/** 人读的项标签：唯一实现见 `applyPlan.applyPlanItemLabel`（轮75 收口，本处只转发）。 */
 function itemRefLabel(ref: ApplyPlanRef): string {
-  const base = `${ref.namespace}/${ref.group}/${ref.dataId}`;
-  return ref.key && ref.key !== DOCUMENT_KEY ? `${base} (${ref.key})` : base;
+  return applyPlanItemLabel(ref);
 }
 
 function sideLabel(side: ApplyPlanFreshnessSide): string {

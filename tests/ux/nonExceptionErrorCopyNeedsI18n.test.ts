@@ -217,14 +217,24 @@ describe("非异常出口的报错必须走 i18n（波30 R50）", () => {
       const users = byFile.filter((entry) => entry.source.includes(`"${key}"`)).map((entry) => entry.file);
       expect(users.length, `${key} 没有任何登记文件在用`).toBeGreaterThan(0);
     });
-    // 组件与 lib 共用同一批键（R4：别再造第二份文本）
-    const browser = readScannedSource("src/components/OperationHistoryView.tsx");
-    [
+    // 轮76：晋级入口从历史页搬回变更计划第5步后，这批文案只有一个产出者——lib。
+    // 旧口径要求历史页组件也翻译这四个键（因为那时判定分支长在组件里）；现在 UI 只透传
+    // result.detail，谁再在组件里自己判一遍并翻译，就是 R4 说的第二份文本，判红。
+    const SHARED_KEYS = [
       "apply.followupMissingPlanId",
       "apply.followupPlanMissing",
       "apply.followupSandboxConnectionMissing",
       "apply.followupNoVerification",
-    ].forEach((key) => expect(browser, `组件没复用 ${key}`).toContain(`"${key}"`));
+    ];
+    const producer = readScannedSource("src/lib/applyFollowup.ts");
+    SHARED_KEYS.forEach((key) => expect(producer, `lib 没复用 ${key}`).toContain(`"${key}"`));
+    [
+      "src/components/OperationHistoryView.tsx",
+      "src/components/PostApplyPromotionPanel.tsx",
+    ].forEach((file) => {
+      const ui = readScannedSource(file);
+      SHARED_KEYS.forEach((key) => expect(ui, `${file} 不该自己再翻译 ${key}`).not.toContain(`"${key}"`));
+    });
     expect(readScannedSource("src/lib/applyPlanExecution.ts")).toContain('"apply.noSelectedItems"');
     expect(readScannedSource("src/lib/applyPlanExecution.ts")).toContain('"apply.planTaskName"');
   });

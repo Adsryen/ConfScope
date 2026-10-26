@@ -12,6 +12,8 @@ import {
   canBuildRollbackEntry,
   executableItemsForRecord,
   fingerprintsForCurrentTargets,
+  isPromotionTargetConnection,
+  promotionTargetCandidates,
   type ApplyFollowupDeps,
 } from "./applyFollowup";
 
@@ -429,5 +431,118 @@ describe("rollback scope follows what one execution actually wrote (R66-WP9)", (
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.detail);
     expect(result.entry.items.map((item) => item.dataId)).toEqual(["app.yaml"]);
+  });
+});
+
+/**
+ * 晋级的生产命名空间必须由调用方点明（轮76 S31 真机量出来的洞）。
+ *
+ * Nacos/MSE 的 namespace id 是每套集群各发各的（MSE 是 36 位 UUID）。以前沿用沙箱那个 id，
+ * 计划把「同一个 id 在生产集群里不存在」报成新建，用户以为在覆盖生产配置，其实写进没人读的租户。
+ */
+describe("promotion writes the namespace the user named, not the sandbox one by reflex", () => {
+  it("rewrites every item target ref and the entry endpoint with the chosen namespace", async () => {
+    const applyPlan = plan();
+    const result = await buildPromotionEntryFromVerification(
+      record(),
+      verification(applyPlan),
+      prodConn,
+      deps(applyPlan, vi.fn(async () => document("server:\n  port: 8080"))),
+      { targetNamespace: "prod-tenant" }
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.detail);
+    // 计划项与入口端点必须一起换：只改一处的话 dry-run 报的「覆盖/新建」和真正落笔的位置会各说一套。
+    expect(result.entry.items[0].targetRef?.namespace).toBe("prod-tenant");
+    expect(result.entry.items[0].namespace).toBe("prod-tenant");
+    expect(result.entry.target).toMatchObject({
+      connectionId: prodConn.id,
+      namespace: "prod-tenant",
+      label: "Production / prod-tenant",
+    });
+    // 沙箱那侧不能被生产命名空间污染：漂移复检读的就是 sourceRef 那个位置。
+    expect(result.entry.items[0].sourceRef?.namespace).toBe("public");
+    expect(result.entry.source).toMatchObject({ connectionId: sandboxConn.id, namespace: "public" });
+  });
+
+  it("keeps the plan target namespace only when the caller names none", async () => {
+    const applyPlan = plan();
+    const getConfigDocument = vi.fn(async () => document("server:\n  port: 8080"));
+
+    const legacy = await buildPromotionEntryFromVerification(record(), verification(applyPlan), prodConn, deps(applyPlan, getConfigDocument));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) throw new Error(legacy.detail);
+    expect(legacy.entry.target.namespace).toBe("public");
+    expect(legacy.entry.items[0].targetRef?.namespace).toBe("public");
+
+    // 空串是「公共空间」这一档，不是「没选」：Nacos 的 public 在接口里就是空 tenant。
+    // 把它当假值退回沙箱那个 id，用户在面板里点了 public，实际写的却是别的租户。
+    const publicNamespace = await buildPromotionEntryFromVerification(
+      record(),
+      verification(applyPlan),
+      prodConn,
+      deps(applyPlan, getConfigDocument),
+      { targetNamespace: "" }
+    );
+    expect(publicNamespace.ok).toBe(true);
+    if (!publicNamespace.ok) throw new Error(publicNamespace.detail);
+    expect(publicNamespace.entry.target.namespace).toBe("");
+    expect(publicNamespace.entry.target.label).toBe("Production / public");
+    expect(publicNamespace.entry.items[0].targetRef?.namespace).toBe("");
+
+    const padded = await buildPromotionEntryFromVerification(
+      record(),
+      verification(applyPlan),
+      prodConn,
+      deps(applyPlan, getConfigDocument),
+      { targetNamespace: "  prod-tenant  " }
+    );
+    expect(padded.ok).toBe(true);
+    if (!padded.ok) throw new Error(padded.detail);
+    expect(padded.entry.target.namespace).toBe("prod-tenant");
+  });});
+
+/**
+ * 「生产目标」这一栏只准挂真写得进去的连接（轮76 S31 补）。
+ *
+ * 本地快照与只读连接挂在候选里，用户要一路走到执行那步才会收到一条永远不可能成功的错误；
+ * 但 apollo/consul 不能顺手一起剔——计划那条写链路在 Go 侧同样有 PublishConfig。
+ */
+describe("promotion targets must be writable environments", () => {
+  const snapshotConn = { ...connection("conn-snap", "Mirror Snapshot", "Snapshot"), sourceType: "local-snapshot" as const };
+  const readonlyConn = { ...connection("conn-ro", "Mirror Read Only", "Readonly"), readonly: true };
+  const forcedConn = { ...connection("conn-force", "Mirror Forced Local", "Forced"), forceLocalSnapshot: true };
+  const apolloProd = { ...connection("conn-apollo", "Apollo Production", "Apollo"), provider: "apollo" as const };
+  const consulConn = { ...connection("conn-consul", "Consul Standard", "Consul"), provider: "consul" as const };
+
+  it("drops local snapshots and read-only connections out of the candidate list", () => {
+    const candidates = promotionTargetCandidates(
+      [sourceConn, sandboxConn, prodConn, snapshotConn, readonlyConn, forcedConn],
+      record(),
+      verification(plan())
+    );
+
+    expect(candidates.map((conn) => conn.id)).toEqual(["conn-prod", "conn-dev"]);
+    for (const conn of [snapshotConn, readonlyConn, forcedConn]) {
+      expect(isPromotionTargetConnection(conn), conn.id + " 根本写不进去，不该出现在生产目标里").toBe(false);
+    }
+    expect(isPromotionTargetConnection(prodConn)).toBe(true);
+  });
+
+  it("keeps apollo and consul eligible, and still puts production-marked targets first", () => {
+    const candidates = promotionTargetCandidates(
+      [sourceConn, sandboxConn, consulConn, readonlyConn, apolloProd, prodConn],
+      record(),
+      verification(plan())
+    );
+    const ids = candidates.map((conn) => conn.id);
+
+    expect(ids).toContain("conn-apollo");
+    expect(ids).toContain("conn-consul");
+    expect(ids).not.toContain("conn-ro");
+    // 带生产标记的两条排在前面：下拉默认指着哪条，用户多半就晋级哪条。
+    // 组内保持连接表原序：非标记的那组里 conn-dev 在前，因为它先出现在输入数组里。
+    expect(ids).toEqual(["conn-apollo", "conn-prod", "conn-dev", "conn-consul"]);
   });
 });
