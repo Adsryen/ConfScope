@@ -618,3 +618,26 @@ jobs:
             artifacts/ConfScope-darwin-arm64/confscope-macos-arm64.dmg
             artifacts/ConfScope-darwin-amd64/confscope-macos-amd64.dmg
             artifacts/update-manifest/update.json
+
+      # 应用内更新的官方源是 releases/latest/download/update.json，而 GitHub 的 latest 指针不按版本号算：
+      # 给老版本补建 Release 会把它抢过去（2026-10-26 补 v1.9.0 时实测踩到，那十几分钟所有人点检查更新都取不到清单）。
+      # 发布完就地确认 latest 落在刚建的这个 tag 上——抢走指针的发布必须当场红，不能留给用户踩。
+      - name: Assert latest pointer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          LATEST=""
+          for attempt in 1 2 3 4 5 6; do
+            # 读不到就当这一轮还没同步上：偶发的 API 抖动不该打断已经建好的发布
+            LATEST="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ "$LATEST" = "$TAG" ]; then
+              echo "latest 指针在 $TAG，检查更新读到的是这一版的资产"
+              exit 0
+            fi
+            echo "第 $attempt 次读到 latest=${LATEST:-（读不到）}，期望 ${TAG}，5 秒后重试"
+            sleep 5
+          done
+          echo "::error::Release 已创建，但 latest 指针停在 ${LATEST}：应用内更新读的是 releases/latest/download/update.json，错位会让所有检查更新失败。人工修正：gh release edit ${TAG} --latest"
+          exit 1

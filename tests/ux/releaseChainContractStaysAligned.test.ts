@@ -740,6 +740,14 @@ function releaseBodyProblems(text: string): string[] {
       problems.push(`body_path（${inputs.body_path}）与渲染步骤 --out（${outPath}）不是同一个文件`);
     }
   }
+  // 发布完的 latest 指针：GitHub 不按版本号算，补建老版本会把它抢走，而应用内更新读的就是
+  // releases/latest/download/update.json —— 错位时所有「检查更新」都取不到清单，且不会有任何地方变红。
+  const pointerStep = steps.find((chunk) => /releases\/latest/.test(runBody(chunk)));
+  if (!pointerStep) {
+    problems.push("release 作业发布后没有确认 latest 指针落在本次 tag 上：latest 被别的版本占走时应用内更新读不到 update.json，没有任何检查会红");
+  } else if (!/GITHUB_REF_NAME/.test(runBody(pointerStep))) {
+    problems.push("latest 指针检查没拿本次发布的 tag 比对（run 里看不到 GITHUB_REF_NAME），等于只打了个读数");
+  }
   return problems;
 }
 
