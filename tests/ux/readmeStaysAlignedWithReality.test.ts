@@ -22,9 +22,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { findChangelogSection, listChangelogVersions } from "../../scripts/changelogSection.mjs";
 import { PROJECT_ROOT } from "./scanUtils";
 
 const readme = readFileSync(join(PROJECT_ROOT, "README.md"), "utf-8");
+const changelog = readFileSync(join(PROJECT_ROOT, "CHANGELOG.md"), "utf-8");
 const goMod = readFileSync(join(PROJECT_ROOT, "go.mod"), "utf-8");
 const pkg = JSON.parse(readFileSync(join(PROJECT_ROOT, "package.json"), "utf-8")) as {
   packageManager?: string;
@@ -142,6 +144,91 @@ describe("发布产物名与 release.yml 一致", () => {
     for (const asset of assets) {
       expect(readme, `README 少了产物 ${asset}`).toContain(asset);
       expect(workflow, `release.yml 里没有 ${asset}`).toContain(asset);
+    }
+  });
+});
+
+describe("CHANGELOG 每个已发布版本的能力都要在 README 有据可查", () => {
+  /**
+   * 轮83 的起因：README 特性表停在 1.9.11，1.9.12 的「逐条回退 + 只看可回退」和 1.9.13 的
+   * 「本次改动 + 晋级收进第5步」一条都没写——CHANGELOG 是发布说明的事实源，但用户翻仓库
+   * 先看 README。上一轮的漂移是手工补的，这一轮把它变成必须过的门。
+   *
+   * 登记方式：版本 -> 该版引入的、README 里**确实出现**的能力关键词（短语，不是整句，
+   * 免得改一个字就把守卫打红）。空数组表示「这版没有面向用户的新能力」，且必须人工确认过
+   * CHANGELOG 段落里确实没有 Added/Changed 条目，否则视为漏登记。
+   *
+   * 门是从 COVERAGE_FLOOR 往后生效的：更早的版本已经发过，回改 README 登记表只会制造假阳性。
+   */
+  const README_COVERAGE: Record<string, string[]> = {
+    "1.9.12": ["生成回退计划", "只看可回退"],
+    "1.9.13": ["本次改动", "点名生产命名空间"],
+  };
+  const COVERAGE_FLOOR = "1.9.12";
+
+  const released = listChangelogVersions(changelog).map((entry) => entry.version);
+
+  /** 只比大小，够用即可：CHANGELOG 里的版本都是 x.y.z。 */
+  function isAtLeast(version: string, floor: string): boolean {
+    const left = version.split(".").map(Number);
+    const right = floor.split(".").map(Number);
+    for (let index = 0; index < 3; index += 1) {
+      if ((left[index] ?? 0) !== (right[index] ?? 0)) return (left[index] ?? 0) > (right[index] ?? 0);
+    }
+    return true;
+  }
+
+  /** 段落里面向用户的条目数：Added/Changed（兼容中文标题）下的 bullet。 */
+  function userVisibleBulletCount(body: string): number {
+    let counting = false;
+    let count = 0;
+    for (const line of body.split("\n")) {
+      const heading = /^#{3,4}\s+([A-Za-z\u4e00-\u9fa5]+)\s*$/.exec(line.trim());
+      if (heading) {
+        const label = heading[1].toLowerCase();
+        counting = ["added", "changed", "deprecated", "removed", "新增", "变更", "废弃", "移除"].includes(label);
+        continue;
+      }
+      if (counting && /^[-*] \S/.test(line.trimStart())) count += 1;
+    }
+    return count;
+  }
+
+  it("登记的版本都在 CHANGELOG 里（不留指向不存在的版本的登记）", () => {
+    for (const version of Object.keys(README_COVERAGE)) {
+      expect(released, `README_COVERAGE 里的 ${version} 在 CHANGELOG 没有对应段落`).toContain(version);
+    }
+  });
+
+  it("底线起每个已发布版本都必须登记，发版时看一眼 README 才算完", () => {
+    const untracked = released.filter(
+      (version) => isAtLeast(version, COVERAGE_FLOOR) && !(version in README_COVERAGE)
+    );
+    expect(
+      untracked,
+      `这些版本没在 README_COVERAGE 登记：${untracked.join(", ")}。` +
+        "面向用户的新能力要写进 README 核心特性表，并在这里登记至少一个 README 里确实出现的关键词；" +
+        "确实没有新能力就登记成空数组，前提是那一段 CHANGELOG 里没有 Added/Changed 条目。"
+    ).toEqual([]);
+  });
+
+  it("登记的关键词必须真的出现在 README 里", () => {
+    for (const [version, keywords] of Object.entries(README_COVERAGE)) {
+      for (const keyword of keywords) {
+        expect(readme, `README 里没有「${keyword}」，而它被登记为 ${version} 的能力`).toContain(keyword);
+      }
+    }
+  });
+
+  it("登记为空必须与 CHANGELOG 一致：有用户可见条目就不许写空数组", () => {
+    for (const [version, keywords] of Object.entries(README_COVERAGE)) {
+      if (keywords.length > 0) continue;
+      const section = findChangelogSection(changelog, version);
+      const visible = section ? userVisibleBulletCount(section.body) : 0;
+      expect(
+        visible,
+        `${version} 登记为空数组，但 CHANGELOG 段落里有 ${visible} 条 Added/Changed 条目——这是漏登记`
+      ).toBe(0);
     }
   });
 });
