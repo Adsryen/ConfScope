@@ -81,10 +81,23 @@ export async function selectSel(page: Page, panel: Locator, fieldLabel: string, 
   }
   await expect(menu).toBeVisible({ timeout: 10_000 });
   const option = menu.locator(".sel-option", { hasText: optionText }).last();
-  const optionCount = await menu.locator(".sel-option", { hasText: optionText }).count();
+  // 候选为空时先等一会儿再判死：连接刚换上的那一瞬，命名空间还在路上（实测过一侧下拉里
+  // 只有 "public（默认）"），真人会等列表长出来再点，测试也必须等得起。
+  // 注意这条重试只在「本来要抛错」的路径上发生，成功路径一个字节没变。
+  let optionCount = await menu.locator(".sel-option", { hasText: optionText }).count();
+  let all: string[] = [];
+  for (let attempt = 0; optionCount === 0 && attempt < 10; attempt += 1) {
+    await page.waitForTimeout(500);
+    if ((await menu.count()) === 0) {
+      await trigger.click({ force: true, timeout: 5_000 }).catch(() => undefined);
+      if ((await menu.count()) === 0) await trigger.evaluate((el) => (el as HTMLElement).click()).catch(() => undefined);
+      await expect(menu).toBeVisible({ timeout: 10_000 });
+    }
+    optionCount = await menu.locator(".sel-option", { hasText: optionText }).count();
+  }
   if (optionCount === 0) {
-    const all = await menu.locator(".sel-option").allInnerTexts();
-    throw new Error(`selectSel: 菜单中无选项 "${optionText}"（全部选项=${JSON.stringify(all)}）`);
+    all = await menu.locator(".sel-option").allInnerTexts();
+    throw new Error(`selectSel: 菜单中无选项 "${optionText}"（全部选项=${JSON.stringify(all)}，已等 5s 仍没有）`);
   }
   await expect(option).toBeVisible({ timeout: 10_000 });
   await option.click({ force: true, timeout: 10_000 }).catch(async (e) => {
