@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, resetRetestRevisions, resetRetestUpdateHandoff, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
+import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, resetRetestPublishRefusals, resetRetestRevisions, resetRetestUpdateHandoff, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -100,6 +100,9 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
   // 本机版本历史替身同样每用例重置：它是「这台机器见过哪几版」，跨用例残留会让
   // 「本机历史（N）」的条数断言读到上一个用例攒下的版本。
   resetRetestRevisions();
+  // 写入拒绝注入同样每用例重置：泄漏的「某条 dataId 恒被拒」会让下一条用例的执行
+  // 莫名半截失败（轮79 E4 注入，见 retestBinding 里的替身说明）。
+  resetRetestPublishRefusals();
   // 审计落盘恢复（node 侧）：retestBinding 为浏览器兼容不再直接 import node:fs，
   // 改由本 node 专属文件注入 sink，写回 /tmp 的 audit-trail.jsonl（只追加）。
   setRetestAuditLineSink((line) => {

@@ -724,6 +724,57 @@ let retestUpdateCheck: Record<string, unknown> | null = null;
 let retestDownloadedArtifact = "no-op";
 const retestActiveTunnels: string[] = [];
 
+/*
+ * provider 侧写入拒绝的桥内替身（轮79 E4 真机读数用）。
+ *
+ * 为什么要有：执行器唯一能说「本次真正写成了哪几份配置」的现场，是**半截失败**——
+ * 第 1 项已落库、第 2 项被服务端拒绝。真实 Nacos 的拒绝条件（dataId 非法字符、
+ * content 为空白）在播种阶段同样会被拒，造不出「一条能建、一条写不进」的组合；
+ * 而靠外部并发改写去撞最后一刻的指纹复检，赢的是毫秒级窗口，天然是 flaky。
+ * 所以这里在同一位置注入拒绝：抛出点与真实发布失败（`if (text !== "true") throw`）
+ * 是同一支笔，错误同样从 deps.publishConfig* 冒出来，生产代码一行都不改。
+ *
+ * 口径：命中即拒（可重复执行仍拒，等价于服务端稳定拒绝），并把每一次拒绝记进 hits，
+ * 用例据此断言「注入真的生效在第 2 项上」，而不是悄悄写成了两条。
+ */
+interface RetestPublishRefusal {
+  dataId: string;
+  group?: string;
+  namespace?: string;
+  message?: string;
+}
+let retestPublishRefusals: RetestPublishRefusal[] = [];
+const retestPublishRefusalHits: { namespace: string; group: string; dataId: string; message: string }[] = [];
+
+/** 让指定配置位置的下一次写入在 provider 侧失败（namespace/group 省略 = 不限）。 */
+export function setRetestPublishRefusals(list: RetestPublishRefusal[]): void {
+  retestPublishRefusals = list.map((item) => ({ ...item }));
+}
+
+export function retestPublishRefusalHitsSnapshot() {
+  return retestPublishRefusalHits.map((hit) => ({ ...hit }));
+}
+
+export function resetRetestPublishRefusals(): void {
+  retestPublishRefusals = [];
+  retestPublishRefusalHits.length = 0;
+}
+
+/** 命中判定 + 记账：返回拒绝文案，未命中返回 null。 */
+function takeRetestPublishRefusal(namespace: string, group: string, dataId: string): string | null {
+  const wanted = retestPublishRefusals.find(
+    (item) =>
+      item.dataId === dataId &&
+      (!item.group || item.group === group) &&
+      (!item.namespace || item.namespace === namespace)
+  );
+  if (!wanted) return null;
+  const message = wanted.message ?? `发布失败: caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`;
+  retestPublishRefusalHits.push({ namespace, group, dataId, message });
+  bridgeLog("publish-refused", namespace, group, dataId, "injected");
+  return message;
+}
+
 /** 覆盖 CheckForUpdates 的返回（null = 恢复「已是最新」基线）；顺带指定下载完落地的产物路径。 */
 export function setRetestUpdateCheck(result: Record<string, unknown> | null, artifactPath = "/tmp/confscope-retest-installer.exe") {
   retestUpdateCheck = result;
@@ -1075,6 +1126,8 @@ export function createRetestInvoke(): RetestInvoke {
         const req = args[1] as { ref: unknown; content: string; format: string };
         const ref = normalizeRefLike(req.ref);
         if (ref.key && ref.key !== "__document") throw new Error(`Nacos 不支持键级发布: ${ref.dataId}/${ref.key}`);
+        const refusal = takeRetestPublishRefusal(String(ref.namespace), String(ref.group), String(ref.dataId));
+        if (refusal) throw new Error(refusal);
         const text = await sendForm("POST", v1(ep, "/cs/configs", {}), {
           dataId: ref.dataId,
           group: ref.group,
@@ -1223,6 +1276,8 @@ export function createRetestInvoke(): RetestInvoke {
         const ep = endpointFor(String(args[0]));
         if (!ep) throw new Error(`retest bridge: 未知端点 ${args[0]}`);
         const [, , , namespace, dataId, group, content, configType] = args as unknown[];
+        const refusal = takeRetestPublishRefusal(String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""));
+        if (refusal) throw new Error(refusal);
         const text = await sendForm("POST", v1(ep, "/cs/configs", {}), {
           dataId: String(dataId ?? ""),
           group: String(group ?? ""),
