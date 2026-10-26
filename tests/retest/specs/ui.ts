@@ -174,13 +174,10 @@ export interface DiffSourceOptions {
 export async function setDiffSource(
   page: Page,
   side: "left" | "right",
-  opts: DiffSourceOptions
+  opts: DiffSourceOptions,
+  locale: "zh-CN" | "en-US" = "zh-CN"
 ): Promise<void> {
-  const title = side === "left" ? "来源（左）" : "目标（右）";
-  const panels = page.locator(".source-picker");
-  const panel = await panels
-    .filter({ has: page.locator(`.source-title:has-text("${title}")`) })
-    .first();
+  const panel = await pickDiffSourcePanel(page, side, locale);
   await expect(panel).toBeVisible({ timeout: 15_000 });
   // 面板折叠时 diff-sources 不可交互，且过渡期间摘要条会覆盖字段行；
   // 首次操作前先确保展开并等过渡稳定，避免卡死（此前 8 分钟级重试的根因）。
@@ -190,17 +187,27 @@ export async function setDiffSource(
   // 用 hasText 子串匹配而非精确文本。
   if (opts.namespace) await selectSel(page, panel, "命名空间", opts.namespace);
   // group 先选（过滤 dataId 候选），再填 dataId。
-  // 字段名用英文锚点：group 的 span 就是 "group"；dataId 的 span 是 "dataId (N)"
-  // （含 data 计数，用 hasText 前缀匹配）。中文 locale 下"命名空间"为 t("app.namespace")，
-  // 英文 locale 下为 "Namespace"，两者都含"命名"无法统一 → 用结构定位。
+  // 字段名一律走「候选标签依次探测」：zh「分组」/en「Group」、dataId span 形如 "Data ID (N)"，
+  // 两套语言都要能落地，否则英文 locale 下深状态直接跑不到。
   if (opts.group !== undefined) await fillDiffGroup(page, panel, opts.group);
   if (opts.dataId !== undefined) await fillDiffDataId(page, panel, opts.dataId);
 }
 
-/** 对比页指定侧的 group 字段（span 文本恰为 "group"）。 */
-function diffGroupField(panel: Locator): Locator {
-  // span 文本悉为 "group"（locale 硬编码）。
-  return panel.locator(`label.field:has(> span:has-text("分组"))`).first();
+/** 对比页指定侧的 group 字段（zh「分组」/ en「Group」，即 t("config.groupFilter")）。 */
+async function diffGroupField(panel: Locator): Promise<Locator> {
+  return fieldByAnyLabel(panel, ["分组", "Group"]);
+}
+
+/** 按候选字段名依次定位 label.field（直接子 span 才是字段名），返回第一个真实存在的。
+ *  不能写成一串逗号选择器：元素作用域下逗号列表在跨引擎版本上的相对语义不稳，
+ *  逐个候选 count() 判定最直白，也便于报错时把试过的字段名带出来。
+ *  注：filter({has: child}) 的子选择器相对【页面】解析，所以用 :has(> span:has-text(...)) 内联写法。 */
+async function fieldByAnyLabel(panel: Locator, labels: string[]): Promise<Locator> {
+  for (const label of labels) {
+    const candidate = panel.locator(`label.field:has(> span:has-text("${label}"))`).first();
+    if ((await candidate.count()) > 0) return candidate;
+  }
+  throw new Error(`fieldByAnyLabel: 字段都不存在，试过的字段名=${JSON.stringify(labels)}`);
 }
 
 function page_span(panel: Locator, text: string): Locator {
@@ -213,7 +220,7 @@ function page_span(panel: Locator, text: string): Locator {
 
 /** 填对比页指定侧的 group（先清空，再输入，等待候选出现后回车确认）。 */
 async function fillDiffGroup(page: Page, panel: Locator, value: string): Promise<void> {
-  const field = diffGroupField(panel);
+  const field = await diffGroupField(panel);
   const input = field.locator("input").first();
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.waitFor({ state: "visible" });
@@ -233,7 +240,7 @@ async function fillDiffGroup(page: Page, panel: Locator, value: string): Promise
 
 /** 填对比页指定侧的 dataId（span 为 "dataId (N)"，按前缀 "dataId" 定位）。 */
 async function fillDiffDataId(page: Page, panel: Locator, value: string): Promise<void> {
-  const target = diffDataIdField(panel);
+  const target = await diffDataIdField(panel);
   const input = target.locator("input").first();
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.fill(value);
@@ -242,9 +249,29 @@ async function fillDiffDataId(page: Page, panel: Locator, value: string): Promis
 }
 
 /** 对比页指定侧的 dataId 字段（span 文本以 "dataId" 开头，含 "(N)" 计数）。 */
-function diffDataIdField(panel: Locator): Locator {
-  // span 文本形如 "dataId (12)"；hasText "dataId" 只命中 dataId 字段
-  return panel.locator(`label.field:has(> span:has-text("dataId"))`).first();
+async function diffDataIdField(panel: Locator): Promise<Locator> {
+  // span 文本形如 "dataId (12)"；zh/en 都含 "dataId"，再兜底 "Data ID"
+  return fieldByAnyLabel(panel, ["dataId", "Data ID"]);
+}
+
+/** 指定侧面板标题（zh-CN: diff.sourceA/sourceB；en-US: Source (Left) / Target (Right)）。
+ *  按 locale 取标题；万一应用 locale 与传入不一致，再用另一套语言兜底，
+ *  这样 3 参老调用方（zh）行为完全不变，普查这类双 locale 用例也能跑通。 */
+const SIDE_TITLES: Record<"left" | "right", Record<"zh-CN" | "en-US", string>> = {
+  left: { "zh-CN": "来源（左）", "en-US": "Source (Left)" },
+  right: { "zh-CN": "目标（右）", "en-US": "Target (Right)" },
+};
+
+async function pickDiffSourcePanel(page: Page, side: "left" | "right", locale: "zh-CN" | "en-US"): Promise<Locator> {
+  const order = locale === "zh-CN" ? (["zh-CN", "en-US"] as const) : (["en-US", "zh-CN"] as const);
+  for (const lang of order) {
+    const candidate = page
+      .locator(".source-picker")
+      .filter({ has: page.locator(`.source-title:has-text("${SIDE_TITLES[side][lang]}")`) })
+      .first();
+    if ((await candidate.count()) > 0) return candidate;
+  }
+  throw new Error(`pickDiffSourcePanel: 找不到 ${side} 侧来源面板（zh/en 标题都没命中）`);
 }
 
 /** 对比页指定侧的来源面板（.source-picker，标题 来源（左）/目标（右），zh-CN locale）。
@@ -261,7 +288,7 @@ function diffPanel(page: Page, side: "left" | "right"): Locator {
 export async function readDiffGroupOptions(page: Page, side: "left" | "right"): Promise<string[]> {
   const panel = diffPanel(page, side);
   await ensureSourcesPanelExpanded(page);
-  const field = diffGroupField(panel);
+  const field = await diffGroupField(panel);
   const input = field.locator("input").first();
   await expect(input).toBeVisible({ timeout: 15_000 });
   // 收起/展开过渡期间摘要条会拦截真实指针点击；用 DOM focus+dispatchEvent 打开
