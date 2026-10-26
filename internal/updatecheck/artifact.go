@@ -99,6 +99,20 @@ func (s Selection) CandidateKeys() []string {
 	}
 }
 
+// ExpectedAssetName 按当前形态给出「这台机器该拿的那个发布文件名」。
+//
+// 只给反馈信息用：它不参与下载与装替补的选择（那条链路仍然走 SelectAsset 逐个试键），
+// 目的是让用户在 Issue 里能一句话说清自己装的是 confscope-windows-amd64-installer.exe
+// 还是便携版，而不是让维护者去猜。文件名取自 defaultFileName —— 与 release.yml 同源的那张表，
+// 不在这里再抄一份形态判据。
+func (s Selection) ExpectedAssetName() string {
+	keys := s.CandidateKeys()
+	if len(keys) == 0 {
+		return ""
+	}
+	return defaultFileName(keys[0])
+}
+
 // SelectionResult 是选条目的结论，含出路。
 type SelectionResult struct {
 	Asset       PlatformAsset `json:"asset"`

@@ -3,6 +3,7 @@ import {
   DownloadUpdate,
   GetAppInfo,
   GetCurrentPlatform,
+  GetFeedbackDiagnostics,
   GetDownloadProgress,
   LaunchUpdateInstaller,
   RevealDownloadedArtifact,
@@ -22,6 +23,16 @@ import type { ConfigItem } from "./nacos";
 export interface UpdateSource {
   name: string;
   url: string;
+}
+
+// 反馈通道能带出的运行环境事实。字段口径与 Go 侧 FeedbackDiagnostics 一一对应，
+// 改字段要同时改 internal/app/app.go 旁边那条「必须只有 5 项」的用例。
+export interface FeedbackDiagnostics {
+  version: string;
+  platform: string;
+  runtimeMode: string;
+  packageFormat: string;
+  assetName: string;
 }
 
 export interface AppInfo {
@@ -151,6 +162,12 @@ export function quitApplication(): Promise<void> {
 
 export function getCurrentPlatform(): Promise<string> {
   return GetCurrentPlatform();
+}
+
+// 反馈信息的唯一事实来源：形态判据住在 Go（portabledata 解析器 + DetectPackageFormat），
+// 前端只负责排版，不再自己猜「我这是安装版还是便携版」。
+export function getFeedbackDiagnostics(): Promise<FeedbackDiagnostics> {
+  return GetFeedbackDiagnostics();
 }
 
 export function selectLocalSnapshotDirectory(): Promise<string> {

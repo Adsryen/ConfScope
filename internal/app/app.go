@@ -192,6 +192,36 @@ func currentRuntimeShape() (portabledata.RuntimeMode, string) {
 	return mode, updatecheck.DetectPackageFormat()
 }
 
+// FeedbackDiagnostics 是「复制反馈信息」允许带出的全部事实（轮80）。
+//
+// 为什么只有这五项：这段文本会被用户原样粘进公开 Issue，所以凡是能定位到人或到环境的都不许进来——
+// 数据根与日志路径（含 Windows 用户名）、连接名、命名空间与租户名、配置正文、报错原文（常带内网 IP
+// 与主机名）一律排除。口径与 tests/ux/publicScreenshotsStaySanitized.test.ts 守的公开面一致。
+//
+// 为什么由 Go 组装而不是前端拼：运行形态的唯一事实源是 portabledata 解析器 +
+// updatecheck.DetectPackageFormat（与 CheckForUpdates 覆盖 req.Mode/PackageFormat 同一条理由），
+// 前端猜一套就会和更新链路各猜一次、猜歪一次。
+type FeedbackDiagnostics struct {
+	Version       string `json:"version"`
+	Platform      string `json:"platform"`
+	RuntimeMode   string `json:"runtimeMode"`
+	PackageFormat string `json:"packageFormat"`
+	AssetName     string `json:"assetName"`
+}
+
+// GetFeedbackDiagnostics 返回脱敏后的运行环境事实，供 About 页「复制反馈信息」使用。
+func (a *App) GetFeedbackDiagnostics() FeedbackDiagnostics {
+	mode, format := currentRuntimeShape()
+	sel := updatecheck.CurrentSelection(mode, format)
+	return FeedbackDiagnostics{
+		Version:       appVersion,
+		Platform:      sel.Platform,
+		RuntimeMode:   string(sel.Mode),
+		PackageFormat: sel.PackageFormat,
+		AssetName:     sel.ExpectedAssetName(),
+	}
+}
+
 // GetCurrentPlatform 返回当前平台标识，如 "windows-amd64"。
 func (a *App) GetCurrentPlatform() string {
 	return updatecheck.CurrentPlatform()

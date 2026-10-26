@@ -6,6 +6,16 @@ export type UpdateProxyConfig = {
   noProxy: string;
 };
 
+// 反馈信息能带出的运行环境事实（对齐 internal/app.FeedbackDiagnostics）。
+// 只有这 5 项：路径、连接名、命名空间、配置正文都不在这里，前端想塞也得先改这个类型。
+export type FeedbackDiagnostics = {
+  version: string;
+  platform: string;
+  runtimeMode: string;
+  packageFormat: string;
+  assetName: string;
+};
+
 type GoApp = {
   GetAppInfo(): Promise<any>;
   CheckForUpdates(request: any): Promise<any>;
@@ -18,6 +28,7 @@ type GoApp = {
   ListActiveSSHTunnels(): Promise<string[]>;
   QuitApplication(): Promise<void>;
   GetCurrentPlatform(): Promise<string>;
+  GetFeedbackDiagnostics(): Promise<FeedbackDiagnostics>;
   RunCredentialStorePoC(runID: string): Promise<CredentialStorePoCResult>;
   WriteSecureSecret(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
   ReadSecureSecret(ref: SecureSecretRef): Promise<string>;
@@ -370,6 +381,8 @@ export const ListActiveSSHTunnels = () => app().ListActiveSSHTunnels();
 export const QuitApplication = () => app().QuitApplication();
 
 export const GetCurrentPlatform = () => app().GetCurrentPlatform();
+
+export const GetFeedbackDiagnostics = () => app().GetFeedbackDiagnostics();
 
 export const RunCredentialStorePoC = (runID: string) => app().RunCredentialStorePoC(runID);
 

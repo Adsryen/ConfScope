@@ -10,6 +10,7 @@ import { ARRIVE_FLASH_CLASS } from "../lib/arriveFlash";
 
 const apiMocks = vi.hoisted(() => ({
   getAppInfo: vi.fn(),
+  getFeedbackDiagnostics: vi.fn(),
   checkForUpdates: vi.fn(),
   downloadUpdate: vi.fn(),
   getDownloadProgress: vi.fn(),
@@ -22,6 +23,14 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/app", () => apiMocks);
+
+// 复制环境信息用的是全站唯一的 copyText。这里换成可控壳子，才测得出「挂载时有没有偷写剪贴板」——
+// 真实现会在 jsdom 里走 textarea + execCommand 兜底，那条路点了什么都在动用户的内容。
+const clipboardMocks = vi.hoisted(() => ({ copyText: vi.fn() }));
+vi.mock("../lib/clipboard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/clipboard")>();
+  return { ...actual, copyText: clipboardMocks.copyText };
+});
 
 // 交接闸门要看「本地数据是否已落盘」，真实现会在 jsdom 里因为拿不到绑定而恒返回 false，
 // 那样每个用例都被判成忙碌，测的就不是闸门而是环境了。
@@ -116,6 +125,21 @@ function disableAutoUpdateCheck() {
 /** 上次检查时间写 7 小时前：触发「距上次检查 > 6 小时」的被动自动检查。 */
 function enableAutoUpdateCheck() {
   writeSettings(new Date(Date.now() - 7 * 3600000).toISOString());
+}
+
+/**
+ * Go 侧反馈事实的基线读数（Windows 安装版那一档）。
+ * 用例只改自己关心的字段，形状与 internal/app.FeedbackDiagnostics 保持五项一致。
+ */
+function feedbackFacts(overrides: Record<string, string> = {}) {
+  return {
+    version: "1.9.13",
+    platform: "windows-amd64",
+    runtimeMode: "installed",
+    packageFormat: "",
+    assetName: "confscope-windows-amd64-installer.exe",
+    ...overrides,
+  };
 }
 
 function baseAppInfo(version = "1.0.0") {
@@ -214,6 +238,9 @@ describe("About", () => {
     docMocks.pushAppDataDocument.mockResolvedValue(true);
 
     apiMocks.getAppInfo.mockResolvedValue(baseAppInfo());
+    clipboardMocks.copyText.mockReset();
+    clipboardMocks.copyText.mockResolvedValue(true);
+    apiMocks.getFeedbackDiagnostics.mockResolvedValue(feedbackFacts());
     apiMocks.checkForUpdates.mockResolvedValue(checkResult());
     apiMocks.downloadUpdate.mockResolvedValue("C:\\Temp\\ConfScope.exe");
     apiMocks.getDownloadProgress.mockResolvedValue({ downloaded: 0, total: 0, percent: 0, done: false, error: "" });
@@ -800,5 +827,61 @@ describe("About", () => {
     const target = document.getElementById("about-update")!;
     expect(target).toHaveClass(ARRIVE_FLASH_CLASS);
     await waitFor(() => expect(target).not.toHaveClass(ARRIVE_FLASH_CLASS), { timeout: 4000 });
+  });
+
+  it("反馈那一节把运行环境排出来，Issue 正文预填的就是屏幕上看到的这一份", async () => {
+    disableAutoUpdateCheck();
+    renderAbout("zh-CN", { embedded: true });
+    await screen.findByText("v1.0.0");
+
+    const preview = await screen.findByRole("region", { name: "运行环境信息预览" });
+    expect(preview.textContent).toContain("- ConfScope version: 1.9.13");
+    expect(preview.textContent).toContain("- Package: confscope-windows-amd64-installer.exe");
+
+    const issue = screen.getByRole("link", { name: "提交 Issue（自动带上环境信息）" });
+    const body = decodeURIComponent(issue.getAttribute("href")!.split("?body=")[1]);
+    // 「预填的 == 预览的」是这一节的全部信任基础：用户贴之前看得见内容，才知道自己没有泄露什么
+    expect(body).toContain(preview.textContent!.trim().split("\n")[0]);
+    expect(body).toContain("## 复现步骤");
+  });
+
+  it("挂载不写剪贴板，明确点「复制环境信息」才动", async () => {
+    disableAutoUpdateCheck();
+    renderAbout("zh-CN", { embedded: true });
+    await screen.findByText("v1.0.0");
+    expect(clipboardMocks.copyText).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制运行环境信息" }));
+    await waitFor(() => expect(clipboardMocks.copyText).toHaveBeenCalledTimes(1));
+    expect(clipboardMocks.copyText.mock.calls[0][0]).toContain("- Platform: windows-amd64");
+  });
+
+  it("环境信息没读到也不关这扇门：给说明、给重读，复制按钮不许空转", async () => {
+    disableAutoUpdateCheck();
+    apiMocks.getFeedbackDiagnostics.mockRejectedValueOnce(new Error("binding not ready"));
+    renderAbout("zh-CN", { embedded: true });
+    await screen.findByText("v1.0.0");
+
+    expect(await screen.findByText(/运行环境信息没读到/)).toBeTruthy();
+    // 没内容就不摆一颗点了没反应的按钮：CopyButton 自己按 text 空串禁用
+    expect(screen.getByRole("button", { name: "复制运行环境信息" })).toBeDisabled();
+    // Issue 出口仍在，且只剩段落模板——读不到事实不等于不许反馈
+    const issue = screen.getByRole("link", { name: "提交 Issue（自动带上环境信息）" });
+    expect(decodeURIComponent(issue.getAttribute("href")!.split("?body=")[1])).toContain("## 问题描述");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(await screen.findByRole("region", { name: "运行环境信息预览" })).toBeTruthy();
+    expect(apiMocks.getFeedbackDiagnostics).toHaveBeenCalledTimes(2);
+  });
+
+  it("同一屏只有一个 Issue 出口，另一颗按钮换成下载页", async () => {
+    disableAutoUpdateCheck();
+    renderAbout("zh-CN", { embedded: true });
+    await screen.findByText("v1.0.0");
+
+    const links = screen.getAllByRole("link");
+    const issueLinks = links.filter((l) => (l.getAttribute("href") ?? "").includes("/issues"));
+    expect(issueLinks).toHaveLength(1);
+    expect(links.some((l) => l.getAttribute("href") === "https://github.com/Adsryen/ConfScope/releases")).toBe(true);
   });
 });

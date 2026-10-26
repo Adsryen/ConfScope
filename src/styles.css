@@ -6131,6 +6131,81 @@ button.diff-workflow-step-btn:hover {
 
 /* R83：.about-section 写了 padding 与 border 简写，这里只撤上边——长写与简写是同一样东西，
    唯一用法是 About.tsx 的 `about-section about-full about-links`，提成复合形式靠特异度决胜。 */
+/*
+ * 反馈通道那一节（轮80）。
+ *
+ * 这一节的节奏交给 flex gap 统一管，不写 `.about-feedback p { margin-bottom }` 那种
+ * 「和 .about-section p 同特异度、靠书写顺序赢」的覆盖——正是 classOverridesResolveBySpecificity 拦的形态。
+ *
+ * 环境块必须等宽 + white-space: pre 不折行：那是要被原样贴进 Issue 的正文，浏览器一折行、
+ * 把 "- " 渲染成列表符号，贴出去的就不是同一份文本。横向自己滚 + overscroll-behavior: contain，
+ * 滚到边界不带动外层弹层（与 .update-release-notes 同一口径）。
+ * 底色/边框/圆角抄 .update-handoff-command：同一页里两块都是「程序算出来、给人原样搬走的东西」，
+ * 长得不一样会让人怀疑其中一块不是真的。
+ */
+.about-section.about-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-section.about-feedback h3 {
+  margin-bottom: 0;
+}
+
+.feedback-env {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 150px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* 只读预览，但它也是 Tab 可达的滚动区：焦点环必须看得见，否则键盘用户不知道自己在哪一块里。 */
+.feedback-env:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: -2px;
+}
+
+/* 读不到 / 还在读时的替身：虚线框说「这里本该有内容，现在没有」，不拿实线冒充正文。 */
+.feedback-env-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feedback-env-note-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.feedback-env-scope {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.feedback-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .about-section.about-links {
   display: flex;
   gap: 10px;

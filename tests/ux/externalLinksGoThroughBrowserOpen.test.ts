@@ -118,11 +118,15 @@ describe("外链走系统浏览器的单一出口（波41 R66）", () => {
     expect(uses).toBeGreaterThanOrEqual(3);
   });
 
-  it("关于页的 4 个外链站点仍然走出口（下载页 + GitHub + 反馈 + 作者）", () => {
+  it("关于页的外链站点仍然走出口（命令式一处 + 声明式不缩水）", () => {
     const source = readScannedSource("src/components/About.tsx");
-    // 命令式那处（下载页/Release 页）只钉「确实走出口且只有一处」，不钉变量名：
+    // 命令式那处（Release 页）只钉「确实走出口且只有一处」，不钉变量名：
     // 轮62 起它是 releasePageUrl，上一版把 url 写进判据里，改个局部变量名就能让它自红。
     expect(occurrences(/\bvoid openExternalLink\(/g, source).length, "关于页的命令式外链必须走 openExternalLink 出口").toBe(1);
-    expect(occurrences(COMPONENT_USE, source).length).toBe(3);
+    // 声明式出口只钉**下界**。上一版钉 toBe(3)：轮80 把反馈做成预填 Issue 出口后 About 多了一处
+    // 出口，这条就红了——红在「功能比守卫多一个出口」上，是误红，不是回归。
+    // 出口被删成静默由这条下界挡；出口喂错料由 tests/ux/feedbackChannelStaysSanitized.test.ts
+    // 的 href 白名单 + 调用点判据挡，两边分工，不在此处重复钉数量。
+    expect(occurrences(COMPONENT_USE, source).length, "关于页的声明式外链出口少于 3 处：有出口被改成静默了").toBeGreaterThanOrEqual(3);
   });
 });

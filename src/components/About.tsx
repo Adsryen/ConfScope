@@ -4,6 +4,7 @@ import {
   checkForUpdates,
   downloadUpdate,
   getAppInfo,
+  getFeedbackDiagnostics,
   getDownloadProgress,
   getUpdateInstallCommand,
   launchUpdateInstaller,
@@ -11,6 +12,7 @@ import {
   quitApplication,
   revealDownloadedArtifact,
   type AppInfo,
+  type FeedbackDiagnostics,
   type DownloadProgress,
   type UpdateCheckResult,
   type UpdateHandoff,
@@ -32,6 +34,7 @@ import { statusMessageProps } from "../lib/statusSemantics";
 import { revealArrival } from "../lib/arriveFlash";
 import { openExternalLink } from "../lib/externalLink";
 import ExternalLink from "./ExternalLink";
+import { buildFeedbackEnvironment, buildNewIssueURL } from "../lib/feedbackDiagnostics";
 
 interface AboutProps {
   onClose?: () => void;
@@ -84,13 +87,20 @@ export default function About({
   arriveAtUpdate = false,
   onArriveConsumed,
 }: AboutProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [appInfo, setAppInfo] = useState<AppInfo>({
     name: "ConfScope",
     version: "1.0.0",
     updateSources: [],
   });
   const [appInfoLoaded, setAppInfoLoaded] = useState(false);
+  // 反馈通道的环境事实（轮80）。挂载时取一次：这几项在进程生命周期内不会变，
+  // 而形态判据住在 Go（portabledata 解析器 + DetectPackageFormat），前端不参与猜测。
+  // 取失败**不能**把这扇门一起关掉——用户报错时正是最需要出口的时候，
+  // 所以失败只把预览换成一句说明加一颗重读按钮，Issue 链接与段落模板照旧给出去。
+  const [feedbackFacts, setFeedbackFacts] = useState<FeedbackDiagnostics | null>(null);
+  const [feedbackFactsFailed, setFeedbackFactsFailed] = useState(false);
+  const [feedbackReloadSeq, setFeedbackReloadSeq] = useState(0);
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
@@ -138,6 +148,26 @@ export default function About({
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getFeedbackDiagnostics()
+      .then((facts) => {
+        if (alive) {
+          setFeedbackFacts(facts);
+          setFeedbackFactsFailed(false);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setFeedbackFacts(null);
+          setFeedbackFactsFailed(true);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [feedbackReloadSeq]);
 
   // 监听 Wails 下载进度事件 + 轮询 fallback
   useEffect(() => {
@@ -328,6 +358,24 @@ export default function About({
   const openReleasePage = useCallback(() => {
     void openExternalLink(releasePageUrl);
   }, [releasePageUrl]);
+
+  // 环境块与 Issue 正文的排版都交给 src/lib/feedbackDiagnostics（判据在那边可脱离组件测）。
+  // UI 语言作为其中一行报出去，字段名固定英文，维护者不用按界面语言认两套。
+  const feedbackEnvBlock = useMemo(() => (feedbackFacts ? buildFeedbackEnvironment(feedbackFacts, locale) : ""), [feedbackFacts, locale]);
+  // 段落标题才是「给用户看的字」，所以 t() 在这里用，而不是塞进排版层。
+  const feedbackIssueUrl = useMemo(
+    () =>
+      buildNewIssueURL(feedbackEnvBlock, [
+        `## ${t("about.feedbackSectionSummary")}`,
+        "",
+        `## ${t("about.feedbackSectionSteps")}`,
+        "1. ",
+        "",
+        `## ${t("about.feedbackSectionExpected")}`,
+        "",
+      ]),
+    [feedbackEnvBlock, t]
+  );
 
   // 忙碌闸门的三个事实源，全都取既有的唯一出口：任务表（写入还在跑）、
   // 隧道表（在 Go 侧）、主数据落盘（pushAppDataDocument 的成功与否）。
@@ -726,12 +774,46 @@ export default function About({
           </div>
         </div>
 
+        <div className="about-section about-full about-feedback">
+          <h3>{t("about.feedback")}</h3>
+          <p>{t("about.feedbackIntro")}</p>
+          {feedbackEnvBlock ? (
+            <pre className="feedback-env" tabIndex={0} role="region" aria-label={t("about.environmentPreview")}>
+              {feedbackEnvBlock}
+            </pre>
+          ) : (
+            <div className="feedback-env-note" {...statusMessageProps("info")}>
+              <span className="feedback-env-note-text">
+                {t(feedbackFactsFailed ? "about.feedbackEnvFailed" : "about.feedbackEnvLoading")}
+              </span>
+              {/* 读不到就只给一条出路，不给「点了没反应」：预览换成说明，重读按钮只在失败时出现。 */}
+              {feedbackFactsFailed && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setFeedbackReloadSeq((n) => n + 1)}>
+                  {t("about.feedbackEnvRetry")}
+                </button>
+              )}
+            </div>
+          )}
+          <div className="feedback-env-scope">{t("about.feedbackPrivacy")}</div>
+          <div className="feedback-actions">
+            {/* 复制只在用户明确点的时候动剪贴板（全站 CopyButton 口径）：
+                以前想过点「反馈」顺手复制，那会盖掉用户正在复制的东西且毫无提示。 */}
+            <CopyButton text={feedbackEnvBlock} label={t("about.copyEnvironment")} ariaLabel={t("about.copyEnvironmentAria")} />
+            <ExternalLink href={feedbackIssueUrl} className="btn btn-primary btn-sm">
+              {t("about.feedbackIssue")}
+            </ExternalLink>
+          </div>
+        </div>
+
         <div className="about-section about-full about-links">
           <ExternalLink href="https://github.com/Adsryen/ConfScope" className="btn btn-ghost btn-sm">
             GitHub
           </ExternalLink>
-          <ExternalLink href="https://github.com/Adsryen/ConfScope/issues" className="btn btn-ghost btn-sm">
-            {t("about.feedback")}
+          {/* 占原来裸 /issues 那颗的位置：反馈已经有自己的预填出口，同一屏不留两颗 Issue。
+              标签用 openReleases 而不是流程里那颗 openDownload——「检查更新」落到手动下载
+              分支时同屏会出现两颗同名按钮，用户无从判断点哪颗。 */}
+          <ExternalLink href={releasePageUrl} className="btn btn-ghost btn-sm">
+            {t("about.openReleases")}
           </ExternalLink>
         </div>
       </div>
