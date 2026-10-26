@@ -16,8 +16,9 @@
 //
 // 安全边界（对着"外部可见且难撤回"这个性质设计的）：
 //   1. 写入前必然先把线上原正文落盘（--backup-dir，默认 tmp 下带时间戳目录）并打印路径；
-//   2. 剥掉 compare 行后正文仍 ≥ 200 字符 ⇒ 认定是手写正文（v1.0.0 就是这种），默认不覆盖，
-//      要 --force；这条顺带让 --apply 重复执行是幂等的；
+//   2. 线上正文末尾带生成标记 ⇒ 是脚本产物，直接按 CHANGELOG 更新；认不出标记且剥掉 compare
+//      行后仍 ≥ 200 字符 ⇒ 认定是手写正文（v1.0.0 就是这种），默认不覆盖，要 --force。
+//      标记是 2026-10-26 补的，此前线上正文都没有它，所以那批老正文只能走长度这条权宜口径；
 //   3. CHANGELOG 抽不到段落 ⇒ 非 0 退出。宁可红，也不往 Release 写一行空话（与轮52 同口径）；
 //   4. 写完逐条回读比对，不一致就算失败，不静默咽掉。
 //
@@ -36,8 +37,16 @@ import { SECTION_LABELS, findChangelogSection, listChangelogVersions, normalizeV
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_REPO = "Adsryen/ConfScope";
 const DEFAULT_TAG_PREFIX = "v";
-/** 剥掉 compare 行后正文达到这个长度，就认为是有人认真手写过，默认别覆盖。 */
+/** 剥掉 compare 行与生成标记后正文达到这个长度，才认为是有人认真手写过，默认别覆盖。 */
 const MANUAL_BODY_MIN_CHARS = 200;
+/**
+ * 生成标记：渲染时贴在正文末尾（HTML 注释，GitHub 不显示）。
+ * 有了它，--list/--apply 就能认出「这份正文是脚本从 CHANGELOG 渲出来的」，不必再靠长度猜。
+ * 轮70 留下的坑：回填 1.9.2–1.9.9 的文案时，线上正文与旧 CHANGELOG 逐字节相同（显然是脚本产物），
+ * 却因为超过 200 字符被判定「手写、默认保留」，只能逐个 --force。长度是权宜口径，标记才是事实。
+ */
+const GENERATED_MARKER_RE = /^<!-- confscope:release-notes generated-from CHANGELOG\.md v\d+\.\d+\.\d+ -->$/im;
+const generatedMarker = (version) => `<!-- confscope:release-notes generated-from CHANGELOG.md v${version} -->`;
 /** 0.x 没打过 tag：作为 compare 基线会拼出死链。 */
 const MIN_TAGGED_MAJOR = 1;
 
@@ -111,6 +120,8 @@ export function renderReleaseBody(markdown, version, options = {}) {
     "",
     buildCompareLine(repo, tag, compareBase),
     "",
+    generatedMarker(section.version),
+    "",
   ].join("\n");
   return { version: section.version, tag, date: section.date, previousVersion: section.previousVersion, compareBase, body };
 }
@@ -125,9 +136,19 @@ function normalizeBody(text) {
     .trim();
 }
 
-/** 线上正文里"除 compare 行以外"的字符数：判断是不是有人手写过。 */
+/**
+ * 线上正文里"人能读的内容"有多少字符：compare 行与生成标记都不算。
+ * 只剥 compare 行时，脚本自己贴的标记会被计入人手写的篇幅——标记一多，
+ * 「默认保留手写」就把脚本产物当成人的东西护起来，正好把标记要解决的问题反过来。
+ */
 export function manualBodyChars(body) {
-  return normalizeBody(String(body ?? "").replace(/^\s*\*\*Full Changelog\*\*:.*$/gim, "")).length;
+  const withoutCompare = String(body ?? "").replace(/^\s*\*\*Full Changelog\*\*:.*$/gim, "");
+  return normalizeBody(stripAllHtmlComments(withoutCompare)).length;
+}
+
+/** 线上正文是不是本脚本写出去的（认末尾的生成标记）。 */
+export function isGeneratedBody(body) {
+  return GENERATED_MARKER_RE.test(String(body ?? ""));
 }
 
 /** 纯函数：单个 Release 的处置决定。action 为 add/update 时 body 才是要写入的正文。 */
@@ -137,14 +158,18 @@ export function planRelease(input) {
   if (!rendered) {
     // --force 的语义是"正文只认 CHANGELOG"：那就不能对着抽不到段落的版本静默保留手写正文，
     // 必须报缺段落、非 0 退出，让人回去补 CHANGELOG（否则 force 一次等于把某个版本永久留在旧正文上）。
-    const protectedManual = chars >= MANUAL_BODY_MIN_CHARS && !force;
+    // 带生成标记的线上正文本来就是脚本产物，算不上"人的东西"，同样报缺段落逼人去补。
+    const generated = isGeneratedBody(existingBody);
+    const protectedManual = !generated && chars >= MANUAL_BODY_MIN_CHARS && !force;
     return {
       action: protectedManual ? "keep-manual" : "missing-section",
       existingChars: chars,
       reason: protectedManual
         ? "CHANGELOG 无段落，但线上已有手写正文，保留"
         : chars >= MANUAL_BODY_MIN_CHARS
-          ? "CHANGELOG 里抽不到该版本的段落（--force 下不再保留手写正文，先去补段落）"
+          ? generated
+            ? "线上正文是脚本生成的，但 CHANGELOG 里抽不到该版本的段落，先去补段落"
+            : "CHANGELOG 里抽不到该版本的段落（--force 下不再保留手写正文，先去补段落）"
           : "CHANGELOG 里抽不到该版本的段落",
     };
   }
@@ -153,6 +178,15 @@ export function planRelease(input) {
   }
   if (normalizeBody(existingBody) === normalizeBody(rendered.body)) {
     return { action: "in-sync", existingChars: chars, reason: "线上正文已与 CHANGELOG 一致" };
+  }
+  // 先认标记再判长度：带标记的正文不管多长都是脚本产物，直接按 CHANGELOG 更新，不需要 --force。
+  if (isGeneratedBody(existingBody)) {
+    return {
+      action: "update",
+      body: rendered.body,
+      existingChars: chars,
+      reason: `线上正文带 CHANGELOG 生成标记（${chars} 字符），按 CHANGELOG 更新`,
+    };
   }
   if (chars >= MANUAL_BODY_MIN_CHARS) {
     if (!force) {
@@ -238,7 +272,7 @@ const USAGE = `用法:
   --bodies-dir  配合 --list：用 <tag>.md 形式的本地正文快照试算，不联网（--apply 不接受）
   --apply       真写：先把线上原正文备份到 --backup-dir（默认 tmp 带时间戳目录），再 gh release edit，写完回读校验
   --version     只处理一个版本；不给则 --all（默认全量回填）
-  --force       连手写正文一起覆盖（默认保留，见脚本头部安全边界）；
+  --force       连手写正文一起覆盖（认不出生成标记且 ≥200 字符才算手写，见脚本头部安全边界）；
                 语义是"正文只认 CHANGELOG"，所以抽不到段落的版本会报缺段落，而不是静默留在旧正文上
   --changelog   默认仓库根的 CHANGELOG.md
   --repo        默认 ${DEFAULT_REPO}

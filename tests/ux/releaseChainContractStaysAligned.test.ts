@@ -40,7 +40,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SECTION_LABELS, listChangelogVersions, normalizeVersion } from "../../scripts/changelogSection.mjs";
-import { manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
+import { isGeneratedBody, manualBodyChars, planRelease, renderReleaseBody, resolveCompareBase } from "../../scripts/sync-github-release-notes.mjs";
 import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
 const WORKFLOW = ".github/workflows/release.yml";
@@ -769,6 +769,20 @@ const FIXTURE_CHANGELOG = `# Changelog
 ### Added
 - 庚功能
 
+## [2.2.0] - 2026-11-08
+
+### Added
+- 戊功能：把两份配置的差异按层级路径列出来，同名 key 在不同父路径下不再混为一谈，读起来不用再自己数缩进。
+- 己功能：写入前自动留存目标配置的原样副本，出问题能从操作历史里找到那一次并回退。
+- 庚功能：批量替换先出一份可逐项勾选的执行计划，确认后才落笔，计划里能看到每一项改动前后的完整内容，未勾选的一项都不会被改动。
+
+## [2.4.0] - 2026-11-09
+
+### Added
+- 戊功能：把两份配置的差异按层级路径列出来，同名 key 在不同父路径下不再混为一谈，读起来不用再自己数缩进。
+- 己功能：写入前自动留存目标配置的原样副本，出问题能从操作历史里找到那一次并回退。
+- 庚功能：批量替换先出一份可逐项勾选的执行计划，确认后才落笔，计划里能看到每一项改动前后的完整内容，未勾选的一项都不会被改动。
+
 ## [2.0.0] - 2026-10-01
 
 ### Added
@@ -921,6 +935,15 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
   writeFileSync(join(snapshotDir, "v3.3.3.md"), `${manual}\n\n`.repeat(8), "utf8"); // 无段落但线上是手写 ⇒ 保留（别把人写的顶掉）
   writeFileSync(join(snapshotDir, "v0.9.9.md"), "只有一句话", "utf8"); // 无段落又短 ⇒ 必须报缺段落
 
+  // 一对控制变量：同样的字符数，只差末尾那行生成标记。正文取自真实渲染链路，
+  // 只把「戊功能：」改成「戊功能（旧文案）：」，模拟线上还停在旧文案的状态。
+  const staleBody = (version: string) =>
+    runSyncScript([`--print-body=${version}`, changelogArg]).stdout.replace("戊功能：", "戊功能（旧文案）：");
+  const withMarker = staleBody("2.2.0");
+  const withoutMarker = withMarker.replace(/^<!-- confscope:release-notes.*-->$/gm, "").trim() + "\n";
+  writeFileSync(join(snapshotDir, "v2.2.0.md"), withMarker, "utf8"); // 带标记的旧文案 ⇒ 不用 --force 也按 CHANGELOG 更新
+  writeFileSync(join(snapshotDir, "v2.4.0.md"), withoutMarker, "utf8"); // 同样长度没标记 ⇒ 仍走老口径当作手写
+
   it("--list 把处置分开：写入 / 覆盖 / 已同步 / 保留手写 / 缺段落", () => {
     const run = runSyncScript(["--list", `--bodies-dir=${snapshotDir}`, changelogArg]);
     expect(run.code, "有缺段落就该非 0，逼人去补 CHANGELOG").not.toBe(0);
@@ -941,6 +964,52 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
     expect(rows["v3.3.3"], "force 的语义是正文只认 CHANGELOG：抽不到段落就必须报缺段落，不能静默留在旧正文上").toBe("缺段落");
     expect(rows["v1.9.9"], "force 不该把已同步的重新写一遍").toBe("已同步");
     expect(forced.code).not.toBe(0);
+  });
+
+  it("生成标记是判据，长度只是没标记老正文的权宜口径", () => {
+    expect(manualBodyChars(withoutMarker), "夹具正文必须够长，否则这条只在测阈值以下的分支").toBeGreaterThanOrEqual(200);
+    const rows = snapshotRows(runSyncScript(["--list", `--bodies-dir=${snapshotDir}`, changelogArg]).stdout);
+    expect(rows["v2.2.0"], "带生成标记 ⇒ 脚本产物，按 CHANGELOG 更新").toBe("覆盖");
+    expect(rows["v2.4.0"], "同样篇幅但认不出标记 ⇒ 仍按老口径保留手写").toBe("保留手写");
+
+    const rendered = renderReleaseBody(FIXTURE_CHANGELOG, "2.2.0", { repo: REPO });
+    expect(rendered, "夹具里的段落必须渲染得出正文").not.toBeNull();
+    expect(planRelease({ rendered, existingBody: withMarker }).reason).toContain("生成标记");
+    expect(planRelease({ rendered, existingBody: withoutMarker }).action).toBe("keep-manual");
+    // 变异对照：注释前缀换了就不算标记，免得将来写成别的注释还指望它起作用
+    const wrongMarker = withMarker.replace(/^<!-- confscope:release-notes(.*)-->$/m, "<!-- generated-from: CHANGELOG$1-->");
+    expect(planRelease({ rendered, existingBody: wrongMarker }).action, "前缀不匹配的注释不算生成标记").toBe("keep-manual");
+  });
+
+  it("重跑幂等；生成标记不算进「人手写的字符数」", () => {
+    const rendered = renderReleaseBody(FIXTURE_CHANGELOG, "2.2.0", { repo: REPO });
+    expect(planRelease({ rendered, existingBody: rendered.body }).action, "线上已是刚渲染的那份 ⇒ 不该再写一遍").toBe("in-sync");
+    const stripped = rendered.body.replace(/^<!-- confscope:release-notes.*-->$/gm, "").trim() + "\n";
+    expect(manualBodyChars(rendered.body), "标记不计入手写字符数，否则脚本产物会被当手写保护起来").toBe(manualBodyChars(stripped));
+    expect(isGeneratedBody(rendered.body)).toBe(true);
+    expect(isGeneratedBody(stripped)).toBe(false);
+  });
+
+  it("CHANGELOG 抽不到段落、线上却带生成标记 ⇒ 报缺段落，不当手写正文护着", () => {
+    const longPlain = `${"生成的旧正文".repeat(80)}\n\n- 甲\n- 乙\n`;
+    const marked = `${longPlain}\n<!-- confscope:release-notes generated-from CHANGELOG.md v9.9.9 -->\n`;
+    expect(manualBodyChars(marked)).toBeGreaterThanOrEqual(200);
+    const plan = planRelease({ rendered: null, existingBody: marked });
+    expect(plan.action, "脚本产物谈不上保护，缺段落就得逼人回去补 CHANGELOG").toBe("missing-section");
+    expect(plan.reason).toContain("脚本生成");
+    expect(planRelease({ rendered: null, existingBody: longPlain }).action, "人写的长正文仍然保留").toBe("keep-manual");
+  });
+
+  it("真实链路：--print-body 末尾带标记且版本号对得上，纯文本 notes 不被污染", () => {
+    const body = runSyncScript([`--print-body=1.9.13`]).stdout;
+    expect(body).toMatch(/^<!-- confscope:release-notes generated-from CHANGELOG\.md v1\.9\.13 -->$/m);
+    expect(body.lastIndexOf("confscope:release-notes"), "标记要排在 compare 行之后").toBeGreaterThan(
+      body.lastIndexOf("**Full Changelog**")
+    );
+    const notes = runNotesScript(["1.9.13"]);
+    expect(notes.code).toBe(0);
+    expect(notes.stdout, "应用内更新面板读的是纯文本 notes，不该长出这行注释").not.toContain("confscope:release-notes");
+    expect(notes.stdout).not.toContain("<!--");
   });
 
   it("覆盖的依据要说真话：线上有内容就不能写成「只剩 compare 行」", () => {
