@@ -1,0 +1,23 @@
+{
+  // tests/ 与 scripts/ 的类型检查入口（轮85 新立）。基准 tsconfig.json 的 include 只有 src + wailsjs，
+  // 于是这个仓库里唯一「改了不会有人报警」的一层一直没人检查过：helper 签名漂移、恒假断言、
+  // 被静默吞掉的 expect 说明文案，全都要等 21 分钟的全量 retest 才暴露。
+  //
+  // 与基准的差异只有两条，各自都有实测理由：
+  // - lib ES2022：用例里大量用 String.replaceAll（29 处 TS2550），ES2020 的 lib 判它不存在。
+  // - esModuleInterop：smoke/native 的 helper 用默认导入（关掉它 tests/smoke 多出 28 条误报）。
+  // strict / noUnusedLocals / noUnusedParameters 一律沿用基准，不做放宽。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "esModuleInterop": true,
+    // scripts/ 那 5 个 .mjs 是被 tests/ux 的守卫直接 import 的（发布链路、CHANGELOG 口径）。
+    // 不给 allowJs 就判 TS7016「无声明文件、隐式 any」，守卫里 listChangelogVersions(...).map(item => ...)
+    // 这类回调用法一律退化成 any——开了 allowJs 后 TS 自己从 JS 推签名，那 3 条 TS7006 一起消失。
+    // checkJs 保持默认关：这些脚本靠 node 跑，不是本轮的门。
+    "allowJs": true,
+    "noEmit": true
+  },
+  "include": ["src", "wailsjs", "tests", "scripts"],
+  "exclude": ["node_modules", "**/*sync-conflict*", "tests/retest/results-run", "tests/retest/shots/out"]
+}
