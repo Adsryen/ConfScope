@@ -1005,11 +1005,13 @@ describe("Release 正文回填的处置规则（离线快照，一次 API 都不
 // 黑话。口径落在 .trellis/spec/guides/release-notes-voice.md，这一节把其中能机械判定的部分钉住。
 
 /**
- * 判据生效的下界：1.9.2 起（含尚未发布的顶部段落）。
- * 更早的段落保持历史原样——那些 Release 正文早已发出去，回改只会让「当时实际交付的内容」与说明脱节。
- * 下界不是空转：下面用 1.9.1 的原文快照证明同一判据对旧段落是红的，豁免是刻意的。
+ * 判据没有版本豁免下界：CHANGELOG 里每个带日期的段落都要过一遍。
+ * 原先设过 1.9.2 的下界，理由是「旧正文已经发出去，回改会和当时交付的内容脱节」；实际后果是旧段落
+ * 里的开发日志措辞永远没人管，而判据被临时调到全量普查之后就停在那里回不去了。本轮把旧段落按
+ * 「事实不变、只换说法」改成用户口径并同步回线上正文，下界连同它的豁免语义一起删掉。
  */
-const VOICE_FLOOR = [1, 9, 2];
+/** 规则 13：条目开头不贴表情符号做装饰。渲染到 Release 页面就是一排图标，读起来像聊天记录。 */
+const VOICE_EMOJI = /\p{Extended_Pictographic}/u;
 /** 规则 9：一条 bullet 讲一件事。超长就是把两三件事塞进了一句，更新面板里会糊成一坨。 */
 const VOICE_BULLET_MAX = 200;
 /** 规则 5：仓库内部路径对读者没有意义，还会顺手把目录结构暴露出去。 */
@@ -1051,25 +1053,6 @@ const VOICE_TERMS: Array<{ label: string; pattern: RegExp }> = [
 ];
 
 const VOICE_SECTION_LABELS = new Set<string>(Object.values(SECTION_LABELS));
-
-function versionParts(version: string): number[] {
-  const normalized = normalizeVersion(version);
-  if (!normalized) return [0, 0, 0];
-  return normalized.split(".").map((seg) => Number(seg) || 0);
-}
-
-function compareVersionParts(a: number[], b: number[]): number {
-  for (let index = 0; index < 3; index += 1) {
-    const diff = (a[index] ?? 0) - (b[index] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-/** 下界以上的段落才受口吻判据约束。数字比较，1.10.0 不会被当成比 1.9.2 旧。 */
-function voiceCoveredVersions(versions: string[], floor: number[] = VOICE_FLOOR): string[] {
-  return versions.filter((version) => compareVersionParts(versionParts(version), floor) >= 0);
-}
 
 /**
  * 纯文本说明 → 「一条一件事」的列表。
@@ -1127,6 +1110,7 @@ function notesVoiceProblems(notes: string): string[] {
     for (const hit of line.match(new RegExp(VOICE_SOURCE_EXT, "g")) ?? []) {
       push("源码文件名", hit, hit, line);
     }
+    if (VOICE_EMOJI.test(line)) push("表情符号装饰", "emoji", "发布说明不用表情符号给条目做装饰", line);
   }
   for (const bullet of bullets) {
     const length = [...bullet].length;
@@ -1139,22 +1123,22 @@ function notesVoiceProblems(notes: string): string[] {
 
 describe("发布说明的口吻（面向用户，不是开发日志）", () => {
   const changelog = readFileSync(join(PROJECT_ROOT, "CHANGELOG.md"), "utf8");
-  const covered = voiceCoveredVersions(changelogVersions(changelog));
+  const covered = changelogVersions(changelog);
   const extracted = covered.map((version) => {
     const run = runNotesScript([version]);
     expect(run.code, `${version} 抽取失败：${run.stderr}`).toBe(0);
     return { version, notes: run.stdout };
   });
 
-  it("覆盖范围：最新段落一定在内，下界按数字序而非字符串序", () => {
-    expect(voiceCoveredVersions(["1.9.1", "1.9.2", "1.10.0", "2.0.0"])).toEqual(["1.9.2", "1.10.0", "2.0.0"]);
-    expect(covered.length).toBeGreaterThanOrEqual(3);
+  it("覆盖范围：每个带日期的段落都在判据内，没有版本豁免", () => {
+    expect(covered.length).toBeGreaterThanOrEqual(30);
     expect(covered[0]).toBe(changelogVersions(changelog)[0]);
     expect(covered).toContain(PKG_VERSION);
-    expect(covered).not.toContain("1.9.1");
+    // 曾经落在下界之外的三段，现在同样受约束
+    for (const anchor of ["1.9.1", "1.1.0", "0.1.0"]) expect(covered).toContain(anchor);
   });
 
-  it(`${covered.length} 个段落的说明里没有内部词、内部路径、源码文件名`, () => {
+  it(`${covered.length} 个段落的说明里没有内部词、内部路径、源码文件名、表情符号`, () => {
     const problems = extracted.flatMap(({ version, notes }) =>
       notesVoiceProblems(notes).map((text) => `${version}：${text}`)
     );
@@ -1182,6 +1166,9 @@ describe("发布说明的口吻（面向用户，不是开发日志）", () => {
     expect(withPath.join("\n"), "内部路径与源码文件名").toContain("tests/");
     expect(withPath.join("\n")).toContain(".ts");
 
+    const withEmoji = notesVoiceProblems("新增\n- ✨ **配置矩阵**: 支持多环境对比。");
+    expect(withEmoji.join("\n"), "表情符号装饰").toContain("表情符号");
+
     const tooLong = notesVoiceProblems(`修复\n- ${"重".repeat(VOICE_BULLET_MAX + 1)}。`);
     expect(tooLong.join("\n"), "超长 bullet").toContain("超过 200");
 
@@ -1204,8 +1191,8 @@ describe("发布说明的口吻（面向用户，不是开发日志）", () => {
     }
   });
 
-  it("下界是刻意的豁免而非判据空转：1.9.1 段落的原文快照按同判据必红", () => {
-    // 摘自 1.9.1 段落（已发布的正文快照，不参与判定，只用来证明判据有牙）
+  it("判据有牙：1.9.1 改写前的原文快照按同判据必红（快照不参与 CHANGELOG 判定）", () => {
+    // 1.9.1 改写前的正文快照。段落本身已经改成用户口径并通过判定，这份快照留着只证明判据不是空气
     const preFloorSample = [
       "工程",
       "- 前端主数据迁出 localStorage：以数据文件为唯一事实源，localStorage 降级为热缓存，损坏时隔离副本并回退。",

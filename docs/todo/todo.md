@@ -801,9 +801,9 @@
   - 当前策略：CI Go 1.24.x；macOS 上 `go install -ldflags="-linkmode=external"` 安装 Wails CLI，并以 `wails version` 做门禁。
   - 产物未签名、未公证；用户首次打开可能需「右键 → 打开」绕过 Gatekeeper。
   - 支持 `workflow_dispatch` 手动试跑（只构建与上传 artifact，不创建正式 Release）。
-- 发布说明的口吻判据（轮70）：`tests/ux/releaseChainContractStaysAligned.test.ts` 的「发布说明的口吻」
-  一节覆盖 1.9.2 起的段落，内部词 / 仓库内部路径 / 源码文件名 / 超长 bullet 一律判红；
-  写作口径见 `.trellis/spec/guides/release-notes-voice.md`。
+- 发布说明的口吻判据（轮70 立，轮82 取消版本豁免）：`tests/ux/releaseChainContractStaysAligned.test.ts`
+  的「发布说明的口吻」一节覆盖 CHANGELOG 里每个带日期的段落，内部词 / 仓库内部路径 / 源码文件名 /
+  表情符号 / 超长 bullet 一律判红；写作口径见 `.trellis/spec/guides/release-notes-voice.md`。
 - 待办（轮70 记）：`sync-github-release-notes.mjs` 分不清「脚本生成的旧正文」与「手写正文」，
   只看长度阈值（≥200 字符判手写）。本轮改写 1.9.2–1.9.9 的文案后，线上正文虽然与旧 CHANGELOG
   逐字节相同（显然由脚本生成），`--list` 仍报「保留手写」，得逐个 `--version=<v> --force --apply`。
