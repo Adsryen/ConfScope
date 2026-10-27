@@ -12,12 +12,15 @@ package ssh
 // 地址不可达时跳过：真机缺席不等于代码有问题，CI 不该因此判红。
 
 import (
+	"encoding/base64"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func liveSSHDDefaultAddr() string {
@@ -86,6 +89,72 @@ func TestLiveSSHDFirstTrustFlow(t *testing.T) {
 	}
 	if reprobe.Fingerprint != status.Fingerprint {
 		t.Fatalf("两次裁决指纹不一致: %q vs %q", reprobe.Fingerprint, status.Fingerprint)
+	}
+}
+
+// livePresentedKey 对真实 sshd 拨一次号，取回它出示的主机密钥。
+// 认证会失败（不凭据），但失败发生在主机密钥交换「之后」——取回钥匙即完成判据所需。
+func livePresentedKey(t *testing.T, addr string) ssh.PublicKey {
+	t.Helper()
+
+	var presented ssh.PublicKey
+	cfg := &ssh.ClientConfig{
+		User: "root",
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			presented = key
+			return nil
+		},
+		Timeout: 5 * time.Second,
+	}
+	c, err := ssh.Dial("tcp", addr, cfg)
+	if c != nil {
+		_ = c.Close()
+	}
+	if presented == nil {
+		t.Fatalf("取不到主机密钥: %v", err)
+	}
+	return presented
+}
+
+// 真机「信任后真实拨号」：信任落盘之后，走 createSSHConfig + 真实 ssh.Dial
+// 的隧道路径再拨一次。判据：不得命中任何主机密钥阻断。
+//
+// 这是 2026-10-27 真机复检复现 A 的收编用例——当时 x/crypto 交给回调的是
+// 带端口的拨号地址，产品代码比的是裸主机名，所有已信任主机在真实拨号时
+// 都被误判成「密钥变更」。假 dialer 的用例只能钉住「带端口要能归一」，
+// 这条对着真实握手，钉住整条链。判据不需要凭据：主机密钥被拒会在握手
+// 阶段就报错，钥匙放行才会走到认证阶段（故意给错口令，认证失败是预期结局）。
+func TestLiveSSHDTrustedHostSurvivesRealDial(t *testing.T) {
+	addr := liveSSHDDefaultAddr()
+	if !liveSSHDReachable(addr) {
+		t.Skipf("容器 sshd %s 不可达，跳过真机信任后拨号用例", addr)
+	}
+	cfg, host, port := liveHostKeyConfig(t, addr)
+
+	khPath := filepath.Join(t.TempDir(), "known_hosts")
+	kh := NewKnownHosts(khPath)
+	presented := livePresentedKey(t, addr)
+	if err := kh.Add(host, port, presented.Type(), base64.StdEncoding.EncodeToString(presented.Marshal())); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	raw, _ := os.ReadFile(khPath)
+	t.Logf("known_hosts 内容: %q", string(raw))
+
+	cfg.Password = "wrong-on-purpose"
+	clientCfg, err := createSSHConfig(cfg, kh)
+	if err != nil {
+		t.Fatalf("createSSHConfig: %v", err)
+	}
+	conn, dialErr := ssh.Dial("tcp", addr, clientCfg)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	t.Logf("信任后走隧道真实拨号路径 err=%v", dialErr)
+	if dialErr != nil {
+		var hke *HostKeyError
+		if asHostKeyError(dialErr, &hke) {
+			t.Fatalf("已信任的主机在真实拨号路径被主机密钥阻断: %v", dialErr)
+		}
 	}
 }
 

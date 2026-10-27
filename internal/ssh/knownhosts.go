@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -29,6 +29,9 @@ const (
 	HostKeyUnknown HostKeyVerdict = "hostKeyUnknown"
 	// HostKeyChanged 有记录但和服务端现在出示的钥匙对不上，按中间人风险阻断。
 	HostKeyChanged HostKeyVerdict = "hostKeyChanged"
+	// HostKeyMismatch 握手身份与拨号目标对不上（客户端侧异常，非服务端换钥匙）：
+	// 删记录解决不了，按阻断处理，文案不得引导用户去删记录。
+	HostKeyMismatch HostKeyVerdict = "hostKeyMismatch"
 )
 
 // HostKeyError 是主机密钥裁决未通过时抛出的错误。
@@ -38,6 +41,7 @@ type HostKeyError struct {
 	Host              string
 	Port              int
 	RecordID          string
+	Hostname          string
 	KeyType           string
 	Fingerprint       string
 	RecordFingerprint string
@@ -57,6 +61,12 @@ func (e *HostKeyError) Error() string {
 			"SSH 主机密钥已变更：%s 记录的指纹是 %s，服务端现在出示的是 %s（指纹 %s）。"+
 				"连接可能被中间人替换，已阻断。确认安全后，请手动删除 %s 中 %s 的记录再重连（本工具不会自动删除）",
 			e.RecordID, e.RecordFingerprint, e.KeyType, e.Fingerprint, e.Path, e.RecordID,
+		)
+	case HostKeyMismatch:
+		return fmt.Sprintf(
+			"SSH 主机密钥身份不符：握手时收到的主机名 %q 与拨号目标 %s 不一致（出示 %s，指纹 %s）。"+
+				"这与「该主机更换了钥匙」不同，手动删除记录解决不了，连接已阻断。请确认连接配置未被改动后重试",
+			e.Hostname, e.RecordID, e.KeyType, e.Fingerprint,
 		)
 	}
 	return "SSH 主机密钥校验未通过"
@@ -150,15 +160,23 @@ func (k *KnownHosts) HostKeyCallback(host string, port int) ssh.HostKeyCallback 
 		k.mu.Lock()
 		defer k.mu.Unlock()
 
+		// x/crypto 交给回调的是拨号地址（dialAddress）：tunnel.go 用 net.JoinHostPort
+		// 从 (host, port) 拼出来，带端口（golang.org/x/crypto/ssh/handshake.go 原样传入）。
+		// 比对身份前先剥掉端口归一；裸 IPv6（无端口分隔）走 SplitHostPort 的
+		// err 分支保持原值。2026-10-27 复检复现：不归一时所有已信任主机在
+		// 真实拨号时都被误判成「密钥变更」硬阻断。
+		if h, _, err := net.SplitHostPort(hostname); err == nil {
+			hostname = h
+		}
 		if hostname != host {
 			return &HostKeyError{
-				Verdict:     HostKeyChanged,
+				Verdict:     HostKeyMismatch,
+				Hostname:    hostname,
 				Host:        host,
 				Port:        port,
 				RecordID:    recordID(host, port),
 				KeyType:     key.Type(),
 				Fingerprint: fingerprintOf(key.Marshal()),
-				Path:        k.path,
 			}
 		}
 		entries := k.lookupLocked(host, port)
@@ -230,20 +248,62 @@ func keyMatchesAny(entries []knownHostsLine, wire []byte) bool {
 	return false
 }
 
+// validRecordHost 判断 host 是否是 Add 可写入的精确身份：
+// 主机名（字母数字与 . - _，单标签 ≤63、总长 ≤253）或 net.ParseIP
+// 认得的 IP 字面量（含 IPv6）。空白与任何控制字符、, * ? # [ ] 等
+// OpenSSH 特殊字符及其余取值一律拒绝——它们正是把记录变成通配、
+// 主机列表或注入完整第二行的手段。
+func validRecordHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	for _, r := range host {
+		if r < 0x20 || r == 0x7f || unicode.IsSpace(r) {
+			return false
+		}
+	}
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	if len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			case r == '-' || r == '_':
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Add 校验并写入一把用户确认过的钥匙。
 //
-// 纪律：同一个 (host, port) 记录已有不同钥匙时拒绝追加——
+// 身份纪律：只接受精确身份（主机名或 IP 字面量，见 validRecordHost），
+// 端口显式 1..65535。*、*.域名 这类通配、逗号主机列表与换行注入一律拒绝——
+// 通配记录会让同一把钥匙在所有主机上放行，换行能注入一条完整的新记录；
+// 文件内容里用户手写的通配仍由 lookup 按 OpenSSH 并集语义裁决，本入口不收。
+//
+// 钥匙纪律：同一个 (host, port) 记录已有不同钥匙时拒绝追加——
 // 「旧记录 + 新钥匙」并存等于给指纹变更开了并集旁路。
 // 同一把钥匙重复信任是幂等的。
-//
-// 通配模式（*.域名、.域名）不在这条身份判定管辖内：文件里已有通配记录时
-// 追加精确记录仍按 OpenSSH 自身的并集语义生效（多条匹配记录任一相等即放行），
-// 与 OpenSSH 客户端行为保持一致，不做更严的私有收紧。
 func (k *KnownHosts) Add(host string, port int, keyType, keyB64 string) error {
-	if strings.TrimSpace(host) == "" {
-		return errors.New("SSH 主机名不能为空")
+	if !validRecordHost(host) {
+		return fmt.Errorf(
+			"主机 %q 不能写入 known_hosts：只接受精确的主机名或 IP（通配、主机列表与特殊字符一律拒绝）",
+			host,
+		)
 	}
-	port = normalizePort(port)
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("端口 %d 超出范围：只接受 1..65535", port)
+	}
 
 	raw, err := base64.StdEncoding.DecodeString(keyB64)
 	if err != nil {

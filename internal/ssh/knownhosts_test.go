@@ -232,6 +232,80 @@ func TestKnownHostsAddRejectsInvalidKey(t *testing.T) {
 	}
 }
 
+// 2026-10-27 真机复检复现 B 收编：Add 不校验 host 时能写出通配记录
+// （同一把钥匙在所有主机上放行）与换行注入（一条完整的新记录）。
+// 判据：这些 host 一律拒绝，且落盘文件不得留下任何内容。
+func TestKnownHostsAddRejectsImpreciseHosts(t *testing.T) {
+	key, wire := testServerKey(t)
+	b64 := base64.StdEncoding.EncodeToString(wire)
+
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"通配星", "*"},
+		{"域通配", "*.example.com"},
+		{"点前缀通配", ".example.com"},
+		{"逗号主机列表", "a.example.com,b.example.com"},
+		{"含空格", "jump example.com"},
+		{"含换行注入", "ok.example.com\nevil.example.com ssh-ed25519 " + ed25519VectorKeyB64},
+		{"超长标签", strings.Repeat("a", 64) + ".example.com"},
+		{"超长总长", strings.Repeat("a", 64) + "." + strings.Repeat("a", 64) + "." + strings.Repeat("a", 64) + "." + strings.Repeat("a", 60)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "known_hosts")
+			kh := NewKnownHosts(path)
+			if err := kh.Add(tc.host, 22, key.Type(), b64); err == nil {
+				t.Fatalf("Add(%q) 成功，want 拒绝", tc.host)
+			}
+			raw, _ := os.ReadFile(path)
+			if len(raw) != 0 {
+				t.Fatalf("被拒的 host 仍在文件留下内容: %q", raw)
+			}
+		})
+	}
+}
+
+// Add 的端口是显式契约：1..65535 之外（含 0 这种「静默归一」的旧口子）一律拒绝。
+func TestKnownHostsAddRejectsOutOfRangePort(t *testing.T) {
+	key, wire := testServerKey(t)
+	b64 := base64.StdEncoding.EncodeToString(wire)
+
+	for _, port := range []int{-1, 0, 65536, 1 << 20} {
+		t.Run(fmt.Sprintf("port=%d", port), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "known_hosts")
+			kh := NewKnownHosts(path)
+			if err := kh.Add("jump.example.com", port, key.Type(), b64); err == nil {
+				t.Fatalf("Add(port=%d) 成功，want 拒绝", port)
+			}
+			if raw, _ := os.ReadFile(path); len(raw) != 0 {
+				t.Fatalf("越界端口仍在文件留下内容: %q", raw)
+			}
+		})
+	}
+}
+
+// 精确身份的正向面：主机名与 IP（含 IPv6）、端口边界 1 与 65535 都要放行。
+func TestKnownHostsAddAcceptsExactIdentities(t *testing.T) {
+	key, wire := testServerKey(t)
+	b64 := base64.StdEncoding.EncodeToString(wire)
+
+	hosts := []string{"jump.example.com", "sub.domain.example.com", "10.0.0.7", "::1"}
+	ports := []int{1, 22, 2222, 65535}
+	for _, host := range hosts {
+		for _, port := range ports {
+			t.Run(fmt.Sprintf("%s:%d", host, port), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "known_hosts")
+				kh := NewKnownHosts(path)
+				if err := kh.Add(host, port, key.Type(), b64); err != nil {
+					t.Fatalf("Add(%q, %d) 拒绝了合法的精确身份: %v", host, port, err)
+				}
+			})
+		}
+	}
+}
+
 // R2：写入后重新打开仍可读（重启后记录不丢）。
 func TestKnownHostsAddSurvivesReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ssh/known_hosts")

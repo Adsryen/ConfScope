@@ -8,9 +8,11 @@ package ssh
 
 import (
 	"encoding/base64"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,7 +27,7 @@ type keyPresentingDialer struct {
 	port     int
 	key      ssh.PublicKey
 	dials    atomic.Int32
-	hostname string // 回调收到的主机名；默认为 host
+	hostname string // 回调收到的主机名；默认为带端口的拨号地址
 }
 
 func (d *keyPresentingDialer) dial(addr string, cfg *ssh.ClientConfig) (sshClientConn, error) {
@@ -35,7 +37,10 @@ func (d *keyPresentingDialer) dial(addr string, cfg *ssh.ClientConfig) (sshClien
 	}
 	hostname := d.hostname
 	if hostname == "" {
-		hostname = d.host
+		// 与真实握手一致：x/crypto 传给 HostKeyCallback 的是拨号地址
+		// （tunnel.go 用 net.JoinHostPort 拼出，带端口），不是裸主机名。
+		// 替身不给错值，否则这条路径的差异被抹平（2026-10-27 复检复现 A）。
+		hostname = net.JoinHostPort(d.host, strconv.Itoa(d.port))
 	}
 	if err := cfg.HostKeyCallback(hostname, nil, d.key); err != nil {
 		return nil, err
@@ -162,7 +167,7 @@ func TestTunnelStartChangedHostKeyIsBlocked(t *testing.T) {
 	}
 }
 
-// 回调收到的主机名与拨号目标不一致（将来若有人换目标）：按变更阻断，不猜。
+// 回调收到的主机名与拨号目标不一致（将来若有人换目标）：按身份不符阻断，不猜。
 func TestHostKeyCallbackBlocksHostnameMismatch(t *testing.T) {
 	kh := NewKnownHosts("")
 	serverKey, wire := testServerKey(t)
@@ -173,6 +178,43 @@ func TestHostKeyCallbackBlocksHostnameMismatch(t *testing.T) {
 	err := kh.HostKeyCallback("jump-a.example.com", 22)("other.example.com", nil, serverKey)
 	if err == nil {
 		t.Fatal("主机名不一致应当被阻断")
+	}
+	var hke *HostKeyError
+	if !asHostKeyError(err, &hke) || hke.Verdict != HostKeyMismatch {
+		t.Fatalf("err = %v, want hostKeyMismatch（身份不符不是密钥变更，文案不得引导删记录）", err)
+	}
+	if hke.Hostname != "other.example.com" {
+		t.Fatalf("Hostname = %q, want other.example.com", hke.Hostname)
+	}
+}
+
+// x/crypto 交给回调的 hostname 是带端口的拨号地址（tunnel.go 用
+// net.JoinHostPort 拼出）。已信任的主机在真实拨号下不得被误判成
+// 「密钥变更」——2026-10-27 真机复检复现（repro A）收成的回归判据。
+func TestHostKeyCallbackNormalizesDialAddressWithPort(t *testing.T) {
+	kh := NewKnownHosts("")
+	serverKey, wire := testServerKey(t)
+	if err := kh.Add("jump-a.example.com", 2223, serverKey.Type(), base64.StdEncoding.EncodeToString(wire)); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// 非 22 端口：拨号地址带端口，必须命中自己的记录。
+	if err := kh.HostKeyCallback("jump-a.example.com", 2223)(net.JoinHostPort("jump-a.example.com", "2223"), nil, serverKey); err != nil {
+		t.Fatalf("带端口的真实拨号地址被误判: %v", err)
+	}
+	// 22 端口同样成立：x/crypto 传的永远是拨号地址，没有「裸主机名」一说。
+	if err := kh.Add("10.0.0.7", 22, serverKey.Type(), base64.StdEncoding.EncodeToString(wire)); err != nil {
+		t.Fatalf("Add(10.0.0.7): %v", err)
+	}
+	if err := kh.HostKeyCallback("10.0.0.7", 22)(net.JoinHostPort("10.0.0.7", "22"), nil, serverKey); err != nil {
+		t.Fatalf("22 端口的带端口拨号地址被误判: %v", err)
+	}
+	// IPv6 的拨号地址带方括号与端口，剥掉之后也要命中。
+	if err := kh.Add("::1", 2223, serverKey.Type(), base64.StdEncoding.EncodeToString(wire)); err != nil {
+		t.Fatalf("Add(::1): %v", err)
+	}
+	if err := kh.HostKeyCallback("::1", 2223)(net.JoinHostPort("::1", "2223"), nil, serverKey); err != nil {
+		t.Fatalf("IPv6 带端口的拨号地址被误判: %v", err)
 	}
 }
 
