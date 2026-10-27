@@ -775,6 +775,58 @@ function takeRetestPublishRefusal(namespace: string, group: string, dataId: stri
   return message;
 }
 
+/*
+ * provider 侧正文读取失败的桥内替身（轮97 K2，接住产品侧 K1「失败态不许吞草稿」的真机取证）。
+ *
+ * 为什么要有：「编辑中重取失败」这个现场在真实 Nacos 上造不出来——要么拔容器网络（殃及同用例
+ * 其它请求），要么在毫秒窗口里并发改写撞重取的那一拍（天然 flaky）。而 K3 最关键的那条判据
+ * 「过期重试真的没有再发一次正文读取」，jsdom 给不了，只能看桥侧记账。
+ *
+ * 口径与上方写入拒绝同源：命中即抛（可重复执行仍抛，等价于服务端持续不可读），每次抛都记账；
+ * 抛出点与真实读取失败（`404 config not found` / `Nacos ${status}`）是同一支笔，错误照旧从
+ * deps.getConfigDocument 冒出来，生产代码一行都不改。
+ *
+ * 只咬正文读取那一条路径（ConfigCenterGetConfig 的 Nacos 分支）：列表请求走 ConfigCenterListConfigs，
+ * 两者都打 /cs/configs 但靠 pageNo 区分，注入若下在 HTTP 层会把 ST-05 那类「数请求次数」的判据
+ * 污染成注入自己的读数；快照来源（local-snapshot）在更早的分支就 return 了，回退计划读 before 值
+ * 不受影响。
+ */
+interface RetestContentReadFailure {
+  dataId: string;
+  group?: string;
+  namespace?: string;
+  message?: string;
+}
+let retestContentReadFailures: RetestContentReadFailure[] = [];
+const retestContentReadFailureHits: { namespace: string; group: string; dataId: string; message: string }[] = [];
+
+/** 让指定配置位置的正文读取抛错（namespace/group 省略 = 不限）。 */
+export function setRetestContentReadFailures(list: RetestContentReadFailure[]): void {
+  retestContentReadFailures = list.map((item) => ({ ...item }));
+}
+
+/** 用例侧读记账：断言「读取真的试过/真的没试」，不看界面文案自己说满意。 */
+export function retestContentReadFailureHitsSnapshot() {
+  return retestContentReadFailureHits.map((hit) => ({ ...hit }));
+}
+
+export function resetRetestContentReadFailures(): void {
+  retestContentReadFailures = [];
+  retestContentReadFailureHits.length = 0;
+}
+
+/** 命中判定 + 记账：返回错误文案，未命中返回 null。 */
+function takeRetestContentReadFailure(namespace: string, group: string, dataId: string): string | null {
+  const wanted = retestContentReadFailures.find(
+    (item) => item.dataId === dataId && (!item.group || item.group === group) && (!item.namespace || item.namespace === namespace)
+  );
+  if (!wanted) return null;
+  const message = wanted.message ?? `读取正文失败: caused: retest 注入的服务端不可读 content denied for ${dataId}`;
+  retestContentReadFailureHits.push({ namespace, group, dataId, message });
+  bridgeLog("content-read-refused", namespace, group, dataId, "injected");
+  return message;
+}
+
 /** 覆盖 CheckForUpdates 的返回（null = 恢复「已是最新」基线）；顺带指定下载完落地的产物路径。 */
 export function setRetestUpdateCheck(result: Record<string, unknown> | null, artifactPath = "/tmp/confscope-retest-installer.exe") {
   retestUpdateCheck = result;
@@ -1175,6 +1227,11 @@ export function createRetestInvoke(): RetestInvoke {
           };
         }
         const ep = getEndpoint(args);
+        // 轮97 K2 的正文读取失败注入。位置刻意在快照分支之后、真正发 GET 之前：
+        // 抛错必须发生在「网络调用之前」，否则用例里那些「注入后不应再有读取」的判据
+        // 会被这条已经发出去的请求污染。
+        const readRefusal = takeRetestContentReadFailure(String(ref.namespace), String(ref.group), String(ref.dataId));
+        if (readRefusal) throw new Error(readRefusal);
         // 复测扩展：tenant 参数 "retest:envB" 让浏览/编辑/历史 UI 可切换同一 dataId
         // 的 B 侧(prod 版)内容 —— 用于大文件(330 行)编辑器回归等测试。
         // 生产程序不经过本桥, 不受影响; 普通 tenant(retest-dev/retest-qa)行为不变。

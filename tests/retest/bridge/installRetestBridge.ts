@@ -4,6 +4,7 @@ import {
   createRetestInvoke,
   resetRetestAppDataDoc,
   resetRetestDataRoot,
+  resetRetestContentReadFailures,
   resetRetestPublishRefusals,
   resetRetestRevisions,
   resetRetestSecureSecrets,
@@ -136,6 +137,9 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
   // 写入拒绝注入同样每用例重置：泄漏的「某条 dataId 恒被拒」会让下一条用例的执行
   // 莫名半截失败（轮79 E4 注入，见 retestBinding 里的替身说明）。
   resetRetestPublishRefusals();
+  // 正文读取失败注入同样每用例重置：泄漏的「某条 dataId 恒读不到」会让下一条用例的浏览页
+  // 莫名停在加载失败弹框上（轮97 K2 注入，见 retestBinding 里的替身说明）。
+  resetRetestContentReadFailures();
   // 审计落盘恢复（node 侧）：retestBinding 为浏览器兼容不再直接 import node:fs，
   // 改由本 node 专属文件注入 sink，写回 /tmp 的 audit-trail.jsonl（只追加）。
   setRetestAuditLineSink((line) => {
