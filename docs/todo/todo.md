@@ -44,8 +44,16 @@
 
 ### 0.3 发布门槛
 
+**发版的前提是用户在当前这一轮明确同意**：原话由 `scripts/release-consent.sh record` 记进
+`release-approvals.log`，发版只走唯一入口 `scripts/tag-release.sh --version=x.y.z --quote="用户原话" --push`，
+`scripts/verify-release-version.sh` 的第 0 道闸门只认这条记录（且不得早于待发布的提交）。
+历史里的「发版吧」「做完就发」不构成常驻授权；真机验证项还挂着未勾时不发版。
+没有授权就照常在 `main` 提交攒批次，等用户开口——普通 commit 不会出包（release.yml 只在 tag push 时触发）。
+判据本身由 `tests/ux/releaseChainContractStaysAligned.test.ts` 的「发版必须先有用户这一轮的授权」钉住。
+
 每个正式版本至少满足：
 
+- [ ] 用户在当前这轮明确同意发这个版本，原话已由 `scripts/tag-release.sh --quote` 入账。
 - [ ] P0 任务全部完成或明确移出该版本。
 - [ ] Go 测试通过：`go test ./... -count=1`。
 - [ ] 前端类型检查通过：`pnpm exec tsc --noEmit`。

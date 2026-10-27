@@ -27,7 +27,9 @@
  * 8. （轮58）两个消费方同源：打过 tag 的版本必须在 CHANGELOG 里有段落，应用内纯文本 notes 与
  *    Release markdown 正文的 bullet 必须一一对得上，处置规则（写入/覆盖/保留手写/已同步/缺段落）
  *    用离线正文快照钉住，不许真打 API。
- * 9. （轮70）发布说明的口吻：CHANGELOG 抽出来的文字原样进应用更新面板与 Release 正文，
+ * 9. （轮102）发布授权：见文件末尾「发版必须先有用户这一轮的授权」。发版链路技术上再稳，
+ *    也拦不住一个自行推定「用户习惯：做完就发版」的执行者——v1.9.14→v1.9.19 一天六个版本就是这么来的。
+ * 10. （轮70）发布说明的口吻：CHANGELOG 抽出来的文字原样进应用更新面板与 Release 正文，
  *    开发日志式写法（轮次编号、「实测」「门禁」这类内部词、仓库内部路径、源码文件名、超长条目）
  *    就是直接把用户眼前的文案写成自己的工作草稿。判据见本文件末尾的「发布说明的口吻」一节，
  *    覆盖 1.9.2 起的段落；更早的段落按当时的形态已经发布过，回改会让说明与实际交付脱节。
@@ -1340,5 +1342,156 @@ describe("发布说明的口吻（面向用户，不是开发日志）", () => {
     for (const needle of ["事实源", "用例", "retest"]) {
       expect(joined, `旧段落里的「${needle}」本该是红的`).toContain(needle);
     }
+  });
+});
+
+describe("发版必须先有用户这一轮的授权（轮102）", () => {
+  const TAG_SCRIPT = "scripts/tag-release.sh";
+  const CONSENT_SCRIPT = "scripts/release-consent.sh";
+
+  /**
+   * 契约的静态判据，写成纯函数是为了能做变异对照：任何一环被拆掉，
+   * 「AI 自己决定发版」这条路就重新打通。
+   */
+  function releaseConsentProblems(verify: string, consent: string, tagScript: string): string[] {
+    const problems: string[] = [];
+    if (!/>> 0\) 发布授权/.test(verify)) problems.push("发版闸门里没有第 0 道授权校验");
+    // 必须是真调用（递归护栏那句提示里也写着这个脚本名，光认脚本名会被它自己糊过去）
+    if (!/bash scripts\/release-consent\.sh check --version=/.test(verify)) problems.push("发版闸门不再调授权账本判据（自己另写一套就会漂）");
+    if (!/echo "结论：版本号链路就绪/.test(verify) || /echo "    git tag -a /.test(verify)) {
+      problems.push("闸门通过后的提示还在教人绕开唯一入口手打 git tag");
+    }
+    if (!/VITEST:-\}/.test(verify)) problems.push("第 4 步没有递归护栏：测试 exec 整条闸门会一层层起 vitest 卡死");
+    if (!/CONFSCOPE_VERIFY_NESTED:-\}/.test(verify)) problems.push("递归护栏只认 vitest，认不出外层 verify");
+    if (!/CONFSCOPE_VERIFY_NESTED=1 npx vitest/.test(verify)) problems.push("起守卫套件时没打下嵌套标记：再往里一层认不出自己已经在 verify 里");
+
+    if (!/release-approvals\.log/.test(consent)) problems.push("授权不再落在磁盘上：默契不是授权");
+    if (!/CONFSCOPE_RELEASE_APPROVALS/.test(consent)) problems.push("授权账本路径不能覆盖：测试只能靠猜路径或污染真实账本");
+    if (!/GITHUB_ACTIONS/.test(consent)) problems.push("授权校验没区分本地与 CI：CI 上没有那条记录，会把每次发版都堵死");
+    if (!/-lt "\$EPOCH_H"/.test(consent)) problems.push("不再拒绝早于待发布提交的授权：上一批代码的同意会被复用到这一批");
+    if (!/\[ -z "\$QUOTE_TEXT" \]/.test(consent)) problems.push("空原话的授权记录也算通过");
+    if (!/发版\|发布\|上线/.test(consent)) problems.push("原话里没有发布动作词也算通过");
+    if (!/不要发\|不用发\|先别/.test(consent)) problems.push("被否定过的句子（先别发/还没/先实测/没同意）也算通过：只查正面词等于把拒绝读成许可");
+
+    if (!/release-consent\.sh record/.test(tagScript)) problems.push("tag 入口不再把用户原话交给授权账本");
+    // 认调用而不是认脚本名：脚本名的注释里也会出现，光认名字等于没判据
+    const idxVerify = tagScript.indexOf("bash scripts/verify-release-version.sh");
+    const idxTag = tagScript.indexOf("git tag -a");
+    if (idxVerify < 0 || idxTag < 0 || idxTag < idxVerify) problems.push("tag-release.sh 不再先过闸门再打 tag");
+    const idxPush = tagScript.indexOf('git push origin "$TAG"');
+    if (idxPush >= 0 && idxPush < idxVerify) problems.push("tag-release.sh 先推 tag 再跑闸门：红了的版本会直接进线上");
+    if (/>> "\$APPROVAL_LOG"|printf '%s\\t%s/.test(tagScript)) problems.push("tag-release.sh 自己手写授权账本：账本判据只能有一处");
+    return problems;
+  }
+
+  const verify = readFileSync(join(PROJECT_ROOT, VERIFY_SCRIPT), "utf8");
+  const consent = readFileSync(join(PROJECT_ROOT, CONSENT_SCRIPT), "utf8");
+  const tagScript = readFileSync(join(PROJECT_ROOT, TAG_SCRIPT), "utf8");
+
+  /**
+   * 跑 shell 脚本：非 0 是预期，不当失败抛。
+   * VITEST 显式置真：本测试在 vitest 里 exec 闸门，护栏必须走「跳过那一层」的分支——
+   * 轮102 在这里卡死过一次（八分钟、七层 vitest），这条就是那次留下来的。
+   */
+  function runShell(file: string, args: string[], env: Record<string, string> = {}): { code: number; out: string } {
+    try {
+      const stdout = execFileSync("bash", [join(PROJECT_ROOT, file), ...args], {
+        cwd: PROJECT_ROOT,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_ACTIONS: "", VITEST: "true", ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { code: 0, out: stdout };
+    } catch (error) {
+      const failure = error as { status?: number; stdout?: string; stderr?: string };
+      return { code: failure.status ?? -1, out: [failure.stdout ?? "", failure.stderr ?? ""].join("\n") };
+    }
+  }
+
+  /** 用临时账本，绝不碰 .trellis 里那份真的。 */
+  function tmpLedger(seed?: string[]): { log: string; env: Record<string, string> } {
+    const dir = mkdtempSync(join(tmpdir(), "confscope-consent-"));
+    const log = join(dir, "release-approvals.log");
+    writeFileSync(log, (seed ?? []).join("\n") + (seed?.length ? "\n" : ""), "utf8");
+    return { log, env: { CONFSCOPE_RELEASE_APPROVALS: log } };
+  }
+
+  it("真实脚本：授权闸门在位，tag 只能从一个入口出", () => {
+    expect(releaseConsentProblems(verify, consent, tagScript)).toEqual([]);
+  });
+
+  it("真跑一次：账本里没有这一版的授权，check 必须红并念出唯一入口", () => {
+    const { env } = tmpLedger();
+    const run = runShell(CONSENT_SCRIPT, ["check", "--version=9.9.6"], env);
+    expect(run.code, "没有授权记录也必须非 0 退出").not.toBe(0);
+    expect(run.out).toContain("没有 v9.9.6 的授权记录");
+    expect(run.out, "红的时候要把唯一入口一起念出来").toContain("scripts/tag-release.sh");
+  });
+
+  it("真跑一次：刚记的原话过，早于待发布提交的原话不过", () => {
+    const fresh = tmpLedger([`${new Date().toISOString()}\tv9.9.5\tquote=发版吧\tby=test\tcommit=x`]);
+    expect(runShell(CONSENT_SCRIPT, ["check", "--version=9.9.5"], fresh.env).code).toBe(0);
+
+    const stale = tmpLedger(["2020-01-01T00:00:00+08:00\tv9.9.4\tquote=发版吧\tby=test\tcommit=x"]);
+    const run = runShell(CONSENT_SCRIPT, ["check", "--version=9.9.4"], stale.env);
+    expect(run.code, "上一批代码的同意不能复用到这一批").not.toBe(0);
+    expect(run.out).toContain("早于待发布提交");
+
+    const empty = tmpLedger([`${new Date().toISOString()}\tv9.9.3\tquote=\tby=test\tcommit=x`]);
+    expect(runShell(CONSENT_SCRIPT, ["check", "--version=9.9.3"], empty.env).out).toContain("没有用户原话");
+  });
+
+  it("真跑一次：不像授权的原话一律被拒，且一个字都不写进账本", () => {
+    const { log, env } = tmpLedger();
+    for (const quote of ["先实测后再说怎么改", "我还没同意发版", "这个别发", "继续做轮102", "发版吧，不过先别"]) {
+      const run = runShell(CONSENT_SCRIPT, ["record", "--version=9.9.2", `--quote=${quote}`], env);
+      expect(run.code, `「${quote}」不该被当成发版授权`).not.toBe(0);
+      expect(run.out, `「${quote}」应被明确拒绝`).toContain("拒绝");
+    }
+    expect(readFileSync(log, "utf8").trim(), "被拒的原话一个字都不该进账本").toBe("");
+    expect(runShell(CONSENT_SCRIPT, ["record", "--version=9.9.2"], env).out).toContain("没有原话就没有授权");
+  });
+
+  it("真跑一次：闸门在没有授权时非 0，且在 vitest 里 exec 它不会递归下去", () => {
+    const { env } = tmpLedger();
+    const started = Date.now();
+    const run = runShell(VERIFY_SCRIPT, ["--version=9.9.6", "--skip-bundle"], env);
+    expect(run.code).not.toBe(0);
+    expect(run.out).toContain(">> 0) 发布授权");
+    expect(run.out).toContain("授权这一关没过");
+    // 护栏生效 = 这一层被跳过，而不是又起一层 vitest
+    expect(run.out).toContain("跳过守卫套件这一层");
+    expect(run.out).not.toContain("4 个测试文件全绿");
+    expect(Date.now() - started, "闸门被测试 exec 时必须在秒级返回，超时就是又在往下递归").toBeLessThan(60_000);
+  });
+
+  it("变异对照：拆掉判据的任何一环都必须判红", () => {
+    expect(releaseConsentProblems(verify.replace(">> 0) 发布授权", ">> 0) 版本号"), consent, tagScript)).toContain(
+      "发版闸门里没有第 0 道授权校验"
+    );
+    expect(releaseConsentProblems(verify.replace("bash scripts/release-consent.sh check --version=", "bash scripts/nope.sh check --version="), consent, tagScript)).toContain(
+      "发版闸门不再调授权账本判据（自己另写一套就会漂）"
+    );
+    expect(releaseConsentProblems(verify.replace(/VITEST:-\}/g, "NOPE:-}"), consent, tagScript)).toContain(
+      "第 4 步没有递归护栏：测试 exec 整条闸门会一层层起 vitest 卡死"
+    );
+    expect(releaseConsentProblems(verify.replace("CONFSCOPE_VERIFY_NESTED:-}", "NOPE:-}"), consent, tagScript)).toContain(
+      "递归护栏只认 vitest，认不出外层 verify"
+    );
+    expect(releaseConsentProblems(verify.replace("CONFSCOPE_VERIFY_NESTED=1 npx vitest", "npx vitest"), consent, tagScript)).toContain(
+      "起守卫套件时没打下嵌套标记：再往里一层认不出自己已经在 verify 里"
+    );
+    expect(releaseConsentProblems(verify, consent.replace(/-lt "\$EPOCH_H"/, '-lt 0'), tagScript)).toContain(
+      '不再拒绝早于待发布提交的授权：上一批代码的同意会被复用到这一批'
+    );
+    expect(
+      releaseConsentProblems(verify, consent.replace(/不要发\|不用发\|先别\|别发[^\n]*/, "不要发"), tagScript)
+    ).toContain("被否定过的句子（先别发/还没/先实测/没同意）也算通过：只查正面词等于把拒绝读成许可");
+    expect(releaseConsentProblems(verify, consent, tagScript.replace("release-consent.sh record", "echo 记一下"))).toContain(
+      "tag 入口不再把用户原话交给授权账本"
+    );
+    expect(releaseConsentProblems(verify, consent, tagScript.replace("bash scripts/verify-release-version.sh --version=", ": # --version="))).toContain(
+      "tag-release.sh 不再先过闸门再打 tag"
+    );
   });
 });

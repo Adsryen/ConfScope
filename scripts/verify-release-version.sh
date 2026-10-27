@@ -42,6 +42,19 @@ bad() { echo "  ✗ $1" >&2; failures=$((failures + 1)); }
 GO_VERSION_FILE="internal/app/app.go"
 INJECT_SYMBOL="confscope/internal/app.appVersion"
 
+# 轮102 补的第 0 道闸门：发布授权。v1.9.14→v1.9.19 一天六个版本，没有一次是用户在那轮
+# 对话里明确同意发版的——是我把「做完就发版」当成用户习惯自行推定的结果，v1.9.19 更是在用户
+# 要求的真机验证还没跑完时就发了。授权不是默契，是落在磁盘上的用户原话：
+# scripts/release-consent.sh 记账与判据都收在那儿（本脚本第 4 步会跑 vitest，
+# 判据留在测试 exec 得到的地方就是自我递归，所以拆出去）。
+if [ -z "$VERSION" ]; then
+  VERSION="$(node -p "require('./package.json').version")"
+fi
+echo ">> 0) 发布授权（必须有一句用户当前这轮对话里的原话）"
+if ! bash scripts/release-consent.sh check --version="$VERSION"; then
+  bad "授权这一关没过：原因见上一行，解决之前不要打 tag（唯一入口 scripts/tag-release.sh）"
+fi
+
 echo ">> 1) 版本号四处一致（package.json / CHANGELOG / tag / wails.json）"
 PKG_VERSION="$(node -p "require('./package.json').version")"
 if [ -z "$VERSION" ]; then
@@ -114,6 +127,13 @@ else
 fi
 
 echo ">> 4) 静态守卫与单测"
+# 轮102 两条教训叠在这里：这条闸门自己会起 vitest，测试里再 exec 它就是一层层往下起
+# （实测一次卡死七层、八分钟不退出）。只报红不够——红完还得往下跑就照样递归，
+# 所以发现自己在 vitest 或另一层 verify 里面时直接跳过这一层并判红，
+# 让调用方拿到「你不该 exec 整条闸门」这句原文。测试判授权请调 scripts/release-consent.sh check。
+if [ -n "${VITEST:-}" ] || [ -n "${CONFSCOPE_VERIFY_NESTED:-}" ]; then
+  bad "正跑在 vitest 或另一层 verify 里：跳过守卫套件这一层（递归会卡死链路），改调 scripts/release-consent.sh check"
+else
 # 失败时把 vitest 的用例名与断言原文一起吐出来。此前一律进 /dev/null，只报一句「见上面用例名」，
 # 而上面根本没有——本地和 CI 的 preflight 撞上这条都得再手工跑一遍这 4 个文件才知道红在哪一条。
 GUARD_TESTS=(
@@ -123,13 +143,14 @@ GUARD_TESTS=(
   src/lib/appVersion.test.ts
 )
 GUARD_LOG="$(mktemp -t confscope-release-guard.XXXXXX)"
-if npx vitest run --reporter=dot "${GUARD_TESTS[@]}" >"$GUARD_LOG" 2>&1; then
+if CONFSCOPE_VERIFY_NESTED=1 npx vitest run --reporter=dot "${GUARD_TESTS[@]}" >"$GUARD_LOG" 2>&1; then
   ok "版本链路与发版契约相关的 4 个测试文件全绿"
 else
   bad "版本号或发版契约的守卫/单测有红，用例名与断言见下"
   tail -80 "$GUARD_LOG" >&2
 fi
 rm -f "$GUARD_LOG"
+fi
 
 echo ">> 5) 发版说明能真的抽出来（update.json 的 notes 与 GitHub Release 正文都是给用户看的文字）"
 NOTES_OUT="$(node scripts/extract-release-notes.mjs "$VERSION" 2>/dev/null)" || NOTES_OUT=""
@@ -177,6 +198,6 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 echo "结论：版本号链路就绪，可以发布 v$VERSION。"
-echo "  发布动作由人执行（会触发 CI 出包，不可逆）："
-echo "    git tag -a v$VERSION -m \"ConfScope v$VERSION\""
-echo "    git push origin v$VERSION"
+echo "  发布不可逆（CI 出包 + 覆盖线上 Release），只走这一个入口："
+echo "    scripts/tag-release.sh --version=$VERSION --quote=\"用户当前这轮对话里的原话\" --push"
+echo "  直接 git tag / git push --tags 视为未经授权发布。"
