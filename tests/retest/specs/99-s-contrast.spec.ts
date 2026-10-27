@@ -20,6 +20,7 @@ import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { loadRetestState } from "../state";
+import { MIN_TEXT_NODES, nodeFloorViolations } from "../contrastFloors";
 
 const state = loadRetestState();
 const NS_A = state.nacos.a.namespace;
@@ -246,6 +247,8 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   await page.setViewportSize({ width: 1280, height: 820 });
 
   let scannedTotal = 0;
+  // 轮95 R5：逐档读数。总数地板挡不住「某一档塌了、其余还在」，而真实故障就是这个形状。
+  const perState: Record<string, number> = {};
   let unknownTotal = 0;
   let invisibleTotal = 0;
   let inactiveTotal = 0;
@@ -258,6 +261,7 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   const take = async (state: string) => {
     const r = await page.evaluate(scanContrast, OPTS);
     scannedTotal += r.scanned;
+    perState[state] = r.scanned;
     unknownTotal += r.unknown;
     invisibleTotal += r.invisible;
     inactiveTotal += r.inactive;
@@ -387,6 +391,7 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   console.log(
     `CONTRAST_SUMMARY ${JSON.stringify({
       scannedTotal, unknownTotal, invisibleTotal, inactiveTotal,
+      perState,
       realGroups: merged.length,
       realNodes: merged.reduce((s, x) => s + x.n, 0),
       merged,
@@ -401,6 +406,17 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
 
   // 防空转：解析器一旦失效（选择器改动 / evaluate 拿不到节点），三条地板都会先炸
   expect(scannedTotal, "13 个状态一共只量到这么点文本节点，普查多半没真正跑起来").toBeGreaterThan(1_500);
+  // 轮95 R5：逐档下限。白屏那一次的实测读数是 scanned=0，而「真不达组=0」照样成立——
+  // 只看总数的地板会把它当成覆盖通过（轮94 的假绿盲区）。数值来源与余量口径见 ../contrastFloors.ts。
+  const floorViolations = nodeFloorViolations(perState, EXPECTED_SCANS);
+  expect(
+    floorViolations,
+    `这些档位的文本节点数低于下限，普查的「真不达组=0」多半是空转出来的：\n${floorViolations.join("\n")}`,
+  ).toEqual([]);
+  expect(
+    Object.keys(MIN_TEXT_NODES).length,
+    "下限登记表与状态清单对不上：EXPECTED_SCANS 与 MIN_TEXT_NODES 必须同批增删"
+  ).toBe(EXPECTED_SCANS.length);
   expect(invisibleTotal, "一个折叠态不可见节点都没量到 ⇒ 累积 opacity 逻辑失效（B 桶会跟着漏）").toBeGreaterThan(0);
   expect(inactiveTotal, "一个禁用/降透明节点都没量到 ⇒ B 桶豁免逻辑失效").toBeGreaterThan(0);
 
@@ -423,6 +439,36 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   ).toBe(true);
 
   expect(merged, "这些文字在实际渲染底色上不达 WCAG AA，且不属于禁用/折叠豁免").toEqual([]);
+});
+
+test("轮95 R5 每档文本节点下限：人为白屏必须报红，而不是空转成绿", async ({ page }) => {
+  test.setTimeout(120_000);
+
+  // 1) 纯函数层：19 档全 0 —— 轮94 那张白屏的真实读数形状（scanned=0、A=[]），必须逐档报红。
+  const blank = Object.fromEntries(EXPECTED_SCANS.map((state) => [state, 0]));
+  expect(nodeFloorViolations(blank, EXPECTED_SCANS), "全 0 读数抓不到，地板等于没钉").toHaveLength(EXPECTED_SCANS.length);
+
+  // 2) 漏 await 的形状：其余档在，唯独少一档读数，也必须点出来（以前这一档会被总数地板蒙过去）。
+  const missing: Record<string, number> = { ...blank };
+  delete missing["设置"];
+  expect(nodeFloorViolations(missing, EXPECTED_SCANS).some((v) => v.startsWith("设置")), "缺读数没被识别成问题").toBe(true);
+
+  // 3) 判据的反面：刚好都踩在下限上的读数不该报红（防永真）。
+  expect(nodeFloorViolations({ ...MIN_TEXT_NODES }, EXPECTED_SCANS)).toEqual([]);
+
+  // 4) 真机层：复刻卸载后的 DOM 形状（#root 清空），扫描器必须只量到个位数节点。
+  //    这一条同时是自证：万一扫描器数的根本不是界面内容，(1) 的 0 就会显得太容易，这里会先红。
+  await page.goto("/");
+  await page.evaluate(() => {
+    const root = document.getElementById("root");
+    if (root) root.innerHTML = "";
+  });
+  const r = await page.evaluate(scanContrast, OPTS);
+  expect(r.scanned, "清空 #root 后还量到这么多文本节点 ⇒ 扫描数的不是界面内容，下限判据抓不到白屏").toBeLessThan(10);
+  expect(
+    nodeFloorViolations({ 配置浏览: r.scanned }, ["配置浏览"]),
+    "白屏读数没被抓到 ⇒ 每档下限是空的"
+  ).toHaveLength(1);
 });
 
 test("轮38 R92 hover 态蓝底按钮标签达标（白字在 --accent-h 上无解，故转黑）", async ({ page, retest }) => {
