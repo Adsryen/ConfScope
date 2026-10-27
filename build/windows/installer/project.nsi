@@ -1,7 +1,7 @@
 ﻿Unicode true
 
 ; 首三字节必须是 UTF-8 BOM（EF BB BF），编辑器/脚本别把它抹掉：Windows 上的 makensis 对
-; 没有 BOM 的脚本按宿主 ANSI 码页解释源码（en-US 机器 = CP1252），下面 9 组中文 LangString
+; 没有 BOM 的脚本按宿主 ANSI 码页解释源码（en-US 机器 = CP1252），下面这些中文 LangString
 ; 会被编成乱码，用户在安装进度页看到的就是「ConfScope å·²é€€å‡º」这种形态（v1.9.9 线上事故）。
 ; `Unicode true` 只保证运行时用 UTF-16，救不了源码阶段的解码；而 POSIX 侧的 makensis 恒按
 ; UTF-8 读源码（C.UTF-8 / C / ISO-8859-1 四种 locale 下产物 sha256 全等），所以 Linux 那道
@@ -69,6 +69,15 @@
 ; Windows 的 STILL_ACTIVE：GetExitCodeProcess 还返回它才说明进程真的活着。
 !define STILL_ACTIVE 259
 
+; 让位覆盖（轮100）：等满一轮还是占用时，把旧镜像改名让开正位，新文件写在正位。
+; 能做到这件事的 Windows 语义：loader 打开 image section 时带 FILE_SHARE_READ | FILE_SHARE_DELETE，
+; 所以**改名可以、删除不行**（VS Code 的 Code.exe.old、Inno Setup 的 RestartReplace 同一族做法）。
+; 这条出路把「不强杀」从「只能等」变成「等不到就让位」：零终止、零跨语言授权契约。
+!define PARKED_SUFFIX ".pending-"
+; 让位目标名重名时往后加计数（同版本号重复升级、或上一份遗留还被旧进程攥着）。改名本身失败
+; 不是名字冲突，加计数也不会成，超过这个上限就如实失败并继续走等待/放弃那几条出口。
+!define PARK_MAX_ATTEMPTS 5
+
 # 这两行必须是四段式版本号
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
@@ -100,6 +109,10 @@ Var SlotBusy     ; slotBusy 的出参（NSIS 函数没有返回值）
 Var KeepData     ; 卸载时是否在程序目录里检测到数据目录
 Var AppPidAlive  ; appPidAlive 的出参：1 = /PID 那个进程还在跑（只用于解释「在等谁」）
 Var WaitRound    ; 当前是第几轮等待（超时后用户点重试才 +1）
+Var ParkOk       ; parkLockedSlot 的出参："1" = 旧镜像已让位，正位可以覆盖
+Var ParkErr      ; parkLockedSlot 的出参：让位失败的原因（只给进度页看，不参与判据）
+Var ParkAttempt  ; 让位目标名重名时的计数
+Var ParkTarget   ; 本次尝试的让位目标全路径（成功后打印出来，便于人工找回旧文件）
 
 ; ---------------------------------------------------------------------------
 ; 运行形态标记：install.json 写在 exe 同级，声明「这一份是安装态」。
@@ -168,6 +181,53 @@ Function appPidAlive
 FunctionEnd
 
 ; ---------------------------------------------------------------------------
+; 让位：把正位那个还被锁着的 exe 改名挪开，正位空出来给新文件（轮100）。
+; 出参 $ParkOk（"1" = 成功）与 $ParkErr（失败原因，只给进度页看，不参与判据）。
+;
+; 为什么改名能成而删除不能：Windows 的 image section 以 FILE_SHARE_DELETE 打开 exe，
+; 改名只要目标名可用；删除会被 loader 的句柄扣住。旧进程拿着已经改名的那份镜像继续跑，
+; 不受任何打扰 —— 这正是「零终止」能成立的地方。
+; 遗留文件由应用下次启动时 best-effort 清掉（Go 侧 portabledata.CleanParkedExecutables，
+; 名字前缀与本文件的 ${PARKED_SUFFIX} 同源），卸载逐条遍历 $INSTDIR\* 时也会连带删掉它。
+;
+; 寄存器纪律：ensureSlotFree 用 $R7/$R8/$R9 数等待轮次，本函数一律不碰。
+; ---------------------------------------------------------------------------
+Function parkLockedSlot
+    StrCpy $ParkOk "0"
+    StrCpy $ParkErr ""
+    StrCpy $ParkAttempt 0
+    cs_park_try:
+    ${If} $ParkAttempt = 0
+        StrCpy $ParkTarget "$INSTDIR\${PRODUCT_EXECUTABLE}${PARKED_SUFFIX}${INFO_PRODUCTVERSION}"
+    ${Else}
+        StrCpy $ParkTarget "$INSTDIR\${PRODUCT_EXECUTABLE}${PARKED_SUFFIX}${INFO_PRODUCTVERSION}.$ParkAttempt"
+    ${EndIf}
+    ${If} ${FileExists} "$ParkTarget"
+        ; 目标名被占（上一轮让位留下的旧镜像还被它的进程攥着）→ 换下一个计数名。
+        ; 不去覆盖别人的镜像：那份文件可能正是用户回退时要找的东西。
+        IntOp $ParkAttempt $ParkAttempt + 1
+        ${If} $ParkAttempt <= ${PARK_MAX_ATTEMPTS}
+            Goto cs_park_try
+        ${EndIf}
+        StrCpy $ParkErr "$(CS_PARK_NAME_BUSY)"
+        Return
+    ${EndIf}
+    ClearErrors
+    Rename "$INSTDIR\${PRODUCT_EXECUTABLE}" "$ParkTarget"
+    ${IfNot} ${Errors}
+        StrCpy $ParkOk "1"
+        Return
+    ${EndIf}
+    ; 改名都被扣住 = 不是「正在运行的镜像」这一类占用（杀软、网络盘、非 share-delete 句柄），
+    ; 再换名字也不会成。把原因如实写出来，退回有界等待：到点放弃覆盖，已装版本不受损。
+    ; GetLastError 只是给用户一个可搜索的线索，可能因为 NSIS 自己的后续调用而偏一点；
+    ; 它不参与任何判据（能不能覆盖的判据永远只有 slotBusy 那一条）。
+    System::Call 'kernel32::GetLastError() i.r1'
+    StrCpy $ParkErr "GetLastError=$1"
+    Return
+FunctionEnd
+
+; ---------------------------------------------------------------------------
 ; 有界等待，单点闸门：整个脚本只有这里检查旧进程，Section 里不得再出现第二份。
 ; 放在 Section 开头而不是 .onInit —— .onInit 阶段 InstFiles 页还没建好，
 ; DetailPrint 用户根本看不见，「等待」就变成了界面无响应。
@@ -175,10 +235,11 @@ FunctionEnd
 ; 本轮把「等待」做成看得见的东西：
 ;   · 一撞上占用就打印在等谁（文件路径 + 进程号线索），不再是同一句话刷屏；
 ;   · 每 ${WAIT_PROGRESS_TICKS} 次探测报一次「已等 N 秒」，界面看得出还在数；
-;   · 一轮 ${WAIT_TICKS} × ${WAIT_INTERVAL}ms ≈ 15s，最多 ${WAIT_ROUNDS} 轮重试，
-;     用完就明确停手并说明已装版本未受损 —— 绝不无限转圈，也绝不 taskkill
-;     （主数据是 debounce 落盘的，强杀会吃掉最后一次写入）。
-; 静默（/S，留给脚本与 CI）超时直接非 0 退出并放弃覆盖。
+;   · 一轮 ${WAIT_TICKS} × ${WAIT_INTERVAL}ms ≈ 15s，等满还没退就让位（把旧镜像改名挪开，
+;     见 parkLockedSlot）；让位也失败才按轮重试，最多 ${WAIT_ROUNDS} 轮，
+;     用完就明确停手并说明已装版本未受损 —— 绝不无限转圈，也绝不终止任何进程
+;     （主数据是 debounce 落盘的，强杀会吃掉最后一次写入；让位这条路连终止都不需要）。
+; 静默（/S，留给脚本与 CI）让位也失败时直接非 0 退出并放弃覆盖。
 ; ---------------------------------------------------------------------------
 Function ensureSlotFree
     StrCpy $R9 0
@@ -213,6 +274,19 @@ Function ensureSlotFree
             DetailPrint "$(CS_WAIT_PROGRESS)$R7$(CS_WAIT_SECONDS)"
         ${EndIf}
         ${If} $R9 >= ${WAIT_TICKS}
+            ; 等满一轮还是占用 → 先让位（轮100），不等用户对着「等待退出」自己猜。
+            ; 静默与人工两条路都试这一脚。正常「退出并安装」的实例在 15 秒内早退了，
+            ; 走不到这里，所以不会平白留下遗留文件。让位成功就直接覆盖正位并返回，
+            ; 失败才落到下面今天的三条出口（静默放弃 / 重试 / 到点停手），一条都没减。
+            DetailPrint "$(CS_PARK_TRY)"
+            Call parkLockedSlot
+            ${If} $ParkOk == "1"
+                DetailPrint "$(CS_PARK_DONE)"
+                DetailPrint "    $ParkTarget"
+                DetailPrint "$(CS_PARK_RESTART)"
+                Return
+            ${EndIf}
+            DetailPrint "$(CS_PARK_FAIL)$ParkErr"
             ${If} ${Silent}
                 DetailPrint "$(CS_WAIT_GIVEUP)"
                 SetErrorLevel 75
@@ -347,6 +421,21 @@ LangString CS_WAIT_GIVEUP_LONG ${LANG_ENGLISH} "ConfScope's program file stayed 
 LangString CS_WAIT_RETRY ${LANG_SIMPCHINESE} "ConfScope 还在运行，无法覆盖正在使用的程序文件。$\r$\n$\r$\n「重试」继续等待；「取消」退出安装程序 —— 已装的版本不会被破坏。"
 LangString CS_WAIT_RETRY ${LANG_ENGLISH} "ConfScope is still running, so its program file cannot be replaced.$\r$\n$\r$\nRetry keeps waiting; Cancel leaves the installed version intact."
 
+LangString CS_PARK_TRY ${LANG_SIMPCHINESE} "旧进程等满一轮仍未退出，改用「让位覆盖」：把正在运行的程序文件改名挪开，新文件写进正位（不强杀任何进程）..."
+LangString CS_PARK_TRY ${LANG_ENGLISH} "The app did not exit within one round, switching to park-and-replace: renaming the running program file out of the way instead of installing over it (no process is ever terminated)..."
+
+LangString CS_PARK_DONE ${LANG_SIMPCHINESE} "旧版本已让位，继续覆盖安装："
+LangString CS_PARK_DONE ${LANG_ENGLISH} "The running copy was parked out of the way, continuing:"
+
+LangString CS_PARK_RESTART ${LANG_SIMPCHINESE} "注意：还开着的窗口跑的仍是老版本，安装完成后请重新启动 ConfScope 才用得上新版本。"
+LangString CS_PARK_RESTART ${LANG_ENGLISH} "Note: windows that are still open keep running the old version - restart ConfScope after this install to use the new one."
+
+LangString CS_PARK_FAIL ${LANG_SIMPCHINESE} "连改名都被扣住，不是「正在运行的程序」这一类占用，放弃让位（已装版本未受损）。原因："
+LangString CS_PARK_FAIL ${LANG_ENGLISH} "Even renaming was refused, so this is not a running-image lock; giving up without touching the installed version. Reason: "
+
+LangString CS_PARK_NAME_BUSY ${LANG_SIMPCHINESE} "让位位置已被更早留下的旧版本占满（请启动一次 ConfScope，程序会自己清掉这些遗留文件）"
+LangString CS_PARK_NAME_BUSY ${LANG_ENGLISH} "Every parked name is already taken by older leftovers (start ConfScope once - it cleans them up itself)"
+
 LangString CS_MARKER_OK ${LANG_SIMPCHINESE} "已写入运行形态标记 install.json（安装态）"
 LangString CS_MARKER_OK ${LANG_ENGLISH} "Wrote install.json runtime marker (installed mode)"
 
@@ -368,6 +457,7 @@ Function .onInit
     StrCpy $UpdateMode "0"
     StrCpy $AppPid ""
     StrCpy $WaitRound 0
+    StrCpy $ParkOk "0"
 
     ${GetOptions} "$CmdLine" "/UPDATE" $R0
     ${IfNot} ${Errors}
@@ -392,7 +482,7 @@ FunctionEnd
 Section
     !insertmacro wails.setShellContext
 
-    ; 覆盖二进制之前先确认旧进程已经退出（见函数注释：判据归属在安装程序）
+    ; 覆盖二进制之前先确认正位可写：旧进程已退出，或已被改名让位（见函数注释：判据归属在安装程序）
     Call ensureSlotFree
 
     !insertmacro wails.webview2runtime
@@ -412,7 +502,12 @@ Section
     Call writeUninstallEntry
 
     ${If} $UpdateMode == "1"
-        MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)" /SD IDOK
+        ; 让过位就得再说一遍：屏幕上还开着的窗口跑的是老版本，不重启用不上新版本。
+        ${If} $ParkOk == "1"
+            MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)$\r$\n$\r$\n$(CS_PARK_RESTART)" /SD IDOK
+        ${Else}
+            MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)" /SD IDOK
+        ${EndIf}
     ${EndIf}
 SectionEnd
 

@@ -22,10 +22,14 @@ var assets embed.FS
 // main 启动 Wails 桌面应用并绑定 Go 后端服务。
 func main() {
 	appInstance := app.NewApp()
+	exePath := mustExePath()
 	// 先把「数据落在哪个目录、命中哪一档、为什么」写进日志：
 	// 用户看不到数据时第一手证据是日志，不是猜（轮62 验收 3）。
-	if layout, layoutErr := portabledata.LayoutFor(mustExePath()); layoutErr == nil {
+	if layout, layoutErr := portabledata.LayoutFor(exePath); layoutErr == nil {
 		portabledata.LogRuntimeLayout(layout)
+		// 顺手清掉安装程序让位覆盖留下的旧副本（轮100）。best-effort，且只在安装态动手，
+		// 清不动也不算错：那是「旧窗口还开着」的正常形态，下次启动再试。
+		portabledata.CleanParkedExecutables(layout, exePath)
 	} else {
 		println("Resolve runtime layout error:", layoutErr.Error())
 	}

@@ -3,8 +3,10 @@
 # 为什么要真机跑：project.nsi 里的判据是内核调用，Linux 侧只能证明它编译得过。
 # v1.9.9 线上事故的形态——应用窗口早就没了、安装程序却永远卡在「等待 ConfScope 退出」——
 # 在文本判据里完全看不出来。这里用四种真实进程状态去撞同一道闸门，退出码就是断言：
+# 场景 A 在轮100 从「必须 75」翻成「必须 0 + 三条让位断言」：装得上不再依赖旧进程肯不肯退，
+# 但代价是旧窗口还在跑老版本，所以断言不能只看退出码，必须同时看到遗留文件与活着的旧进程。
 #
-#   A  目标 exe 正被某个进程当镜像加载着   -> 必须 75（有界等待后放弃，绝不硬抢）
+#   A  目标 exe 正被某个进程当镜像加载着   -> 必须 0 （等满一轮后改名让位，新文件照样落地，旧进程一个也不许终止）
 #   B1 /PID 给的是一个还在跑的无关进程     -> 必须 0 （v1.9.9 在这里白等 15 秒）
 #   B2 进程已退出、但句柄仍被别处引用       -> 必须 0 （v1.9.9 在这里永久判忙 = 线上事故）
 #   C  没有 /PID（人工双击）且目标空闲      -> 必须 0
@@ -101,10 +103,12 @@ function Invoke-Installer {
 }
 
 function Invoke-Scenario {
+    # 每个场景只往 $script:results 里写一行：CI 断言的是 scenarios=4，多写一行就多一个假失败。
     param(
         [string]$Name,
         [scriptblock]$Prepare,
-        [int]$Expect
+        [int]$Expect,
+        [scriptblock]$PostCheck = $null
     )
     Remove-UninstallEntry
     $targetDir = Join-Path $WorkRoot ("t-" + $Name)
@@ -118,11 +122,23 @@ function Invoke-Scenario {
             $script:results += "FAIL $Name : 退出码 $code，期望 $Expect"
         }
         elseif ($Expect -eq 0) {
+            $detail = ""
             if (-not (Test-Path -LiteralPath $exe)) {
-                $script:results += "FAIL $Name : 退出码 0，但 $exe 没装上"
+                $detail = "退出码 0，但 $exe 没装上"
             }
             elseif (-not (Test-Path -LiteralPath $marker)) {
-                $script:results += "FAIL $Name : 装了 exe 却没写 install.json，应用会按便携态解析数据根"
+                $detail = "装了 exe 却没写 install.json，应用会按便携态解析数据根"
+            }
+            elseif ($PostCheck) {
+                # 让位这类场景光看退出码不够：装上了但把旧进程杀了，同样是事故。
+                # 必须在 finally 那段 Stop-Process 之前问，所以 PostCheck 排在 try 里。
+                $problems = @(& $PostCheck $targetDir $pidArg)
+                if ($problems.Count -gt 0) {
+                    $detail = ($problems -join "；")
+                }
+            }
+            if ($detail) {
+                $script:results += "FAIL $Name : $detail"
             }
             else {
                 $script:results += "ok   $Name : 退出码 $code，已覆盖安装到独立目录"
@@ -147,7 +163,7 @@ function Invoke-Scenario {
     }
 }
 
-# A：目标 exe 正被占用 -> 有界等待之后必须 75
+# A：目标 exe 正被占用 -> 等满一轮必须让位覆盖（退出码 0），且旧进程一个都不许少
 $scenarioA = {
     param($dir)
     $exe = Join-Path $dir "ConfScope.exe"
@@ -198,7 +214,31 @@ $scenarioC = {
     return ""
 }
 
-Invoke-Scenario -Name "A-占用必须放弃" -Prepare $scenarioA -Expect 75
+# 让位成功的三条硬断言：遗留文件在、还被锁着、发起它的进程还活着，而正位上是新文件。
+$checkA = {
+    param($Dir, $ProcId)
+    $problems = @()
+    $exe = Join-Path $Dir "ConfScope.exe"
+    $parked = @(Get-ChildItem -LiteralPath $Dir -Filter "ConfScope.exe.pending-*" -File)
+    if ($parked.Count -eq 0) {
+        $problems += "没让位：程序目录里没有 ConfScope.exe.pending-* 遗留副本（新文件是怎么挤掉正在运行的镜像的？）"
+    }
+    else {
+        $parkedPath = $parked[0].FullName
+        if (-not (Test-FileLocked -Path $parkedPath)) {
+            $problems += "遗留副本 $parkedPath 已经不占用了：旧进程可能已经退出，A 就没测到「占用中让位」"
+        }
+        if ((Get-Item -LiteralPath $exe).Length -eq $parked[0].Length) {
+            $problems += "$exe 与遗留副本同尺寸：正位上不像装了新文件"
+        }
+    }
+    if (-not (Get-Process -Id ([int]$ProcId) -ErrorAction SilentlyContinue)) {
+        $problems += "旧进程 $ProcId 不在了：本轮红线是零终止，安装程序不许杀任何进程"
+    }
+    return $problems
+}
+
+Invoke-Scenario -Name "A-占用必须让位覆盖" -Prepare $scenarioA -Expect 0 -PostCheck $checkA
 Invoke-Scenario -Name "B1-无关进程不该挡路" -Prepare $scenarioB1 -Expect 0
 Invoke-Scenario -Name "B2-句柄残留不该挡路" -Prepare $scenarioB2 -Expect 0
 Invoke-Scenario -Name "C-无PID空闲目录" -Prepare $scenarioC -Expect 0

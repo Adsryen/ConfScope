@@ -8,7 +8,9 @@
  *  A. 安装/卸载程序不能毁掉用户数据。wails 默认模板里那行 RMDir /r "$AppData\..."
  *     删的正是数据根迁移认得的旧 webview 数据源目录之一；整体 RMDir /r $INSTDIR 会把
  *     放在程序目录里的 ConfScopeData 连锅端。症状是用户丢数据，且要到下次升级才看得见。
- *  B. 安装程序必须「等」而不是「杀」。主数据是 debounce 落盘的，强杀等于吃掉最后一次写入。
+ *  B. 安装程序必须「等」而不是「杀」，等不到就「让位」。主数据是 debounce 落盘的，强杀等于吃掉最后一次
+ *     写入；轮100 起的出路是把还被锁着的旧 exe 改名挪开（零终止，正位让给新文件），遗留副本由应用下次
+ *     启动时 best-effort 清掉。「装不上」从此不再依赖旧进程肯不肯退出。
  *  C. 两侧字面量必须同源：数据目录名、install.json 的文件名与字段、/UPDATE 与 /PID 开关，
  *     一半写在 .nsi、一半写在 Go。Go 读不到标记就按便携态解析数据根，用户看到的症状
  *     是「装了之后数据不见了」——2026-09-04 的事故形态。
@@ -33,6 +35,8 @@ import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
 const NSI = "build/windows/installer/project.nsi";
 const TOOLS = "build/windows/installer/wails_tools.nsh";
+const PARKED_GO = "internal/portabledata/parked_executable.go";
+const MAIN_GO = "main.go";
 const HANDOFF_GO = "internal/updatecheck/handoff.go";
 const ARTIFACT_GO = "internal/updatecheck/artifact.go";
 const APP_GO = "internal/app/app.go";
@@ -170,7 +174,7 @@ describe("A. 安装程序不得毁掉用户数据", () => {
   });
 });
 
-describe("B. 覆盖二进制之前必须确认旧进程已退出，且绝不强杀", () => {
+describe("B. 覆盖二进制之前必须确认正位可写（已退出或已让位），且绝不终止进程", () => {
   it("没有任何强杀/隐藏 helper 的形态", () => {
     const code = nsisCode(NSI);
     for (const banned of [/taskkill/i, /nsExec/i, /Process::Kill/i, /\bExecWait\b/i, /\bExec\b/]) {
@@ -210,7 +214,22 @@ describe("B. 覆盖二进制之前必须确认旧进程已退出，且绝不强�
     // 「还在数」必须在进度页看得见，否则用户只能对着静止的窗口猜。
     expect(code).toMatch(/DetailPrint "\$\(CS_WAIT_PROGRESS\)\$R7\$\(CS_WAIT_SECONDS\)"/);
     // 一撞上占用就要说清在等谁：文件路径 + 进程号线索，两类都得有中英文案。
-    for (const key of ["CS_WAIT_FILE", "CS_WAIT_NOPID", "CS_WAIT_PID_ALIVE", "CS_WAIT_PID_GONE", "CS_WAIT_PROGRESS", "CS_WAIT_SECONDS", "CS_WAIT_GIVEUP_LONG"]) {
+    const keys = [
+      "CS_WAIT_FILE",
+      "CS_WAIT_NOPID",
+      "CS_WAIT_PID_ALIVE",
+      "CS_WAIT_PID_GONE",
+      "CS_WAIT_PROGRESS",
+      "CS_WAIT_SECONDS",
+      "CS_WAIT_GIVEUP_LONG",
+      // 让位（轮100）：进度页与收尾弹窗的每一句都得中英各一条，缺一条就是英文用户在中文机器上看中文提示。
+      "CS_PARK_TRY",
+      "CS_PARK_DONE",
+      "CS_PARK_FAIL",
+      "CS_PARK_NAME_BUSY",
+      "CS_PARK_RESTART",
+    ];
+    for (const key of keys) {
       expect(countOccurrences(code, new RegExp(String.raw`LangString ${key} \$\{LANG_`, "g")), `${key} 必须中英各一条`).toBe(2);
     }
     expect(code).toMatch(/SetErrorLevel 75/);
@@ -218,6 +237,63 @@ describe("B. 覆盖二进制之前必须确认旧进程已退出，且绝不强�
     expect(countOccurrences(code, /Call ensureSlotFree/g), "单点闸门：判据只许出现在安装 Section 开头一次").toBe(1);
     const ins = installSection(code);
     expect(ins.indexOf("Call ensureSlotFree"), "ensureSlotFree 必须在 wails.files 覆盖之前").toBeLessThan(ins.indexOf("!insertmacro wails.files"));
+  });
+
+  it("等不到退出时有第二条出路：改名让位，零终止（轮100）", () => {
+    const code = nsisCode(NSI);
+    expect(parkProblems(code), "让位这一脚的不变量漂了").toEqual([]);
+    // 让位只在等满一轮之后发生：正常「退出并安装」的实例几秒内就退了，
+    // 不该平白在程序目录里留下一份旧副本。
+    const gate = functionBody(code, "ensureSlotFree");
+    const roundFull = gate.indexOf("${If} $R9 >= ${WAIT_TICKS}");
+    expect(roundFull, "找不到「等满一轮」的判定：让位就没了落点").toBeGreaterThanOrEqual(0);
+    expect(gate.indexOf("Call parkLockedSlot"), "让位必须排在等满一轮之内，不能一撞上占用就改名").toBeGreaterThan(roundFull);
+  });
+
+  it("让位不取代等待：静默放弃 / 重试 / 到点停手三条既有出口一条都不许少", () => {
+    const code = nsisCode(NSI);
+    const gate = functionBody(code, "ensureSlotFree");
+    expect(gate).toContain("Sleep ${WAIT_INTERVAL}");
+    expect(countOccurrences(gate, /SetErrorLevel 75/g), "让位失败仍要能非 0 退出").toBeGreaterThanOrEqual(3);
+    expect(countOccurrences(gate, /\bAbort\b/g), "放弃覆盖必须真的中止 Section").toBeGreaterThanOrEqual(3);
+    expect(
+      gate,
+      "静默模式仍然要有立刻放弃的出口：让位失败就落到它，不许再兜一圈",
+    ).toMatch(/\$\{If\} \$ParkOk == "1"\n[\s\S]*?\$\{EndIf\}\n\s*DetailPrint "\$\(CS_PARK_FAIL\)\$ParkErr"\n\s*\$\{If\} \$\{Silent\}/);
+    const ins = installSection(code);
+    expect(ins.indexOf("Call ensureSlotFree")).toBeLessThan(ins.indexOf("!insertmacro wails.files"));
+    expect(countOccurrences(code, /Call ensureSlotFree/g), "单点闸门：判据只许出现在安装 Section 开头一次").toBe(1);
+    expect(countOccurrences(code, /Call parkLockedSlot/g), "让位只许在闸门里调一次").toBe(1);
+  });
+
+  it("变异对照：删掉让位、让位后不 Return、让位里动手删文件、越界改计数器，都必须判红", () => {
+    const code = nsisCode(NSI);
+    expect(parkProblems(code)).toEqual([]);
+
+    const noPark = code.replace("Call parkLockedSlot", "Call unrelatedSlot");
+    expect(noPark, "变异没落到实处").not.toBe(code);
+    expect(parkProblems(noPark).length, "整脚让位被删掉必须判红").toBeGreaterThan(0);
+
+    const noReturn = code.replace('                DetailPrint "$(CS_PARK_RESTART)"\n                Return\n', '                DetailPrint "$(CS_PARK_RESTART)"\n');
+    expect(noReturn, "变异没落到实处").not.toBe(code);
+    expect(parkProblems(noReturn).length, "让位成功不 Return 必须判红").toBeGreaterThan(0);
+
+    const deletes = code.replace('    Rename "$INSTDIR\\${PRODUCT_EXECUTABLE}" "$ParkTarget"', '    Delete "$INSTDIR\\${PRODUCT_EXECUTABLE}"');
+    expect(deletes, "变异没落到实处").not.toBe(code);
+    expect(parkProblems(deletes).length, "让位里出现删除动作必须判红").toBeGreaterThan(0);
+
+    const kills = code.replace(
+      '        StrCpy $ParkOk "1"\n        Return',
+      '        System::Call \'kernel32::TerminateProcess(p $1, i 0)\'\n        StrCpy $ParkOk "1"\n        Return'
+    );
+    expect(kills, "变异没落到实处").not.toBe(code);
+    expect(parkProblems(kills).length, "让位里出现终止进程必须判红").toBeGreaterThan(0);
+
+    const clobbers = code.replace('    StrCpy $ParkErr ""\n', '    StrCpy $R9 0\n    StrCpy $ParkErr ""\n');
+    expect(clobbers, "变异没落到实处").not.toBe(code);
+    expect(parkProblems(clobbers).length, "让位改了等待计数器必须判红").toBeGreaterThan(0);
+
+    expect(parkedSuffixProblems(code.replace('!define PARKED_SUFFIX ".pending-"', '!define PARKED_SUFFIX ".old-"')).length, "让位前缀两侧字面量漂了必须判红").toBeGreaterThan(0);
   });
 });
 
@@ -252,6 +328,24 @@ describe("C. 安装包与程序两侧的字面量必须同源", () => {
     expect(code).toMatch(/\$\{GetOptions\} "\$CmdLine" "\/PID"/);
     const handoff = stripComments(read(HANDOFF_GO));
     expect(handoff, "Go 侧传的要与 .nsi 解析的开关同名，否则升级永远走成人工双击").toContain('exec.Command(path, "/UPDATE", "/PID="+');
+  });
+
+  it("让位前缀与 Go 侧 ParkedExecutableSuffix 同源（漂了就是遗留文件永远清不掉）", () => {
+    expect(parkedSuffixProblems(nsisCode(NSI))).toEqual([]);
+  });
+
+  it("Go 侧清扫只认安装态，并且真的挂在启动链路上", () => {
+    const parked = stripComments(read(PARKED_GO));
+    expect(parked, "非安装态必须原样退出：便携版的 exe 可能在 U 盘或别人的目录里，程序没资格在那儿删文件")
+      .toMatch(/if layout\.Mode != RuntimeModeInstalled \{/);
+    expect(parked, "取不到绝对路径时不许拿占位路径去扫当前工作目录").toMatch(/!filepath\.IsAbs\(exePath\)/);
+    expect(parked, "「没扫」与「扫了但没有遗留」得看得出区别，否则日志读成空气").toMatch(/report\.Reason =/);
+    expect(parked, "真扫过就必须留自证据").toMatch(/AppendRuntimeLogLine\(layout\.DataRoot, report\.logLine\(\)\)/);
+    expect(parked, "只删普通文件：同名目录绝不递归删除，符号链接绝不跟随").toMatch(/!info\.Mode\(\)\.IsRegular\(\)/);
+
+    const main = stripComments(read(MAIN_GO));
+    expect(main, "清扫没接到启动链路上就是死代码：让位留下的旧副本会永远躺着")
+      .toMatch(/portabledata\.CleanParkedExecutables\(layout, exePath\)/);
   });
 });
 
@@ -504,6 +598,13 @@ describe("H. 窗口关了进程必须真的退出去（否则安装永远等在�
     expect(ps1).toMatch(/HANDOFF-CI ok scenarios=\d+/);
     expect(ps1, "每个场景都得先清掉上一轮留下的 HKCU 卸载项，否则 resolveInstallDir 会把 /D 覆盖掉").toMatch(/Uninstall\\ConfScope/);
     for (const flag of ["/PID=", "/S"]) expect(ps1).toContain(flag);
+    // 轮100：场景 A 从「必须 75」翻成「必须 0 + 让位断言」。还钉着旧期望就是在验旧行为。
+    expect(ps1, "场景 A 必须期望让位覆盖装上（退出码 0），否则等不到退出就还是只能放弃").toMatch(/-Prepare \$scenarioA -Expect 0/);
+    expect(ps1, "让位的三条硬断言一条都不能少：遗留副本在、副本还被锁着、旧进程还活着").toMatch(/ConfScope\.exe\.pending-\*/);
+    expect(ps1).toMatch(/Test-FileLocked -Path \$parkedPath/);
+    expect(ps1).toMatch(/Get-Process -Id \(\[int\]\$ProcId\)/);
+    expect(ps1, "每个场景只许产出一行结果：CI 钉的是 scenarios=4，多写一行就多一个假失败")
+      .toMatch(/\$script:results \+= "FAIL \$Name : \$detail"/);
 
     const wf = yamlCode(read(WORKFLOW));
     expect(wf).toContain("check-windows-installer-handoff.ps1");
@@ -514,6 +615,77 @@ describe("H. 窗口关了进程必须真的退出去（否则安装永远等在�
     );
   });
 });
+
+
+/**
+ * 让位覆盖（轮100）的不变量。返回问题清单，方便变异对照在同一套判据上跑。
+ *
+ * 为什么值得钉住：这条路是「等不到退出」的唯一出路，漂了不会有人立刻发现——
+ * 症状是用户又对着安装进度页白等，或者程序目录里堆满没人清的旧副本。
+ * 判据本身是负向的：让位只许改名，任何删除/终止/起进程的动作都判红，
+ * 「不强杀」这条红线因此不是靠注释守着的。
+ */
+function parkProblems(code: string): string[] {
+  const problems: string[] = [];
+  let gate: string;
+  try {
+    gate = functionBody(code, "ensureSlotFree");
+  } catch {
+    return ["找不到 Function ensureSlotFree：单点闸门没了，让位也无从谈起"];
+  }
+  const parkAt = gate.indexOf("Call parkLockedSlot");
+  const giveUpAt = gate.indexOf("SetErrorLevel 75");
+  if (parkAt < 0) {
+    problems.push("ensureSlotFree 里没有让位这一脚：等不到退出就只剩「继续等」和「放弃」两条路（用户实测的卡点）");
+  }
+  if (parkAt >= 0 && giveUpAt >= 0 && parkAt > giveUpAt) {
+    problems.push("让位必须排在放弃覆盖之前：等满一轮直接 exit 75 的话，让位永远跑不到");
+  }
+  const successBlock = /\$\{If\} \$ParkOk == "1"\n([\s\S]*?)\$\{EndIf\}/.exec(gate)?.[1] ?? "";
+  if (!successBlock) {
+    problems.push("让位成功之后没有明确分支：$ParkOk 出参没人读，改名成功了也不会继续覆盖");
+  } else if (!successBlock.includes("Return")) {
+    problems.push("让位成功必须 Return 回 Section 继续覆盖：留在等待里打转等于白让");
+  }
+
+  let park = "";
+  try {
+    park = functionBody(code, "parkLockedSlot");
+  } catch {
+    problems.push("找不到 Function parkLockedSlot");
+    return problems;
+  }
+  if (!/Rename "\$INSTDIR\\\$\{PRODUCT_EXECUTABLE\}" "\$ParkTarget"/.test(park)) {
+    problems.push("让位必须把正位 exe 改名到 $ParkTarget：正位空出来才能覆盖");
+  }
+  if (!/\$ParkTarget "\$INSTDIR\\\$\{PRODUCT_EXECUTABLE\}\$\{PARKED_SUFFIX\}/.test(park)) {
+    problems.push("让位目标名必须由 ${PARKED_SUFFIX} 拼出来，否则 Go 侧按前缀清不到遗留文件");
+  }
+  if (!/ClearErrors\n\s*Rename/.test(park)) {
+    problems.push("Rename 之前必须 ClearErrors：错误位带着上一步的残留，${Errors} 就成了假信号");
+  }
+  for (const banned of [/Delete\b/, /RMDir/i, /taskkill/i, /TerminateProcess/i, /OpenProcess/, /\bExec\b/, /\$AppPid/]) {
+    if (banned.test(park)) {
+      problems.push(`parkLockedSlot 只许改名，不许删除/终止/起进程/按进程号做事：命中 ${banned}`);
+    }
+  }
+  if (/\$R[789]/.test(park)) {
+    problems.push("parkLockedSlot 不许碰 $R7/$R8/$R9：那是 ensureSlotFree 数等待轮次的计数器");
+  }
+  if (countOccurrences(code, /Function parkLockedSlot/g) !== 1) {
+    problems.push("让位函数只许有一份");
+  }
+  return problems;
+}
+
+/** 让位前缀是 Go ⇄ NSIS 的第二条同源线：漂了就是「遗留文件永远清不掉」。 */
+function parkedSuffixProblems(code: string): string[] {
+  const nsi = /!define PARKED_SUFFIX "([^"]*)"/.exec(code)?.[1];
+  if (!nsi) return ['project.nsi 必须 !define PARKED_SUFFIX，Go 侧按它清扫遗留副本'];
+  const go = goStringConst(PARKED_GO, "ParkedExecutableSuffix");
+  if (nsi !== go) return [`让位前缀两侧不同源：NSI "${nsi}" ⇄ Go "${go}" ⇒ 安装留下的旧副本永远清不掉`];
+  return [];
+}
 
 /** G 组的共享判据：读文件、看码页、比 BOM，全走真实字节而不是解码后的字符串。 */
 function readBytes(rel: string): Buffer {
