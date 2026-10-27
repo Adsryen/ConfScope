@@ -150,7 +150,9 @@ function makeConnections(scale: { envs: number; prefix: string }): Connection[] 
         name: `env-${k + 1}`,
         baseUrl: "http://localhost:8848",
         provider: "nacos",
-        sourceType: "nacos-online",
+        // sourceType 只有 "nacos | local-snapshot" 两个取值（src/store/connections.ts:31），
+        // 早先写的 "nacos-online" 能跑是因为类型在运行时被抹掉，tsc -p tsconfig.tests.json 会判红。
+        sourceType: "nacos",
         projectName: "r111-proj",
         environmentName: `环境${k + 1}`,
         sourceName: "fixture",
