@@ -287,7 +287,6 @@ function nacosTime(ms: number): string {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
 }
 
-
 const bridgeListeners: Array<(line: string) => void> = [];
 
 export function onBridgeLog(fn: (line: string) => void): void {
@@ -767,10 +766,7 @@ export function resetRetestPublishRefusals(): void {
 /** 命中判定 + 记账：返回拒绝文案，未命中返回 null。 */
 function takeRetestPublishRefusal(namespace: string, group: string, dataId: string): string | null {
   const wanted = retestPublishRefusals.find(
-    (item) =>
-      item.dataId === dataId &&
-      (!item.group || item.group === group) &&
-      (!item.namespace || item.namespace === namespace)
+    (item) => item.dataId === dataId && (!item.group || item.group === group) && (!item.namespace || item.namespace === namespace)
   );
   if (!wanted) return null;
   const message = wanted.message ?? `发布失败: caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`;
@@ -802,10 +798,89 @@ export function resetRetestUpdateHandoff() {
   retestActiveTunnels.length = 0;
 }
 
+// ── 系统凭据库 / 便携快照文件 / 配置源导出的桥内替身（轮94 补齐）──────────────────
+// 起因：这 9 个绑定产品侧真在调（src/lib/credentialSecrets.ts、src/api/appDataBackup.ts、
+// src/components/ConfigBrowser.tsx、src/components/LogViewer.tsx、src/lib/auditBootstrap.ts），
+// 桥里却没有替身。wailsjs 的包装是 `() => app().X(...)`，取方法是**同步**的：
+//   · 在 useEffect 里直接调 ⇒ 同步抛穿 React ⇒ 关于页整棵 #root 被卸载成白屏（轮94 实测）；
+//   · 在 async 调用链里调 ⇒ 抛错退化成 rejection，被上层 catch 吞掉 ⇒ 页面不炸、用例不红，
+//     「存密码进系统凭据库」「打包应用数据备份」「导出配置源文件」在复测里一直是静默空转。
+// 后者比白屏更难发现，所以补齐替身并把口径钉回 Go 侧，别在桥里发明第二套语义：
+//   · 目标名 = ConfScope/<namespace>/<ownerID>[/<field>]（internal/securestore/securestore.go:65），
+//     非法片段报 invalid secret reference: <part>；
+//   · 值上限 5*512（Windows CRED_MAX_CREDENTIAL_BLOB_SIZE），文案沿用 Go 的 sentinel，
+//     这样 src/lib/credentialSecrets.ts:211 的 isUnsupportedError 判定在桥里同样成立；
+//   · 非 Windows 平台 Go 侧恒返回 secure store unsupported on this platform，桥默认按 Windows
+//     形态（产品主战场）成功，用例可用 setRetestSecureStoreUnsupported 驱动 unsupported 分支；
+//   · 读不回报 secret not found，删除幂等（securestore_windows.go:119 not-found → nil）；
+//   · 快照文件列表/恢复对齐便携快照目录，恢复拒绝空路径与穿越路径（app.go:879 同构检查）；
+//   · 导出的两种失败（空目录 / 无配置）文案对齐 provider.WriteConfigSourceDirectory，
+//     目录选择返回空串 = 用户取消（ConfigBrowser.tsx:997 靠这个短路，不能当成错误）。
+const RETEST_SECRET_BLOB_LIMIT = 5 * 512;
+const RETEST_SECRET_TARGET_PREFIX = "ConfScope";
+const RETEST_EXPORT_DIR = "/tmp/confscope-retest-exports";
+
+let secureStoreUnsupported = false;
+let pendingConfigSourceExportDir: string | null = null;
+
+/** 驱动「本机不支持系统凭据库」分支（Linux/WSL 上 Go 侧就是这个形态）。 */
+export function setRetestSecureStoreUnsupported(unsupported: boolean): void {
+  secureStoreUnsupported = unsupported;
+}
+
+/** 预置「用户会在目录选择器里选哪儿」；传 "" 模拟取消，传 null 恢复默认目录。 */
+export function setRetestConfigSourceExportDir(target: string | null): void {
+  pendingConfigSourceExportDir = target;
+}
+
+/** 桥内每用例重置，避免上一个用例写进的凭据/快照泄漏到下一个用例的断言里。 */
+export function resetRetestSecureSecrets(): void {
+  secureStoreUnsupported = false;
+  pendingConfigSourceExportDir = null;
+}
+
+/** 与 securestore.SecretRef.TargetName() 同构：非法片段直接复刻 Go 的错误文案。 */
+function retestSecretTargetName(ref: Record<string, unknown>): string {
+  const part = (name: string): string => {
+    const value = String(ref?.[name] ?? "").trim();
+    if (value === "") throw new Error(`invalid secret reference: ${name}`);
+    for (const ch of value) {
+      const ok = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch === "-" || ch === "_" || ch === ".";
+      if (!ok) throw new Error(`invalid secret reference: ${name}`);
+    }
+    return value;
+  };
+  const namespace = part("namespace");
+  const ownerId = part("ownerId");
+  const field = String(ref?.field ?? "").trim();
+  if (field !== "") part("field");
+  return field === ""
+    ? `${RETEST_SECRET_TARGET_PREFIX}/${namespace}/${ownerId}`
+    : `${RETEST_SECRET_TARGET_PREFIX}/${namespace}/${ownerId}/${field}`;
+}
+
+/** UTF-8 安全的 base64（Go 侧用 base64.StdEncoding；桥两端都可能跑，故不依赖 Buffer）。 */
+function retestToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+function retestFromBase64(value: string): string {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 export function createRetestInvoke(): RetestInvoke {
   const versionCache = new Map<string, "v1" | "v3">();
   const snapshotCache = new Map<string, unknown>();
   const snapshotsList: unknown[] = [];
+  // 系统凭据库替身（键 = TargetName）；便携快照目录的文件表（键 = 相对路径）
+  const secureSecretStore = new Map<string, string>();
+  const snapshotFiles = new Map<string, { contentBase64: string; mode: number }>();
 
   const getEndpoint = (args: unknown[]): NacosEndpoint => {
     const profile = args[0] as Record<string, unknown>;
@@ -819,8 +894,7 @@ export function createRetestInvoke(): RetestInvoke {
   // 注意：复测容器是持久化的，跨 run 残留 stamp（旧版曾落盘 /tmp）会让
   // GetConfig 误判"内容未变"（stamp >= Nacos Last-Modified），审计/历史场景因此失真。
   const publishStamps = new Map<string, number>();
-  const stampKey = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) =>
-    `${ep.baseUrl}|${namespace}|${group}|${dataId}`;
+  const stampKey = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) => `${ep.baseUrl}|${namespace}|${group}|${dataId}`;
   const readStamp = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) =>
     publishStamps.get(stampKey(ep, namespace, group, dataId)) ?? null;
   const writeStamp = (ep: NacosEndpoint, namespace: string, group: string, dataId: string) => {
@@ -841,9 +915,7 @@ export function createRetestInvoke(): RetestInvoke {
           v1(ep, "/cs/history", { search: "accurate", dataId, group, tenant: namespace, nid: "1", pageNo: "1", pageSize: String(pageSize) })
         )
       : await listAllHistory(ep, namespace, pageSize);
-    const rawList: RawHistory[] = Array.isArray(list)
-      ? list
-      : ((list as unknown as { pageItems?: RawHistory[] }).pageItems ?? []);
+    const rawList: RawHistory[] = Array.isArray(list) ? list : ((list as unknown as { pageItems?: RawHistory[] }).pageItems ?? []);
     // Nacos v1 历史行实际带 dataId/group 字段（accurate 语义：行就是请求的 dataId）；
     // 早期版本 row-mapper 曾不填 dataId，这里兜底用请求参数补齐。
     // 单 dataId 查询：行 dataId 缺失时用请求参数 dataId 回填；
@@ -872,7 +944,15 @@ export function createRetestInvoke(): RetestInvoke {
     const merged: RawHistory[] = [];
     for (const c of configs.pageItems ?? []) {
       const res = await getJson<RawHistory[]>(
-        v1(ep, "/cs/history", { search: "accurate", dataId: c.dataId, group: c.group, tenant: namespace, nid: "1", pageNo: "1", pageSize: String(pageSize) })
+        v1(ep, "/cs/history", {
+          search: "accurate",
+          dataId: c.dataId,
+          group: c.group,
+          tenant: namespace,
+          nid: "1",
+          pageNo: "1",
+          pageSize: String(pageSize),
+        })
       );
       const items = Array.isArray(res) ? res : ((res as unknown as { pageItems?: RawHistory[] }).pageItems ?? []);
       // v1 历史行不带 dataId 字段：按本次查询的 dataId 回填
@@ -883,9 +963,7 @@ export function createRetestInvoke(): RetestInvoke {
     return merged;
   };
   const rawHistoryDetail = async (ep: NacosEndpoint, namespace: string, dataId: string, group: string, nid: string) => {
-    const detail = await getJson<RawHistoryDetail>(
-      v1(ep, "/cs/history", { dataId, group, tenant: namespace, nid })
-    );
+    const detail = await getJson<RawHistoryDetail>(v1(ep, "/cs/history", { dataId, group, tenant: namespace, nid }));
     return {
       id: String(detail.nid ?? nid),
       ref: { provider: "nacos", connectionId: "", namespace, group: detail.group ?? group, dataId: detail.dataId ?? dataId, key: "" },
@@ -911,7 +989,6 @@ export function createRetestInvoke(): RetestInvoke {
     return items;
   };
 
-
   // ConfigCenter* 的 page/pageItems 形态与 Go 序列化一致，但经 JSON 往返后
   // pageItems 可能变成非数组（例如 Nacos 端点返回错误对象）。这里统一兜底，
   // 避免 UI 侧 list.filter is not a function 直接崩溃（50-history 实测发现）。
@@ -921,9 +998,7 @@ export function createRetestInvoke(): RetestInvoke {
       if ("pageItems" in page && !Array.isArray(page.pageItems)) {
         page.pageItems = [];
       } else if (Array.isArray(page.pageItems)) {
-        page.pageItems = (page.pageItems as unknown[]).filter(
-          (it) => it && typeof it === "object"
-        );
+        page.pageItems = (page.pageItems as unknown[]).filter((it) => it && typeof it === "object");
       }
     }
     return result;
@@ -937,6 +1012,16 @@ export function createRetestInvoke(): RetestInvoke {
         return { name: "ConfScope", version: "1.9.2", updateSources: [] };
       case "GetCurrentPlatform":
         return "linux";
+      case "GetFeedbackDiagnostics":
+        // 复测环境按「Linux 便携版」给事实：与上面 GetAppInfo/GetCurrentPlatform 的口径一致，
+        // 关于页的反馈环境块因此有确定读数，可断言。真实值由 Go 的 portabledata 解析器给。
+        return {
+          version: "1.9.2",
+          platform: "linux-amd64",
+          runtimeMode: "portable",
+          packageFormat: "",
+          assetName: "confscope-linux-amd64.tar.gz",
+        };
       case "CheckForUpdates":
         if (retestUpdateCheck) return retestUpdateCheck;
         return {
@@ -993,7 +1078,10 @@ export function createRetestInvoke(): RetestInvoke {
       case "ConfigCenterTestConnection": {
         // 快照来源连接（baseUrl=/tmp/...）不走 Nacos 端点探测，直接成功（与 Go 侧 local provider 行为一致）。
         const profileConn = (args[0] ?? {}) as Record<string, unknown>;
-        if (String(profileConn?.id ?? "").startsWith("snapshot:") || String(profileConn?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")) {
+        if (
+          String(profileConn?.id ?? "").startsWith("snapshot:") ||
+          String(profileConn?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")
+        ) {
           return null;
         }
         const ep = getEndpoint(args);
@@ -1063,13 +1151,15 @@ export function createRetestInvoke(): RetestInvoke {
         // 快照来源（local-snapshot）：连接 baseUrl 是 /tmp 快照路径，不命中任何 Nacos 端点。
         // 回退计划执行链路（S8b）的 freshness/before 快照读取会走这里，从内存快照缓存取内容。
         const profile0 = (args[0] ?? {}) as Record<string, unknown>;
-        if (ref.provider === "local" || String(profile0?.id ?? "").startsWith("snapshot:") || String(profile0?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")) {
+        if (
+          ref.provider === "local" ||
+          String(profile0?.id ?? "").startsWith("snapshot:") ||
+          String(profile0?.baseUrl ?? "").startsWith("/tmp/confscope-retest-snapshots")
+        ) {
           const snapshotId = String(profile0?.id ?? "").replace(/^snapshot:/, "");
           const snap = snapshotCache.get(snapshotId) as { configs?: Array<Record<string, unknown>> } | undefined;
           const match = (snap?.configs ?? []).find(
-            (c) =>
-              String(c.dataId) === ref.dataId &&
-              (String(c.group) === ref.group || (ref.group === "" && !c.group))
+            (c) => String(c.dataId) === ref.dataId && (String(c.group) === ref.group || (ref.group === "" && !c.group))
           );
           if (!match) throw new Error(`404 config not found in snapshot ${snapshotId}: ${ref.dataId}`);
           const content = String(match.content ?? "");
@@ -1088,13 +1178,14 @@ export function createRetestInvoke(): RetestInvoke {
         // 复测扩展：tenant 参数 "retest:envB" 让浏览/编辑/历史 UI 可切换同一 dataId
         // 的 B 侧(prod 版)内容 —— 用于大文件(330 行)编辑器回归等测试。
         // 生产程序不经过本桥, 不受影响; 普通 tenant(retest-dev/retest-qa)行为不变。
-        const nacosTenant =
-          ref.namespace === "retest:envB" ? ep.namespace : ref.namespace;
+        const nacosTenant = ref.namespace === "retest:envB" ? ep.namespace : ref.namespace;
         // 注意：GET /cs/configs 会命中 Chromium/Node 默认 HTTP 缓存（同 URL 同缓存键，
         // 无 cache-control 头）。审计等场景两侧命名空间不同但 dataId/group 相同时
         // （URL 仅 tenant 参数不同…tenant 在 query 里，仍可能因代理/预取混淆），
         // 一律加 no-store 强制回源，保证每次读取拿到真实当前内容。
-        const res = await fetch(v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: nacosTenant }), { cache: "no-store" });
+        const res = await fetch(v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: nacosTenant }), {
+          cache: "no-store",
+        });
         if (res.status === 404) throw new Error(`404 config not found: ${nacosTenant}/${ref.group}/${ref.dataId}`);
         const content = await res.text();
         if (!res.ok) throw new Error(`Nacos ${res.status}: ${content.slice(0, 200)}`);
@@ -1108,7 +1199,20 @@ export function createRetestInvoke(): RetestInvoke {
           if (localStamp >= lastModified) lastModified = localStamp;
         }
         const updateTime = nacosTime(lastModified);
-        bridgeLog("GetConfig", ref.namespace, ref.group, ref.dataId, "raw", rawHeader, "ms", lastModified, "stamp", localStamp ?? "-", "updateTime", updateTime);
+        bridgeLog(
+          "GetConfig",
+          ref.namespace,
+          ref.group,
+          ref.dataId,
+          "raw",
+          rawHeader,
+          "ms",
+          lastModified,
+          "stamp",
+          localStamp ?? "-",
+          "updateTime",
+          updateTime
+        );
         return {
           ref: { ...ref, provider: "nacos" },
           content,
@@ -1202,7 +1306,14 @@ export function createRetestInvoke(): RetestInvoke {
         const d = await rawHistoryDetail(ep, histDetailTenant, ref.dataId, ref.group, String(args[2]));
         return {
           id: d.id,
-          ref: { provider: "nacos", connectionId: ref.connectionId, namespace: ref.namespace, group: ref.group, dataId: ref.dataId, key: "" },
+          ref: {
+            provider: "nacos",
+            connectionId: ref.connectionId,
+            namespace: ref.namespace,
+            group: ref.group,
+            dataId: ref.dataId,
+            key: "",
+          },
           content: d.content,
           opType: d.opType,
           createdTime: d.createdTime,
@@ -1240,14 +1351,21 @@ export function createRetestInvoke(): RetestInvoke {
           totalCount: page.totalCount ?? 0,
           pageNumber: page.pageNumber ?? 1,
           pagesAvailable: page.pagesAvailable ?? 1,
-          pageItems: (page.pageItems ?? []).map((item) => ({ dataId: item.dataId, group: item.group, content: item.content, configType: item.type })),
+          pageItems: (page.pageItems ?? []).map((item) => ({
+            dataId: item.dataId,
+            group: item.group,
+            content: item.content,
+            configType: item.type,
+          })),
         };
       }
       case "NacosGetConfig": {
         const ep = endpointFor(String(args[0]));
         if (!ep) throw new Error(`retest bridge: 未知端点 ${args[0]}`);
         const [, , , namespace, dataId, group] = args as unknown[];
-        return getText(v1(ep, "/cs/configs", { dataId: String(dataId ?? ""), group: String(group ?? ""), tenant: String(namespace ?? "") }));
+        return getText(
+          v1(ep, "/cs/configs", { dataId: String(dataId ?? ""), group: String(group ?? ""), tenant: String(namespace ?? "") })
+        );
       }
       case "NacosHistoryList": {
         const ep = endpointFor(String(args[0]));
@@ -1256,13 +1374,7 @@ export function createRetestInvoke(): RetestInvoke {
         // v3 的 NacosHistoryList 走 v3 历史接口（pageItems 直接是数组），这里走 v1 兼容
         // 持久化容器的历史 nid 会在重启后重置，按会话基线过滤会误杀真实历史；
         // 与 ConfigCenterListHistory 保持一致：返回全部（降序），由 UI 侧自行筛选
-        const items = await rawHistory(
-          ep,
-          String(namespace ?? ""),
-          String(dataId ?? ""),
-          String(group ?? ""),
-          100
-        );
+        const items = await rawHistory(ep, String(namespace ?? ""), String(dataId ?? ""), String(group ?? ""), 100);
         return normalizePage({ totalCount: items.length, pageNumber: 1, pagesAvailable: 1, pageItems: items });
       }
       case "NacosHistoryDetail": {
@@ -1270,7 +1382,15 @@ export function createRetestInvoke(): RetestInvoke {
         if (!ep) throw new Error(`retest bridge: 未知端点 ${args[0]}`);
         const [, , , namespace, dataId, group, , nid] = args as unknown[];
         const detail = await rawHistoryDetail(ep, String(namespace ?? ""), String(dataId ?? ""), String(group ?? ""), String(nid ?? ""));
-        return { id: detail.id, dataId: detail.ref.dataId, group: detail.ref.group, content: detail.content, opType: detail.opType, createdTime: detail.createdTime, lastModifiedTime: detail.lastModifiedTime };
+        return {
+          id: detail.id,
+          dataId: detail.ref.dataId,
+          group: detail.ref.group,
+          content: detail.content,
+          opType: detail.opType,
+          createdTime: detail.createdTime,
+          lastModifiedTime: detail.lastModifiedTime,
+        };
       }
       case "NacosPublishConfig":
         throw new Error("直接发布被阻断：必须通过 ApplyPlan");
@@ -1298,7 +1418,11 @@ export function createRetestInvoke(): RetestInvoke {
         const ep = endpointFor(String(args[0]));
         if (!ep) throw new Error(`retest bridge: 未知端点 ${args[0]}`);
         const [, , , namespace, dataId, group] = args as unknown[];
-        const text = await sendForm("DELETE", v1(ep, "/cs/configs", { dataId: String(dataId ?? ""), group: String(group ?? ""), tenant: String(namespace ?? "") }), {});
+        const text = await sendForm(
+          "DELETE",
+          v1(ep, "/cs/configs", { dataId: String(dataId ?? ""), group: String(group ?? ""), tenant: String(namespace ?? "") }),
+          {}
+        );
         if (text !== "true") throw new Error(`删除失败: ${text}`);
         writeStamp(ep, String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""));
         bridgeLog("delete", namespace, group, dataId, "type=nacos");
@@ -1361,6 +1485,12 @@ export function createRetestInvoke(): RetestInvoke {
         };
         snapshotCache.set(id, snapshot);
         snapshotsList.push(snapshot);
+        // Go 侧 CreateSnapshot 会把快照写进便携快照目录，ListAppDataSnapshotFiles 才列得到；
+        // 桥保持同一因果，否则「打包应用数据备份」列出的快照文件永远是空的。
+        snapshotFiles.set(`${id}/metadata.json`, {
+          contentBase64: retestToBase64(JSON.stringify(snapshot)),
+          mode: 0o644,
+        });
         return snapshot;
       }
       case "GetSnapshot": {
@@ -1372,9 +1502,7 @@ export function createRetestInvoke(): RetestInvoke {
         // 按 createdAt 倒序（新→旧），与 Go 侧 ListSnapshots 排序语义一致；
         // UI 首项即最新快照，测试/人工操作都依赖这个顺序。
         return [...snapshotsList].sort((a, b) =>
-          String((b as { createdAt?: string })?.createdAt ?? "").localeCompare(
-            String((a as { createdAt?: string })?.createdAt ?? "")
-          )
+          String((b as { createdAt?: string })?.createdAt ?? "").localeCompare(String((a as { createdAt?: string })?.createdAt ?? ""))
         );
       case "DeleteSnapshot":
         snapshotCache.delete(String(args[0]));
@@ -1473,6 +1601,68 @@ export function createRetestInvoke(): RetestInvoke {
         // UI 用返回值渲染 toast/刷新列表：必须返回完整 Snapshot（与 CreateSnapshot 契约一致）
         return snapshot;
       }
+      case "WriteSecureSecret": {
+        const ref = (args[0] ?? {}) as Record<string, unknown>;
+        const value = String(args[1] ?? "");
+        const targetName = retestSecretTargetName(ref);
+        const valueSize = new TextEncoder().encode(value).length;
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        if (valueSize > RETEST_SECRET_BLOB_LIMIT) {
+          throw new Error(`secret too large: ${valueSize} > ${RETEST_SECRET_BLOB_LIMIT}`);
+        }
+        secureSecretStore.set(targetName, value);
+        // Go 侧写完立刻读回校验，校验失败会删掉并报错；内存替身不存在读不回，verified 恒真
+        return { ref, targetName, valueSize, verified: true };
+      }
+      case "ReadSecureSecret": {
+        const targetName = retestSecretTargetName((args[0] ?? {}) as Record<string, unknown>);
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        const value = secureSecretStore.get(targetName);
+        if (value === undefined) throw new Error(`secret not found: ${targetName}`);
+        return value;
+      }
+      case "DeleteSecureSecret": {
+        const targetName = retestSecretTargetName((args[0] ?? {}) as Record<string, unknown>);
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        // 幂等：删不存在的目标也算成功（securestore_windows.go:119 not-found → nil）
+        secureSecretStore.delete(targetName);
+        return null;
+      }
+      case "ListAppDataSnapshotFiles": {
+        // 便携快照目录里的文件，按路径排序给出 {path, contentBase64, mode}
+        return Array.from(snapshotFiles.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([path, file]) => ({ path, contentBase64: file.contentBase64, mode: file.mode }));
+      }
+      case "RestoreAppDataSnapshotFiles": {
+        const files = (args[0] ?? []) as Array<Record<string, unknown>>;
+        for (const file of files) {
+          const path = String(file?.path ?? "").trim();
+          if (path === "") throw new Error("快照文件路径不能为空");
+          if (path.startsWith("/") || path.split("/").some((seg) => seg === ".." || seg === ".")) {
+            throw new Error(`快照文件路径不安全: ${path}`);
+          }
+          const b64 = String(file?.contentBase64 ?? "");
+          try {
+            retestFromBase64(b64);
+          } catch {
+            throw new Error(`解析快照文件失败 ${path}`);
+          }
+          const mode = Number(file?.mode ?? 0) || 0o644;
+          snapshotFiles.set(path, { contentBase64: b64, mode });
+        }
+        return null;
+      }
+      case "SelectConfigSourceExportDirectory":
+        // "" = 用户取消导出（ConfigBrowser 靠它短路，不能当错误弹提示）
+        return pendingConfigSourceExportDir ?? RETEST_EXPORT_DIR;
+      case "ExportConfigSourceFiles": {
+        const targetDir = String(args[0] ?? "").trim();
+        const configs = (args[2] ?? []) as unknown[];
+        if (targetDir === "") throw new Error("导出目录不能为空");
+        if (configs.length === 0) throw new Error("没有可导出的配置");
+        return { path: targetDir, configCount: configs.length, manifest: `${targetDir}/metadata.json` };
+      }
       case "AppendAuditEvent": {
         // raw 为单行 JSON（JSONL）
         const line = String(args[0] ?? "");
@@ -1481,7 +1671,8 @@ export function createRetestInvoke(): RetestInvoke {
           const ev = JSON.parse(line) as { kind?: string; sessionId?: string; result?: string; status?: string };
           if (ev.kind && ev.sessionId) {
             if (ev.kind === "session_start") auditSessions.set(ev.sessionId, { kind: String(ev.kind), status: "running" });
-            else if (ev.kind === "session_end") auditSessions.set(ev.sessionId, { kind: String(ev.kind), status: String(ev.status ?? "unknown") });
+            else if (ev.kind === "session_end")
+              auditSessions.set(ev.sessionId, { kind: String(ev.kind), status: String(ev.status ?? "unknown") });
           }
         } catch {
           // 非 JSON 行也照写
@@ -1589,4 +1780,3 @@ export function createRetestInvoke(): RetestInvoke {
     }
   };
 }
-

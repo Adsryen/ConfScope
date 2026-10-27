@@ -1,6 +1,18 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { createRetestInvoke, resetRetestAppDataDoc, resetRetestDataRoot, resetRetestPublishRefusals, resetRetestRevisions, resetRetestUpdateHandoff, RETEST_AUDIT_DIR, RETEST_AUDIT_FILE, setRetestAuditFsHooks, setRetestAuditLineSink } from "./retestBinding";
+import {
+  createRetestInvoke,
+  resetRetestAppDataDoc,
+  resetRetestDataRoot,
+  resetRetestPublishRefusals,
+  resetRetestRevisions,
+  resetRetestSecureSecrets,
+  resetRetestUpdateHandoff,
+  RETEST_AUDIT_DIR,
+  RETEST_AUDIT_FILE,
+  setRetestAuditFsHooks,
+  setRetestAuditLineSink,
+} from "./retestBinding";
 import { bumpRetestBridgeBust } from "../specs/ui";
 import { createRetestStorageSeed } from "./storageSeed";
 import type { RetestState } from "../state";
@@ -13,6 +25,9 @@ const WAILS_METHODS = [
   "RetestAppDataDocSnapshot",
   "CheckForUpdates",
   "GetCurrentPlatform",
+  // 关于页「复制反馈信息」的运行环境事实（src/api/app.ts getFeedbackDiagnostics）。
+  // 缺这一名时桥里没有该方法，About 挂载即在 render 阶段抛 TypeError，整棵 #root 被卸载成白屏（轮94 实测）。
+  "GetFeedbackDiagnostics",
   "SelectLocalSnapshotDirectory",
   "ValidateLocalSnapshotDirectory",
   "ConfigCenterListNamespaces",
@@ -71,6 +86,11 @@ const WAILS_METHODS = [
   "UploadSnapshotWebDAVPackage",
   "ImportSnapshotWebDAVPackage",
   "ClearAuditTrail",
+  // 审计链的另两端：前端 auditBootstrap 经 wailsjs 调 AppendAuditEvent，
+  // LogViewer 经 wailsjs 调 ReadAuditLogLines。这两个名字此前只在桥里有 case、没进方法表，
+  // 于是 window.go.app.App 上取不到方法 —— 写审计静默降级、日志页永远读不到持久化行。
+  "AppendAuditEvent",
+  "ReadAuditLogLines",
   "GetDataLocations",
   "OpenDataFolder",
   // 数据根运行形态与换根迁移（轮62）：桥内内存替身，见 retestBinding
@@ -87,6 +107,17 @@ const WAILS_METHODS = [
   "PruneConfigRevisions",
   "ClearConfigRevisions",
   "GetConfigRevisionFacts",
+  // 系统凭据库读写（src/lib/credentialSecrets.ts 经 wailsjs 调用）。缺这三个名字时
+  // 「保存密码到系统凭据库」在复测里只是被 catch 吞掉的 rejection，页面照常渲染，绿灯是假的。
+  "WriteSecureSecret",
+  "ReadSecureSecret",
+  "DeleteSecureSecret",
+  // 便携快照文件列表/恢复（src/api/appDataBackup.ts，应用数据备份打包与还原用它）
+  "ListAppDataSnapshotFiles",
+  "RestoreAppDataSnapshotFiles",
+  // 配置浏览「导出源文件到目录」（src/components/ConfigBrowser.tsx）
+  "SelectConfigSourceExportDirectory",
+  "ExportConfigSourceFiles",
   "RetestRevisionsSnapshot",
 ] as const;
 
@@ -95,6 +126,8 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
   resetRetestAppDataDoc();
   // 数据根替身同样每用例重置：避免上一个用例迁移后的 root 泄漏到下一个用例。
   resetRetestDataRoot();
+  // 凭据库/导出目录的预置也每用例复位，避免上一条用例驱动的 unsupported 或取消态串味。
+  resetRetestSecureSecrets();
   // 升级交接替身同样每用例重置：泄漏的「有新版本」会让下一条用例的关于页直接停在更新面板上。
   resetRetestUpdateHandoff();
   // 本机版本历史替身同样每用例重置：它是「这台机器见过哪几版」，跨用例残留会让
@@ -119,7 +152,9 @@ export async function installRetestBridge(page: Page, state: RetestState): Promi
     () => {
       try {
         if (!existsSync(RETEST_AUDIT_FILE)) return [];
-        return readFileSync(RETEST_AUDIT_FILE, "utf8").split("\n").filter((l) => l.trim() !== "");
+        return readFileSync(RETEST_AUDIT_FILE, "utf8")
+          .split("\n")
+          .filter((l) => l.trim() !== "");
       } catch {
         return [];
       }
