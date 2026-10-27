@@ -933,7 +933,7 @@ const retestActiveTunnels: string[] = [];
  * 第 1 项已落库、第 2 项被服务端拒绝。真实 Nacos 的拒绝条件（dataId 非法字符、
  * content 为空白）在播种阶段同样会被拒，造不出「一条能建、一条写不进」的组合；
  * 而靠外部并发改写去撞最后一刻的指纹复检，赢的是毫秒级窗口，天然是 flaky。
- * 所以这里在同一位置注入拒绝：抛出点与真实发布失败（`if (text !== "true") throw`）
+ * 所以这里在同一位置注入拒绝：抛出点与真实发布被拒（`assertWriteAccepted`）
  * 是同一支笔，错误同样从 deps.publishConfig* 冒出来，生产代码一行都不改。
  *
  * 口径：命中即拒（可重复执行仍拒，等价于服务端稳定拒绝），并把每一次拒绝记进 hits，
@@ -962,13 +962,44 @@ export function resetRetestPublishRefusals(): void {
   retestPublishRefusalHits.length = 0;
 }
 
+/*
+ * 写入被拒的文案（轮101）。
+ *
+ * 为什么要在这里再写一份：桥里那句 `if (text !== "true") throw` 是 Go 侧
+ * PublishConfig/DeleteConfig 同一判据的镜像。判据两处都要动才不漏，但**文案必须同源**——
+ * 漂了的话复测量到的是旧句子，真机上用户看到的却还是新的，等于白测。
+ * 关键短语由 tests/ux/goErrorCopyStaysActionable.test.ts 拿 internal/nacos/error_shapes.go
+ * 逐条比对，两边一起改才会绿。
+ */
+const WRITE_REFUSAL_PREFIX = "这次写入没有被服务端接受";
+const WRITE_REFUSAL_CHECKS =
+  "接下来依次确认：当前凭据对这个命名空间与分组有没有这项操作的权限；这份配置是否被他人锁定或所在环境只读；正文与所选格式是否匹配（例如选了 YAML 但正文不是合法 YAML）";
+
+function describeWriteRefusal(action: string, namespace: string, group: string, dataId: string, body: string): string {
+  const trimmed = body.trim();
+  let reason = `服务端原话：${trimmed}。`;
+  if (trimmed === "") {
+    reason = "服务端没有给出任何原因。";
+  } else if (trimmed.toLowerCase() === "false") {
+    reason = "服务端只回了 false，没有给出原因。";
+  }
+  const location = [namespace || "默认命名空间", group || "DEFAULT_GROUP", dataId || "未取名"].join("/");
+  return `${WRITE_REFUSAL_PREFIX}：${action}未写成（位置 ${location}）。${reason}${WRITE_REFUSAL_CHECKS}`;
+}
+
+/** 判据与 Go 一致：v1 正文必须是 true，否则这次写入没被接受（要说清是哪一份）。 */
+function assertWriteAccepted(action: string, namespace: string, group: string, dataId: string, text: string): void {
+  if (text.trim() === "true") return;
+  throw new Error(describeWriteRefusal(action, namespace, group, dataId, text));
+}
+
 /** 命中判定 + 记账：返回拒绝文案，未命中返回 null。 */
 function takeRetestPublishRefusal(namespace: string, group: string, dataId: string): string | null {
   const wanted = retestPublishRefusals.find(
     (item) => item.dataId === dataId && (!item.group || item.group === group) && (!item.namespace || item.namespace === namespace)
   );
   if (!wanted) return null;
-  const message = wanted.message ?? `发布失败: caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`;
+  const message = wanted.message ?? describeWriteRefusal("发布", namespace, group, dataId, `caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`);
   retestPublishRefusalHits.push({ namespace, group, dataId, message });
   bridgeLog("publish-refused", namespace, group, dataId, "injected");
   return message;
@@ -1499,7 +1530,7 @@ export function createRetestInvoke(): RetestInvoke {
           content: req.content,
           type: req.format || "txt",
         });
-        if (text !== "true") throw new Error(`发布失败: ${text}`);
+        assertWriteAccepted("发布", ref.namespace, ref.group, ref.dataId, text);
         writeStamp(ep, ref.namespace, ref.group, ref.dataId);
         bridgeLog("publish", ref.namespace, ref.group, ref.dataId, "type=ref");
         return null;
@@ -1514,7 +1545,7 @@ export function createRetestInvoke(): RetestInvoke {
         const ref = normalizeRefLike(args[1]);
         if (!ref.dataId) throw new Error("retest bridge: 删除请求的 dataId 为空，arg2 形状与绑定契约不符（应为 ConfigRef 本体）");
         const text = await sendForm("DELETE", v1(ep, "/cs/configs", { dataId: ref.dataId, group: ref.group, tenant: ref.namespace }), {});
-        if (text !== "true") throw new Error(`删除失败: ${text}`);
+        assertWriteAccepted("删除", ref.namespace, ref.group, ref.dataId, text);
         writeStamp(ep, ref.namespace, ref.group, ref.dataId);
         bridgeLog("delete", ref.namespace, ref.group, ref.dataId, "type=ref");
         return null;
@@ -1665,7 +1696,7 @@ export function createRetestInvoke(): RetestInvoke {
           content: String(content ?? ""),
           type: String(configType || "txt"),
         });
-        if (text !== "true") throw new Error(`发布失败: ${text}`);
+        assertWriteAccepted("发布", String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""), text);
         writeStamp(ep, String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""));
         bridgeLog("publish", namespace, group, dataId, "type=nacos");
         return null;
@@ -1679,7 +1710,7 @@ export function createRetestInvoke(): RetestInvoke {
           v1(ep, "/cs/configs", { dataId: String(dataId ?? ""), group: String(group ?? ""), tenant: String(namespace ?? "") }),
           {}
         );
-        if (text !== "true") throw new Error(`删除失败: ${text}`);
+        assertWriteAccepted("删除", String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""), text);
         writeStamp(ep, String(namespace ?? ""), String(group ?? ""), String(dataId ?? ""));
         bridgeLog("delete", namespace, group, dataId, "type=nacos");
         return null;

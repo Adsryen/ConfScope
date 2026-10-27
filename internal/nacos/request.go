@@ -23,6 +23,9 @@ func base(baseURL string) string {
 	return strings.TrimRight(baseURL, "/")
 }
 
+// requestPath 给错误文案用（界面、操作历史、用户手抄），不是给请求用。
+// 所以查询串必须先过 sanitizeQuery：Nacos v1 的 accessToken 就挂在查询串里，
+// 直接把 RawQuery 抄进错误文案，等于把会话令牌写进会被复制粘贴走的文本（轮101）。
 func requestPath(req *http.Request) string {
 	if req == nil || req.URL == nil {
 		return ""
@@ -30,7 +33,42 @@ func requestPath(req *http.Request) string {
 	if req.URL.RawQuery == "" {
 		return req.URL.Path
 	}
-	return req.URL.Path + "?" + req.URL.RawQuery
+	return req.URL.Path + "?" + sanitizeQuery(req.URL.RawQuery)
+}
+
+// sensitiveQueryKey 判断查询参数名是不是带着凭据的那一类。
+// 口径宁严勿松：命中不了只是少一条线索，命中漏了就是泄露。
+func sensitiveQueryKey(key string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(key))
+	if lowered == "" {
+		return false
+	}
+	switch lowered {
+	case "accesstoken", "accesskey", "accesskeyid", "secretkey", "securitytoken", "password", "username", "token":
+		return true
+	}
+	return strings.Contains(lowered, "token") ||
+		strings.Contains(lowered, "password") ||
+		strings.Contains(lowered, "secret")
+}
+
+// sanitizeQuery 把查询串里的凭据类参数值换成 ***，其余一个字节都不动。
+//
+// 只做值替换、不做重新编码：这里拼出来的是给人看的文本，
+// ParseQuery + Encode 会把别的参数重排并二次转义（* 变 %2A、中文变一长串百分号），
+// 用户抄给别人时那些噪音反而挡在中间。空查询串照原样返回空。
+func sanitizeQuery(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	pairs := strings.Split(raw, "&")
+	for i, pair := range pairs {
+		key, _, _ := strings.Cut(pair, "=")
+		if sensitiveQueryKey(key) {
+			pairs[i] = key + "=***"
+		}
+	}
+	return strings.Join(pairs, "&")
 }
 
 func requestURL(baseURL, path string, query url.Values) string {
@@ -216,11 +254,22 @@ func (c *Client) sendFormOnce(method, baseURL, path string, query url.Values, fo
 	return "", fmt.Errorf("请求失败"), 404
 }
 
-// statusError 把非 2xx 响应转成错误：403 且报文明显在要 AccessKey 时翻译成
-// 可执行动作（ErrAccessKeyRejected），其余照旧带上状态码、请求路径和响应体。
+// statusError 把非 2xx 响应转成错误。出口只有三条，且必须按这个顺序判（轮101）：
+//  1. 报文在要 AccessKey  -> ErrAccessKeyRejected（轮65）；
+//  2. 报文在说「身份有、权限没有」 -> ErrConfigPermissionDenied；
+//  3. 都不像 -> 状态码 + 请求路径 + 服务端原文，一个字不改地交给用户。
+//
+// 第 401 也进前两条：以前只认 403，但 MSE 侧对签名与授权的拒绝并不总用 403 表态，
+// 落到第 3 条就是一坨排障用的 JSON。第 3 条仍是唯一拼装原文的地方（守卫钉着），
+// 分类只认字形，认不出来绝不猜。
 func (c *Client) statusError(statusCode int, req *http.Request, body string) error {
-	if statusCode == http.StatusForbidden && asksForAccessKey(body) {
-		return fmt.Errorf("%w: %s（请求 %s）", ErrAccessKeyRejected, c.accessKeyAdvice(), requestPath(req))
+	if statusCode == http.StatusForbidden || statusCode == http.StatusUnauthorized {
+		if asksForAccessKey(body) {
+			return fmt.Errorf("%w: %s（请求 %s）", ErrAccessKeyRejected, c.accessKeyAdvice(), requestPath(req))
+		}
+		if isPermissionShape(body) {
+			return fmt.Errorf("%w: %s（请求 %s）", ErrConfigPermissionDenied, permissionAdvice(req.Method), requestPath(req))
+		}
 	}
 	return fmt.Errorf("Nacos 返回 %d，请求 %s: %s", statusCode, requestPath(req), truncate(body))
 }
@@ -240,7 +289,7 @@ func decodeResponseBody(body []byte, contentType string) (string, error) {
 	if label := responseCharset(contentType); label != "" {
 		reader, err := charset.NewReaderLabel(label, bytes.NewReader(body))
 		if err != nil {
-			return "", fmt.Errorf("??????? %q ??: %w", label, err)
+			return "", fmt.Errorf("无法按响应声明的编码 %q 解码响应体: %w", label, err)
 		}
 		decoded, err := io.ReadAll(reader)
 		if err != nil {
@@ -254,7 +303,7 @@ func decodeResponseBody(body []byte, contentType string) (string, error) {
 
 	decoded, _, err := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), body)
 	if err != nil {
-		return "", fmt.Errorf("? UTF-8/GB18030 ??????: %w", err)
+		return "", fmt.Errorf("响应体既不是 UTF-8 也无法按 GB18030 解码: %w", err)
 	}
 	return string(decoded), nil
 }

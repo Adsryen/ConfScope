@@ -151,9 +151,10 @@ func (c *Client) PublishConfig(baseURL, accessToken, apiVersion, namespace, data
 	if err != nil {
 		return err
 	}
+	refusal := writeRefusal{action: "发布", namespace: namespace, group: group, dataID: dataID}
 	if version == apiV1 {
 		if strings.TrimSpace(text) != "true" {
-			return fmt.Errorf("发布失败: %s", truncate(text))
+			return refusal.err(text)
 		}
 		return nil
 	}
@@ -162,7 +163,7 @@ func (c *Client) PublishConfig(baseURL, accessToken, apiVersion, namespace, data
 		return fmt.Errorf("解析响应失败: %w —— %s", err, truncate(text))
 	}
 	if i(v, "code") != 0 || v["data"] != true {
-		return fmt.Errorf("发布失败: %s", s(v, "message"))
+		return refusal.err(s(v, "message"))
 	}
 	return nil
 }
@@ -189,9 +190,10 @@ func (c *Client) DeleteConfig(baseURL, accessToken, apiVersion, namespace, dataI
 	if err != nil {
 		return err
 	}
+	refusal := writeRefusal{action: "删除", namespace: namespace, group: group, dataID: dataID}
 	if version == apiV1 {
 		if strings.TrimSpace(text) != "true" {
-			return fmt.Errorf("删除失败: %s", truncate(text))
+			return refusal.err(text)
 		}
 		return nil
 	}
@@ -200,7 +202,7 @@ func (c *Client) DeleteConfig(baseURL, accessToken, apiVersion, namespace, dataI
 		return fmt.Errorf("解析响应失败: %w —— %s", err, truncate(text))
 	}
 	if i(v, "code") != 0 {
-		return fmt.Errorf("删除失败: %s", s(v, "message"))
+		return refusal.err(s(v, "message"))
 	}
 	return nil
 }
