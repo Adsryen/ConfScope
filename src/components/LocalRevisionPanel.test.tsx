@@ -17,16 +17,27 @@ import { clearErrors, subscribeErrors, type AppErrorItem } from "../lib/errorCen
 import { toast } from "../lib/toast";
 import type { Connection } from "../store/connections";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
-import type { ConfigRevisionRecord } from "../../wailsjs/go/app/App";
+import type { ConfigRevisionPinnedRef, ConfigRevisionPolicyView, ConfigRevisionRecord } from "../../wailsjs/go/app/App";
 import LocalRevisionPanel from "./LocalRevisionPanel";
 
 const revisionMocks = vi.hoisted(() => ({
   listRevisionsForKey: vi.fn(),
+  // 轮99：钉住那一族的三个出口。存在性探测默认「不可用」——jsdom 里根本没有 window.go，
+  // 这就是真的降级环境，其余用例因此跟改动前一模一样（整排键都不出现）。
+  revisionPolicyStoreAvailable: vi.fn(() => false),
+  getConfigRevisionPolicy: vi.fn(),
+  toggleRevisionPinned: vi.fn(),
 }));
 
 vi.mock("../lib/configRevisions", async () => {
   const actual = await vi.importActual<typeof import("../lib/configRevisions")>("../lib/configRevisions");
-  return { ...actual, listRevisionsForKey: revisionMocks.listRevisionsForKey };
+  return {
+    ...actual,
+    listRevisionsForKey: revisionMocks.listRevisionsForKey,
+    revisionPolicyStoreAvailable: revisionMocks.revisionPolicyStoreAvailable,
+    getConfigRevisionPolicy: revisionMocks.getConfigRevisionPolicy,
+    toggleRevisionPinned: revisionMocks.toggleRevisionPinned,
+  };
 });
 
 vi.mock("../lib/toast", () => ({ toast: vi.fn() }));
@@ -112,6 +123,10 @@ describe("LocalRevisionPanel", () => {
     localStorage.clear();
     clearErrors();
     revisionMocks.listRevisionsForKey.mockReset();
+    revisionMocks.revisionPolicyStoreAvailable.mockReset();
+    revisionMocks.revisionPolicyStoreAvailable.mockReturnValue(false);
+    revisionMocks.getConfigRevisionPolicy.mockReset();
+    revisionMocks.toggleRevisionPinned.mockReset();
     vi.mocked(toast).mockReset();
     revisionMocks.listRevisionsForKey.mockResolvedValue([rec(), older]);
   });
@@ -169,10 +184,7 @@ describe("LocalRevisionPanel", () => {
   it("正文超上限的那一版不渲染空正文冒充「这一版是空的」，也不挂回滚键", async () => {
     const { container } = renderPanel();
     await waitFor(() => expect(rows(container)).toHaveLength(2));
-    revisionMocks.listRevisionsForKey.mockResolvedValue([
-      rec({ bytes: 5_000_000, content: "", contentOmittedReason: "too-large" }),
-      older,
-    ]);
+    revisionMocks.listRevisionsForKey.mockResolvedValue([rec({ bytes: 5_000_000, content: "", contentOmittedReason: "too-large" }), older]);
     // 「重新读取」在 loading 期间是 disabled 的，必须等首轮落定再点（点了没反应比红更糟）
     fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
 
@@ -286,11 +298,166 @@ describe("LocalRevisionPanel", () => {
       </I18nProvider>
     );
 
-    await waitFor(() => expect(revisionMocks.listRevisionsForKey).toHaveBeenLastCalledWith(conn, {
-      namespace: "other",
-      group: "DEFAULT_GROUP",
-      dataId: "app.yaml",
-    }));
+    await waitFor(() =>
+      expect(revisionMocks.listRevisionsForKey).toHaveBeenLastCalledWith(conn, {
+        namespace: "other",
+        group: "DEFAULT_GROUP",
+        dataId: "app.yaml",
+      })
+    );
     expect(screen.getByText(/点击左侧版本查看内容/)).toBeInTheDocument();
+  });
+
+  // ── 轮99：钉住「本机见过的某一版正文」 ──────────────────────────────────────
+
+  /** 一份策略视图替身：清单与配额都由 Go 回，面板只是转发与对照。 */
+  function panelPolicyView(refs: ConfigRevisionPinnedRef[]): ConfigRevisionPolicyView {
+    return {
+      path: "/tmp/confscope-retest/data/app-data/config-revisions-policy.json",
+      keepPerKey: 50,
+      keepSource: "policy",
+      minKeepPerKey: 10,
+      maxKeepPerKey: 1000,
+      defaultKeepPerKey: 50,
+      pinned: refs,
+      pinnedCount: refs.length,
+      unpinnedOverQuota: 0,
+    };
+  }
+
+  /** 一条钉住记录的四元组就是面板当前的键，只有 hash 随版本变。 */
+  function pinnedRef(hash: string): ConfigRevisionPinnedRef {
+    return { connectionId: "dev", namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", hash };
+  }
+
+  describe("钉住这一版正文", () => {
+    beforeEach(() => {
+      revisionMocks.revisionPolicyStoreAvailable.mockReturnValue(true);
+      revisionMocks.getConfigRevisionPolicy.mockResolvedValue(panelPolicyView([]));
+      revisionMocks.toggleRevisionPinned.mockReset();
+    });
+
+    it("策略读不出来时整排钉住键都不出现：不摆一颗说不清钉没钉上的键", async () => {
+      revisionMocks.revisionPolicyStoreAvailable.mockReturnValue(false);
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      expect(container.querySelectorAll(".history-item-pin")).toHaveLength(0);
+      expect(revisionMocks.getConfigRevisionPolicy).not.toHaveBeenCalled();
+    });
+
+    it("策略读失败同样收起整排键，行本体照常可看", async () => {
+      revisionMocks.getConfigRevisionPolicy.mockRejectedValue(new Error("保留策略读不出来：绑定回了空"));
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      expect(container.querySelectorAll(".history-item-pin")).toHaveLength(0);
+      expect(container.textContent).toContain("本机写入");
+    });
+
+    it("钉上以后画的是 Go 回读的那份清单，键与标记同时改口", async () => {
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      const pins = () => Array.from(container.querySelectorAll<HTMLButtonElement>(".history-item-pin"));
+      expect(pins()[0].textContent).toContain("钉住");
+      expect(pins()[0]).toHaveAttribute("aria-pressed", "false");
+
+      revisionMocks.toggleRevisionPinned.mockResolvedValue({ pinned: true, hits: 1, pinnedCount: 1 });
+      revisionMocks.getConfigRevisionPolicy.mockResolvedValue(panelPolicyView([pinnedRef(rec().hash)]));
+      fireEvent.click(pins()[0]);
+
+      await waitFor(() => expect(revisionMocks.toggleRevisionPinned).toHaveBeenCalledTimes(1));
+      expect(revisionMocks.toggleRevisionPinned).toHaveBeenCalledWith(
+        conn,
+        { namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml" },
+        rec().hash,
+        true
+      );
+      await waitFor(() => expect(pins()[0].textContent).toContain("已钉住"));
+      expect(pins()[0]).toHaveAttribute("aria-pressed", "true");
+      expect(container.querySelectorAll(".pin-badge")).toHaveLength(1);
+      expect(toast).toHaveBeenCalledWith("已钉住");
+    });
+
+    it("钉在正文摘要上：同一份内容的另一版一起亮，不是只有点的那一行", async () => {
+      // 同一键上「最新」与「更旧」两条正文相同（A→B→A 那种往返），hash 一致
+      const sameContentOlder = rec({ ts: "2026-10-19T10:00:00.000000Z", kind: "observed" });
+      revisionMocks.listRevisionsForKey.mockResolvedValue([rec(), sameContentOlder]);
+      revisionMocks.getConfigRevisionPolicy.mockResolvedValue(panelPolicyView([pinnedRef(rec().hash)]));
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      const pins = Array.from(container.querySelectorAll<HTMLButtonElement>(".history-item-pin"));
+      expect(pins).toHaveLength(2);
+      expect(pins[0]).toHaveAttribute("aria-pressed", "true");
+      expect(pins[1]).toHaveAttribute("aria-pressed", "true");
+      expect(container.querySelectorAll(".pin-badge")).toHaveLength(2);
+    });
+
+    it("Go 说钉不住（本机已没这版正文）时如实说没生效，不报「已钉住」", async () => {
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      revisionMocks.toggleRevisionPinned.mockResolvedValue({ pinned: false, hits: 0, pinnedCount: 0 });
+      fireEvent.click(container.querySelectorAll<HTMLButtonElement>(".history-item-pin")[0]);
+
+      await waitFor(() => expect(toast).toHaveBeenCalledTimes(1));
+      expect(toast).toHaveBeenCalledWith("本机已经没有这一版正文可钉（可能刚被清理），钉住没有生效", "info");
+      expect(toast).not.toHaveBeenCalledWith("已钉住");
+    });
+
+    it("取消钉住回的是取消后的清单，标记跟着消失", async () => {
+      revisionMocks.getConfigRevisionPolicy.mockResolvedValue(panelPolicyView([pinnedRef(rec().hash)]));
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      const pins = () => Array.from(container.querySelectorAll<HTMLButtonElement>(".history-item-pin"));
+      expect(pins()[0]).toHaveAttribute("aria-pressed", "true");
+
+      revisionMocks.toggleRevisionPinned.mockResolvedValue({ pinned: false, hits: 1, pinnedCount: 0 });
+      revisionMocks.getConfigRevisionPolicy.mockResolvedValue(panelPolicyView([]));
+      fireEvent.click(pins()[0]);
+
+      await waitFor(() =>
+        expect(revisionMocks.toggleRevisionPinned).toHaveBeenCalledWith(conn, expect.anything(), rec().hash, false)
+      );
+      await waitFor(() => expect(container.querySelectorAll(".pin-badge")).toHaveLength(0));
+      expect(toast).toHaveBeenCalledWith("已取消钉住");
+    });
+
+    it("一次只让一把在飞：请求没回来前其它行的键禁用，点第二下不会并发写清单", async () => {
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      let release!: (value: { pinned: boolean; hits: number; pinnedCount: number }) => void;
+      revisionMocks.toggleRevisionPinned.mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        })
+      );
+
+      const pins = () => Array.from(container.querySelectorAll<HTMLButtonElement>(".history-item-pin"));
+      fireEvent.click(pins()[0]);
+      await waitFor(() => expect(pins()[0]).toHaveTextContent("处理中"));
+      expect(pins()[0]).toBeDisabled();
+      expect(pins()[1]).toBeDisabled();
+
+      release({ pinned: true, hits: 1, pinnedCount: 1 });
+      await waitFor(() => expect(pins()[1]).not.toBeDisabled());
+      expect(revisionMocks.toggleRevisionPinned).toHaveBeenCalledTimes(1);
+    });
+
+    it("钉住键点下去只改钉，不顺手把这一版打开来看（两件事各自的落点）", async () => {
+      const { container } = renderPanel();
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      revisionMocks.toggleRevisionPinned.mockResolvedValue({ pinned: true, hits: 1, pinnedCount: 1 });
+      fireEvent.click(container.querySelectorAll<HTMLButtonElement>(".history-item-pin")[0]);
+
+      await waitFor(() => expect(revisionMocks.toggleRevisionPinned).toHaveBeenCalledTimes(1));
+      expect(document.querySelector(".udiff")).toBeNull();
+      expect(screen.getByText(/点击左侧版本查看内容/)).toBeInTheDocument();
+    });
   });
 });

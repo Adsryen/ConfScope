@@ -45,9 +45,19 @@ type GoApp = {
     dataID: string,
     limit: number
   ): Promise<ConfigRevisionRecord[]>;
-  PruneConfigRevisions(keepPerKey: number): Promise<number>;
+  PruneConfigRevisions(): Promise<number>;
   ClearConfigRevisions(): Promise<void>;
   GetConfigRevisionFacts(): Promise<ConfigRevisionFacts>;
+  GetConfigRevisionPolicy(): Promise<ConfigRevisionPolicyView>;
+  SaveConfigRevisionPolicy(keepPerKey: number): Promise<ConfigRevisionPolicyView>;
+  SetConfigRevisionPinned(
+    connectionID: string,
+    namespace: string,
+    group: string,
+    dataID: string,
+    hash: string,
+    pinned: boolean
+  ): Promise<ConfigRevisionPinResult>;
   SelectLocalSnapshotDirectory(): Promise<string>;
   ValidateLocalSnapshotDirectory(path: string): Promise<any>;
   SelectConfigSourceExportDirectory(): Promise<string>;
@@ -348,7 +358,42 @@ export interface ConfigRevisionFacts {
   records: number;
   sizeBytes: number;
   keys: number;
+  /** 生效配额（磁盘策略钳制后的值），不是构建常量。 */
   keepPerKey: number;
+  /** 生效配额的来源档：policy / default-missing / default-unreadable / default-out-of-range。 */
+  keepSource: string;
+  /** 钉住条目数（指向磁盘策略，不数日志行）。 */
+  pinnedCount: number;
+}
+
+/** 一条钉住的身份：配置键四元组 + 正文摘要（不是时间戳，见 internal/revisions/policy.go）。 */
+export interface ConfigRevisionPinnedRef {
+  connectionId: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+  hash: string;
+}
+
+/** 生效的保留策略：配额、来源档、合法区间与钉住清单（区间由这里给，前端不抄常量）。 */
+export interface ConfigRevisionPolicyView {
+  path: string;
+  keepPerKey: number;
+  keepSource: string;
+  minKeepPerKey: number;
+  maxKeepPerKey: number;
+  defaultKeepPerKey: number;
+  pinned: ConfigRevisionPinnedRef[];
+  pinnedCount: number;
+  /** 按当前上限已经多出来、下一次裁剪会被删掉的未钉住条数（「按新上限清理」据此说话）。 */
+  unpinnedOverQuota: number;
+}
+
+/** 一次钉住/取消钉住的真实结局：hits 是命中的行数，钉不住时如实回 0。 */
+export interface ConfigRevisionPinResult {
+  pinned: boolean;
+  hits: number;
+  pinnedCount: number;
 }
 
 declare global {
@@ -445,9 +490,19 @@ export const AppendConfigRevision = (input: ConfigRevisionInput) => call("Append
 export const ReadConfigRevisions = (limit: number) => call("ReadConfigRevisions", limit);
 export const ReadConfigRevisionsForKey = (connectionID: string, namespace: string, group: string, dataID: string, limit: number) =>
   call("ReadConfigRevisionsForKey", connectionID, namespace, group, dataID, limit);
-export const PruneConfigRevisions = (keepPerKey: number) => call("PruneConfigRevisions", keepPerKey);
+export const PruneConfigRevisions = () => call("PruneConfigRevisions");
 export const ClearConfigRevisions = () => call("ClearConfigRevisions");
 export const GetConfigRevisionFacts = () => call("GetConfigRevisionFacts");
+export const GetConfigRevisionPolicy = () => call("GetConfigRevisionPolicy");
+export const SaveConfigRevisionPolicy = (keepPerKey: number) => call("SaveConfigRevisionPolicy", keepPerKey);
+export const SetConfigRevisionPinned = (
+  connectionID: string,
+  namespace: string,
+  group: string,
+  dataID: string,
+  hash: string,
+  pinned: boolean
+) => call("SetConfigRevisionPinned", connectionID, namespace, group, dataID, hash, pinned);
 
 export const SelectLocalSnapshotDirectory = () => call("SelectLocalSnapshotDirectory");
 

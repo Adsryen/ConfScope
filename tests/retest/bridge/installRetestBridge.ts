@@ -108,6 +108,11 @@ const WAILS_METHODS = [
   "PruneConfigRevisions",
   "ClearConfigRevisions",
   "GetConfigRevisionFacts",
+  // 保留策略与钉住（轮99）：桥内内存替身，见 retestBinding 的策略替身说明。缺这三个名字时
+  // 设置页存配额、历史面板钉版本都只是被 catch 吞掉的 rejection，页面照常渲染，绿灯是假的。
+  "GetConfigRevisionPolicy",
+  "SaveConfigRevisionPolicy",
+  "SetConfigRevisionPinned",
   // 系统凭据库读写（src/lib/credentialSecrets.ts 经 wailsjs 调用）。缺这三个名字时
   // 「保存密码到系统凭据库」在复测里只是被 catch 吞掉的 rejection，页面照常渲染，绿灯是假的。
   "WriteSecureSecret",

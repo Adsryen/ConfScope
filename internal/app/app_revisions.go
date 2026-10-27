@@ -13,7 +13,7 @@ import (
 // 本机配置版本历史（config-revisions.jsonl）的 Wails 绑定层。
 //
 // 这一层只做三件事：解析数据目录、补 appVersion、把错误如实回传。
-// 摘要口径、超限裁剪、保留策略、判重全在 internal/revisions，避免绑定层长业务（backend 规约）。
+// 摘要口径、超限裁剪、判重、配额钳制与钉住命中全在 internal/revisions，避免绑定层长业务（backend 规约）。
 //
 // 目录跟着主数据文件走（<数据根>/app-data/），换根迁移按整目录递归搬运，
 // 这份日志因此自动随迁，不需要在迁移清单里另立一条。
@@ -92,19 +92,67 @@ func (a *App) ReadConfigRevisionsForKey(connectionID, namespace, group, dataID s
 	return records, nil
 }
 
-// PruneConfigRevisions 按保留策略压缩这份日志，返回删掉的条数。
-func (a *App) PruneConfigRevisions(keepPerKey int) (int, error) {
+// PruneConfigRevisions 按**磁盘上生效的保留策略**压缩这份日志，返回删掉的条数。
+//
+// 不收 keepPerKey：配额的钳制点必须只有一个（internal/revisions 的 clampKeepPerKey），
+// 绑定层再收一个数就等于开一条「绕过策略直接删用户数据」的路。
+// 界面改配额的正当路径是先 SaveConfigRevisionPolicy 落盘、再按需要调这一颗清理。
+func (a *App) PruneConfigRevisions() (int, error) {
 	dir, err := revisionsDataDir()
 	if err != nil {
 		return 0, err
 	}
-	return a.revisionsStore().Prune(dir, keepPerKey)
+	return a.revisionsStore().Prune(dir)
 }
 
-// ClearConfigRevisions 清除本机版本历史。
+// GetConfigRevisionPolicy 给出当前生效的保留策略：配额、来源档、合法区间与钉住清单。
+//
+// 区间与默认值由这里回给界面，前端不再自己抄一份常量——抄一次就多一个判据源，
+// 下一轮改动就是「界面说合法而落盘又钳了一道」。
+func (a *App) GetConfigRevisionPolicy() (revisions.PolicyView, error) {
+	dir, err := revisionsDataDir()
+	if err != nil {
+		return revisions.PolicyView{}, err
+	}
+	return a.revisionsStore().Policy(dir), nil
+}
+
+// SaveConfigRevisionPolicy 保存「每个配置保留多少版」。越界先钳到合法区间再落盘，
+// 返回的是磁盘上回读到的生效值——界面必须念实际存下的那个数，不能念用户刚敲的那个。
+//
+// 存盘不顺手删任何历史：调小配额只改变下一次裁剪的落点，删除动作要么由用户按
+// 「按新上限清理」，要么等到自动裁剪触发。误删不该是一个输入框的副作用。
+func (a *App) SaveConfigRevisionPolicy(keepPerKey int) (revisions.PolicyView, error) {
+	dir, err := revisionsDataDir()
+	if err != nil {
+		return revisions.PolicyView{}, err
+	}
+	return a.revisionsStore().SetPolicyKeepPerKey(dir, keepPerKey)
+}
+
+// SetConfigRevisionPinned 钉住/取消钉住某一版本机正文（身份 = 配置键 + 正文摘要）。
+//
+// 钉住的版本不参与裁剪、不受配额影响。钉不住（本机已没有这一版正文）不报错，
+// 返回 hits=0 让界面如实说明原因。
+func (a *App) SetConfigRevisionPinned(connectionID, namespace, group, dataID, hash string, pinned bool) (revisions.PinResult, error) {
+	dir, err := revisionsDataDir()
+	if err != nil {
+		return revisions.PinResult{}, err
+	}
+	return a.revisionsStore().SetPinned(dir, revisions.PinnedRef{
+		ConnectionID: connectionID,
+		Namespace:    namespace,
+		Group:        group,
+		DataID:       dataID,
+		Hash:         hash,
+	}, pinned)
+}
+
+// ClearConfigRevisions 清除本机版本历史，连钉住清单一起清（配额保留）。
 //
 // 这是用户数据，走设置页独立入口，绝不与开发者「清理缓存」混为一谈（R11）：
 // 清理缓存只清缓存并从主数据文件重新水合，不碰任何数据文件。
+// 正文都没了之后，钉住清单里那些标记没有落点，留着只会让界面亮一排「已钉住」而点不到东西。
 func (a *App) ClearConfigRevisions() error {
 	dir, err := revisionsDataDir()
 	if err != nil {

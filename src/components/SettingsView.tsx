@@ -2,7 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "../i18n";
 import { countMigratableStoredCredentials, migrateStoredCredentials, type CredentialMigrationSummary } from "../lib/credentialSecrets";
 import { clearAppCache } from "../lib/cacheCleanup";
-import { resetConfigRevisionAccelerator } from "../lib/configRevisions";
+import {
+  CONFIG_REVISION_KEEP_SOURCE_MISSING,
+  CONFIG_REVISION_KEEP_SOURCE_OUT_OF_RANGE,
+  CONFIG_REVISION_KEEP_SOURCE_UNREADABLE,
+  getConfigRevisionPolicy,
+  pruneConfigRevisionsByPolicy,
+  resetConfigRevisionAccelerator,
+  revisionPolicyStoreAvailable,
+  saveRevisionKeepPerKey,
+} from "../lib/configRevisions";
 import { formatDateTime } from "../lib/formatDateTime";
 import { formatBytes } from "../lib/formatBytes";
 import { getAppDataDocInfo, type AppDataDocInfo } from "../lib/appDataDoc";
@@ -25,6 +34,7 @@ import BusyLabel from "./BusyLabel";
 import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
+import NumberField from "./NumberField";
 import {
   CheckDataRootRollback,
   ClearConfigRevisions,
@@ -37,6 +47,7 @@ import {
   RollbackDataRoot,
   SelectDataRootDirectory,
   type ConfigRevisionFacts,
+  type ConfigRevisionPolicyView,
   type DataLocations,
   type DataRootRollbackStatus,
   type RuntimeLayoutInfo,
@@ -169,6 +180,18 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [revisionResult, setRevisionResult] = useState<"" | "ok" | "fail">("");
   const [revisionError, setRevisionError] = useState("");
+  // 轮99：每配置保留数的编辑器（配额 + 钉住数展示 + 按新上限清理一次）。
+  // 策略读不出来（旧 Go 二进制没这颗绑定、或磁盘那份读坏了）时整块不出现：
+  // 摆一个永远存不上、还念着不存在的事实的编辑器，比没有编辑器更坏。
+  const [revisionPolicy, setRevisionPolicy] = useState<ConfigRevisionPolicyView | null>(null);
+  const [revisionKeepDraft, setRevisionKeepDraft] = useState<number | undefined>(undefined);
+  const [revisionKeepBusy, setRevisionKeepBusy] = useState(false);
+  const [revisionKeepResult, setRevisionKeepResult] = useState<"" | "saved" | "clamped" | "fail">("");
+  const [revisionKeepError, setRevisionKeepError] = useState("");
+  const [revisionPruneBusy, setRevisionPruneBusy] = useState(false);
+  const [revisionPruneResult, setRevisionPruneResult] = useState<"" | "done" | "none" | "fail">("");
+  const [revisionPruneRemoved, setRevisionPruneRemoved] = useState(0);
+  const [revisionPruneError, setRevisionPruneError] = useState("");
   // 轮62：数据根运行形态（便携/安装 + 命中哪一档解析规则）与换根迁移状态。
   const [runtimeLayout, setRuntimeLayout] = useState<RuntimeLayoutInfo | null>(null);
   const [rollbackStatus, setRollbackStatus] = useState<DataRootRollbackStatus | null>(null);
@@ -226,6 +249,16 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
   const openFolderErrorRef = useKeepVisible<HTMLDivElement>(!!openFolderError, openFolderError);
   const revisionOkRef = useKeepVisible<HTMLDivElement>(revisionResult === "ok");
   const revisionErrorRef = useKeepVisible<HTMLDivElement>(!!revisionError, revisionError);
+  const revisionKeepOkRef = useKeepVisible<HTMLDivElement>(
+    revisionKeepResult === "saved" || revisionKeepResult === "clamped",
+    revisionKeepResult
+  );
+  const revisionKeepErrorRef = useKeepVisible<HTMLDivElement>(!!revisionKeepError, revisionKeepError);
+  const revisionPruneOkRef = useKeepVisible<HTMLDivElement>(
+    revisionPruneResult !== "" && revisionPruneResult !== "fail",
+    revisionPruneResult
+  );
+  const revisionPruneErrorRef = useKeepVisible<HTMLDivElement>(!!revisionPruneError, revisionPruneError);
   const cacheErrorRef = useKeepVisible<HTMLDivElement>(!!cacheError, cacheError);
   /*
    * 代理三框的草稿（轮72 R-B2）：草稿活在这一框里，落盘只发生在失焦 / Enter 那一刻。
@@ -352,6 +385,14 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     safeCall(GetConfigRevisionFacts, (facts) => {
       setRevisionFacts(facts);
     });
+    // 策略与钉住清单（轮99）：绑定缺失或读不出来就整块不出现（safeCall 吞 reject，
+    // apply 永不执行），界面绝不在读不到策略的事实上摆「保存成功」的按钮。
+    if (revisionPolicyStoreAvailable()) {
+      safeCall(getConfigRevisionPolicy, (view) => {
+        setRevisionPolicy(view);
+        setRevisionKeepDraft(view.keepPerKey);
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -424,9 +465,15 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
       for (const warning of plan.warnings ?? []) {
         details.push(warning);
       }
-      askConfirm(t("settings.dataRootMigrateTitle"), t("settings.dataRootMigrateMessage"), () => {
-        void runMigrateDataRoot(plan.target);
-      }, details, false);
+      askConfirm(
+        t("settings.dataRootMigrateTitle"),
+        t("settings.dataRootMigrateMessage"),
+        () => {
+          void runMigrateDataRoot(plan.target);
+        },
+        details,
+        false
+      );
     } catch (e) {
       setDataRootError(errorText(e));
     } finally {
@@ -473,9 +520,15 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
       }),
       t("settings.dataRootRollbackRestartNote"),
     ];
-    askConfirm(t("settings.dataRootRollbackTitle"), t("settings.dataRootRollbackMessage"), () => {
-      void runRollbackDataRoot();
-    }, details, false);
+    askConfirm(
+      t("settings.dataRootRollbackTitle"),
+      t("settings.dataRootRollbackMessage"),
+      () => {
+        void runRollbackDataRoot();
+      },
+      details,
+      false
+    );
   };
 
   const runRollbackDataRoot = async () => {
@@ -542,6 +595,74 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
       setRevisionError(errorText(e));
     } finally {
       setRevisionBusy(false);
+    }
+  };
+
+  /** 配额合法区间只从策略视图取（Go 侧 clampKeepPerKey 是唯一钳制点，前端不抄区间常量）。 */
+  const validateRevisionKeep = (v: number | undefined): string | undefined => {
+    if (!revisionPolicy) return undefined;
+    if (v === undefined) return t("settings.revisionKeepRequired");
+    if (!Number.isInteger(v) || v < revisionPolicy.minKeepPerKey || v > revisionPolicy.maxKeepPerKey) {
+      return t("settings.revisionKeepRange", { min: revisionPolicy.minKeepPerKey, max: revisionPolicy.maxKeepPerKey });
+    }
+    return undefined;
+  };
+
+  /** 生效配额的来源档要念成用户听得懂的话：「还没设过」不许念成「你设的值生效了」。 */
+  const revisionKeepSourceCopy = (view: ConfigRevisionPolicyView): string => {
+    switch (view.keepSource) {
+      case CONFIG_REVISION_KEEP_SOURCE_MISSING:
+        return t("settings.revisionKeepSourceMissing", { count: view.defaultKeepPerKey });
+      case CONFIG_REVISION_KEEP_SOURCE_OUT_OF_RANGE:
+        return t("settings.revisionKeepSourceOutOfRange");
+      case CONFIG_REVISION_KEEP_SOURCE_UNREADABLE:
+        return t("settings.revisionKeepSourceUnreadable");
+      default:
+        return t("settings.revisionKeepSourcePolicy");
+    }
+  };
+
+  /*
+   * 保存每配置保留数（轮99）。回的是磁盘回读后的事实，不是刚才那个入参：
+   * 越界的值 Go 侧钳回默认并带 default-out-of-range 档回来——那是给外部改坏文件的
+   * 防御档（界面已经把越界挡在保存键外面），真收到就得把「已回落默认值」原样说。
+   */
+  const runSaveRevisionKeep = async () => {
+    if (revisionKeepBusy || !revisionPolicy || validateRevisionKeep(revisionKeepDraft) !== undefined) return;
+    setRevisionKeepBusy(true);
+    setRevisionKeepResult("");
+    setRevisionKeepError("");
+    try {
+      const view = await saveRevisionKeepPerKey(revisionKeepDraft as number);
+      setRevisionPolicy(view);
+      setRevisionKeepDraft(view.keepPerKey);
+      setRevisionKeepResult(view.keepSource === CONFIG_REVISION_KEEP_SOURCE_OUT_OF_RANGE ? "clamped" : "saved");
+      refreshDataSurfaces();
+    } catch (e) {
+      setRevisionKeepResult("fail");
+      setRevisionKeepError(errorText(e));
+    } finally {
+      setRevisionKeepBusy(false);
+    }
+  };
+
+  /** 按新上限清理一次：Go 侧 Prune 不收参数，多一个入参就等于多一条绕过策略删数据的路。 */
+  const runPruneRevisionsByPolicy = async () => {
+    if (revisionPruneBusy) return;
+    setRevisionPruneBusy(true);
+    setRevisionPruneResult("");
+    setRevisionPruneError("");
+    try {
+      const removed = await pruneConfigRevisionsByPolicy();
+      setRevisionPruneRemoved(removed);
+      setRevisionPruneResult(removed > 0 ? "done" : "none");
+      // 清理后的钉住数与剩余条数都由这一把统一重拉（含策略视图），不在这里另开一条读取分支。
+      refreshDataSurfaces();
+    } catch (e) {
+      setRevisionPruneResult("fail");
+      setRevisionPruneError(errorText(e));
+    } finally {
+      setRevisionPruneBusy(false);
     }
   };
 
@@ -641,10 +762,10 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
               <div className="settings-panel-description">{t("settings.compareDescription")}</div>
             </div>
             {/*
-              * 整行可点（轮72 R-B4）：原先只有那颗 16px 的方框能按，点标题什么都不发生。
-              * label 包住「标题 + 复选框」，说明文字放在 label 外面——包进去会连整句说明
-              * 一起变成这个复选框的可访问名（读屏每按一次就念一遍说明书）。
-              */}
+             * 整行可点（轮72 R-B4）：原先只有那颗 16px 的方框能按，点标题什么都不发生。
+             * label 包住「标题 + 复选框」，说明文字放在 label 外面——包进去会连整句说明
+             * 一起变成这个复选框的可访问名（读屏每按一次就念一遍说明书）。
+             */}
             <label className="settings-setting-row settings-setting-row-clickable">
               <span>{t("settings.sortConnections")}</span>
               <input
@@ -703,7 +824,7 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
             {credentialError && <InlineError title={t("settings.credentialMigrationFailed")} message={credentialError} />}
           </section>
 
-          <section id="settings-backup" className="settings-panel settings-backup-panel" tabIndex={-1} aria-labelledby="settings-backup-title">
+          <section id="settings-backup" className="settings-panel settings-backup" tabIndex={-1} aria-labelledby="settings-backup-title">
             {savedFlagFor("settings-backup")}
             <div className="settings-panel-head">
               <h4 id="settings-backup-title">{t("settings.backup")}</h4>
@@ -761,13 +882,13 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
               <div className="settings-panel-description">{t("settings.dataLocationsDescription")}</div>
             </div>
             {/*
-              * 三条提示挂在节首、紧挨着「更改位置…」上方（轮67 R67-WP7）。
-              * 挂在节尾时真机量到两个毛病：① 提示顶边落在可视区外 86px；② 接上「出现即滚进可视区」
-              * 之后仍然差 23px——迁移成功后 refreshDataSurfaces() 才落地，它上方那 7 行路径长高，
-              * 把刚滚进框的提示又顶了出去（关闭键正好被裁掉）。
-              * 挂到节首让「提示之上只有静态标题」，迟到的内容一律在它下方生长，落点就稳了；
-              * 与 AppDataBackupPanel 的提示位也同口径。
-              */}
+             * 三条提示挂在节首、紧挨着「更改位置…」上方（轮67 R67-WP7）。
+             * 挂在节尾时真机量到两个毛病：① 提示顶边落在可视区外 86px；② 接上「出现即滚进可视区」
+             * 之后仍然差 23px——迁移成功后 refreshDataSurfaces() 才落地，它上方那 7 行路径长高，
+             * 把刚滚进框的提示又顶了出去（关闭键正好被裁掉）。
+             * 挂到节首让「提示之上只有静态标题」，迟到的内容一律在它下方生长，落点就稳了；
+             * 与 AppDataBackupPanel 的提示位也同口径。
+             */}
             {restartNotice && (
               /*
                * 关闭键挂在 div 上、不挂进 label（轮67 R67-WP9 量过 label 的代价：整行 accname
@@ -776,7 +897,13 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                */
               <div ref={restartNoticeRef} className="test-msg warn" {...statusMessageProps("info")}>
                 <span className="test-msg-text">{restartNotice}</span>
-                <button type="button" className="test-msg-close" title={closeLabel} aria-label={closeLabel} onClick={() => setRestartNotice("")}>
+                <button
+                  type="button"
+                  className="test-msg-close"
+                  title={closeLabel}
+                  aria-label={closeLabel}
+                  onClick={() => setRestartNotice("")}
+                >
                   ×
                 </button>
               </div>
@@ -799,7 +926,8 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                   <strong>{t("settings.dataRootRuntime")}</strong>
                   <div className="settings-data-root-facts">
                     <span>
-                      {t("settings.dataRootMode")}：<code>{t(`settings.dataRootMode${runtimeLayout.mode.charAt(0).toUpperCase()}${runtimeLayout.mode.slice(1)}`)}</code>
+                      {t("settings.dataRootMode")}：
+                      <code>{t(`settings.dataRootMode${runtimeLayout.mode.charAt(0).toUpperCase()}${runtimeLayout.mode.slice(1)}`)}</code>
                     </span>
                     <span>
                       {t("settings.dataRootSource")}：
@@ -827,7 +955,11 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                   </button>
                   {rollbackStatus?.available && (
                     <button type="button" className="btn btn-ghost btn-sm" disabled={dataRootBusy} onClick={askRollbackDataRoot}>
-                      <BusyLabel busy={dataRootPhase === "rollback"} idle={t("settings.dataRootRollback")} busyText={t("settings.rollingBackDataRoot")} />
+                      <BusyLabel
+                        busy={dataRootPhase === "rollback"}
+                        idle={t("settings.dataRootRollback")}
+                        busyText={t("settings.rollingBackDataRoot")}
+                      />
                     </button>
                   )}
                 </div>
@@ -865,7 +997,11 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                             void runOpenDataFolder(entry.key);
                           }}
                         >
-                          <BusyLabel busy={openingFolderKey === entry.key} idle={t("settings.openFolder")} busyText={t("settings.openingFolder")} />
+                          <BusyLabel
+                            busy={openingFolderKey === entry.key}
+                            idle={t("settings.openFolder")}
+                            busyText={t("settings.openingFolder")}
+                          />
                         </button>
                       </div>
                     </div>
@@ -875,12 +1011,86 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
             ) : (
               <div className="settings-panel-note">{t("settings.dataLocationsUnavailable")}</div>
             )}
+            {revisionPolicy && (
+              <div className="settings-setting-row">
+                <div>
+                  <strong>{t("settings.revisionKeep")}</strong>
+                  <div className="settings-panel-description">
+                    {t("settings.revisionKeepHint", { min: revisionPolicy.minKeepPerKey, max: revisionPolicy.maxKeepPerKey })}
+                  </div>
+                  <div className="settings-data-root-facts">
+                    <span>{revisionKeepSourceCopy(revisionPolicy)}</span>
+                    <span>{t("settings.revisionFactsPinned", { count: revisionPolicy.pinnedCount })}</span>
+                    <span>{t("settings.revisionPruneOverQuota", { count: revisionPolicy.unpinnedOverQuota })}</span>
+                  </div>
+                </div>
+                <div className="settings-data-location-actions">
+                  <NumberField
+                    value={revisionKeepDraft}
+                    onChange={setRevisionKeepDraft}
+                    min={revisionPolicy.minKeepPerKey}
+                    max={revisionPolicy.maxKeepPerKey}
+                    fallback={revisionPolicy.defaultKeepPerKey}
+                    validate={validateRevisionKeep}
+                    ariaLabel={t("settings.revisionKeep")}
+                    disabled={revisionKeepBusy}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={revisionKeepBusy || revisionPruneBusy || validateRevisionKeep(revisionKeepDraft) !== undefined}
+                    onClick={() => void runSaveRevisionKeep()}
+                  >
+                    <BusyLabel busy={revisionKeepBusy} idle={t("settings.revisionKeepSave")} busyText={t("settings.revisionKeepSaving")} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={revisionPruneBusy || revisionKeepBusy}
+                    onClick={() =>
+                      askConfirm(t("settings.revisionPrune"), t("settings.confirmPruneRevisions"), () => void runPruneRevisionsByPolicy(), [
+                        t("settings.revisionPruneOverQuota", { count: revisionPolicy.unpinnedOverQuota }),
+                        t("settings.revisionFactsServerUntouched"),
+                      ])
+                    }
+                  >
+                    <BusyLabel busy={revisionPruneBusy} idle={t("settings.revisionPrune")} busyText={t("settings.revisionPruning")} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {revisionKeepResult === "saved" && (
+              <div ref={revisionKeepOkRef} className="test-msg ok" {...statusMessageProps("success")}>
+                {t("settings.revisionKeepSaved", { count: revisionPolicy?.keepPerKey ?? 0 })}
+              </div>
+            )}
+            {revisionKeepResult === "clamped" && (
+              <div ref={revisionKeepOkRef} className="test-msg warn" {...statusMessageProps("info")}>
+                {t("settings.revisionKeepSourceOutOfRange")}
+              </div>
+            )}
+            {revisionKeepError && (
+              <InlineError title={t("settings.revisionKeepFailed")} message={revisionKeepError} containerRef={revisionKeepErrorRef} />
+            )}
+            {revisionPruneResult === "done" && (
+              <div ref={revisionPruneOkRef} className="test-msg ok" {...statusMessageProps("success")}>
+                {t("settings.revisionPruneDone", { count: revisionPruneRemoved })}
+              </div>
+            )}
+            {revisionPruneResult === "none" && (
+              <div ref={revisionPruneOkRef} className="test-msg ok" {...statusMessageProps("success")}>
+                {t("settings.revisionPruneNone")}
+              </div>
+            )}
+            {revisionPruneError && (
+              <InlineError title={t("settings.revisionPruneFailed")} message={revisionPruneError} containerRef={revisionPruneErrorRef} />
+            )}
             {/*
-              * 本机版本历史的体量与清除入口（R57-WP14）。行标题用动作名而不是数据名：
-              * 上面清单里已经有一行叫「本机版本历史」（那是文件位置），再来同名的一行
-              * 就成了两行一个名字，用户分不清哪行才是能按的。形状照「清理缓存」那行抄：
-              * 标题 = 动作、说明 = 后果、右侧 = 一颗同名的键。
-              */}
+             * 本机版本历史的体量与清除入口（R57-WP14）。行标题用动作名而不是数据名：
+             * 上面清单里已经有一行叫「本机版本历史」（那是文件位置），再来同名的一行
+             * 就成了两行一个名字，用户分不清哪行才是能按的。形状照「清理缓存」那行抄：
+             * 标题 = 动作、说明 = 后果、右侧 = 一颗同名的键。
+             */}
             {revisionFacts && (
               <div className="settings-setting-row settings-danger-zone">
                 <div>
@@ -891,6 +1101,9 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                     <span>{t("settings.revisionFactsKeys", { count: revisionFacts.keys })}</span>
                     <span>{t("settings.revisionFactsSize", { size: formatBytes(revisionFacts.sizeBytes) })}</span>
                     <span>{t("settings.revisionFactsKeep", { count: revisionFacts.keepPerKey })}</span>
+                    {revisionFacts.pinnedCount > 0 && (
+                      <span>{t("settings.revisionFactsPinned", { count: revisionFacts.pinnedCount })}</span>
+                    )}
                   </div>
                 </div>
                 <div className="settings-data-location-actions">
@@ -919,7 +1132,9 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
                 {t("settings.clearRevisionsSuccess")}
               </div>
             )}
-            {revisionError && <InlineError title={t("settings.clearRevisionsFailed")} message={revisionError} containerRef={revisionErrorRef} />}
+            {revisionError && (
+              <InlineError title={t("settings.clearRevisionsFailed")} message={revisionError} containerRef={revisionErrorRef} />
+            )}
           </section>
           <section id="settings-update" className="settings-panel" tabIndex={-1} aria-labelledby="settings-update-title">
             {savedFlagFor("settings-update")}

@@ -291,31 +291,37 @@ func TestStoreSurvivesRestartAndDataRootSwitch(t *testing.T) {
 func TestPruneKeepsEarliestAnchorAndLatestN(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore()
-	const total = 12
+	// 配额从磁盘策略来（轮99）：合法下界 10，测试按「锚点 + 最近 10 版」这条判据走。
+	const keep = MinKeepPerKey
+	const total = 22
 	for i := 0; i < total; i++ {
 		in := observedInput("v\n")
-		in.Content = string(rune('a'+i)) + "\n"
+		in.Content = strings.Repeat("x", i%5+1) + string(rune('a'+i%26)) + "\n"
 		if _, err := store.Append(dir, in); err != nil {
 			t.Fatalf("追加第 %d 条失败: %v", i, err)
 		}
 	}
-	removed, err := store.Prune(dir, 5)
+	if _, err := store.SetPolicyKeepPerKey(dir, keep); err != nil {
+		t.Fatalf("保存配额失败: %v", err)
+	}
+	removed, err := store.Prune(dir)
 	if err != nil {
 		t.Fatalf("裁剪失败: %v", err)
 	}
-	if removed != total-6 {
-		t.Fatalf("保留最早锚点 + 最近 5 版应当删 %d 条，实得 %d", total-6, removed)
+	if removed != total-keep-1 {
+		t.Fatalf("保留最早锚点 + 最近 %d 版应当删 %d 条，实得 %d", keep, total-keep-1, removed)
 	}
 	records := mustReadKey(t, store, dir, "conn-a", "public", "DEFAULT_GROUP", "app.yml", 0)
-	if len(records) != 6 {
-		t.Fatalf("裁剪后应当剩 6 版，实得 %d", len(records))
+	if len(records) != keep+1 {
+		t.Fatalf("裁剪后应当剩 %d 版，实得 %d", keep+1, len(records))
 	}
 	// 文件里顺序仍等于写入顺序（时间序），锚点在最早那一侧
-	if !strings.HasPrefix(records[5].Content, "a\n") {
+	if !strings.HasPrefix(records[keep].Content, "xa\n") {
 		t.Fatalf("最早一版必须留作锚点，最老的一条实得 %q", records[5].Content)
 	}
-	if !strings.HasPrefix(records[0].Content, string(rune('a'+total-1))) {
-		t.Fatalf("最新一版不得被删，最新的一条实得 %q", records[0].Content)
+	latestWant := strings.Repeat("x", (total-1)%5+1) + string(rune('a'+(total-1)%26)) + "\n"
+	if records[0].Content != latestWant {
+		t.Fatalf("最新一版不得被删，期望 %q 实得 %q", latestWant, records[0].Content)
 	}
 
 	// 裁剪重写了文件，索引必须跟着重建：同一版再读进来仍须判重
@@ -796,7 +802,7 @@ func TestReadDistinguishesUnreadableFromNeverRecorded(t *testing.T) {
 	}
 
 	// 3) 压缩要整份重写：读不出可信结果时按空文件重写就等于删光历史，必须拒绝。
-	removed, err := fresh.Prune(dir, DefaultKeepPerKey)
+	removed, err := fresh.Prune(dir)
 	if err == nil {
 		t.Fatal("读不出来时 Prune 必须拒绝重写")
 	}

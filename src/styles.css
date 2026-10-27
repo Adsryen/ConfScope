@@ -1302,7 +1302,7 @@ textarea {
   font-size: 13px;
 }
 
-.settings-backup-panel {
+.settings-backup {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -3012,6 +3012,47 @@ textarea {
 .history-item-id {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/*
+ * 轮99：版本历史每一行的「钉住」开关与钉住标记。
+ *
+ * .history-item-pin 是 .history-item 这个 flex 行的第三个孩子（勾选框 / 行主体 / 本键），
+ * 必须 flex:none——否则它和 .history-item-main 抢宽度，长 dataId 那行会被挤成一团。
+ * 悬停底色仍由 .btn-ghost:hover:not(:disabled)（特异度 0,3,0）决定，这里刻意不写 background
+ * 的 hover 分支：稳定态（.on）与悬停态各管一件事，写在一起会让「已钉住的行鼠标划过就没反应」。
+ */
+.history-item-pin {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+/* 已钉住 = 长按下态的观感，但它是持久状态，不能只在按下时出现：描边、文字、底色三样一起给，
+   不让「颜色」单独承担语义（同 .diff-toggle 那一族的口径）。*/
+.history-item-pin.on {
+  color: var(--accent-text);
+  border-color: rgba(79, 195, 247, 0.42);
+  background: rgba(79, 195, 247, 0.10);
+}
+/* meta 行里的钉住标记：字号与灰字跟着 .history-item-id，形状跟着 .history-item-src，
+   只加一层 accent 描边表明它是「不会被动的那一行」。
+   选择器必须写成 .history-item-id.pin-badge（0,2,0）而不是裸 .pin-badge（0,1,0）：
+   这个 span 同时挂着两个类，裸类名与 .history-item-id 同特异度、只靠「恰好写在后面」才生效，
+   任何人往上头再插一条 .history-item-id 规则就会静默把钉住标记改回灰字（R83 判这条为缺陷）。 */
+.history-item-id.pin-badge {
+  color: var(--accent-text);
+  border: 1px solid rgba(79, 195, 247, 0.36);
+  border-radius: 3px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+/* 选中行的底色是 --bg-active(#094771)：.history-item.active .history-item-id (0,3,0) 会把
+   .history-item-id.pin-badge (0,2,0) 的字色改成 --text-dim-raised，「已钉住」在最该看清的那一行反而褪成灰字。
+   这里按 --text-dim-raised 那条族的写法显式补一条 (0,4,0)，让它压过通用规则。
+   #4fc3f7 在 #094771 上是 4.87:1，正文 11px 够 AA。 */
+.history-item.active .history-item-id.pin-badge {
+  color: var(--accent-text);
 }
 /*
  * 轮67 顺手补的漏：`.history-item-src` / `.history-publisher` 从 f17936c（2026-10-21）

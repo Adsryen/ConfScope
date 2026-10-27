@@ -12,10 +12,18 @@
  * 与服务端历史是并列不是合并：服务端能给的仍走 listHistory，本机这份只说
  * 「本机在什么时刻见过哪一版」，绝不冒充配置中心的发布时间。
  */
+import { translate } from "../locales";
+
 import {
   AppendConfigRevision,
+  GetConfigRevisionPolicy,
+  PruneConfigRevisions,
   ReadConfigRevisionsForKey,
+  SaveConfigRevisionPolicy,
+  SetConfigRevisionPinned,
   type ConfigRevisionInput,
+  type ConfigRevisionPinResult,
+  type ConfigRevisionPolicyView,
   type ConfigRevisionRecord,
 } from "../../wailsjs/go/app/App";
 import type { Connection } from "../store/connections";
@@ -29,6 +37,18 @@ export const CONFIG_REVISION_KIND_CONFIRMED_WRITE = "confirmed-write";
 
 /** 与 Go 侧 revisions.ContentOmittedTooLarge 同值：正文超单条上限，本机只留下摘要与字节数。 */
 export const CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE = "too-large";
+
+/**
+ * 生效配额的来源档，与 Go 侧 revisions.KeepSource* 同值（policy.go）。
+ *
+ * 界面按这几档说实话（「还没设过」不许念成「你设的值生效了」）；档位字符串在前端
+ * 只许从这里出，散落的字面量就是第二个事实源。区间与默认值不在这里——那些随
+ * ConfigRevisionPolicyView 从 Go 回，抄一份常量就多一条 bug 线。
+ */
+export const CONFIG_REVISION_KEEP_SOURCE_POLICY = "policy";
+export const CONFIG_REVISION_KEEP_SOURCE_MISSING = "default-missing";
+export const CONFIG_REVISION_KEEP_SOURCE_UNREADABLE = "default-unreadable";
+export const CONFIG_REVISION_KEEP_SOURCE_OUT_OF_RANGE = "default-out-of-range";
 
 /** 一条版本记录的归属：连接 + 命名空间 + 分组 + dataId（key 级变更也记整篇正文）。 */
 export interface ConfigRevisionTarget {
@@ -189,4 +209,110 @@ interface LocalRevisionBindings {
 export async function listRevisionsForKey(conn: Connection, target: ConfigRevisionTarget, limit = 0): Promise<ConfigRevisionRecord[]> {
   const records = await ReadConfigRevisionsForKey(conn.id, target.namespace, target.group, target.dataId, limit);
   return records ?? [];
+}
+
+/** 保留策略读出口要摸的那几颗绑定（存在性判断用，调用仍走本函数下面的出口）。 */
+interface RevisionPolicyBindings {
+  GetConfigRevisionPolicy(): Promise<ConfigRevisionPolicyView>;
+  SaveConfigRevisionPolicy(keepPerKey: number): Promise<ConfigRevisionPolicyView>;
+  SetConfigRevisionPinned(
+    connectionID: string,
+    namespace: string,
+    group: string,
+    dataID: string,
+    hash: string,
+    pinned: boolean
+  ): Promise<ConfigRevisionPinResult>;
+}
+
+/**
+ * 保留策略与钉住的读出口在当前运行时可达吗。
+ *
+ * 与 localRevisionStoreAvailable 同一个理由：纯浏览器 / web 模式拿不到绑定，
+ * 那时配额编辑器与每行的钉住开关都必须整个不出现，而不是点了报错。
+ */
+export function revisionPolicyStoreAvailable(): boolean {
+  const bindings = wailsAppBindings<RevisionPolicyBindings>();
+  return typeof bindings?.GetConfigRevisionPolicy === "function" && typeof bindings?.SetConfigRevisionPinned === "function";
+}
+
+/**
+ * 当前生效的保留策略：配额、来源档、合法区间与钉住清单都由 Go 侧回（policy.go 的 PolicyView）。
+ *
+ * 前端不抄区间常量——第二个判据源就是第二条 bug 线（守卫 tests/ux 的单源钉）。
+ * 读失败要如实抛：把「读不出策略」说成「默认 50」会让设置页在一个不存在的事实上让用户保存。
+ */
+export async function getConfigRevisionPolicy(): Promise<ConfigRevisionPolicyView> {
+  const view = await GetConfigRevisionPolicy();
+  if (!view || typeof view !== "object") throw new Error(translate("configRevisions.policyUnreadable"));
+  return view;
+}
+
+/**
+ * 保存每键保留数。回的是磁盘回读后的事实，不是刚才那个入参：
+ * 越界的值带 default-out-of-range 档回来，界面必须把「钳回了默认值」这句话原样说出来。
+ */
+export async function saveRevisionKeepPerKey(keepPerKey: number): Promise<ConfigRevisionPolicyView> {
+  const view = await SaveConfigRevisionPolicy(keepPerKey);
+  if (!view || typeof view !== "object") throw new Error(translate("configRevisions.policyUnreadableAfterSave"));
+  return view;
+}
+
+/**
+ * 钉住 / 取消钉住「某个键的某一版正文」。
+ *
+ * 身份是键四元组 + 正文摘要（不是时间戳：observed 会被就地升级成 confirmed-write 换掉整行含 ts，
+ * 钉 ts 的钉会在那一刻静默失效）。Go 侧如实回 pinned 与 hits：hits=0 且 pinned=false 不是错误，
+ * 是「本机已经没有这一版正文可钉」，界面要把这句话原样说出来。
+ */
+export async function toggleRevisionPinned(
+  conn: Connection,
+  target: ConfigRevisionTarget,
+  hash: string,
+  pinned: boolean
+): Promise<ConfigRevisionPinResult> {
+  const connectionId = conn.id.trim();
+  const dataId = target.dataId.trim();
+  const revisionHash = hash.trim();
+  if (!connectionId || !dataId || !revisionHash) {
+    throw new Error(translate("configRevisions.pinIdentityMissing"));
+  }
+  // 三段身份都在这里钳过空格再上 wire：Go 侧 SetPinned 也会钳一次（幂等），
+  // 但界面上「钉没钉」的对照走的是 isRevisionPinned，那份对照用的是钳过的值——
+  // 发出去的和比回来的必须是同一种形状，否则钉住了却显示没钉。
+  return SetConfigRevisionPinned(connectionId, target.namespace, target.group, dataId, revisionHash, pinned);
+}
+
+/**
+ * 按新上限清理一次（设置页「按新上限清理」）。
+ *
+ * Go 侧 Prune 不收参数：配额只有一个钳制点，多一个入参就等于多一条绕过策略直接删数据的路。
+ * 返回删掉的条数，钉住的行永远不在删除之列。
+ */
+export async function pruneConfigRevisionsByPolicy(): Promise<number> {
+  return PruneConfigRevisions();
+}
+
+/**
+ * 这一版（键 + 正文摘要）在不在钉住清单里。
+ *
+ * 身份匹配只在这一处：界面不自己拼键分隔符、不自己比字段，避免第二套归属判据。
+ * Go 侧存的就是钳过空格的四元组 + hash（SetPinned 里 TrimSpace），这里逐字段对照即可。
+ */
+export function isRevisionPinned(
+  policy: ConfigRevisionPolicyView,
+  connectionId: string,
+  target: ConfigRevisionTarget,
+  hash: string
+): boolean {
+  const conn = connectionId.trim();
+  const dataId = target.dataId.trim();
+  return (policy.pinned ?? []).some(
+    (ref) =>
+      ref.connectionId === conn &&
+      ref.namespace === target.namespace &&
+      ref.group === target.group &&
+      ref.dataId === dataId &&
+      ref.hash === hash
+  );
 }

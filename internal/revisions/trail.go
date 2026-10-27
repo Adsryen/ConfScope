@@ -37,7 +37,8 @@ const (
 	// KindConfirmedWrite：本程序写入且写后回读确认。时间是可信的写入完成时刻。
 	KindConfirmedWrite = "confirmed-write"
 
-	// DefaultKeepPerKey 是每个配置键默认保留的最近版本数（最早那一版额外留作锚点）。
+	// DefaultKeepPerKey 是「还没写过策略文件」时用的每键保留数（最早那一版额外留作锚点）。
+	// 它是回落档不是判据：真正的配额在 config-revisions-policy.json 里，见 policy.go。
 	DefaultKeepPerKey = 50
 	// MaxContentBytes 是单条记录缓存正文的上限，超限只记摘要与大小。
 	MaxContentBytes = 512 * 1024
@@ -102,6 +103,9 @@ type AppendResult struct {
 }
 
 // Facts 是这份日志的体量事实，供设置页如实展示。
+//
+// KeepPerKey 回的是**生效值**（磁盘策略钳制后的数），不是构建常量；
+// KeepSource 说明这个数从哪一档来，界面因此能把「还没设过 / 越界回落了」说实话。
 type Facts struct {
 	Path       string `json:"path"`
 	Exists     bool   `json:"exists"`
@@ -109,6 +113,9 @@ type Facts struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 	Keys       int    `json:"keys"`
 	KeepPerKey int    `json:"keepPerKey"`
+	KeepSource string `json:"keepSource"`
+	// PinnedCount 是指向磁盘策略里的钉住条目数（不数日志行：日志行可能被升级合并）。
+	PinnedCount int `json:"pinnedCount"`
 }
 
 // NormalizeContent 是摘要前的规范化口径：只统一换行（CRLF/CR → LF）。
@@ -165,12 +172,16 @@ type Store struct {
 	dir      string
 	lastHash map[string]string
 	counts   map[string]int
+	// unpinned 是每键「没被钉住」的条数：自动裁剪的触发量只看它。
+	// 为什么不能拿 counts 顶：钉住的行永远删不掉，把它们的条数算进触发量，
+	// 一个「钉了 60 版、配额 50」的键会在每次追加时重写整文件却一条也删不掉。
+	unpinned map[string]int
 	loaded   bool
 }
 
 // NewStore 创建一份带内存索引的存储句柄。
 func NewStore() *Store {
-	return &Store{lastHash: map[string]string{}, counts: map[string]int{}}
+	return &Store{lastHash: map[string]string{}, counts: map[string]int{}, unpinned: map[string]int{}}
 }
 
 func trailPath(dataDir string) string {
@@ -190,13 +201,18 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureLocked(dataDir)
+	// 配额与钉住每轮都从磁盘策略读一次（策略文件只有几百字节，成本远低于这条记录本身的 fsync）。
+	// 故意不缓存：缓存会让「另一个入口刚把配额调小/把某一版钉住」晚一拍才生效，
+	// 而晚一拍被裁掉的那几版是回不来的。
+	policy, keep := loadPolicy(dataDir)
+	pinned := policy.pinnedSet()
+	s.ensureLocked(dataDir, pinned)
 	if s.lastHash[key] == record.Hash && record.Kind == KindObserved {
 		return AppendResult{Appended: false, Reason: ReasonDuplicate, Record: record}, nil
 	}
 	if s.lastHash[key] == record.Hash {
 		// 摘要与上一版相同，但这一条是「本程序写的」：先试着把来历升级，而不是当重复丢掉。
-		outcome, err := s.promoteLocked(dataDir, key, record)
+		outcome, err := s.promoteLocked(dataDir, key, record, pinned)
 		if err != nil {
 			return AppendResult{Record: record}, err
 		}
@@ -213,7 +229,7 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 			// 判据回到文件。读不出来就当本键没有历史（宁可多落一条新版，也绝不回头改更老那一行）：
 			// 这里若因读失败而不写，confirmed-write 那条最可靠的事实会永久丢掉。
 			trail, _ := readRecords(dataDir)
-			s.reindexLocked(dataDir, trail)
+			s.reindexLocked(dataDir, trail, pinned)
 		}
 	}
 	if err := appendLine(dataDir, record); err != nil {
@@ -221,9 +237,12 @@ func (s *Store) Append(dataDir string, in Input) (AppendResult, error) {
 	}
 	s.lastHash[key] = record.Hash
 	s.counts[key]++
+	if !pinned[pinID(key, record.Hash)] {
+		s.unpinned[key]++
+	}
 	// 攒够两倍配额再重写文件：每条都 prune 会把「追加不怕并发」的优点换成整文件反复重写。
-	if s.counts[key] > DefaultKeepPerKey*2 {
-		if _, err := s.pruneLocked(dataDir, DefaultKeepPerKey); err != nil {
+	if s.unpinned[key] > keep.KeepPerKey*2 {
+		if _, err := s.pruneLocked(dataDir); err != nil {
 			// 裁剪失败不影响这一条已经写进历史的事实，错误只回传给调用方记录。
 			return AppendResult{Appended: true, Record: record}, fmt.Errorf("写入成功但裁剪失败: %w", err)
 		}
@@ -265,14 +284,17 @@ func (s *Store) ReadKey(dataDir, connectionID, namespace, group, dataID string, 
 	return reverseRecords(out), nil
 }
 
-// Prune 按保留策略重写文件，返回删掉的条数。
-func (s *Store) Prune(dataDir string, keepPerKey int) (int, error) {
+// Prune 按**磁盘上生效的保留策略**重写文件，返回删掉的条数。
+//
+// 这里不收 keepPerKey 参数：配额的钳制点必须只有一个（policy.go 的 clampKeepPerKey）。
+// 多收一个入参就等于多一条「绕过策略直接删数据」的路，界面与落盘判据会长成两副样子。
+func (s *Store) Prune(dataDir string) (int, error) {
 	if dataDir == "" {
 		return 0, fmt.Errorf("版本历史数据目录不可用")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.pruneLocked(dataDir, keepPerKey)
+	return s.pruneLocked(dataDir)
 }
 
 // Clear 清空这份日志（truncate 为 0 字节，与审计同口径：保路径与权限不变，不存在时幂等成功）。
@@ -284,6 +306,11 @@ func (s *Store) Clear(dataDir string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 正文都没了，钉住清单里那些指向它的标记也就没了落点：一起清，
+	// 否则界面上会挂着一排永远命中不了任何版本的「已钉住」。配额（keepPerKey）保留。
+	if err := clearPinsLocked(dataDir); err != nil {
+		return err
+	}
 	path := trailPath(dataDir)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		s.resetLocked(dataDir)
@@ -299,10 +326,11 @@ func (s *Store) Clear(dataDir string) error {
 // GetFacts 汇总这份日志的体量，供设置页如实说明。
 func (s *Store) GetFacts(dataDir string) Facts {
 	path := trailPath(dataDir)
-	facts := Facts{Path: path, KeepPerKey: DefaultKeepPerKey}
 	if dataDir == "" {
-		return facts
+		return Facts{KeepPerKey: DefaultKeepPerKey, KeepSource: KeepSourceUnreadable}
 	}
+	policy, keep := loadPolicy(dataDir)
+	facts := Facts{Path: path, KeepPerKey: keep.KeepPerKey, KeepSource: keep.Source, PinnedCount: len(policy.Pinned)}
 	info, err := os.Stat(path)
 	if err != nil {
 		return facts
@@ -329,7 +357,7 @@ func (s *Store) GetFacts(dataDir string) Facts {
 // 落进历史；随后 recordConfirmedWrite 拿到同一摘要若只判重跳过，「这一版是本程序写的、
 // 对应哪个计划」这条最可靠的事实就永久丢了。正文没变（摘要一致），改的是来历与时间戳，
 // 不是伪造新版本；反过来 observed 永远不得覆盖 confirmed-write（降级会把 planId 回链弄丢）。
-func (s *Store) promoteLocked(dataDir string, key string, record Record) (promoteOutcome, error) {
+func (s *Store) promoteLocked(dataDir string, key string, record Record, pinned map[string]bool) (promoteOutcome, error) {
 	records, err := readRecords(dataDir)
 	if err != nil {
 		// 读不出可信结果 ⇒ 不去改写任何一行，按「本键找不到落点」处理，交给调用方落一条新版。
@@ -360,15 +388,19 @@ func (s *Store) promoteLocked(dataDir string, key string, record Record) (promot
 	if err := writeRecords(dataDir, records); err != nil {
 		return promoteDone, err
 	}
-	s.reindexLocked(dataDir, records)
+	s.reindexLocked(dataDir, records, pinned)
 	return promoteDone, nil
 }
 
-// pruneLocked 必须在持有 s.mu 时调用。
-func (s *Store) pruneLocked(dataDir string, keepPerKey int) (int, error) {
-	if keepPerKey <= 0 {
-		keepPerKey = DefaultKeepPerKey
-	}
+// pruneLocked 必须在持有 s.mu 时调用；配额与钉住一律现读磁盘策略。
+//
+// 保留三样东西：每个键最早那一版（锚点，「本机第一次看到的样子」不能丢）、
+// 最近 keepPerKey 条未钉住的、以及**全部**钉住的。钉住的行不受配额影响，
+// 这是用户亲口说的「这一版不许丢」，裁剪碰到它就是越界。
+func (s *Store) pruneLocked(dataDir string) (int, error) {
+	policy, keep := loadPolicy(dataDir)
+	keepPerKey := keep.KeepPerKey
+	pinned := policy.pinnedSet()
 	records, err := readRecords(dataDir)
 	if err != nil {
 		// 压缩要重写整份文件：读不出可信结果时绝不能「按空文件重写」，那等于删光历史。
@@ -378,42 +410,50 @@ func (s *Store) pruneLocked(dataDir string, keepPerKey int) (int, error) {
 		s.resetLocked(dataDir)
 		return 0, nil
 	}
-	// 每个键：最早一版留作锚点，其余只留最近 keepPerKey 条；顺序按写入先后（=时间序）。
+	// 未钉住的行按各键自己的序号数「最近 keep 条」；钉住的行不参与计数也不被删。
 	seen := map[string]int{}
-	total := map[string]int{}
+	seenUnpinned := map[string]int{}
+	totalUnpinned := map[string]int{}
 	for _, rec := range records {
-		total[rec.Key()]++
+		if !pinned[pinID(rec.Key(), rec.Hash)] {
+			totalUnpinned[rec.Key()]++
+		}
 	}
-	keep := make([]bool, len(records))
+	keepFlags := make([]bool, len(records))
 	for i, rec := range records {
 		key := rec.Key()
 		seen[key]++
 		isEarliest := seen[key] == 1
-		fromEnd := total[key] - seen[key] + 1
-		keep[i] = isEarliest || fromEnd <= keepPerKey
+		if pinned[pinID(key, rec.Hash)] {
+			keepFlags[i] = true
+			continue
+		}
+		seenUnpinned[key]++
+		fromEnd := totalUnpinned[key] - seenUnpinned[key] + 1
+		keepFlags[i] = isEarliest || fromEnd <= keepPerKey
 	}
 	var kept []Record
 	removed := 0
 	for i, rec := range records {
-		if keep[i] {
+		if keepFlags[i] {
 			kept = append(kept, rec)
 		} else {
 			removed++
 		}
 	}
 	if removed == 0 {
-		s.reindexLocked(dataDir, kept)
+		s.reindexLocked(dataDir, kept, pinned)
 		return 0, nil
 	}
 	if err := writeRecords(dataDir, kept); err != nil {
 		return 0, err
 	}
-	s.reindexLocked(dataDir, kept)
+	s.reindexLocked(dataDir, kept, pinned)
 	return removed, nil
 }
 
 // ensureLocked 按当前数据根校内存索引；目录换了（用户换根）或索引还没建时从文件重建。
-func (s *Store) ensureLocked(dataDir string) {
+func (s *Store) ensureLocked(dataDir string, pinned map[string]bool) {
 	if s.loaded && s.dir == dataDir {
 		return
 	}
@@ -430,6 +470,9 @@ func (s *Store) ensureLocked(dataDir string) {
 			key := rec.Key()
 			s.lastHash[key] = rec.Hash
 			s.counts[key]++
+			if !pinned[pinID(key, rec.Hash)] {
+				s.unpinned[key]++
+			}
 		}
 	}
 	s.loaded = true
@@ -439,14 +482,18 @@ func (s *Store) resetLocked(dataDir string) {
 	s.dir = dataDir
 	s.lastHash = map[string]string{}
 	s.counts = map[string]int{}
+	s.unpinned = map[string]int{}
 }
 
-func (s *Store) reindexLocked(dataDir string, records []Record) {
+func (s *Store) reindexLocked(dataDir string, records []Record, pinned map[string]bool) {
 	s.resetLocked(dataDir)
 	for _, rec := range records {
 		key := rec.Key()
 		s.lastHash[key] = rec.Hash
 		s.counts[key]++
+		if !pinned[pinID(key, rec.Hash)] {
+			s.unpinned[key]++
+		}
 	}
 	s.loaded = true
 }

@@ -392,6 +392,26 @@
     "revisionFactsKeys": "{count} configs covered",
     "revisionFactsSize": "{size} on disk",
     "revisionFactsKeep": "Up to {count} versions kept per config",
+    "revisionKeep": "Versions kept per config",
+    "revisionKeepHint": "How many recent versions of each config to keep locally (valid range {min}–{max}). The earliest version of every key and all pinned versions don't count against it and are never pruned.",
+    "revisionKeepSave": "Save",
+    "revisionKeepSaving": "Saving",
+    "revisionKeepRequired": "Enter a keep count",
+    "revisionKeepRange": "Only integers between {min} and {max}",
+    "revisionKeepSourcePolicy": "Using the policy you saved",
+    "revisionKeepSourceMissing": "Not set yet, using the default of {count}",
+    "revisionKeepSourceOutOfRange": "The value was out of range and fell back to the default",
+    "revisionKeepSourceUnreadable": "Policy file unreadable, using the default",
+    "revisionKeepSaved": "Keep count saved — each config now keeps up to {count} versions",
+    "revisionKeepFailed": "Failed to save keep count",
+    "revisionFactsPinned": "{count} pinned",
+    "revisionPrune": "Prune to new limit",
+    "revisionPruning": "Pruning",
+    "revisionPruneOverQuota": "Unpinned versions over the limit: {count}",
+    "confirmPruneRevisions": "Unpinned versions over the current limit are deleted now; the earliest version of every key and all pinned versions are kept. Server-side history is untouched.",
+    "revisionPruneDone": "Pruned {count} over-limit versions",
+    "revisionPruneNone": "Nothing exceeds the limit — nothing to prune",
+    "revisionPruneFailed": "Prune failed",
     "revisionFactsServerUntouched": "Server-side history in the config center is untouched",
     "revisionFactsUnavailable": "This build cannot show or clear the local revision history.",
     "clearRevisions": "Clear Local Revision History",
@@ -1200,6 +1220,12 @@
     "localEmpty": "No local revision yet. One is recorded when content is read; use Reload to check again",
     "localKindObserved": "Seen here",
     "localKindWritten": "Written here",
+    "localPin": "Pin",
+    "localPinned": "Pinned",
+    "localUnpinned": "Unpinned",
+    "localPinBusy": "Working",
+    "localPinTitle": "Pin this content: pruning never deletes it (the pin follows the content hash, covering every row with the same content)",
+    "localPinNoRow": "This exact content is no longer recorded locally (it may have just been pruned) — nothing was pinned",
     "localObservedTimeTitle": "When this machine first saw this revision (not the config center's release time)",
     "localWrittenTimeTitle": "When ConfScope wrote this revision and read it back to confirm",
     "localFirstSeen": "First seen",
@@ -1214,7 +1240,8 @@
     "sourceGroup": "History source",
     "sourceServer": "Config center",
     "sourceLocal": "This machine",
-    "sourceHint": "Each history keeps its own source; they are never merged into one column"
+    "sourceHint": "Each history keeps its own source; they are never merged into one column",
+    "localPinHint": "Pinning protects one version by its content digest: pruning and quota cleanup never remove it, and rows holding the same text are kept together."
   },
   "audit": {
     "runAudit": "Run Audit",
@@ -1595,5 +1622,10 @@
     "stackLabel": "React component stack",
     "stackNone": "(none)",
     "timeLabel": "Occurred at"
+  },
+  "configRevisions": {
+    "policyUnreadable": "Could not read the retention policy: the native binding returned nothing.",
+    "policyUnreadableAfterSave": "Could not read the retention policy back after saving: the on-disk fact is missing.",
+    "pinIdentityMissing": "Cannot locate this version: the pin request is missing the connection, dataId or content digest."
   }
 }

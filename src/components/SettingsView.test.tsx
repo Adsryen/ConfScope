@@ -7,6 +7,7 @@ import { I18nProvider } from "../i18n";
 import { formatDateTime } from "../lib/formatDateTime";
 import { clearViewState, readViewState, writeViewState } from "../lib/viewState";
 import SettingsView from "./SettingsView";
+import type { ConfigRevisionPolicyView } from "../../wailsjs/go/app/App";
 
 const credentialMocks = vi.hoisted(() => ({
   countMigratableStoredCredentials: vi.fn(() => 0),
@@ -88,11 +89,27 @@ const dataLocMocks = vi.hoisted(() => ({
 
 // 清除本机版本历史必须连前端那份 md5 记忆一起清（否则清完再也攒不起历史）。
 // 这里把出口换成可断言的替身，其余导出保持真实实现。
-const revisionOutletMocks = vi.hoisted(() => ({ resetConfigRevisionAccelerator: vi.fn() }));
+const revisionOutletMocks = vi.hoisted(() => ({
+  resetConfigRevisionAccelerator: vi.fn(),
+  // 轮99：配额编辑器与「按新上限清理」都走这一层出口，替身让它们各自可控。
+  // 存在性探测默认「不可用」——jsdom 里根本没有 window.go，这就是真的降级环境；
+  // 需要看到配额行的用例在自己的 beforeEach 里把它打开。
+  revisionPolicyStoreAvailable: vi.fn(() => false),
+  getConfigRevisionPolicy: vi.fn(),
+  saveRevisionKeepPerKey: vi.fn(),
+  pruneConfigRevisionsByPolicy: vi.fn(),
+}));
 
 vi.mock("../lib/configRevisions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/configRevisions")>();
-  return { ...actual, resetConfigRevisionAccelerator: revisionOutletMocks.resetConfigRevisionAccelerator };
+  return {
+    ...actual,
+    resetConfigRevisionAccelerator: revisionOutletMocks.resetConfigRevisionAccelerator,
+    revisionPolicyStoreAvailable: revisionOutletMocks.revisionPolicyStoreAvailable,
+    getConfigRevisionPolicy: revisionOutletMocks.getConfigRevisionPolicy,
+    saveRevisionKeepPerKey: revisionOutletMocks.saveRevisionKeepPerKey,
+    pruneConfigRevisionsByPolicy: revisionOutletMocks.pruneConfigRevisionsByPolicy,
+  };
 });
 
 vi.mock("../../wailsjs/go/app/App", async (importOriginal) => {
@@ -138,6 +155,10 @@ const testRevisionFacts = {
   sizeBytes: 20480,
   keys: 3,
   keepPerKey: 50,
+  // 轮99：这两项是新字段。pinnedCount 为 0 时界面不摆「已钉住 0 版」，
+  // 所以下面那条「没钉住时不出现」的判据就靠这份默认替身钉住。
+  keepSource: "policy",
+  pinnedCount: 0,
 };
 
 // 轮62：运行形态替身。installed + os-user-data 是最常出问题的组合（deb/rpm 装完写不出主数据文件），
@@ -168,8 +189,20 @@ const testRollbackAvailable = {
   ...testRollbackUnavailable,
   available: true,
   previousRoot: "/opt/confscope/ConfScopeData",
-  currentDoc: { exists: true, path: `${testRuntimeLayout.dataRoot}/app-data/confscope-data.json`, savedAt: "2026-10-22T01:02:03.000Z", sizeBytes: 2048, sha256: "a" },
-  previousDoc: { exists: true, path: "/opt/confscope/ConfScopeData/app-data/confscope-data.json", savedAt: "2026-10-01T08:00:00.000Z", sizeBytes: 4096, sha256: "b" },
+  currentDoc: {
+    exists: true,
+    path: `${testRuntimeLayout.dataRoot}/app-data/confscope-data.json`,
+    savedAt: "2026-10-22T01:02:03.000Z",
+    sizeBytes: 2048,
+    sha256: "a",
+  },
+  previousDoc: {
+    exists: true,
+    path: "/opt/confscope/ConfScopeData/app-data/confscope-data.json",
+    savedAt: "2026-10-01T08:00:00.000Z",
+    sizeBytes: 4096,
+    sha256: "b",
+  },
   reason: "",
 };
 
@@ -292,6 +325,11 @@ describe("SettingsView", () => {
     dataLocMocks.ClearConfigRevisions.mockReset();
     dataLocMocks.ClearConfigRevisions.mockResolvedValue(undefined);
     revisionOutletMocks.resetConfigRevisionAccelerator.mockReset();
+    revisionOutletMocks.revisionPolicyStoreAvailable.mockReset();
+    revisionOutletMocks.revisionPolicyStoreAvailable.mockReturnValue(false);
+    revisionOutletMocks.getConfigRevisionPolicy.mockReset();
+    revisionOutletMocks.saveRevisionKeepPerKey.mockReset();
+    revisionOutletMocks.pruneConfigRevisionsByPolicy.mockReset();
     historyMocks.clearOperationHistory.mockReset();
     cacheMocks.clearAppCache.mockReset();
     cacheMocks.clearAppCache.mockResolvedValue(0);
@@ -738,7 +776,10 @@ describe("SettingsView", () => {
       .filter((row) => Boolean(row.querySelector(".settings-data-location-path")))
       .flatMap((row) => Array.from(row.querySelectorAll<HTMLElement>(".settings-data-location-actions button")))
       .map((button) => button.getAttribute("aria-label"));
-    expect(names.every((name) => Boolean(name)), "又有按钮没名字了").toBe(true);
+    expect(
+      names.every((name) => Boolean(name)),
+      "又有按钮没名字了"
+    ).toBe(true);
     expect(new Set(names).size, `${names.length} 颗按钮只念得出 ${new Set(names).size} 个名字`).toBe(names.length);
   });
 
@@ -819,7 +860,11 @@ describe("SettingsView", () => {
 
   it("shows the plan rejection inline instead of opening a confirm dialog", async () => {
     dataLocMocks.SelectDataRootDirectory.mockResolvedValue("/home/ryen/.local/share");
-    dataLocMocks.PlanDataRootMigration.mockResolvedValue({ ...testMigrationPlan, valid: false, error: "目标位置在当前数据位置内部，会造成递归嵌套" });
+    dataLocMocks.PlanDataRootMigration.mockResolvedValue({
+      ...testMigrationPlan,
+      valid: false,
+      error: "目标位置在当前数据位置内部，会造成递归嵌套",
+    });
     renderSettings("en-US");
 
     fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
@@ -831,7 +876,12 @@ describe("SettingsView", () => {
 
   it("surfaces a failed migration without pretending the move succeeded", async () => {
     dataLocMocks.SelectDataRootDirectory.mockResolvedValue(testMigrationPlan.target);
-    dataLocMocks.MigrateDataRoot.mockResolvedValue({ ...testMigrationResult, requiresRestart: false, restartReason: "", error: "目标位置已存在另一份主数据文件" });
+    dataLocMocks.MigrateDataRoot.mockResolvedValue({
+      ...testMigrationResult,
+      requiresRestart: false,
+      restartReason: "",
+      error: "目标位置已存在另一份主数据文件",
+    });
     renderSettings("en-US");
 
     fireEvent.click(await screen.findByRole("button", { name: "Change location..." }));
@@ -1164,4 +1214,191 @@ describe("SettingsView", () => {
     });
   });
 
+  // ── 轮99：本机版本历史的保留配额可在设置页调整 ────────────────────────────────
+
+  /** 一份典型的策略视图：区间、默认值与来源档都由 Go 回，测试里改这些数字就是在改磁盘事实。 */
+  function policyView(patch: Partial<ConfigRevisionPolicyView> = {}): ConfigRevisionPolicyView {
+    return {
+      path: "/tmp/confscope-retest/data/app-data/config-revisions-policy.json",
+      keepPerKey: 50,
+      keepSource: "policy",
+      minKeepPerKey: 10,
+      maxKeepPerKey: 1000,
+      defaultKeepPerKey: 50,
+      pinned: [],
+      pinnedCount: 0,
+      unpinnedOverQuota: 0,
+      ...patch,
+    };
+  }
+
+  describe("本机版本历史的保留配额", () => {
+    /*
+     * 假磁盘一份：保存写进去的与策略读出来的必须是同一份事实。
+     * 两份各说各话会让「保存成功后重拉策略」这条路在测试里被走成回滚，
+     * 而那恰恰是界面上最难查的一类跳变（保存完数字自己弹回旧值）。
+     */
+    let diskKeep = 50;
+    let diskSource = "policy";
+
+    beforeEach(() => {
+      diskKeep = 50;
+      diskSource = "policy";
+      // 配额行要看得见，得先满足「绑定存在」这个前提
+      revisionOutletMocks.revisionPolicyStoreAvailable.mockReturnValue(true);
+      revisionOutletMocks.getConfigRevisionPolicy.mockImplementation(async () =>
+        policyView({ keepPerKey: diskKeep, keepSource: diskSource })
+      );
+      revisionOutletMocks.saveRevisionKeepPerKey.mockImplementation(async (raw: number) => {
+        diskKeep = raw;
+        diskSource = "policy";
+        return policyView({ keepPerKey: diskKeep, keepSource: diskSource });
+      });
+      revisionOutletMocks.pruneConfigRevisionsByPolicy.mockReset();
+    });
+
+    it("绑定拿不到时整块不出现：绝不在读不到策略的事实上摆「保存」键", async () => {
+      revisionOutletMocks.revisionPolicyStoreAvailable.mockReturnValue(false);
+      renderSettings("zh-CN");
+
+      await screen.findByRole("button", { name: "清除本机版本历史" });
+      expect(screen.queryByText("每配置保留版数")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "按新上限清理" })).not.toBeInTheDocument();
+      expect(revisionOutletMocks.getConfigRevisionPolicy).not.toHaveBeenCalled();
+    });
+
+    it("还没设置过时念「用默认值」，不许念成「你保存的值生效了」", async () => {
+      revisionOutletMocks.getConfigRevisionPolicy.mockResolvedValue(policyView({ keepSource: "default-missing" }));
+      renderSettings("zh-CN");
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      expect(row).toHaveTextContent("还没设置过，当前用默认值 50 版");
+      expect(row).not.toHaveTextContent("已按你保存的策略生效");
+      // 输入框回显生效配额，不是把默认值悄悄写回磁盘
+      expect(within(row).getByRole("spinbutton", { name: "每配置保留版数" })).toHaveValue(50);
+    });
+
+    it("合法区间跟着策略视图走：改 Go 回的 min/max，界面立刻按新区间说话并挡下保存", async () => {
+      revisionOutletMocks.getConfigRevisionPolicy.mockResolvedValue(policyView({ minKeepPerKey: 20, maxKeepPerKey: 80 }));
+      renderSettings("zh-CN");
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      expect(row).toHaveTextContent("合法区间 20–80");
+      const input = within(row).getByRole("spinbutton", { name: "每配置保留版数" });
+      const save = within(row).getByRole("button", { name: "保存" });
+
+      fireEvent.change(input, { target: { value: "9" } });
+      expect(await within(row).findByText("只能填 20–80 之间的整数")).toBeInTheDocument();
+      expect(save).toBeDisabled();
+      expect(revisionOutletMocks.saveRevisionKeepPerKey).not.toHaveBeenCalled();
+    });
+
+    it("保存成功回的是磁盘事实：成功文案与输入框都跟着它，不跟着刚才敲的那串", async () => {
+      renderSettings("zh-CN");
+      const before = dataLocMocks.GetConfigRevisionFacts.mock.calls.length;
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      fireEvent.change(within(row).getByRole("spinbutton", { name: "每配置保留版数" }), { target: { value: "30" } });
+      fireEvent.click(within(row).getByRole("button", { name: "保存" }));
+
+      expect(await screen.findByText("保留数已保存，现在每个配置最多留 30 版")).toBeInTheDocument();
+      expect(revisionOutletMocks.saveRevisionKeepPerKey).toHaveBeenCalledWith(30);
+      expect(within(row).getByRole("spinbutton", { name: "每配置保留版数" })).toHaveValue(30);
+      // 「每个配置最多留 N 版」那条事实来自另一颗绑定，保存完必须重拉一次
+      await waitFor(() => expect(dataLocMocks.GetConfigRevisionFacts.mock.calls.length).toBeGreaterThan(before));
+    });
+
+    it("Go 回钳制档时只能说「已回落默认值」，不许报喜成保存成功", async () => {
+      renderSettings("zh-CN");
+      // 只替这一把的保存出口：重拉回来的仍是「策略生效 + 磁盘那份」，屏幕上一句「已回落默认值」
+      // 只可能来自保存的结果行，而不是同时出现在两处让人分不清是谁在说话。
+      revisionOutletMocks.saveRevisionKeepPerKey.mockResolvedValue(policyView({ keepPerKey: 50, keepSource: "default-out-of-range" }));
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      fireEvent.click(within(row).getByRole("button", { name: "保存" }));
+
+      const warn = await screen.findByText("刚才填的值超出区间，已回落默认值");
+      expect(warn).toHaveClass("warn");
+      expect(screen.queryByText(/保留数已保存/)).not.toBeInTheDocument();
+    });
+
+    it("保存失败把原因摊开，忙态解除后还能重填", async () => {
+      renderSettings("zh-CN");
+      revisionOutletMocks.saveRevisionKeepPerKey.mockRejectedValue(new Error("attempted to write a read-only file"));
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      fireEvent.click(within(row).getByRole("button", { name: "保存" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("保留数保存失败");
+      expect(alert).toHaveTextContent("attempted to write a read-only file");
+      await waitFor(() => expect(within(row).getByRole("button", { name: "保存" })).not.toBeDisabled());
+      expect(screen.queryByText(/保留数已保存/)).not.toBeInTheDocument();
+    });
+
+    it("「按新上限清理」先在应用内确认，取消就一条历史都不动", async () => {
+      revisionOutletMocks.getConfigRevisionPolicy.mockResolvedValue(policyView({ unpinnedOverQuota: 12 }));
+      renderSettings("zh-CN");
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      expect(row).toHaveTextContent("超出当前上限、待清理的未钉住版本：12 版");
+      fireEvent.click(within(row).getByRole("button", { name: "按新上限清理" }));
+
+      expect(await screen.findByText(/立即删除超出当前上限的未钉住版本/)).toBeInTheDocument();
+      expect(revisionOutletMocks.pruneConfigRevisionsByPolicy).not.toHaveBeenCalled();
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "取消" }));
+      await waitFor(() => expect(screen.queryByText(/立即删除超出当前上限的未钉住版本/)).not.toBeInTheDocument());
+      expect(revisionOutletMocks.pruneConfigRevisionsByPolicy).not.toHaveBeenCalled();
+    });
+
+    it("清理删了几版就说几版；一条都不超额时如实说无需清理", async () => {
+      renderSettings("zh-CN");
+      revisionOutletMocks.pruneConfigRevisionsByPolicy.mockResolvedValue(4);
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      fireEvent.click(within(row).getByRole("button", { name: "按新上限清理" }));
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+      expect(await screen.findByText("已清理 4 版超额历史")).toBeInTheDocument();
+
+      revisionOutletMocks.pruneConfigRevisionsByPolicy.mockResolvedValue(0);
+      fireEvent.click(within(row).getByRole("button", { name: "按新上限清理" }));
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+      expect(await screen.findByText("没有超出上限的版本，无需清理")).toBeInTheDocument();
+    });
+
+    it("清理失败摊开原因，不拿「无需清理」冒充没事", async () => {
+      renderSettings("zh-CN");
+      revisionOutletMocks.pruneConfigRevisionsByPolicy.mockRejectedValue(new Error("read boom"));
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      fireEvent.click(within(row).getByRole("button", { name: "按新上限清理" }));
+      fireEvent.click(within(confirmModal()).getByRole("button", { name: "确定" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("按新上限清理失败");
+      expect(alert).toHaveTextContent("read boom");
+      expect(screen.queryByText(/无需清理/)).not.toBeInTheDocument();
+    });
+
+    it("钉住数在配额行与清除行都说出来，一条没钉时不摆「已钉住 0 版」", async () => {
+      const pinnedRef = { connectionId: "a", namespace: "public", group: "G", dataId: "d", hash: "h" };
+      revisionOutletMocks.getConfigRevisionPolicy.mockResolvedValue(policyView({ pinned: [pinnedRef], pinnedCount: 3 }));
+      dataLocMocks.GetConfigRevisionFacts.mockResolvedValue({ ...testRevisionFacts, pinnedCount: 3 });
+      renderSettings("zh-CN");
+
+      const row = (await screen.findByText("每配置保留版数")).closest(".settings-setting-row") as HTMLElement;
+      expect(row).toHaveTextContent("已钉住 3 版");
+      const clearRow = (await screen.findByRole("button", { name: "清除本机版本历史" })).closest(".settings-setting-row") as HTMLElement;
+      expect(clearRow).toHaveTextContent("已钉住 3 版");
+    });
+
+    it("策略读不出来时同样不摆编辑器：降级只体现在少了一块，不出空壳", async () => {
+      revisionOutletMocks.getConfigRevisionPolicy.mockRejectedValue(new Error("保留策略读不出来：绑定回了空"));
+      renderSettings("zh-CN");
+
+      await screen.findByRole("button", { name: "清除本机版本历史" });
+      expect(screen.queryByText("每配置保留版数")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "按新上限清理" })).not.toBeInTheDocument();
+    });
+  });
 });

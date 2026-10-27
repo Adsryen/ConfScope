@@ -13,12 +13,16 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Connection } from "../store/connections";
 import { formatTime } from "../api/nacos";
-import type { ConfigRevisionRecord } from "../../wailsjs/go/app/App";
+import type { ConfigRevisionPolicyView, ConfigRevisionRecord } from "../../wailsjs/go/app/App";
 import type { ApplyEntryPayload } from "../lib/applyEntry";
 import {
   CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE,
   CONFIG_REVISION_KIND_CONFIRMED_WRITE,
+  getConfigRevisionPolicy,
+  isRevisionPinned,
   listRevisionsForKey,
+  revisionPolicyStoreAvailable,
+  toggleRevisionPinned,
 } from "../lib/configRevisions";
 import { detectFormat, Format } from "../lib/format";
 import { buildDirectWriteExitEntry, isWritableConfigTarget } from "../lib/directWriteExit";
@@ -104,6 +108,11 @@ export default function LocalRevisionPanel({
   const [rawView, setRawView] = useState(false);
   const [rbConfirm, setRbConfirm] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
+  // 轮99：钉住这一版正文。清单来自保留策略（与设置页同一个事实源）；
+  // 策略读不出来（绑定缺失/磁盘那份坏了）时整排钉住键不出现——
+  // 摆一颗永远点不动、还说不清钉没钉上的键，比没有这颗键更坏。
+  const [policyView, setPolicyView] = useState<ConfigRevisionPolicyView | null>(null);
+  const [pinBusyId, setPinBusyId] = useState("");
 
   const reqId = useRef(0);
   const sourceLabel = `${connectionLabel(conn, t)} / ${tenant || "public"} / ${group} / ${dataId}`;
@@ -148,10 +157,27 @@ export default function LocalRevisionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.id, tenant, dataId, group]);
 
-  const entries = useMemo<RevisionEntry[]>(
-    () => records.map((rec, index) => ({ id: revisionId(rec, index), rec, index })),
-    [records]
-  );
+  // 钉住清单跟着键走（与上面 load 同一个口径）：换配置要看的就是这一排键的钉住状态。
+  useEffect(() => {
+    if (!revisionPolicyStoreAvailable()) {
+      setPolicyView(null);
+      return;
+    }
+    let alive = true;
+    void getConfigRevisionPolicy()
+      .then((view) => {
+        if (alive) setPolicyView(view);
+      })
+      .catch(() => {
+        // 读不出策略 = 钉没钉上都不确定，整排键不出现（见上面的状态注释）。
+        if (alive) setPolicyView(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [conn.id, tenant, dataId, group]);
+
+  const entries = useMemo<RevisionEntry[]>(() => records.map((rec, index) => ({ id: revisionId(rec, index), rec, index })), [records]);
   const entryOf = (id: string | null | undefined): RevisionEntry | undefined =>
     id === null || id === undefined ? undefined : entries.find((item) => item.id === id);
 
@@ -159,7 +185,7 @@ export default function LocalRevisionPanel({
   const bodyOmitted = (entry: RevisionEntry | undefined): boolean =>
     entry?.rec.contentOmittedReason === CONFIG_REVISION_CONTENT_OMITTED_TOO_LARGE;
 
-  const contentOf = (entry: RevisionEntry | undefined): string => (bodyOmitted(entry) ? "" : entry?.rec.content ?? "");
+  const contentOf = (entry: RevisionEntry | undefined): string => (bodyOmitted(entry) ? "" : (entry?.rec.content ?? ""));
 
   /**
    * 这一版自己的格式（与 HistoryView 的 versionFormat 同一口径）。
@@ -180,6 +206,38 @@ export default function LocalRevisionPanel({
   /** 时刻的含义（R6）：observed 是首见，confirmed-write 是写入并回读确认，两者都不是发布时间。 */
   const timeTitle = (rec: ConfigRevisionRecord): string =>
     isWritten(rec) ? t("history.localWrittenTimeTitle") : t("history.localObservedTimeTitle");
+
+  /** 这一版钉没钉：匹配只走 lib 里那一个 isRevisionPinned，面板不抄键结构。 */
+  const isPinned = (rec: ConfigRevisionRecord): boolean =>
+    policyView !== null && isRevisionPinned(policyView, conn.id, { namespace: tenant, group, dataId }, rec.hash);
+
+  /*
+   * 钉住 / 取消钉住（轮99）。身份是「键 + 正文摘要」不是时间戳：observed 会被就地升级成
+   * confirmed-write 换掉整行含 ts，钉 ts 的钉会在那一刻静默失效。
+   * 钉完以 Go 回读的策略刷新清单，界面上那颗键画的必须是磁盘上的事实；
+   * result.pinned=false 且这次是想钉 ⇒ 本机已经没有这一版正文可钉（多半刚被裁掉），如实说出来。
+   */
+  const togglePin = async (entry: RevisionEntry) => {
+    const hash = entry.rec.hash;
+    if (!hash || pinBusyId) return;
+    const next = !isPinned(entry.rec);
+    setPinBusyId(entry.id);
+    try {
+      const result = await toggleRevisionPinned(conn, { namespace: tenant, group, dataId }, hash, next);
+      if (revisionPolicyStoreAvailable()) {
+        setPolicyView(await getConfigRevisionPolicy());
+      }
+      if (next && !result.pinned) {
+        toast(t("history.localPinNoRow"), "info");
+      } else {
+        toast(result.pinned ? t("history.localPinned") : t("history.localUnpinned"));
+      }
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setPinBusyId("");
+    }
+  };
 
   const togglePick = (id: string) => {
     setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-2)));
@@ -274,6 +332,13 @@ export default function LocalRevisionPanel({
             </button>
           </div>
           <span className="history-hint">{t("history.localListHint")}</span>
+          {/*
+           * 「钉住」是什么、保住什么，写在这一行给整张清单看（轮99）。
+           * 不挂每颗键的 title：那颗键在「另一颗正在处理」时是 disabled 的原生控件，
+           * Blink 对 disabled 控件整段跳过 tooltip（tests/ux/disabledControlsDoNotRelyOnTitle 的取证），
+           * 二十行重复同一句悬浮提示既点不动也读不到，反倒不如一处常驻说明。
+           */}
+          {policyView !== null && <span className="history-hint">{t("history.localPinHint")}</span>}
         </div>
         <div className="history-items" {...busyProps(loading)}>
           {loading && (
@@ -291,9 +356,7 @@ export default function LocalRevisionPanel({
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className={`history-item${viewing === entry.id ? " active" : ""}${
-                picked.includes(entry.id) ? " picked" : ""
-              }`}
+              className={`history-item${viewing === entry.id ? " active" : ""}${picked.includes(entry.id) ? " picked" : ""}`}
             >
               <input
                 type="checkbox"
@@ -317,11 +380,12 @@ export default function LocalRevisionPanel({
                   </span>
                   <span className="history-item-id mono">{formatBytes(entry.rec.bytes)}</span>
                 </div>
-                {(entry.rec.firstSeenTs || entry.rec.planId || entry.rec.contentOmittedReason) && (
+                {(entry.rec.firstSeenTs ||
+                  entry.rec.planId ||
+                  entry.rec.contentOmittedReason ||
+                  (policyView !== null && isPinned(entry.rec))) && (
                   <div className="history-item-meta">
-                    {entry.rec.contentOmittedReason && (
-                      <span className="history-item-id">{t("history.localContentOmitted")}</span>
-                    )}
+                    {entry.rec.contentOmittedReason && <span className="history-item-id">{t("history.localContentOmitted")}</span>}
                     {entry.rec.firstSeenTs && (
                       <span className="history-item-id" title={t("history.localFirstSeenTitle")}>
                         {t("history.localFirstSeen")} {formatTime(entry.rec.firstSeenTs)}
@@ -332,9 +396,29 @@ export default function LocalRevisionPanel({
                         {t("history.localPlan")} {entry.rec.planId.slice(0, 8)}
                       </span>
                     )}
+                    {policyView !== null && isPinned(entry.rec) && (
+                      <span className="history-item-id pin-badge" title={t("history.localPinTitle")}>
+                        {t("history.localPinned")}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
+              {policyView !== null && entry.rec.hash && (
+                <button
+                  type="button"
+                  className={`btn btn-ghost btn-sm history-item-pin${isPinned(entry.rec) ? " on" : ""}`}
+                  aria-pressed={isPinned(entry.rec)}
+                  disabled={pinBusyId !== ""}
+                  onClick={() => void togglePin(entry)}
+                >
+                  {pinBusyId === entry.id
+                    ? t("history.localPinBusy")
+                    : isPinned(entry.rec)
+                      ? t("history.localPinned")
+                      : t("history.localPin")}
+                </button>
+              )}
             </div>
           ))}
         </div>

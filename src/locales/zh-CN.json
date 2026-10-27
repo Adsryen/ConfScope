@@ -392,6 +392,26 @@
     "revisionFactsKeys": "涉及 {count} 个配置",
     "revisionFactsSize": "占用 {size}",
     "revisionFactsKeep": "每个配置最多留 {count} 版",
+    "revisionKeep": "每配置保留版数",
+    "revisionKeepHint": "每个配置在本机最多保留最近多少版正文（合法区间 {min}–{max}）。每键最早一版和钉住的版本不占这个数，裁剪永不删它们。",
+    "revisionKeepSave": "保存",
+    "revisionKeepSaving": "保存中",
+    "revisionKeepRequired": "请填写保留版数",
+    "revisionKeepRange": "只能填 {min}–{max} 之间的整数",
+    "revisionKeepSourcePolicy": "已按你保存的策略生效",
+    "revisionKeepSourceMissing": "还没设置过，当前用默认值 {count} 版",
+    "revisionKeepSourceOutOfRange": "刚才填的值超出区间，已回落默认值",
+    "revisionKeepSourceUnreadable": "策略文件读不出来，当前用默认值",
+    "revisionKeepSaved": "保留数已保存，现在每个配置最多留 {count} 版",
+    "revisionKeepFailed": "保留数保存失败",
+    "revisionFactsPinned": "已钉住 {count} 版",
+    "revisionPrune": "按新上限清理",
+    "revisionPruning": "清理中",
+    "revisionPruneOverQuota": "超出当前上限、待清理的未钉住版本：{count} 版",
+    "confirmPruneRevisions": "立即删除超出当前上限的未钉住版本；每键最早一版与钉住的版本都会保留。配置中心的服务端历史不受影响。",
+    "revisionPruneDone": "已清理 {count} 版超额历史",
+    "revisionPruneNone": "没有超出上限的版本，无需清理",
+    "revisionPruneFailed": "按新上限清理失败",
     "revisionFactsServerUntouched": "配置中心的服务端历史不受影响",
     "revisionFactsUnavailable": "当前版本还不支持查看或清除本机版本历史。",
     "clearRevisions": "清除本机版本历史",
@@ -1200,6 +1220,12 @@
     "localEmpty": "本机还没记下这个配置的版本：读到正文时才会记一版，可点「重新读取」再看",
     "localKindObserved": "本机读到",
     "localKindWritten": "本机写入",
+    "localPin": "钉住",
+    "localPinned": "已钉住",
+    "localUnpinned": "已取消钉住",
+    "localPinBusy": "处理中",
+    "localPinTitle": "钉住这一版正文：清理与裁剪永不删它（钉在内容摘要上，同正文的行一起保住）",
+    "localPinNoRow": "本机已经没有这一版正文可钉（可能刚被清理），钉住没有生效",
     "localObservedTimeTitle": "本机第一次看到这一版的时刻（不是配置中心的发布时间）",
     "localWrittenTimeTitle": "本程序写入并回读确认的时刻",
     "localFirstSeen": "首见",
@@ -1214,7 +1240,8 @@
     "sourceGroup": "历史来源",
     "sourceServer": "配置中心",
     "sourceLocal": "本机",
-    "sourceHint": "两份历史各说各的来源，不合并成一列"
+    "sourceHint": "两份历史各说各的来源，不合并成一列",
+    "localPinHint": "「钉住」按正文摘要保住某一版：清理与按上限裁剪永不删它，正文相同的行一起保住。"
   },
   "audit": {
     "runAudit": "执行审计",
@@ -1595,5 +1622,10 @@
     "stackLabel": "React 组件栈",
     "stackNone": "（无）",
     "timeLabel": "发生时间"
+  },
+  "configRevisions": {
+    "policyUnreadable": "保留策略读不出来：绑定回了空",
+    "policyUnreadableAfterSave": "保留策略保存后读不回来：磁盘事实缺失",
+    "pinIdentityMissing": "钉住请求缺少连接、dataId 或正文摘要，无法定位版本"
   }
 }

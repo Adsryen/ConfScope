@@ -309,6 +309,9 @@ const bridgeLog = (...parts: unknown[]) => {
 //   confirmed-write 命中同一版时就地升级并保留首见时刻；已挂写入确认的同一版再执行只判重。
 export const RETEST_REVISIONS_PATH = "/tmp/confscope-retest/app-data/config-revisions.jsonl（桥内内存替身）";
 
+// 与 Go 侧 policy.go 的 PolicyFileName 同目录同名单（桥内是内存替身：策略活在状态里，不落盘）。
+export const RETEST_REVISIONS_POLICY_PATH = "/tmp/confscope-retest/app-data/config-revisions-policy.json（桥内内存替身）";
+
 // 与 Go 侧 revisions 包同名常量同值。桥只做镜像，不参与产品构建，产品里那一份的唯一出口是 src/lib/configRevisions.ts。
 const REVISION_KIND_OBSERVED = "observed";
 const REVISION_KIND_CONFIRMED_WRITE = "confirmed-write";
@@ -316,7 +319,15 @@ const REVISION_CONTENT_OMITTED_TOO_LARGE = "too-large";
 const REVISION_REASON_APPENDED = "appended";
 const REVISION_REASON_DUPLICATE = "duplicate";
 const REVISION_REASON_PROMOTED = "promoted";
-const REVISION_KEEP_PER_KEY = 50;
+const REVISION_DEFAULT_KEEP_PER_KEY = 50;
+// 与 Go 侧 policy.go 的 Min/MaxKeepPerKey 同值：合法区间由策略视图回给界面，前端不抄常量。
+const REVISION_MIN_KEEP_PER_KEY = 10;
+const REVISION_MAX_KEEP_PER_KEY = 1000;
+// 生效配额的来源档，与 Go 侧 KeepSource* 同值（policy.go 的四档里桥内内存只到得了这三档：
+// 坏文件回落 unreadable 是磁盘世界的事，桥没有「读不出来的策略」，判据由 policy_test.go 钉）。
+const REVISION_KEEP_SOURCE_POLICY = "policy";
+const REVISION_KEEP_SOURCE_MISSING = "default-missing";
+const REVISION_KEEP_SOURCE_OUT_OF_RANGE = "default-out-of-range";
 const REVISION_MAX_CONTENT_BYTES = 512 * 1024;
 // 分组键分隔符同 Go 侧 keySeparator（NUL）。用 fromCharCode 造而不在源码里写字面量：
 // 源文件里塞一个真实的 NUL 会让各种工具链抽搐（与 src/lib/configRevisions.ts 同一处理）。
@@ -344,6 +355,15 @@ interface RetestRevisionRecord {
   appVersion: string;
 }
 
+/** 与 Go 侧 revisions.PinnedRef 的 json 形状逐字对齐：钉住身份 = 配置键四元组 + 正文摘要（不是 ts）。 */
+interface RetestRevisionPinnedRef {
+  connectionId: string;
+  namespace: string;
+  group: string;
+  dataId: string;
+  hash: string;
+}
+
 /** 单个配置键在桥内替身里发生过的三种结局（断言只按自己的键取，别被同页其他配置的读取噪声串台）。 */
 interface RetestRevisionKeyCounters {
   appended: number;
@@ -361,10 +381,27 @@ interface RetestRevisionsState {
   clears: number;
   /** 按配置键分开的结局计数（整页会顺带读别的配置正文，全局计数没法证明「这一次重复读被判重了」）。 */
   byKey: Record<string, RetestRevisionKeyCounters>;
+  /** 与 Go 侧 Store.unpinned 同判据：每键未钉住的行数，自动裁剪的触发量只看它。 */
+  unpinnedByKey: Record<string, number>;
+  /** 与 Go 侧磁盘策略同判据：null = 从没写过（default-missing 档）；写进来的值恒为钳后值。 */
+  policyKeepPerKey: number | null;
+  /** 与 Go 侧 Policy.Pinned 同判据：钉住清单，最新的在前。 */
+  pinned: RetestRevisionPinnedRef[];
 }
 
 function emptyRevisionsState(): RetestRevisionsState {
-  return { records: [], appended: 0, duplicate: 0, promoted: 0, reads: 0, clears: 0, byKey: {} };
+  return {
+    records: [],
+    appended: 0,
+    duplicate: 0,
+    promoted: 0,
+    reads: 0,
+    clears: 0,
+    byKey: {},
+    unpinnedByKey: {},
+    policyKeepPerKey: null,
+    pinned: [],
+  };
 }
 
 let revisionsState: RetestRevisionsState = emptyRevisionsState();
@@ -379,6 +416,8 @@ export function retestRevisionsSnapshot(): RetestRevisionsState {
     ...revisionsState,
     records: revisionsState.records.map((rec) => ({ ...rec })),
     byKey: Object.fromEntries(Object.entries(revisionsState.byKey).map(([k, v]) => [k, { ...v }])),
+    unpinnedByKey: { ...revisionsState.unpinnedByKey },
+    pinned: revisionsState.pinned.map((ref) => ({ ...ref })),
   };
 }
 
@@ -514,6 +553,12 @@ async function retestAppendRevision(input: Record<string, unknown>) {
   revisionsState.records.push(record);
   revisionsState.appended += 1;
   bumpRevisionKeyCounter(key, "appended");
+  // 与 Go 侧 Append 同一触发：未钉住的攒到两倍配额就按生效策略裁一遍整份。
+  // 未钉住计数按行 + 当刻钉住集合整体重算（reindexLocked 同款；桥单线程，增量计数与重建同果）。
+  rebuildRetestUnpinnedCounts();
+  if ((revisionsState.unpinnedByKey[key] ?? 0) > effectiveRetestKeep().keepPerKey * 2) {
+    retestPruneRevisionsState();
+  }
   return { appended: true, reason: REVISION_REASON_APPENDED, record };
 }
 
@@ -538,27 +583,44 @@ function retestReadRevisionsForKey(
   return limit > 0 ? newestFirst.slice(0, limit) : newestFirst;
 }
 
-/** 保留策略同 Go 侧 pruneLocked：每键最早一版留作锚点，其余只留最近 keepPerKey 条。 */
-function retestPruneRevisions(keepPerKeyRaw: number): number {
-  const keepPerKey = keepPerKeyRaw > 0 ? keepPerKeyRaw : REVISION_KEEP_PER_KEY;
-  const total = new Map<string, number>();
+/**
+ * 保留裁剪同 Go 侧 pruneLocked：三样都留——每键最早那一版（锚点）、最近 keep 条未钉住的、
+ * 以及**全部**钉住的。配额不收参数：钳制点唯一（clampRetestKeepPerKey），
+ * 多收一个入参就等于多一条绕过策略直接删数据的路（Go 侧 Prune 同口径）。
+ */
+function retestPruneRevisionsState(): number {
+  const keepPerKey = effectiveRetestKeep().keepPerKey;
+  const pinned = retestPinnedSet();
+  const totalUnpinned: Record<string, number> = {};
   for (const rec of revisionsState.records) {
     const key = revisionKeyOf(rec);
-    total.set(key, (total.get(key) ?? 0) + 1);
+    if (!pinned.has(revisionPinID(key, rec.hash))) totalUnpinned[key] = (totalUnpinned[key] ?? 0) + 1;
   }
-  const seen = new Map<string, number>();
+  const seen: Record<string, number> = {};
+  const seenUnpinned: Record<string, number> = {};
+  const keepFlags = revisionsState.records.map((rec) => {
+    const key = revisionKeyOf(rec);
+    seen[key] = (seen[key] ?? 0) + 1;
+    const isEarliest = seen[key] === 1;
+    if (pinned.has(revisionPinID(key, rec.hash))) return true;
+    seenUnpinned[key] = (seenUnpinned[key] ?? 0) + 1;
+    const fromEnd = (totalUnpinned[key] ?? 0) - seenUnpinned[key] + 1;
+    return isEarliest || fromEnd <= keepPerKey;
+  });
   const kept: RetestRevisionRecord[] = [];
   let removed = 0;
-  for (const rec of revisionsState.records) {
-    const key = revisionKeyOf(rec);
-    const nth = (seen.get(key) ?? 0) + 1;
-    seen.set(key, nth);
-    const fromEnd = (total.get(key) ?? 0) - nth + 1;
-    if (nth === 1 || fromEnd <= keepPerKey) kept.push(rec);
+  revisionsState.records.forEach((rec, i) => {
+    if (keepFlags[i]) kept.push(rec);
     else removed += 1;
-  }
+  });
   revisionsState.records = kept;
+  rebuildRetestUnpinnedCounts();
   return removed;
+}
+
+/** 手动裁剪入口（绑定层 PruneConfigRevisions 的替身）。 */
+function retestPruneRevisions(): number {
+  return retestPruneRevisionsState();
 }
 
 function retestClearRevisions(): void {
@@ -566,6 +628,9 @@ function retestClearRevisions(): void {
   // 按键的结局计数属于「这份历史的内容」，跟着一起清，否则清完后断言读不到真实起点）
   revisionsState.records = [];
   revisionsState.byKey = {};
+  // 同 Go 侧 Clear：钉住清单一起清（正文都没了，钉着没有落点），配额保留。
+  revisionsState.pinned = [];
+  revisionsState.unpinnedByKey = {};
   revisionsState.clears += 1;
 }
 
@@ -582,8 +647,142 @@ export function retestRevisionFacts() {
     records: revisionsState.records.length,
     sizeBytes,
     keys: keys.size,
-    keepPerKey: REVISION_KEEP_PER_KEY,
+    keepPerKey: effectiveRetestKeep().keepPerKey,
+    keepSource: effectiveRetestKeep().keepSource,
+    pinnedCount: revisionsState.pinned.length,
   };
+}
+
+// ── 保留策略与钉住（internal/revisions/policy.go 的桥内替身，轮99）────────────────
+// 桥镜像的是前端可见判据：来源档说实话（没写过 / 已保存 / 被钳过）、钳制点唯一、钉不住不悬空、
+// 幂等钉取消不落盘、裁剪全保钉住。磁盘原子写、坏文件 unreadable 回落这些真实文件世界的
+// 判据由 internal/revisions/policy_test.go 钉，桥里不存在那条路径。
+
+/** 与 Go 侧 pinID 同构：内部键 + 正文摘要（身份不是 ts：observed 会被就地升级换掉整行含 ts）。 */
+function revisionPinID(key: string, hash: string): string {
+  return [key, hash].join(REVISION_KEY_SEPARATOR);
+}
+
+/** 全包唯一的配额钳制点（同 Go 侧 clampKeepPerKey，与区间值的比较只许出现在这里，守卫见 tests/ux）。 */
+function clampRetestKeepPerKey(raw: number): { keepPerKey: number; inRange: boolean } {
+  if (raw < REVISION_MIN_KEEP_PER_KEY || raw > REVISION_MAX_KEEP_PER_KEY) {
+    return { keepPerKey: REVISION_DEFAULT_KEEP_PER_KEY, inRange: false };
+  }
+  return { keepPerKey: raw, inRange: true };
+}
+
+/** 生效配额与来源档（同 loadPolicy：还没写过就用默认值，并带上 default-missing 档说实话）。 */
+function effectiveRetestKeep(): { keepPerKey: number; keepSource: string } {
+  if (revisionsState.policyKeepPerKey === null) {
+    return { keepPerKey: REVISION_DEFAULT_KEEP_PER_KEY, keepSource: REVISION_KEEP_SOURCE_MISSING };
+  }
+  return { keepPerKey: revisionsState.policyKeepPerKey, keepSource: REVISION_KEEP_SOURCE_POLICY };
+}
+
+function retestPinnedSet(): Set<string> {
+  return new Set(revisionsState.pinned.map((ref) => revisionPinID(revisionKeyOf(ref), ref.hash)));
+}
+
+/** 按行 + 当刻钉住集合整体重建每键未钉住条数（同 reindexLocked：索引宁可整建不增量，防漂移）。 */
+function rebuildRetestUnpinnedCounts(): void {
+  const next: Record<string, number> = {};
+  const pinned = retestPinnedSet();
+  for (const rec of revisionsState.records) {
+    const key = revisionKeyOf(rec);
+    if (pinned.has(revisionPinID(key, rec.hash))) continue;
+    next[key] = (next[key] ?? 0) + 1;
+  }
+  revisionsState.unpinnedByKey = next;
+}
+
+/** 同 Go 侧 countUnpinnedOverQuota：按当前上限已经多出来、下一次裁剪会删掉的未钉住行数。 */
+function countUnpinnedRetestOverQuota(keepPerKey: number): number {
+  const pinned = retestPinnedSet();
+  const total: Record<string, number> = {};
+  for (const rec of revisionsState.records) {
+    if (pinned.has(revisionPinID(revisionKeyOf(rec), rec.hash))) continue;
+    const key = revisionKeyOf(rec);
+    total[key] = (total[key] ?? 0) + 1;
+  }
+  let over = 0;
+  for (const count of Object.values(total)) {
+    if (count > keepPerKey) over += count - keepPerKey;
+  }
+  // 每键最早那一版是锚点不参与删除：多算一条，设置页就念出一个清不掉的数。
+  const seen: Record<string, boolean> = {};
+  for (const rec of revisionsState.records) {
+    const key = revisionKeyOf(rec);
+    if (seen[key]) continue;
+    seen[key] = true;
+    if (!pinned.has(revisionPinID(key, rec.hash)) && (total[key] ?? 0) > keepPerKey) over -= 1;
+  }
+  return over < 0 ? 0 : over;
+}
+
+function retestRevisionPolicyView(keepSourceOverride?: string) {
+  const keep = effectiveRetestKeep();
+  return {
+    path: RETEST_REVISIONS_POLICY_PATH,
+    keepPerKey: keep.keepPerKey,
+    keepSource: keepSourceOverride ?? keep.keepSource,
+    minKeepPerKey: REVISION_MIN_KEEP_PER_KEY,
+    maxKeepPerKey: REVISION_MAX_KEEP_PER_KEY,
+    defaultKeepPerKey: REVISION_DEFAULT_KEEP_PER_KEY,
+    pinned: revisionsState.pinned.map((ref) => ({ ...ref })),
+    pinnedCount: revisionsState.pinned.length,
+    unpinnedOverQuota: countUnpinnedRetestOverQuota(keep.keepPerKey),
+  };
+}
+
+/** 同 Go 侧 Store.Policy：当前生效的保留策略（含钉住清单与超出新上限的未钉住数）。 */
+export function retestGetRevisionPolicy() {
+  return retestRevisionPolicyView();
+}
+
+/** 同 Go 侧 SetPolicyKeepPerKey：钳后才落盘；钳过就得说钳过——越界档只有这一处知道。 */
+export function retestSaveRevisionPolicy(raw: number) {
+  const { keepPerKey, inRange } = clampRetestKeepPerKey(raw);
+  revisionsState.policyKeepPerKey = keepPerKey;
+  return retestRevisionPolicyView(inRange ? undefined : REVISION_KEEP_SOURCE_OUT_OF_RANGE);
+}
+
+/** 同 Go 侧 SetPinned：幂等；该键下已经没有这个摘要的行就钉不住（如实回 hits=0，不留悬空钉）。 */
+export function retestSetRevisionPinned(
+  connectionIdRaw: string,
+  namespace: string,
+  group: string,
+  dataIdRaw: string,
+  hashRaw: string,
+  pinned: boolean
+) {
+  const connectionId = connectionIdRaw.trim();
+  const dataId = dataIdRaw.trim();
+  const hash = hashRaw.trim();
+  if (!connectionId || !dataId || !hash) {
+    throw new Error("钉住记录缺少连接、dataId 或正文摘要，无法定位版本");
+  }
+  const ref: RetestRevisionPinnedRef = { connectionId, namespace, group, dataId, hash };
+  const key = revisionKeyOf(ref);
+  const id = revisionPinID(key, hash);
+  const hits = revisionsState.records.filter((rec) => revisionKeyOf(rec) === key && rec.hash === hash).length;
+  const foundIndex = revisionsState.pinned.findIndex((existing) => revisionPinID(revisionKeyOf(existing), existing.hash) === id);
+  const found = foundIndex >= 0;
+  if (pinned && !found && hits === 0) {
+    // 本机已经没有这一版正文可钉：界面向用户解释为什么钉不上，磁盘上不留永远命不中的标记。
+    return { pinned: false, hits: 0, pinnedCount: revisionsState.pinned.length };
+  }
+  if (found === pinned) {
+    // 已经是用户要的状态（钉着再钉 / 没钉再取消）：幂等返回。
+    return { pinned, hits, pinnedCount: revisionsState.pinned.length };
+  }
+  if (pinned) {
+    revisionsState.pinned = [ref, ...revisionsState.pinned];
+  } else {
+    revisionsState.pinned = revisionsState.pinned.filter((_, i) => i !== foundIndex);
+  }
+  // 触发量按新钉住集合重算（Go 侧对索引做 ±hits 增量，同果）。
+  rebuildRetestUnpinnedCounts();
+  return { pinned, hits, pinnedCount: revisionsState.pinned.length };
 }
 
 // 审计事件持久化（模拟 Go 侧 AppendAuditEvent → <dataDir>/audit-trail.jsonl）：
@@ -1811,11 +2010,25 @@ export function createRetestInvoke(): RetestInvoke {
           Number(args[4] ?? 0)
         );
       case "PruneConfigRevisions":
-        return retestPruneRevisions(Number(args[0] ?? 0));
+        // 同 Go 侧 Prune：不收参数，按生效策略裁（不许绕过策略直接删数据）。
+        return retestPruneRevisions();
       case "ClearConfigRevisions":
         return retestClearRevisions();
       case "GetConfigRevisionFacts":
         return retestRevisionFacts();
+      case "GetConfigRevisionPolicy":
+        return retestGetRevisionPolicy();
+      case "SaveConfigRevisionPolicy":
+        return retestSaveRevisionPolicy(Number(args[0] ?? 0));
+      case "SetConfigRevisionPinned":
+        return retestSetRevisionPinned(
+          String(args[0] ?? ""),
+          String(args[1] ?? ""),
+          String(args[2] ?? ""),
+          String(args[3] ?? ""),
+          String(args[4] ?? ""),
+          Boolean(args[5])
+        );
       case "RetestRevisionsSnapshot":
         // 只给复测断言用（前端不调它）：读桥内替身攒到的版本条数与各结局计数。
         return retestRevisionsSnapshot();

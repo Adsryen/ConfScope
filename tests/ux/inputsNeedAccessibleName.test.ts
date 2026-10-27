@@ -334,6 +334,7 @@ describe("输入控件必须有不消失的可访问名", () => {
     for (const s of components) counts[s.name] = (counts[s.name] ?? 0) + 1;
     // 数量钉死：加调用点要先把名字写好，再回来把数字改上去
     // CodeEditor 第 4 处 = 轮60 微调抽屉，调用点已显式传 ariaLabel={t("diff.manualTuneAria")}
-    expect(counts).toEqual({ Combobox: 2, NumberField: 4, CodeEditor: 4 });
+    // NumberField 第 5 处 = 轮99 设置页「每配置保留版数」，调用点显式传 ariaLabel={t("settings.revisionKeep")}
+    expect(counts).toEqual({ Combobox: 2, NumberField: 5, CodeEditor: 4 });
   });
 });
