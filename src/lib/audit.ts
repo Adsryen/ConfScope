@@ -102,10 +102,7 @@ function statusOf(row: RowBucket, envIds: string[], ignoreRule?: IgnoreRule): Au
   return "inconsistent";
 }
 
-export function buildAuditMatrix(
-  sources: AuditSource[],
-  options: BuildAuditMatrixOptions = {}
-): AuditRow[] {
+export function buildAuditMatrix(sources: AuditSource[], options: BuildAuditMatrixOptions = {}): AuditRow[] {
   const normalizeName = options.normalizeName ?? ((name: string) => name);
   const envIds = Array.from(new Set(sources.map((source) => source.envId)));
   const buckets = new Map<string, RowBucket>();
