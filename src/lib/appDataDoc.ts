@@ -308,6 +308,9 @@ function reportDocSaveError(message: string): void {
   try {
     reportError({
       // 走 i18n：这两句以前写死中文，英文界面下错误中心会漏出中文（轮6 R45）
+      // 后台 debounce 推送重试耗尽 ⇒ 系统自发。按轮94 口径仍要即时播报（坏事），
+      // 标 origin 是为了让「谁触发」这件事在代码里可见，而不是等下一个人靠猜。
+      origin: "system",
       title: translate("app.dataFileSaveErrorTitle"),
       source: translate("app.dataFileSource"),
       message,

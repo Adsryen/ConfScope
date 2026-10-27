@@ -35,6 +35,46 @@ describe("MessageCenter", () => {
     clearErrors();
   });
 
+  // 轮94：系统自发的好消息不再抢即时通道，「看得见」这一半就压在这条播报上。
+  // 静默登记如果只是变哑，这个改动就不该做 —— 所以这里钉的是「常驻 + 内容随未读变」，
+  // 而不是钉一句文案：整块条件渲染（活区在内容插入后才出现）读屏念不到，必须判红。
+  it("未读数由常驻活区播报：0 条时留空文本，不整块消失", () => {
+    renderMessageCenter();
+
+    const live = document.querySelector(".message-live") as HTMLElement;
+    expect(live, "活区必须一进页面就在").toBeInTheDocument();
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live.textContent).toBe("");
+
+    act(() => {
+      reportMessage({ level: "info", origin: "system", title: "发现新版本 1.9.15", message: "notes" });
+    });
+    expect(live.textContent).toBe("消息中心有 1 条未读");
+
+    act(() => {
+      reportMessage({ level: "info", origin: "system", title: "定时同步完成", message: "ok" });
+    });
+    expect(live.textContent).toBe("消息中心有 2 条未读");
+
+    openPanel();
+    expect(live.textContent, "读完就该安静下来，否则每次进面板都念一遍").toBe("");
+  });
+
+  it("英文界面下单条未读念对数", () => {
+    renderMessageCenter("en-US");
+
+    act(() => {
+      reportMessage({ level: "info", origin: "system", title: "New version", message: "notes" });
+    });
+    expect((document.querySelector(".message-live") as HTMLElement).textContent).toBe("1 unread message in Message Center");
+
+    act(() => {
+      reportMessage({ level: "info", origin: "system", title: "Another", message: "ok" });
+    });
+    expect((document.querySelector(".message-live") as HTMLElement).textContent).toBe("2 unread messages in Message Center");
+  });
+
   it("lists messages, copies full detail, deletes items, and opens the detail dialog", async () => {
     const { copyText } = await import("../lib/clipboard");
     vi.mocked(copyText).mockResolvedValue(true);

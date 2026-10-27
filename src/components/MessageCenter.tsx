@@ -121,6 +121,16 @@ export default function MessageCenter({ collapsed }: { collapsed?: boolean }) {
         {unread > 0 && <span className="message-badge">{unread > 99 ? "99+" : unread}</span>}
       </button>
 
+      {/* 未读数的读屏播报（轮94）。口径的另一半：系统自发的好消息不再抢即时通道，
+          「看得见」就得由角标这一侧还回来——静默登记如果只是变哑，这条改动就不该做。
+          活区必须常驻且挂在 button 的兄弟节点：button 里换文案读屏不一定会念，
+          条件渲染整块也等于没有活区（内容插入前活区就得存在，见 Toaster 的同款注释）。 */}
+      <span className="message-live" role="status" aria-live="polite" aria-atomic="true">
+        {unread > 0
+          ? t(unread === 1 ? "messageCenter.unreadAnnounceOne" : "messageCenter.unreadAnnounce", { count: unread })
+          : ""}
+      </span>
+
       {open && (
         <div className="message-panel" onMouseEnter={openPanel} onMouseLeave={scheduleClose}>
           <div className="message-panel-head">

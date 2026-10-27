@@ -267,24 +267,32 @@ export default function App() {
     };
   }, []);
 
-  // 主数据文件引导提示：迁移导入 / 从文件恢复 / 损坏回退
+  // 主数据文件引导提示：迁移导入 / 从文件恢复 / 损坏回退。
+  // 轮94 口径：这三类都是「用户没有等它的时刻」发生的系统自发事件，落点是登记簿而不是即时通道——
+  // 以前「已恢复 N 条连接」只有一条 2.6 秒的 toast，错过就再也无从知道本次数据是从哪一份来的；
+  // 而它恰恰只在清缓存 / 换 profile 这类一次性场景出现，正是最该留痕的一类。
+  // 损坏回退是坏事（error），按口径仍要即时播报一句；恢复与导入是好消息（info），只留未读角标。
   useEffect(() => {
     const notice = consumeAppDataDocNotice();
     if (!notice) return;
     if (notice.kind === "corrupt-fallback") {
       reportMessage({
         level: "error",
+        origin: "system",
         title: t("app.dataFileCorruptTitle"),
         source: t("app.dataFileSource"),
         message: t("app.dataFileCorruptMessage", { file: notice.detail }),
       });
       return;
     }
-    toast(
-      notice.kind === "restored-from-file"
-        ? t("app.dataFileRestored", { count: notice.connections })
-        : t("app.dataFileImported", { count: notice.connections })
-    );
+    const restored = notice.kind === "restored-from-file";
+    reportMessage({
+      level: "info",
+      origin: "system",
+      title: t(restored ? "app.dataFileRestoredTitle" : "app.dataFileImportedTitle"),
+      source: t("app.dataFileSource"),
+      message: t(restored ? "app.dataFileRestored" : "app.dataFileImported", { count: notice.connections }),
+    });
   }, [t]);
 
   // 记住上次的连接、浏览筛选与模式。
@@ -335,8 +343,10 @@ export default function App() {
           });
           if (!result.hasUpdate || result.error) return;
           if (!result.mandatory && settings.update.skipVersion === result.latestVersion) return;
+          // 系统自发的好消息（用户没点过「检查更新」）：只登记，不占即时通道（轮94 口径）。
           reportMessage({
             level: "info",
+            origin: "system",
             title: t("about.updateAvailable", { version: result.latestVersion }),
             source: t("about.updateTitle"),
             message: result.releaseNotes || "",
