@@ -33,6 +33,8 @@ const CONTENT_TERM = "8080";
 const CONTENT_SHOT_DATA_ID = "svc-gateway.yaml";
 /** 批量对比的跨项内容搜索用词：左右两侧处数不相等。 */
 const BATCH_TERM = "timeout";
+/** 变更计划/操作历史两张图的目标配置：小文件，一次就地编辑就是一条覆盖项。 */
+const PLAN_TARGET_DATA_ID = "svc-pay.properties";
 
 const visible = (page: Page, selector: string) => page.locator(selector).filter({ visible: true });
 
@@ -161,4 +163,82 @@ test("配置矩阵：双环境审计", async ({ page }) => {
   await expect(visible(page, ".audit-matrix-row").first()).toBeVisible({ timeout: 120_000 });
   await page.waitForTimeout(1_200);
   await shoot(page, "配置矩阵");
+});
+
+/**
+ * 变更计划（第 5 步的勾选区）+ 操作历史（可回退的那条记录）——轮96 K3。
+ *
+ * 为什么两张图挤在同一条用例里：桥的本地数据是内存替身，`installRetestBridge` 每调一次就
+ * `resetRetestAppDataDoc()` 清一次台账（tests/retest/bridge/installRetestBridge.ts:126）。
+ * 拆成两条的话，第二条打开时第一条执行出来的操作记录已经被清了，第二张只能拍到空列表。
+ *
+ * 手顺走真人那一条，中途不抄近路：就地编辑 → 生成变更计划 → 全选 → Dry-run →
+ * 停在确认区拍第一张 → 勾选确认 → 执行 → 到操作历史选中那条记录、展开「具体改了什么」拍第二张。
+ * 结尾 republishRetestData() 把种子正文写回去，A 侧真值不留脏给下一批用例。
+ */
+test("变更计划与操作历史：确认勾选区 + 可回退的记录", async ({ page }) => {
+  test.setTimeout(420_000);
+  await openApp(page);
+  await navigate(page, "配置浏览");
+  await expect(visible(page, ".browser-item-id").first()).toBeVisible({ timeout: 30_000 });
+  await visible(page, ".browser-item-id").filter({ hasText: PLAN_TARGET_DATA_ID }).first().click();
+  await expect(visible(page, ".code-area").first()).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole("button", { name: "编辑" }).click();
+  const ta = visible(page, ".code-editor-ta").first();
+  await expect(ta).toBeVisible({ timeout: 30_000 });
+  await ta.fill(`${await ta.inputValue()}\n# README 截图：这一行由一次就地编辑产生\n`);
+
+  await page.getByRole("button", { name: /生成变更计划/ }).click();
+  await expect(visible(page, ".apply-item-list").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "全选" }).first().click();
+  await expect(visible(page, ".apply-item-check").first()).toBeChecked({ timeout: 10_000 });
+
+  const dryRunBtn = page.locator("button", { hasText: "Dry-run 检查" }).last();
+  await dryRunBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await visible(page, ".apply-execution-notice").count()) === 0) {
+    await dryRunBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(visible(page, ".apply-execution-notice").first()).toBeVisible({ timeout: 120_000 });
+
+  const confirmBox = visible(page, ".apply-confirmation").first();
+  await expect(confirmBox, "第 5 步的确认区没渲染出来").toBeVisible({ timeout: 30_000 });
+  await confirmBox.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  expect(
+    await visible(page, ".apply-confirm-check input").first().isVisible(),
+    "确认勾选框不在截图里，这张图说明不了第 5 步长什么样"
+  ).toBe(true);
+  await shoot(page, "变更计划");
+
+  await page.locator(".apply-confirm-check input").check();
+  const execBtn = page.locator("button", { hasText: "执行变更" }).last();
+  await execBtn.click({ force: true, timeout: 10_000 }).catch(() => undefined);
+  if ((await visible(page, ".apply-task-progress").count()) === 0) {
+    await execBtn.evaluate((el) => (el as HTMLElement).click());
+  }
+  await expect(visible(page, ".apply-task-progress .task-status-success").first()).toBeVisible({ timeout: 120_000 });
+  await page.waitForTimeout(800);
+
+  await navigate(page, "操作历史");
+  const row = visible(page, ".op-history-item")
+    .filter({ has: page.locator(".history-dataid", { hasText: PLAN_TARGET_DATA_ID }) })
+    .first();
+  await expect(row, "执行完的这条操作没进操作历史列表").toBeVisible({ timeout: 30_000 });
+  await expect(row.locator(".history-rollback-chip"), "行上没有「可回退」徽标").toBeVisible();
+  await row.click();
+  await expect(visible(page, ".history-change-detail").first(), "详情里看不到改动明细").toBeVisible({ timeout: 30_000 });
+  // 展开第一处变更，把「具体改了什么」那半边内容拍进图里——只看状态徽标说明不了它。
+  await visible(page, ".history-change-item").first().click();
+  await expect(visible(page, ".history-change-body").first()).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page
+      .getByRole("button", { name: /生成回退计划/ })
+      .or(page.getByRole("button", { name: /按备份快照回退/ }))
+      .first(),
+    "回退入口不在图里，这张图就只是又一条流水记录"
+  ).toBeVisible({ timeout: 30_000 });
+  await shoot(page, "操作历史");
+
+  await republishRetestData();
 });

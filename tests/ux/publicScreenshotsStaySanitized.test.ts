@@ -67,6 +67,16 @@ const REVIEWED_CAPTURES: Record<string, ReviewedCapture> = {
     note: "轮68 重拍：Retest Nacos A/B 两侧 svc-auth.json，域名是 auth.dev.example.com；"
       + "第三步多出「微调右侧」入口，仍为合成数据",
   },
+  "变更计划.png": {
+    md5: "bbf904194bee83e6d29e51043190a10c",
+    note: "轮96 新拍：Retest Nacos A / retest-dev 的 svc-pay.properties 单配置计划，"
+      + "第 4 步 dry-run 通过后的确认区（已选 1 项、勾选框、Dry-run 与执行按钮）",
+  },
+  "操作历史.png": {
+    md5: "5e8db0b15f5fb5ff363ff718e5b244b6",
+    note: "轮96 新拍：同一条执行写进操作历史后的详情——可回退徽标与状态、生成回退计划入口、"
+      + "「本次改动」展开后的写前写后差异；正文为合成配置（dev_pass_123 之类来自复测种子）",
+  },
   "配置矩阵.png": {
     md5: "f14cb3f576d6f845e46964257bf4cc98",
     note: "retest-dev / retest-qa 一致性矩阵，命名空间为合成名",
