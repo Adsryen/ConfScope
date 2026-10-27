@@ -1463,6 +1463,230 @@ describe("ApplyPlanView", () => {
     expect(document.querySelector(".apply-partial-write")).toBeNull();
   });
 
+
+  // ── 轮98：半截写入的第二条出口（prd A6/A8） ──
+  /** 两份可执行项的计划：失败停在第 2 项时，第 1 项已写成、还有第 3 项没碰。 */
+  function partialWritePlan() {
+    return makePlan(
+      [
+        item("first.key", value("server.port=8080"), value("server.port=9090")),
+        item("second.key", value("log.level=info"), value("log.level=warn")),
+        item("third.key", value("feature.a=1"), value("feature.a=0")),
+      ],
+      { targetId: "conn-stage", targetLabel: "Staging / public" }
+    );
+  }
+
+  /** 走到第 5 步并按下「执行变更」；调用方自己等要看的结论。 */
+  async function executeOnce(plan: ApplyPlan) {
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+    return { executeButton };
+  }
+
+  it("失败项被认出来时给出第二条出口，与重试、回退并存", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-skip-1",
+      error: "403 Forbidden: accessKeyId can't be null",
+      historyId: "history-1",
+      progress: {
+        completedWrites: 1,
+        totalWrites: 3,
+        failedIndex: 2,
+        failedRef: "public/DEFAULT_GROUP/app.properties",
+        failedItemId: plan.items[1].id,
+      },
+    });
+
+    await executeOnce(plan);
+
+    const skip = await screen.findByRole("button", { name: "Skip this item, continue with the rest" });
+    expect(document.querySelector(".apply-partial-write")).not.toBeNull();
+    expect(skip).toBeEnabled();
+    // 三条出口各说各的：留着已写成的继续 / 撤回去 / 原样重来
+    expect(document.querySelector(".apply-rollback-entry")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    // 提示要说清这次会跑几项，否则用户按下去不知道自己按了什么
+    expect(document.querySelector(".apply-skip-exit-hint")?.textContent).toContain("2 item");
+  });
+
+  it("按跳过是摘掉失败项再执行，走同一个执行入口而不是新开的捷径", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-skip-2",
+      error: "403 Forbidden: accessKeyId can't be null",
+      historyId: "history-1",
+      progress: {
+        completedWrites: 1,
+        totalWrites: 3,
+        failedIndex: 2,
+        failedRef: "public/DEFAULT_GROUP/app.properties",
+        failedItemId: plan.items[1].id,
+      },
+    });
+
+    await executeOnce(plan);
+    await waitFor(() => expect(document.querySelector(".apply-partial-write")).not.toBeNull());
+    const skipped = plan.items[1].id;
+    fireEvent.click(screen.getByRole("button", { name: "Skip this item, continue with the rest" }));
+
+    await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
+    const [, , secondOptions] = executionMocks.executeApplyPlan.mock.calls[1] as [
+      ApplyPlan,
+      unknown,
+      { selectedItemIds: string[]; dryRun?: boolean },
+    ];
+    expect(secondOptions.selectedItemIds).not.toContain(skipped);
+    expect(secondOptions.selectedItemIds.sort()).toEqual([plan.items[0].id, plan.items[2].id].sort());
+    expect(secondOptions.dryRun, "跳过出口是执行，不是又干跑一次预演").toBeUndefined();
+    // 界面上的复选框要跟着灭掉：还勾着失败项，用户看到的就不是"这一项不会再写"
+    await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[1].querySelector(".apply-item-check")).not.toBeChecked());
+  });
+
+  it("进度里没有 failedItemId 时不出现出口：老形态不凭空冒按钮", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-skip-3",
+      error: "write failed: HTTP 500",
+      historyId: "history-1",
+      progress: { completedWrites: 1, totalWrites: 3, failedIndex: 2, failedRef: "public/DEFAULT_GROUP/app.properties" },
+    });
+
+    await executeOnce(plan);
+    await waitFor(() => expect(document.querySelector(".apply-rollback-entry")).not.toBeNull());
+
+    expect(screen.queryByRole("button", { name: "Skip this item, continue with the rest" })).not.toBeInTheDocument();
+    // 回退那条老出口照旧在，说明这里不是整块没渲染
+    expect(document.querySelector(".apply-rollback-entry")).not.toBeNull();
+  });
+
+  it("摘掉失败项后没得写就不给出口：跳过最后一项等于空跑", async () => {
+    const plan = makePlan([item("only.key", value("server.port=8080"), value("server.port=9090"))], {
+      targetId: "conn-stage",
+      targetLabel: "Staging / public",
+    });
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-skip-4",
+      error: "write failed: HTTP 500",
+      progress: {
+        completedWrites: 0,
+        totalWrites: 1,
+        failedIndex: 1,
+        failedRef: "public/DEFAULT_GROUP/app.properties",
+        failedItemId: plan.items[0].id,
+      },
+    });
+
+    await executeOnce(plan);
+    await waitFor(() => expect(document.querySelector(".apply-partial-write")).not.toBeNull());
+
+    expect(screen.queryByRole("button", { name: "Skip this item, continue with the rest" })).not.toBeInTheDocument();
+  });
+
+  it("取消确认勾选后跳过按钮一起灰掉，守卫不另开一套", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: false,
+      taskId: "task-skip-5",
+      error: "403 Forbidden",
+      historyId: "history-1",
+      progress: {
+        completedWrites: 1,
+        totalWrites: 3,
+        failedIndex: 2,
+        failedRef: "public/DEFAULT_GROUP/app.properties",
+        failedItemId: plan.items[1].id,
+      },
+    });
+
+    await executeOnce(plan);
+    const skip = await screen.findByRole("button", { name: "Skip this item, continue with the rest" });
+    fireEvent.click(screen.getByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+
+    expect(skip).toBeDisabled();
+    // 灰按钮自己说清缺哪一步（R19）
+    expect(skip.closest(".btn-guard")).toHaveAttribute("title", expect.stringContaining("confirm"));
+  });
+
+  it("勾选项全部已达成时不报「变更执行完成」，改说没写入并摊开项清单", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: true,
+      taskId: "task-skip-6",
+      alreadyAppliedOnly: true,
+      alreadyApplied: ["public/DEFAULT_GROUP/app.properties (first.key)", "public/DEFAULT_GROUP/app.properties (second.key)"],
+    });
+
+    await executeOnce(plan);
+
+    const block = await waitFor(() => {
+      const found = document.querySelector(".apply-already-applied");
+      if (!found) throw new Error("还在等已达成的结论屏");
+      return found;
+    });
+    expect(block.textContent).toContain("Nothing to write: the target is already at this version");
+    expect(document.querySelector(".apply-already-applied-refs")?.textContent).toContain("Already at this version (2)");
+    expect(screen.queryByText(/Change executed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dry-run passed/)).not.toBeInTheDocument();
+    // 什么都没写就不该有回退入口，也不该有晋级面板
+    expect(document.querySelector(".apply-rollback-entry")).toBeNull();
+    expect(document.querySelector(".apply-partial-write")).toBeNull();
+  });
+
+  it("混合成功时绿横幅与信息行各说各的：写了的说写了，没写的说没写", async () => {
+    const plan = partialWritePlan();
+    executionMocks.executeApplyPlan.mockResolvedValueOnce({
+      ok: true,
+      taskId: "task-skip-7",
+      historyId: "history-1",
+      verification: {
+        total: 1,
+        confirmedCount: 1,
+        drifted: [],
+        unreadable: [],
+        unconfirmedCount: 0,
+        items: [{ ref: "public/DEFAULT_GROUP/app.properties (third.key)", verdict: "confirmed" }],
+      },
+      alreadyApplied: ["public/DEFAULT_GROUP/app.properties (first.key)"],
+    });
+    historyMocks.loadOperationHistory.mockReturnValue([appliedHistoryRecord()]);
+
+    draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+      ok: true,
+      plan,
+      sourceConnection: sourceConn,
+      targetConnection: safeTargetConn,
+    });
+    renderView(entryPayload, [sourceConn, safeTargetConn]);
+    fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+    const executeButton = await screen.findByRole("button", { name: "Execute change" });
+    await waitFor(() => expect(executeButton).toBeEnabled());
+    fireEvent.click(executeButton);
+
+    const notice = await screen.findByText(/Change executed\. Applied items/);
+    expect(notice).toBeInTheDocument();
+    // 这一轮只真写了 1 条（另 1 条本来就是这一版，还有 1 条没被勾）：横幅的数必须跟历史里
+    // 「本次写入 1 项」同源，拿勾选数重算就成了 3——同一个动作两个屏幕报两个数，用户只能自己猜哪个真。
+    expect(notice.textContent).toContain("Applied items: 1");
+    expect(notice.textContent, "横幅又拿勾选项数目当已应用数目").not.toContain("Applied items: 3");
+    expect(document.querySelector(".apply-already-applied")?.textContent).toContain("1 item(s) were already at this version");
+    expect(document.querySelector(".apply-already-applied-refs"), "混合成功不该再摊一整块清单").toBeNull();
+  });
+
   // ── 波16：内联「编辑目标内容」的未保存草稿（R60 串内容 / R58 静默丢弃） ──
   function renderTwoItems() {
     draftMocks.buildApplyPlanFromEntry.mockResolvedValue({

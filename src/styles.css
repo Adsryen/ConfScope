@@ -8753,6 +8753,45 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.6;
 }
 
+/* 目标已经是这一版（轮98）：与 .apply-partial-write 同一种"事实陈述"色块——
+   它既不是成功（一个字节都没写）也不是错误（没有东西失败），绿色横幅会把这层意思说反。 */
+.apply-already-applied {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 220, 170, 0.28);
+  border-radius: 4px;
+  background: rgba(220, 220, 170, 0.08);
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 项清单比结论行长，单行截断就等于没说：靠 break-all 在窄面板里逐段折行。 */
+.apply-already-applied-refs {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* 跳过失败项的出口（轮98）：与回退出口同构，两颗按钮各说一件事，上下排开不抢位。 */
+.apply-skip-exit {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.apply-skip-exit .btn {
+  min-height: 24px;
+}
+
+.apply-skip-exit-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* 变更计划第5步「晋级到生产」（轮76）：写后回读 → 标记沙箱验证 → 选生产目标 → 生成新计划，
    四步一屏读完。命中高度沿用轮44 R88 的 24px 口径；灰按钮的原因挂在包裹的 .btn-guard 上
    （disabled 元素收不到 pointer 事件，title 直接写在按钮上等于没写）。 */
@@ -9502,6 +9541,7 @@ button.diff-workflow-step-btn:hover {
 /* 轮67 R67-WP10：受保护目标的确认文本要手敲进输入框，抄不走就只能逐字符用眼睛记 */
 .apply-confirmation-code,
 .apply-partial-write,
+.apply-already-applied,
 
 /* 更新交接面板：产物路径单行截断，安装命令要整段抄进终端 */
 .update-artifact-path,

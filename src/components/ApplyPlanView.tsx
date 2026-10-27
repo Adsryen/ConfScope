@@ -486,6 +486,8 @@ function ConfirmationPanel({
   writeVerification,
   executeHistoryId,
   executeRecord,
+  alreadyAppliedRefs,
+  nothingToWrite,
   connections,
   onOpenHistory,
   onStartApply,
@@ -493,6 +495,7 @@ function ConfirmationPanel({
   onConfirmationTextChange,
   onExecute,
   onDryRun,
+  onSkipFailedItem,
 }: {
   plan: ApplyPlan;
   selectedCount: number;
@@ -513,6 +516,10 @@ function ConfirmationPanel({
   executeHistoryId: string | null;
   /** 本次执行留下的那条记录（成功分支才有）：晋级面板要从它读验证状态与执行范围。 */
   executeRecord: OperationRecord | null;
+  /** 本轮判定「目标已经是这一版」而没有落笔的项（人读标签，轮98）。 */
+  alreadyAppliedRefs: string[];
+  /** 勾选项全部已达成：这一轮一个字节都没写，屏上不许出现「变更执行完成」。 */
+  nothingToWrite: boolean;
   connections: Connection[];
   onOpenHistory?: (recordId: string) => void;
   onStartApply?: (payload: ApplyEntryPayload) => void;
@@ -520,6 +527,8 @@ function ConfirmationPanel({
   onConfirmationTextChange: (value: string) => void;
   onExecute: () => void;
   onDryRun: () => void;
+  /** 摘掉失败项执行剩下的（轮98 第二条出口）；itemId 由执行进度给出。 */
+  onSkipFailedItem: (itemId: string) => void;
 }) {
   const { t } = useTranslation();
   const requiredText = applyConfirmationText(plan);
@@ -535,6 +544,15 @@ function ConfirmationPanel({
   // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
   const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
   const executeDisabled = !ready || anyRunning || executionSucceeded || selectedCount === 0 || selectedHasBlocked;
+  // 半截失败的第二条出口（轮98）：摘掉失败项后还有得写才给这颗按钮，
+  // 「跳过最后一项」变成空跑没有意义。守卫沿用执行按钮那一份（确认文本/执行中/已成功一次），
+  // 只是把"勾选项里含失败项"这条摘掉——少选一项不可能是新的风险动作。
+  const skipCandidateId = executeError && executeProgress?.failedItemId && selectedIds.has(executeProgress.failedItemId) ? executeProgress.failedItemId : "";
+  const remainingAfterSkip = skipCandidateId
+    ? plan.items.filter((item) => selectedIds.has(item.id) && item.id !== skipCandidateId && isSelectableApplyItem(item))
+    : [];
+  const canSkipFailedItem = Boolean(skipCandidateId) && remainingAfterSkip.length > 0;
+  const skipDisabled = !ready || anyRunning || executionSucceeded;
   // 灰按钮必须自己说清缺哪一步（R19）：五个原因并成一个 disabled，用户只能一个个开关去试。
   // title 挂在包裹按钮的 .btn-guard 上而不是按钮本身——disabled 的元素收不到 pointer 事件，
   // 浏览器根本不出 tooltip（与 ConnectionManager 的端口守卫同一写法）。
@@ -558,6 +576,7 @@ function ConfirmationPanel({
     });
   }
   const dryRunBlockers = blockers.filter((blocker) => blocker.alsoDryRun);
+  const skipBlockers = blockers.filter((blocker) => blocker.id !== "noSelection");
   const blockerTitle = (list: typeof blockers) => (list.length ? list.map((blocker) => blocker.label).join("\n") : undefined);
   const executeLabel =
     executionMode === "apply"
@@ -628,7 +647,27 @@ function ConfirmationPanel({
           ))}
         </ul>
       )}
-      {executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
+      {/*
+       * 全部已达成（轮98 A5）：这不是一次"变更执行完成"，而是一轮什么都没做。
+       * 绿色那条成功横幅留给真的写过的场合，这里用信息色块并把项清单摊开——
+       * 用户下一步要判断的是"那我到底还要不要改这份计划"，看不见是哪几项就判断不了。
+       */}
+      {nothingToWrite && (
+        <div className="apply-already-applied" {...statusMessageProps("info")}>
+          <span>{executeNotice}</span>
+          {alreadyAppliedRefs.length > 0 && (
+            <span className="apply-already-applied-refs">
+              {t("apply.alreadyAppliedItems", { count: alreadyAppliedRefs.length, refs: alreadyAppliedRefs.join(" / ") })}
+            </span>
+          )}
+        </div>
+      )}
+      {!nothingToWrite && executeNotice && <div className="apply-execution-notice">{executeNotice}</div>}
+      {!nothingToWrite && alreadyAppliedRefs.length > 0 && (
+        <div className="apply-already-applied" {...statusMessageProps("info")}>
+          {t("apply.alreadyAppliedNote", { count: alreadyAppliedRefs.length })}
+        </div>
+      )}
       {writeVerification && <PostWriteVerificationPanel verification={writeVerification} />}
       {executionTask && (
         <div className="apply-task-progress" aria-label={t("apply.taskProgressLabel")}>
@@ -701,6 +740,24 @@ function ConfirmationPanel({
           半截写入 = 改动已经在目标上生效，出口必须比文案更显眼，所以直接给一颗跳转按钮。
           只在真拿到本次记录 id 时出现；也不塞进上面那块——它带 aria-live，
           交互节点放进去会让读屏把按钮连文案重播一遍。 */}
+      {executeError && canSkipFailedItem && (
+        <div className="apply-skip-exit">
+          <span className="btn-guard" title={blockerTitle(skipBlockers)}>
+            <button
+              className="btn btn-ghost btn-sm"
+              type="button"
+              disabled={skipDisabled}
+              aria-disabled={skipDisabled}
+              onClick={() => onSkipFailedItem(skipCandidateId)}
+            >
+              {t("apply.skipFailedItem")}
+            </button>
+          </span>
+          <span className="apply-skip-exit-hint">{t("apply.skipFailedItemHint", { count: remainingAfterSkip.length })}</span>
+        </div>
+      )}
+      {/* 两条出口并存（轮98）：想留着已写成的部分继续 → 跳过这一项；想把已写成的撤回去 → 回退。
+          回退那条仍只认真正写成过的项（completedWrites > 0）：一项都没落笔时它指向一份不存在的现场。 */}
       {executeError && executeProgress && executeProgress.completedWrites > 0 && executeHistoryId && onOpenHistory && (
         <div className="apply-rollback-entry">
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenHistory(executeHistoryId)}>
@@ -755,6 +812,10 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
   // 写后回读结论（R55-B2）：跟着执行态一起重置，换一次执行不能留着上一轮的结论
   const [writeVerification, setWriteVerification] = useState<ApplyWriteVerification | null>(null);
+  // 轮98：本轮判定「目标已经是这一版」而没有落笔的项，以及"这一轮什么都没要写"这条独立结论。
+  // 两者都跟着执行态一起清，换一次执行不能留着上一轮的结论。
+  const [alreadyAppliedRefs, setAlreadyAppliedRefs] = useState<string[]>([]);
+  const [nothingToWrite, setNothingToWrite] = useState(false);
   const taskManager = getTaskManager();
   const trackedTaskIdRef = useRef<string | null>(null);
   // 变更会话 id：进入计划时创建，整个组件生命周期内五步事件共用
@@ -883,6 +944,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setExecuteRecord(null);
     setExecuteNotice(null);
     setWriteVerification(null);
+    setAlreadyAppliedRefs([]);
+    setNothingToWrite(false);
     buildDraft();
   }, [buildDraft]);
 
@@ -1024,11 +1087,27 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     });
   };
 
-  const runPlan = async (dryRun: boolean) => {
+  /**
+   * @param selectedOverride 明确指定本次执行的项 id —— 「跳过这一项，继续剩下的」走这条。
+   *   必须走参数而不是先 setSelectedIds 再调用：setState 之后这一趟 runPlan 读到的还是旧勾选，
+   *   失败项会被再写一遍，而那颗按钮承诺的恰恰是"不写它"。
+   */
+  /** 摘掉失败项、把剩下的继续写完（轮98 的第二条出口）。 */
+  const skipFailedItemAndContinue = (itemId: string) => {
+    if (!plan) return;
+    const remaining = plan.items
+      .filter((item) => selectedIds.has(item.id) && item.id !== itemId && isSelectableApplyItem(item))
+      .map((item) => item.id);
+    // 勾选与执行用同一份清单：界面上那颗复选框必须跟着灭掉，否则用户看到的还是"这几项待写"
+    setSelectedIds(new Set(remaining));
+    void runPlan(false, remaining);
+  };
+
+  const runPlan = async (dryRun: boolean, selectedOverride?: string[]) => {
     if (!plan || executionMode) return;
     // 始终过滤 blocked/parse_error/skip 项：勾选框禁用只是 UI 层守卫，
     // 这里是执行层兜底，避免任何来源（含旧计划数据）把阻断项写入目标。
-    const selectedItemIds = Array.from(selectedIds).filter((id) => {
+    const selectedItemIds = (selectedOverride ?? Array.from(selectedIds)).filter((id) => {
       const item = plan.items.find((candidate) => candidate.id === id);
       return item ? isSelectableApplyItem(item) : false;
     });
@@ -1059,6 +1138,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     }
     setExecuteNotice(null);
     setWriteVerification(null);
+    setAlreadyAppliedRefs([]);
+    setNothingToWrite(false);
     // 复用组件级变更会话（进入计划时已 apply_session_start），后续步骤续写同一 sessionId
     const session = applyEntrySessionRef.current ?? createAuditSession("apply");
     auditSessionEvent(session, {
@@ -1157,6 +1238,9 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       // 记录由执行器同步写进本地历史，这里当场读回来一次，不放进渲染期。
       setExecuteHistoryId(resultHistoryId ?? null);
       setExecuteRecord(resultHistoryId ? loadOperationHistory().find((item) => item.id === resultHistoryId) ?? null : null);
+      // 已达成的项在成功与失败两条出口里都要如实报出来（轮98）：失败屏上那句
+      // 「另有 N 项已经是这一版」正是用户判断"这一次重试到底有没有意义"的依据。
+      setAlreadyAppliedRefs(result.alreadyApplied ?? []);
       if (!result.ok) {
         setExecuteError(result.error);
         setExecuteProgress(result.progress ?? null);
@@ -1174,14 +1258,24 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       }
       if ("dryRun" in result && result.dryRun) {
         setExecuteNotice(t("apply.dryRunCompleted", { count: result.plannedWrites }));
+      } else if ("alreadyAppliedOnly" in result && result.alreadyAppliedOnly) {
+        // 没写就不许记成功：executionSucceeded / executionCompleted 都留在原值——
+        // 晋级面板和工作流「已完成」那条线靠它们点亮，这里点亮了就是假话。
+        setNothingToWrite(true);
+        setExecuteNotice(t("apply.alreadyAppliedOnly"));
       } else {
         setExecutionCompleted(!sandboxTarget);
         setExecutionSucceeded(true);
+        // 「已应用 N 项」的 N 取执行器那份落笔清单：verification.total 与操作历史的 appliedLocations
+        // 是写入循环里同一个 `if (!itemError)` 攒出来的两份视图，天生同源。
+        // 界面不许拿勾选数重算——轮98 的跳过出口让「勾了 2 条、只写 1 条」成为常态，
+        // 那时报「已应用 2 项」就和同一轮历史里的「本次写入 1 项」对不上（审计数字只许一个来源）。
+        const appliedCount = writeVerificationResult?.total ?? selectedItemIds.length;
         if (skippedBlocked > 0) {
           // 整句走 i18n：以前这里是「t() 结果 + 写死的中文尾巴」，英文界面会漏出「（另有 N 项已阻断，未执行）」（轮6 R54）
-          setExecuteNotice(t("apply.executionSucceededWithBlocked", { count: selectedItemIds.length, blocked: skippedBlocked }));
+          setExecuteNotice(t("apply.executionSucceededWithBlocked", { count: appliedCount, blocked: skippedBlocked }));
         } else {
-          setExecuteNotice(t("apply.executionSucceeded", { count: selectedItemIds.length }));
+          setExecuteNotice(t("apply.executionSucceeded", { count: appliedCount }));
         }
       }
       auditSessionEvent(session, {
@@ -1348,6 +1442,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
               writeVerification={writeVerification}
               executeHistoryId={executeHistoryId}
               executeRecord={executeRecord}
+              alreadyAppliedRefs={alreadyAppliedRefs}
+              nothingToWrite={nothingToWrite}
               connections={connections}
               onOpenHistory={onOpenHistory}
               onStartApply={onStartApply}
@@ -1355,6 +1451,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
               onConfirmationTextChange={setConfirmationText}
               onExecute={() => runPlan(false)}
               onDryRun={() => runPlan(true)}
+              onSkipFailedItem={skipFailedItemAndContinue}
             />
           </div>
         </div>

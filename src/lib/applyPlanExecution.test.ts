@@ -865,6 +865,8 @@ describe("executeApplyPlan", () => {
         totalWrites: 1,
         failedIndex: 1,
         failedRef: "public/DEFAULT_GROUP/changed.yaml",
+        // 轮98：界面「跳过这一项，继续剩下的」要的是 id，不是那段人读标签
+        failedItemId: plan.items[0].id,
       });
       expect(runDeps.recordOperation).toHaveBeenCalledWith(
         expect.objectContaining({ result: "failure", planId: "plan-1", backupSnapshotId: "snap-before-1" })
@@ -919,6 +921,7 @@ describe("executeApplyPlan", () => {
         totalWrites: 2,
         failedIndex: 2,
         failedRef: "public/DEFAULT_GROUP/b.yaml",
+        failedItemId: plan.items[1].id,
       });
       // 第二条确实发起过写入请求（失败在 provider 侧），成功落库的只有第一条
       expect(runDeps.publishConfig.mock.calls.map((call: unknown[]) => call[2])).toEqual(["a.yaml", "b.yaml"]);
@@ -1763,5 +1766,257 @@ describe("本机版本历史：只有写后回读确认才算本程序写的那�
     expect(result.ok).toBe(true);
     await settle();
     expect(calls.length).toBe(1);
+  });
+});
+
+/**
+ * 轮98：半截写入后的第二条出口。
+ *
+ * 现场是用户手上最难受的那一刻——10 项写到第 4 项被权限打回，前 3 项已经落在生产上。
+ * 他想留着那 3 项、把 5–10 也写完，可重试进来先撞新鲜度判据：前 3 项的目标现值当然
+ * 和「写入前」不等 ⇒ 整份计划被判过期 ⇒ 连没写过的 6 项一起堵死。
+ * 根因不是判据太严，是它把「已经干完的活」当成了「现场被人改了」。这里按 prd 的
+ * A2/A3/A4/A5 逐条钉住，每条都用「发起过几次写入」这类硬证据说话。
+ */
+describe("目标已经是这一版的项不重复写入（轮98）", () => {
+  /** 从 recordOperation 的调用里取那份记录输入。 */
+  function recorded(runDeps: ReturnType<typeof deps>) {
+    const calls = runDeps.recordOperation.mock.calls;
+    const call = calls[calls.length - 1];
+    if (!call) throw new Error("没有落操作历史，先确认这条路径该不该记");
+    return call[0];
+  }
+
+  const locationOf = (dataId: string, key = "__document") => ({
+    namespace: "public",
+    group: "DEFAULT_GROUP",
+    dataId,
+    key,
+  });
+
+  const labelOf = (dataId: string) => `public/DEFAULT_GROUP/${dataId}`;
+
+  it("已达成的项不写入、不建写前快照、不进落笔清单，结果如实报出来", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    // a 的目标现值已经等于要写的那一版（上一轮半截执行里写成的样子）
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a2"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0] });
+
+    expect(result).toMatchObject({
+      ok: true,
+      taskId: "task-apply-1",
+      alreadyApplied: [labelOf("a.yaml")],
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1 }),
+    });
+    expect(runDeps.publishConfig.mock.calls.map((call: unknown[]) => call[2])).toEqual(["b.yaml"]);
+    // 备份只含真正要落笔的那一条：已达成的项这一轮一个字节没动，没什么可备份的
+    const [configs] = runDeps.createBackupSnapshot.mock.calls[0] as unknown as [Array<{ dataId: string }>];
+    expect(configs.map((config) => config.dataId)).toEqual(["b.yaml"]);
+    // 落笔清单是回退/晋级的唯一依据，混进 a 就等于承诺回退一个本轮没碰过的配置
+    expect(recorded(runDeps).appliedLocations).toEqual([locationOf("b.yaml")]);
+  });
+
+  it("删除类同样判达成：目标已经不存在就不再发起删除", async () => {
+    const plan = applyPlan([
+      { ref: ref("removed.yaml"), sourceValue: absentValue(), targetValue: documentValue("old removed") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:removed.yaml": null,
+      "conn-prod:removed.yaml": null,
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0] });
+
+    expect(result).toMatchObject({ ok: true, alreadyApplied: [labelOf("removed.yaml")] });
+    expect(runDeps.deleteConfig).not.toHaveBeenCalled();
+    expect(runDeps.publishConfig.mock.calls.map((call: unknown[]) => call[2])).toEqual(["b.yaml"]);
+  });
+
+  it("dry-run 也按同一口径报数：已达成的项不进计划写入数", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a2"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps, { dryRun: true });
+
+    // 第 4 步报 2 项、第 5 步只写 1 项，用户会以为少写了一项出了 bug
+    expect(result).toEqual({
+      ok: true,
+      dryRun: true,
+      taskId: "task-apply-1",
+      plannedWrites: 1,
+      alreadyApplied: [labelOf("a.yaml")],
+    });
+  });
+
+  it("source 侧变了照样拦：目标恰好等于要写的那版也不能豁免", async () => {
+    const plan = applyPlan([{ ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") }]);
+    const runDeps = deps({
+      // 源在计划生成后被改成 a3，而目标已经是要写的 a2 —— 这份计划不再代表用户勾的那件事
+      "conn-dev:a.yaml": doc("a3"),
+      "conn-prod:a.yaml": doc("a2"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected stale rejection");
+    expect(result.error).toContain(labelOf("a.yaml"));
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("目标变成第三个值是真过期，不能当成已达成放过去", async () => {
+    const plan = applyPlan([{ ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") }]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a9"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected stale rejection");
+    expect(result.error).toContain(labelOf("a.yaml"));
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+  });
+
+  it("过期清单里只列真冲突的项，已达成的不许混进来吓人", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a2"), // 已达成
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b9"), // 真冲突
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected stale rejection");
+    expect(result.error).toContain(labelOf("b.yaml"));
+    expect(result.error, "把已达成报成过期，用户下一步该做的事就被说反了").not.toContain(labelOf("a.yaml"));
+  });
+
+  it("半截失败后摘掉失败项重试：已写成的被跳过，剩下的照常写完", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("b.yaml"), sourceValue: documentValue("b2"), targetValue: documentValue("b1") },
+      { ref: ref("c.yaml"), sourceValue: documentValue("c2"), targetValue: documentValue("c1") },
+    ]);
+    const documents: Record<string, ConfigDocument | null> = {
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a1"),
+      "conn-dev:b.yaml": doc("b2"),
+      "conn-prod:b.yaml": doc("b1"),
+      "conn-dev:c.yaml": doc("c2"),
+      "conn-prod:c.yaml": doc("c1"),
+    };
+    const base = deps(documents);
+    const runDeps = {
+      ...base,
+      publishConfig: vi.fn(async (conn: Connection, _ns: string, dataId: string, _g: string, content: string, configType: string) => {
+        if (dataId === "b.yaml") throw new Error("403 Forbidden: accessKeyId can't be null");
+        applyDocWrite(documents, conn.id, dataId, content, configType);
+      }),
+    };
+
+    const first = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0] });
+    expect(first.ok).toBe(false);
+    if (first.ok) throw new Error("expected partial write");
+    expect(first.progress).toMatchObject({ completedWrites: 1, totalWrites: 3, failedIndex: 2, failedItemId: plan.items[1].id });
+
+    const writesAfterFirst = runDeps.publishConfig.mock.calls.length;
+    const second = await executeApplyPlan(plan, runDeps, {
+      verifyDelaysMs: [0],
+      selectedItemIds: [plan.items[0].id, plan.items[2].id],
+    });
+
+    expect(second).toMatchObject({
+      ok: true,
+      taskId: "task-apply-1",
+      historyId: "history-1",
+      alreadyApplied: [labelOf("a.yaml")],
+      verification: expect.objectContaining({ total: 1, confirmedCount: 1 }),
+    });
+    // 重试这一次只发起 c 一条：a 被判已达成跳过，b 已被摘掉
+    const retryWrites = runDeps.publishConfig.mock.calls.slice(writesAfterFirst).map((call: unknown[]) => call[2]);
+    expect(retryWrites).toEqual(["c.yaml"]);
+    expect(documents["conn-prod:a.yaml"]?.content).toBe("a2");
+    expect(documents["conn-prod:c.yaml"]?.content).toBe("c2");
+    // 第二次的落笔清单只有 c：a 这一轮没动，回退范围里不能出现它
+    expect(recorded(runDeps).appliedLocations).toEqual([locationOf("c.yaml")]);
+    // 界面横幅那个「已应用 N 项」的数就取这份回读结论的 total：两者必须由同一个数组攒出来，
+    // 否则跳过出口之后，第 5 步的横幅与操作历史的记录会各报各的数（轮98）。
+    // 收窄到「真写过」那一条返回：dry-run 与全部已达成都没有回读结论，也就没有可对齐的落笔数
+    if (!("verification" in second) || !second.verification) throw new Error("跳过重试这一轮没有回读结论");
+    expect(second.verification.total, "回读结论的条数与落笔清单不同源").toBe(recorded(runDeps).appliedLocations?.length);
+    // 已达成的 a 不进第二次的备份
+    const lastBackup = runDeps.createBackupSnapshot.mock.calls[
+      runDeps.createBackupSnapshot.mock.calls.length - 1
+    ][0] as Array<{ dataId: string }>;
+    expect(lastBackup.map((config) => config.dataId)).toEqual(["c.yaml"]);
+  });
+
+  it("勾选项全部已达成：不写、不备份、不记历史，也不报成执行完成", async () => {
+    const plan = applyPlan([
+      { ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") },
+      { ref: ref("c.yaml"), sourceValue: documentValue("c2"), targetValue: documentValue("c1") },
+    ]);
+    const runDeps = deps({
+      "conn-dev:a.yaml": doc("a2"),
+      "conn-prod:a.yaml": doc("a2"),
+      "conn-dev:c.yaml": doc("c2"),
+      "conn-prod:c.yaml": doc("c2"),
+    });
+
+    const result = await executeApplyPlan(plan, runDeps);
+
+    expect(result).toEqual({
+      ok: true,
+      alreadyAppliedOnly: true,
+      taskId: "task-apply-1",
+      alreadyApplied: [labelOf("a.yaml"), labelOf("c.yaml")],
+    });
+    // 用 not.toHaveProperty 而不是 result.historyId：这一支返回的是 alreadyAppliedOnly 变体，
+    // 收窄到「普通成功」才能读 historyId，而这里要的恰恰是「没写 ⇒ 没有记录、没有回读结论」。
+    expect(result, "没写任何东西却留下一条历史记录").not.toHaveProperty("historyId");
+    expect(result).not.toHaveProperty("verification");
+    expect(runDeps.publishConfig).not.toHaveBeenCalled();
+    expect(runDeps.createBackupSnapshot).not.toHaveBeenCalled();
+    expect(runDeps.recordOperation).not.toHaveBeenCalled();
+    expect(runDeps.taskManager.completeTask).toHaveBeenCalledWith("task-apply-1", true);
+  });
+
+  it("老计划没有 failedItemId 时行为不变：进度里不带这个字段就不算异常", async () => {
+    const plan = applyPlan([{ ref: ref("a.yaml"), sourceValue: documentValue("a2"), targetValue: documentValue("a1") }]);
+    const runDeps = deps({ "conn-dev:a.yaml": doc("a2"), "conn-prod:a.yaml": doc("a1") });
+
+    const result = await executeApplyPlan(plan, runDeps, { verifyDelaysMs: [0] });
+
+    expect(result).toMatchObject({ ok: true });
+    expect((result as { alreadyApplied?: string[] }).alreadyApplied, "没有已达成项时不该冒出空数组之外的东西").toBeUndefined();
   });
 });

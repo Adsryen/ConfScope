@@ -15,6 +15,7 @@ import {
   type ApplyPlanRef,
   type ApplyPlanValueInput,
 } from "./applyPlan";
+import { isTargetAlreadyApplied, writeMatchesReadBack, type ApplyWriteKind } from "./applyWriteEquivalence";
 import {
   buildApplyOperationHistoryInput,
   operationTypeForApplyPlan,
@@ -79,8 +80,31 @@ export interface ExecuteApplyPlanOptions {
 }
 
 export type ExecuteApplyPlanResult =
-  | { ok: true; taskId: string; historyId: string; verification?: ApplyWriteVerification }
-  | { ok: true; dryRun: true; taskId: string; plannedWrites: number }
+  | {
+      ok: true;
+      taskId: string;
+      historyId: string;
+      verification?: ApplyWriteVerification;
+      /** 本轮判定「目标已经是这一版」而没有落笔的项（人读标签）：界面要能说清它们没被重复写。 */
+      alreadyApplied?: string[];
+    }
+  | { ok: true; dryRun: true; taskId: string; plannedWrites: number; alreadyApplied?: string[] }
+  | {
+      /**
+       * 勾选项全部已达成（轮98 A5）。
+       *
+       * 这是一条独立结论，不能塞进 `historyId` 那条成功分支：一个字节都没写，所以既不建备份
+       * 也不记操作历史——往审计里记一条"变更执行完成"就是假事，回退入口也会指向一份不存在的现场。
+       */
+      ok: true;
+      alreadyAppliedOnly: true;
+      taskId: string;
+      // 显式声明"这一轮没有可指的历史/验证现场"：调用方收窄后读这两个字段拿到 undefined，
+      // 而不是靠运行时属性不存在去猜（回退入口与回读结论都不许凭空出现）。
+      historyId?: undefined;
+      verification?: undefined;
+      alreadyApplied: string[];
+    }
   | {
       ok: false;
       taskId?: string;
@@ -89,6 +113,7 @@ export type ExecuteApplyPlanResult =
       progress?: ApplyExecutionProgress;
       /** 半截写入时同样回读（B1）：失败前落成功的那几条到底生效没有，必须能报出来。 */
       verification?: ApplyWriteVerification;
+      alreadyApplied?: string[];
     };
 
 /**
@@ -135,6 +160,13 @@ export interface ApplyExecutionProgress {
   failedIndex?: number;
   /** 失败项的人读标签（命名空间/分组/dataId (+ key)）。 */
   failedRef?: string;
+  /**
+   * 失败项的 itemId（轮98）。
+   *
+   * 界面上「跳过这一项，继续剩下的」要摘掉的正是这一项。让人去拿 failedRef 那段文字反查 id
+   * 等于再造一份标签解析规则；老现场里没有这个字段 ⇒ 出口不出现，行为与今天一致。
+   */
+  failedItemId?: string;
 }
 
 function targetSearchText(connection: Connection | null | undefined, endpoint: ApplyPlanEndpoint): string {
@@ -197,10 +229,13 @@ function summarizeItems(items: ApplyPlanItem[]): ApplyPlan["summary"] {
   return summary;
 }
 
-function selectPlanItems(plan: ApplyPlan, selectedItemIds?: string[]): ApplyPlan {
-  if (!selectedItemIds) return plan;
-  const selected = new Set(selectedItemIds);
-  const items = plan.items.filter((item) => selected.has(item.id));
+/**
+ * 换一份项清单，重算所有派生计数。
+ *
+ * `summary` 与 `inputSummary.selectedCount` 都是从 items 算出来的，任何一处绕过这颗函数
+ * 手动 filter，界面上的计数条与操作历史里的 planSummary 就会跟实际写的项数不一致。
+ */
+function withItems(plan: ApplyPlan, items: ApplyPlanItem[]): ApplyPlan {
   return {
     ...plan,
     items,
@@ -210,6 +245,15 @@ function selectPlanItems(plan: ApplyPlan, selectedItemIds?: string[]): ApplyPlan
     },
     summary: summarizeItems(items),
   };
+}
+
+function selectPlanItems(plan: ApplyPlan, selectedItemIds?: string[]): ApplyPlan {
+  if (!selectedItemIds) return plan;
+  const selected = new Set(selectedItemIds);
+  return withItems(
+    plan,
+    plan.items.filter((item) => selected.has(item.id))
+  );
 }
 
 function sourceRef(item: ApplyPlanItem) {
@@ -373,6 +417,21 @@ function executableItems(plan: ApplyPlan): ApplyPlanItem[] {
 }
 
 /**
+ * 新鲜度现场的一份读数：指纹 + 那一侧的现值本身。
+ *
+ * 轮98 起要把现值一起带出来：「目标已经等于要写的那一版」这条判定吃的正是正文，
+ * 而它必须发生在同一趟读取里——再读一次就等于给校验开了第二个现场，两次之间被人改过
+ * 的话，判据说的就不是要落笔的那一刻。公开的 `ApplyPlanFreshnessSnapshot` 形状不动，
+ * 别处（审计、界面、既有测试）拿到的还是三元组。
+ */
+interface FreshnessReading {
+  itemId: string;
+  side: ApplyPlanFreshnessSide;
+  fingerprint: string;
+  value: ApplyPlanValueInput;
+}
+
+/**
  * 新鲜度快照：每项两端各读一次现值（R55-D1 起按 BATCH_READ_CONCURRENCY 并发）。
  *
  * 顺序不能乱——快照数组要按项配对写进审计与比对，mapWithConcurrency 按下标回填，
@@ -383,7 +442,7 @@ async function freshnessSnapshots(
   sourceConnection: Connection,
   targetConnection: Connection,
   deps: ExecuteApplyPlanDeps
-): Promise<ApplyPlanFreshnessSnapshot[]> {
+): Promise<FreshnessReading[]> {
   const perItem = await mapWithConcurrency(plan.items, BATCH_READ_CONCURRENCY, async (item) => {
     const [sourceValue, targetValue] = await Promise.all([
       readCurrentValue(item, sourceConnection, "source", deps),
@@ -394,11 +453,13 @@ async function freshnessSnapshots(
         itemId: item.id,
         side: "source" as const,
         fingerprint: sourceValue.fingerprint ?? fingerprintApplyPlanValue(sourceRef(item), sourceValue),
+        value: sourceValue,
       },
       {
         itemId: item.id,
         side: "target" as const,
         fingerprint: targetValue.fingerprint ?? fingerprintApplyPlanValue(targetRef(item), targetValue),
+        value: targetValue,
       },
     ];
   });
@@ -412,7 +473,7 @@ async function beforeSnapshots(plan: ApplyPlan, targetConnection: Connection, de
 
 interface PlannedWrite {
   item: ApplyPlanItem;
-  kind: "publish" | "delete" | "publish_ref" | "delete_ref";
+  kind: ApplyWriteKind;
   content?: string;
   configType?: string;
 }
@@ -449,47 +510,108 @@ function providerWriteRef(item: ApplyPlanItem): ApplyPlanWriteRef | string {
   return { ...ref, expectedVersion };
 }
 
+/**
+ * 这一项要落的那一笔；`null` = 不用落（skip），`string` = 这一项根本写不了（错误文案）。
+ *
+ * 拆成单项是轮98 的要求：写前的「目标已经是这一版了吗」必须按项问同一个问题，
+ * 而那份判据吃的 kind / content 与真正落笔时用的是同一份。留成整份计划一个函数，
+ * 判定处就只能再算一遍写入形状——两处各算各的，早晚对不上。
+ */
+function writeForItem(item: ApplyPlanItem): PlannedWrite | string | null {
+  const ref = targetRef(item);
+  // 阻断项本来就被界面过滤掉了，这条是兜底出路；文案里吐 itemId 的 `|` 拼接串等于没说（R55-B4）
+  if (item.blocked || item.action === "parse_error") return translate("apply.blockedItem", { id: itemRefLabel(ref) });
+  if (item.action === "skip") return null;
+  if (ref.key !== DOCUMENT_KEY) {
+    if (!isProviderKeyWriteSupported(item)) {
+      return translate("apply.keyLevelWriteUnsupported", { ref: `${ref.dataId}/${ref.key}`, format: formatForWrite(item) });
+    }
+    if (item.action === "delete") {
+      return { item, kind: "delete_ref" };
+    }
+    if (item.action === "create" || item.action === "overwrite") {
+      return { item, kind: "publish_ref", content: valueForKeyWrite(item), configType: nacosType(formatForWrite(item)) };
+    }
+    return null;
+  }
+  if (ref.provider === "consul") {
+    const writeRef = providerWriteRef(item);
+    if (typeof writeRef === "string") return writeRef;
+    if (item.action === "delete") {
+      return { item, kind: "delete_ref" };
+    }
+    if (item.action === "create" || item.action === "overwrite") {
+      return { item, kind: "publish_ref", content: contentForDocumentWrite(item), configType: nacosType(formatForWrite(item)) };
+    }
+    return null;
+  }
+  if (item.action === "delete") {
+    return { item, kind: "delete" };
+  }
+  if (item.action === "create" || item.action === "overwrite") {
+    return { item, kind: "publish", content: contentForDocumentWrite(item), configType: nacosType(formatForWrite(item)) };
+  }
+  return null;
+}
+
 function planWrites(plan: ApplyPlan): PlannedWrite[] | string {
   const writes: PlannedWrite[] = [];
   for (const item of plan.items) {
-    const ref = targetRef(item);
-    // 阻断项本来就被界面过滤掉了，这条是兜底出路；文案里吐 itemId 的 `|` 拼接串等于没说（R55-B4）
-    if (item.blocked || item.action === "parse_error") return translate("apply.blockedItem", { id: itemRefLabel(ref) });
-    if (item.action === "skip") continue;
-    if (ref.key !== DOCUMENT_KEY) {
-      if (!isProviderKeyWriteSupported(item)) {
-        return translate("apply.keyLevelWriteUnsupported", { ref: `${ref.dataId}/${ref.key}`, format: formatForWrite(item) });
-      }
-      if (item.action === "delete") {
-        writes.push({ item, kind: "delete_ref" });
-        continue;
-      }
-      if (item.action === "create" || item.action === "overwrite") {
-        writes.push({ item, kind: "publish_ref", content: valueForKeyWrite(item), configType: nacosType(formatForWrite(item)) });
-        continue;
-      }
-    }
-    if (ref.provider === "consul") {
-      const writeRef = providerWriteRef(item);
-      if (typeof writeRef === "string") return writeRef;
-      if (item.action === "delete") {
-        writes.push({ item, kind: "delete_ref" });
-        continue;
-      }
-      if (item.action === "create" || item.action === "overwrite") {
-        writes.push({ item, kind: "publish_ref", content: contentForDocumentWrite(item), configType: nacosType(formatForWrite(item)) });
-        continue;
-      }
-    }
-    if (item.action === "delete") {
-      writes.push({ item, kind: "delete" });
-      continue;
-    }
-    if (item.action === "create" || item.action === "overwrite") {
-      writes.push({ item, kind: "publish", content: contentForDocumentWrite(item), configType: nacosType(formatForWrite(item)) });
-    }
+    const write = writeForItem(item);
+    if (typeof write === "string") return write;
+    if (write) writes.push(write);
   }
   return writes;
+}
+
+/** 新鲜度里「这一侧的现值」的索引键，与 `applyPlan.freshnessKey` 同一形状（那边未导出）。 */
+function sideKey(itemIdValue: string, side: ApplyPlanFreshnessSide): string {
+  return `${itemIdValue}|${side}`;
+}
+
+interface StaleSplit {
+  /** 真过期：仍然要拦住整份计划的项。 */
+  stale: ApplyPlanFreshnessIssue[];
+  /** 已达成：目标本来就是这一版，这一轮不该再碰它。 */
+  alreadyApplied: { itemId: string; label: string }[];
+}
+
+/**
+ * 把 target 侧的「指纹变了」拆成两种完全不同的事（轮98 的核心判据）。
+ *
+ * - 目标现在**正好等于要写进去的那一版** ⇒ 已达成。多半是上一次半截执行里写成功的那几条：
+ *   它们与「计划记录的写入前指纹」当然不等，但那不是冲突，是已经干完的活。
+ * - 目标变成了第三方的值 ⇒ 真过期，照常拦。
+ *
+ * 只豁免 target 侧：source 侧变了说明「要搬的东西」本身变了，这份计划不再代表用户勾的那件事。
+ * 判据必须先看这一侧有没有 issue——指纹没变的项照常走写入分类，不许被「已达成」吞掉
+ * （create/overwrite 与目标同值那种情形由动作分类负责，这里不造第二条规则）。
+ *
+ * `writeForItem` 返回错误文案（consul 缺 ModifyIndex 这类）时不判已达成也不报新错：
+ * 让原来的 planWrites 在原来的位置报它，错误出现的先后不随本轮改动漂移。
+ */
+function splitStaleVsApplied(
+  plan: ApplyPlan,
+  issues: ApplyPlanFreshnessIssue[],
+  targetValues: Map<string, ApplyPlanValueInput>
+): StaleSplit {
+  const stale: ApplyPlanFreshnessIssue[] = [];
+  const alreadyApplied: StaleSplit["alreadyApplied"] = [];
+  for (const issue of issues) {
+    if (issue.side === "source") {
+      stale.push(issue);
+      continue;
+    }
+    const item = plan.items.find((candidate) => candidate.id === issue.itemId);
+    const current = targetValues.get(sideKey(issue.itemId, "target"));
+    const write = item ? writeForItem(item) : null;
+    if (item && write && typeof write !== "string" && current && isTargetAlreadyApplied(write, current)) {
+      alreadyApplied.push({ itemId: item.id, label: itemRefLabel(targetRef(item)) });
+      continue;
+    }
+    stale.push(issue);
+  }
+  return { stale, alreadyApplied };
 }
 
 /** 写后可见窗口（真机取证，轮55 B线）：单节点 loopback 也要 54–145ms 才读得到新值。 */
@@ -503,23 +625,6 @@ function sleep(ms: number): Promise<void> {
 interface WrittenWrite {
   write: PlannedWrite;
   refLabel: string;
-}
-
-/**
- * 写入值与回读值是不是同一份（R55-B1）。
- *
- * 口径刻意不用 fingerprint：`fingerprintApplyPlanValue` 把 md5 / format / parseStatus
- * 一起卷了进去，而 `afterValue` 是计划阶段造的、回读值是现读现算的，两边不同源，
- * 比出来的差异绝大多数是噪声（真机 detail 接口的 md5 在 showAll 下还恒为 null）。
- * 取证结论是 provider 原样保留正文——CRLF、尾随空格、无尾换行都不改写——所以直接比字符串：
- * 整篇写入比整篇正文，key 级写入比这一项读回来的值，删除比「读不到了」。
- */
-function writeMatchesReadBack(write: PlannedWrite, current: ApplyPlanValueInput): boolean {
-  if (write.kind === "delete" || write.kind === "delete_ref") return !current.exists;
-  if (!current.exists) return false;
-  const actual = current.content ?? current.value;
-  if (actual === undefined) return false;
-  return actual === (write.content ?? "");
 }
 
 async function verifyWrittenWrite(
@@ -644,6 +749,8 @@ interface RecordFailureExtras {
    * 一条都没写成传 `[]`，半截失败传已经落成功的那些。传漏了编译不过，避免再退化成「全部勾选项」。
    */
   appliedLocations: AppliedConfigLocation[];
+  /** 本轮判定已达成的项（人读标签），失败屏也要据实说「另有 N 项不用写」。 */
+  alreadyApplied?: string[];
 }
 
 function recordFailure(
@@ -670,8 +777,23 @@ function recordFailure(
   }
   deps.taskManager.completeTask(taskId, false, error);
   return recordHistory
-    ? { ok: false, taskId, historyId, error, progress: extras.progress, verification: extras.verification }
-    : { ok: false, taskId, error, progress: extras.progress, verification: extras.verification };
+    ? {
+        ok: false,
+        taskId,
+        historyId,
+        error,
+        progress: extras.progress,
+        verification: extras.verification,
+        alreadyApplied: extras.alreadyApplied,
+      }
+    : {
+        ok: false,
+        taskId,
+        error,
+        progress: extras.progress,
+        verification: extras.verification,
+        alreadyApplied: extras.alreadyApplied,
+      };
 }
 
 /** 前置失败（一条都没写出去）的公共 extras：dry-run 不落历史，落笔范围恒空。 */
@@ -685,6 +807,10 @@ export async function executeApplyPlan(
   options: ExecuteApplyPlanOptions = {}
 ): Promise<ExecuteApplyPlanResult> {
   const workingPlan = selectPlanItems(plan, options.selectedItemIds);
+  // 已达成的项要从现在起一路替换掉工作计划：写入、写前快照、备份、落笔清单、操作历史
+  // 必须同一份口径。声明在 try 外面，split 之后的异常才还能按这份口径记账。
+  let executionPlan = workingPlan;
+  let alreadyAppliedLabels: string[] = [];
   if (options.selectedItemIds && workingPlan.items.length === 0) {
     return { ok: false, error: translate("apply.noSelectedItems") };
   }
@@ -717,27 +843,58 @@ export async function executeApplyPlan(
       return recordFailure(workingPlan, deps, taskId, targetConnection, emptyBackup(), failureExtras(options, []));
 
   try {
-    const currentSnapshots = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
+    const readings = await freshnessSnapshots(workingPlan, sourceConnection, targetConnection, deps);
+    const currentSnapshots: ApplyPlanFreshnessSnapshot[] = readings.map(({ itemId, side, fingerprint }) => ({
+      itemId,
+      side,
+      fingerprint,
+    }));
     const freshness = validateApplyPlanFreshness(workingPlan, currentSnapshots);
-    if (!freshness.ok) {
+    const targetValues = new Map<string, ApplyPlanValueInput>();
+    for (const reading of readings) {
+      if (reading.side === "target") targetValues.set(sideKey(reading.itemId, "target"), reading.value);
+    }
+    const split = splitStaleVsApplied(workingPlan, freshness.staleItems, targetValues);
+    if (split.stale.length > 0) {
+      // 只有真冲突的项能进这份清单：已达成的项报成"过期"会吓住用户，也把他下一步该做的事说反。
       const error = translate("apply.planStale", {
-        items: freshness.staleItems.map((issue) => staleIssueLabel(workingPlan, issue)).join(", "),
+        items: split.stale.map((issue) => staleIssueLabel(workingPlan, issue)).join(", "),
       });
       return recordFailure(workingPlan, deps, taskId, error, emptyBackup(), failureExtras(options, []));
     }
+    alreadyAppliedLabels = split.alreadyApplied.map((entry) => entry.label);
+    if (split.alreadyApplied.length > 0) {
+      const done = new Set(split.alreadyApplied.map((entry) => entry.itemId));
+      executionPlan = withItems(
+        workingPlan,
+        workingPlan.items.filter((item) => !done.has(item.id))
+      );
+    }
 
-    const writes = planWrites(workingPlan);
-    if (typeof writes === "string")
-      return recordFailure(workingPlan, deps, taskId, writes, emptyBackup(), failureExtras(options, []));
+    const writes = planWrites(executionPlan);
+    if (typeof writes === "string") return recordFailure(executionPlan, deps, taskId, writes, emptyBackup(), failureExtras(options, []));
 
     if (options.dryRun) {
       deps.taskManager.updateProgress(taskId, writes.length, writes.length, writes.length);
       deps.taskManager.completeTask(taskId, true);
-      return { ok: true, dryRun: true, taskId, plannedWrites: writes.length };
+      return {
+        ok: true,
+        dryRun: true,
+        taskId,
+        plannedWrites: writes.length,
+        alreadyApplied: alreadyAppliedLabels.length ? alreadyAppliedLabels : undefined,
+      };
     }
 
-    const before = await beforeSnapshots(workingPlan, targetConnection, deps);
-    const safety = await prepareApplyExecutionSafety(workingPlan, before, {
+    if (writes.length === 0 && alreadyAppliedLabels.length > 0) {
+      // 全部已达成：不建备份、不写、不记历史，任务照常收尾（它这一轮确实干完了）。
+      deps.taskManager.updateProgress(taskId, 0, 0, 0);
+      deps.taskManager.completeTask(taskId, true);
+      return { ok: true, alreadyAppliedOnly: true, taskId, alreadyApplied: alreadyAppliedLabels };
+    }
+
+    const before = await beforeSnapshots(executionPlan, targetConnection, deps);
+    const safety = await prepareApplyExecutionSafety(executionPlan, before, {
       createBackupSnapshot: deps.createBackupSnapshot,
       taskId,
     });
@@ -754,12 +911,14 @@ export async function executeApplyPlan(
     const writtenWrites: WrittenWrite[] = [];
     let attemptedIndex = 0;
     let attemptedRefLabel = "";
+    let attemptedItemId = "";
     let completedWrites = 0;
     try {
       for (const write of writes) {
         const ref = targetRef(write.item);
         attemptedIndex += 1;
         attemptedRefLabel = itemRefLabel(ref);
+        attemptedItemId = write.item.id;
         // 完整现场：写入前目标当前内容（best-effort；读失败不阻断执行）
         let beforeContent: string | undefined;
         let currentFingerprint: string | undefined;
@@ -833,21 +992,24 @@ export async function executeApplyPlan(
     } catch (error) {
       // 部分写入：失败项之前落成功的那些已经改过服务端了，先回读确认它们到底生效没有，
       // 再广播失效——回读排在广播之前，免得保活视图在可见窗口里重取到旧值。
-      const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
+      const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, executionPlan.id);
       notifyConfigsChanged();
-      return recordFailure(workingPlan, deps, taskId, errorText(error), safety.backup, {
+      return recordFailure(executionPlan, deps, taskId, errorText(error), safety.backup, {
         progress: {
           completedWrites,
           totalWrites: writes.length,
           failedIndex: attemptedIndex,
           failedRef: attemptedRefLabel,
+          // 界面「跳过这一项，继续剩下的」据此摘除失败项；空串按没有处理，老形态不留假出口
+          failedItemId: attemptedItemId || undefined,
         },
         verification,
         appliedLocations: writtenLocations.list(),
+        alreadyApplied: alreadyAppliedLabels.length ? alreadyAppliedLabels : undefined,
       });
     }
 
-    const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, workingPlan.id);
+    const verification = await verifyWrittenWrites(writtenWrites, targetConnection, deps, options, executionPlan.id);
     // prepare 那份 historyInput 里的范围是「计划要写的全部可执行项」；落记录时换成逐条攒出来的
     // 落笔清单（轮79 E4）——正常路径两者等值，但来源必须是这一份，失败/成功才共用同一口径。
     const history = deps.recordOperation({
@@ -857,7 +1019,13 @@ export async function executeApplyPlan(
     });
     deps.taskManager.completeTask(taskId, true);
     notifyConfigsChanged();
-    return { ok: true, taskId, historyId: history.id, verification };
+    return {
+      ok: true,
+      taskId,
+      historyId: history.id,
+      verification,
+      alreadyApplied: alreadyAppliedLabels.length ? alreadyAppliedLabels : undefined,
+    };
   } catch (error) {
     notifyConfigsChanged();
     // 外层兜底：异常可能发生在写入循环之后（回读确认、快照等），此时前面几条已经落库，
