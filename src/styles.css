@@ -9467,6 +9467,8 @@ button.diff-workflow-step-btn:hover {
 .log-event-payload:focus-visible,
 .audit-detail-value:focus-visible,
 .inline-error-body:focus-visible,
+/* 轮95 R3：兜底界面的诊断正文同样要「能被 Tab 停进来、停得看得见」。 */
+.app-crash-detail:focus-visible,
 .update-release-notes:focus-visible,
 .match-side-scroll:focus-visible,
 /* 轮48：查找栏关掉后焦点归还给这块正文，它同时是 Tab 可达的滚动区，环必须看得见。 */
@@ -9488,4 +9490,89 @@ button.diff-workflow-step-btn:hover {
   right: 26px;
   z-index: 6;
   pointer-events: none;
+}
+/*
+ * 崩溃兜底界面（轮95 R3/R4）。
+ *
+ * 为什么单独一段：它是 React 那棵树被卸载之后唯一还要说话的东西，所以只用最基础的令牌，
+ * 不借任何页面级容器（.page-surface / .settings-panel 之类）——出错那一刻那些容器的状态本身不可信。
+ * 承托面实测就是 --bg（#1e1e1e，#root 的直接子节点），正文 --text、标题 --red-text、
+ * 次要 --text-dim，三档在 --bg 与正文块的 --bg2 上都 >= 4.5:1
+ * （口径见 .trellis/spec/frontend/visual-contrast-guidelines.md §2 令牌分层）。
+ */
+.app-crash {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 26px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-crash-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.app-crash-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--red-text);
+}
+
+.app-crash-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-crash-lead,
+.app-crash-hint {
+  margin: 0;
+  max-width: 960px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.app-crash-lead {
+  color: var(--text);
+}
+
+.app-crash-hint {
+  color: var(--text-dim);
+}
+
+.app-crash-detail-label {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+/*
+ * 诊断正文：全站 body{user-select:none}，这一块的文本是要被抄去反馈的，必须就地放开
+ * （与 .inline-error-body 同一口径）。可滚动 + 收住滚动链 + 键盘停得进来。
+ */
+.app-crash-detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg2);
+  color: var(--text);
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-user-select: text;
+  user-select: text;
 }

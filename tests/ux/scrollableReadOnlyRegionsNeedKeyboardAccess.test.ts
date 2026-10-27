@@ -223,6 +223,7 @@ const FOCUS_RING_CLASSES = [
   "log-event-payload",
   "audit-detail-value",
   "inline-error-body",
+  "app-crash-detail",
   "update-release-notes",
   "match-side-scroll",
   "diff-body",

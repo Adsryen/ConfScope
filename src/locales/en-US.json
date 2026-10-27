@@ -1565,5 +1565,19 @@
   },
   "toast": {
     "stackLabel": "Notifications"
+  },
+  "crash": {
+    "title": "This screen stopped rendering",
+    "lead": "The interface threw while rendering, so this screen could not be drawn. Your local data files were not modified, and nothing was written to the config center.",
+    "reload": "Reload the interface",
+    "reloadHint": "Reloading only rebuilds the interface: it does not restart the app, touch local data, or affect tasks already running.",
+    "copy": "Copy diagnostics",
+    "copyAria": "Copy diagnostics",
+    "detail": "Diagnostics (complete, not truncated)",
+    "again": "If this screen comes back after reloading, paste the diagnostics above into a GitHub Issue - that text is what we trace the problem from.",
+    "messageTitle": "Interface failed to render; this screen fell back to diagnostics",
+    "stackLabel": "React component stack",
+    "stackNone": "(none)",
+    "timeLabel": "Occurred at"
   }
 }
