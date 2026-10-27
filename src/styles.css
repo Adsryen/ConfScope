@@ -6111,12 +6111,18 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.6;
 }
 
-.about-section a {
+/* 链接着色只管正文里的链接，不许越过按钮 tone（轮95 真机普查抓到的实伤）：
+   `.about-section a` 特异度 (0,1,1) 严格高于 `.btn-primary` (0,1,0)，所以挂在关于页
+   「提交 Issue（自动带上环境信息）」这颗 .btn.btn-primary 外链上的文字被涂成 --accent-text
+   #4fc3f7，落在实心蓝 --accent #007acc 上实测 2.25:1（要求 4.5）。写成 :not(.btn) 后
+   「按钮的字色只由 tone 决定」这条重新成立，ghost 档外链按钮也回到全站同一支笔。
+   判据守卫：tests/ux/linkColorRulesMustNotRepaintButtonTones.test.ts */
+.about-section a:not(.btn) {
   color: var(--accent-text);
   text-decoration: none;
 }
 
-.about-section a:hover {
+.about-section a:not(.btn):hover {
   text-decoration: underline;
 }
 
@@ -6448,13 +6454,16 @@ button.diff-workflow-step-btn:hover {
   line-height: 1.5;
 }
 
-.about-footer a {
+/* 同 .about-section a 一条口径（轮95 R7）：特异度 (0,1,1) 压得过 .btn-primary/.btn-ghost 的 (0,1,0)。
+   今天页脚里没有挂 .btn 的外链，但规则写着就是把上了膛的枪留给下一个人——守卫
+   tests/ux/linkColorRulesMustNotRepaintButtonTones.test.ts 判它红，故一并排除 .btn。 */
+.about-footer a:not(.btn) {
   color: var(--accent-text);
   text-decoration: none;
   font-weight: 500;
 }
 
-.about-footer a:hover {
+.about-footer a:not(.btn):hover {
   text-decoration: underline;
 }
 
