@@ -38,7 +38,13 @@ type GoApp = {
   ReadAuditLogLines(limit: number): Promise<string[]>;
   AppendConfigRevision(input: ConfigRevisionInput): Promise<ConfigRevisionAppendResult>;
   ReadConfigRevisions(limit: number): Promise<ConfigRevisionRecord[]>;
-  ReadConfigRevisionsForKey(connectionID: string, namespace: string, group: string, dataID: string, limit: number): Promise<ConfigRevisionRecord[]>;
+  ReadConfigRevisionsForKey(
+    connectionID: string,
+    namespace: string,
+    group: string,
+    dataID: string,
+    limit: number
+  ): Promise<ConfigRevisionRecord[]>;
   PruneConfigRevisions(keepPerKey: number): Promise<number>;
   ClearConfigRevisions(): Promise<void>;
   GetConfigRevisionFacts(): Promise<ConfigRevisionFacts>;
@@ -355,93 +361,132 @@ declare global {
   }
 }
 
-const app = () => window.go.app.App;
+/**
+ * 原生绑定缺失时抛这个，而不是留一句 `app().X is not a function`：
+ * 报错必须说得出**是哪一个方法**没了。轮94 的白屏根因就是这个名字没人报出来 ——
+ * 「关于」页挂载时取反馈事实，桥的方法表里少一个名字，整棵 React 树被卸载，
+ * 探针读到的只是「提示没弹」，谁也没想到缺的是一颗方法表里的键。
+ */
+export class MissingNativeBindingError extends Error {
+  readonly binding: string;
 
-export const GetAppInfo = () => app().GetAppInfo();
+  constructor(binding: string) {
+    super(`原生绑定 window.go.app.App.${binding} 不可用：` + `请确认 Go 侧方法名与本文件一致（复测环境需要由复测桥补上同名替身）`);
+    this.name = "MissingNativeBindingError";
+    this.binding = binding;
+  }
+}
 
-export const CheckForUpdates = (request: any) => app().CheckForUpdates(request);
+/**
+ * 唯一的原生调用出口（轮95）。两条不变式，缺一不可：
+ *  ① **返回值永远是 Promise**。绑定缺失、`window.go` 还没注入、Go 侧同步抛错，
+ *     一律退化成 rejection —— 调用点的 `.catch()` 与 errorCenter 抓得到。
+ *     同步抛错会绕过这两层，在 render/effect 阶段炸穿，React 卸载整个 root。
+ *  ② **报错里必须带方法名**。`x is not a function` 定位不到是哪颗绑定。
+ *
+ * 静态守卫 `tests/ux/nativeBindingsUseSingleAsyncExit.test.ts` 钉住这两条：
+ * 本文件里除本函数外不得再出现 `window.go` 或 `app()` 形态的直接调用。
+ */
+function call<K extends keyof GoApp>(name: K, ...args: Parameters<GoApp[K]>): ReturnType<GoApp[K]> {
+  const invoke = () => {
+    const api = window.go?.app?.App;
+    const candidate = api ? (api[name] as unknown) : undefined;
+    if (typeof candidate !== "function") throw new MissingNativeBindingError(String(name));
+    const method = candidate as (...a: Parameters<GoApp[K]>) => ReturnType<GoApp[K]>;
+    return method(...args);
+  };
+  // 走 Promise.resolve().then 而不是 async 包装：GoApp 的方法一律声明成 Promise<...>，
+  // 这样每个包装的对外签名与改造前**逐字一致**（调用点零漂移），而 invoke 里的同步抛错
+  // 已经被 .then 的边界吃成 rejection —— 这正是这一层要买的唯一东西。
+  return Promise.resolve().then(invoke) as ReturnType<GoApp[K]>;
+}
+
+export const GetAppInfo = () => call("GetAppInfo");
+
+export const CheckForUpdates = (request: any) => call("CheckForUpdates", request);
 
 export const DownloadUpdate = (downloadURL: string, sha256: string, proxy: UpdateProxyConfig) =>
-  app().DownloadUpdate(downloadURL, sha256, proxy);
+  call("DownloadUpdate", downloadURL, sha256, proxy);
 
-export const GetDownloadProgress = () => app().GetDownloadProgress();
+export const GetDownloadProgress = () => call("GetDownloadProgress");
 
 // 升级的出路只有交给别人这几条，程序从不覆盖自己的二进制。
 // 传空串表示回落到 Go 侧记住的最后一次下载结果（见 internal/app/app.go）。
-export const LaunchUpdateInstaller = (downloadedFile: string) => app().LaunchUpdateInstaller(downloadedFile);
+export const LaunchUpdateInstaller = (downloadedFile: string) => call("LaunchUpdateInstaller", downloadedFile);
 
-export const RevealDownloadedArtifact = (downloadedFile: string) => app().RevealDownloadedArtifact(downloadedFile);
+export const RevealDownloadedArtifact = (downloadedFile: string) => call("RevealDownloadedArtifact", downloadedFile);
 
-export const AttachUpdateImage = (downloadedFile: string) => app().AttachUpdateImage(downloadedFile);
+export const AttachUpdateImage = (downloadedFile: string) => call("AttachUpdateImage", downloadedFile);
 
-export const UpdateInstallCommand = (downloadedFile: string) => app().UpdateInstallCommand(downloadedFile);
+export const UpdateInstallCommand = (downloadedFile: string) => call("UpdateInstallCommand", downloadedFile);
 
-export const ListActiveSSHTunnels = () => app().ListActiveSSHTunnels();
+export const ListActiveSSHTunnels = () => call("ListActiveSSHTunnels");
 
-export const QuitApplication = () => app().QuitApplication();
+export const QuitApplication = () => call("QuitApplication");
 
-export const GetCurrentPlatform = () => app().GetCurrentPlatform();
+export const GetCurrentPlatform = () => call("GetCurrentPlatform");
 
-export const GetFeedbackDiagnostics = () => app().GetFeedbackDiagnostics();
+export const GetFeedbackDiagnostics = () => call("GetFeedbackDiagnostics");
 
-export const RunCredentialStorePoC = (runID: string) => app().RunCredentialStorePoC(runID);
+export const RunCredentialStorePoC = (runID: string) => call("RunCredentialStorePoC", runID);
 
-export const WriteSecureSecret = (ref: SecureSecretRef, value: string) => app().WriteSecureSecret(ref, value);
+export const WriteSecureSecret = (ref: SecureSecretRef, value: string) => call("WriteSecureSecret", ref, value);
 
-export const ReadSecureSecret = (ref: SecureSecretRef) => app().ReadSecureSecret(ref);
+export const ReadSecureSecret = (ref: SecureSecretRef) => call("ReadSecureSecret", ref);
 
-export const DeleteSecureSecret = (ref: SecureSecretRef) => app().DeleteSecureSecret(ref);
+export const DeleteSecureSecret = (ref: SecureSecretRef) => call("DeleteSecureSecret", ref);
 
-export const AppendAuditEvent = (raw: string) => app().AppendAuditEvent(raw);
-export const ClearAuditTrail = () => app().ClearAuditTrail();
+export const AppendAuditEvent = (raw: string) => call("AppendAuditEvent", raw);
+export const ClearAuditTrail = () => call("ClearAuditTrail");
 
-export const ReadAuditLogLines = (limit: number) => app().ReadAuditLogLines(limit);
+export const ReadAuditLogLines = (limit: number) => call("ReadAuditLogLines", limit);
 
-export const AppendConfigRevision = (input: ConfigRevisionInput) => app().AppendConfigRevision(input);
-export const ReadConfigRevisions = (limit: number) => app().ReadConfigRevisions(limit);
+export const AppendConfigRevision = (input: ConfigRevisionInput) => call("AppendConfigRevision", input);
+export const ReadConfigRevisions = (limit: number) => call("ReadConfigRevisions", limit);
 export const ReadConfigRevisionsForKey = (connectionID: string, namespace: string, group: string, dataID: string, limit: number) =>
-  app().ReadConfigRevisionsForKey(connectionID, namespace, group, dataID, limit);
-export const PruneConfigRevisions = (keepPerKey: number) => app().PruneConfigRevisions(keepPerKey);
-export const ClearConfigRevisions = () => app().ClearConfigRevisions();
-export const GetConfigRevisionFacts = () => app().GetConfigRevisionFacts();
+  call("ReadConfigRevisionsForKey", connectionID, namespace, group, dataID, limit);
+export const PruneConfigRevisions = (keepPerKey: number) => call("PruneConfigRevisions", keepPerKey);
+export const ClearConfigRevisions = () => call("ClearConfigRevisions");
+export const GetConfigRevisionFacts = () => call("GetConfigRevisionFacts");
 
-export const SelectLocalSnapshotDirectory = () => app().SelectLocalSnapshotDirectory();
+export const SelectLocalSnapshotDirectory = () => call("SelectLocalSnapshotDirectory");
 
-export const ValidateLocalSnapshotDirectory = (path: string) => app().ValidateLocalSnapshotDirectory(path);
+export const ValidateLocalSnapshotDirectory = (path: string) => call("ValidateLocalSnapshotDirectory", path);
 
-export const SelectConfigSourceExportDirectory = () => app().SelectConfigSourceExportDirectory();
+export const SelectConfigSourceExportDirectory = () => call("SelectConfigSourceExportDirectory");
 
 export const ExportConfigSourceFiles = (targetDir: string, source: any, configs: any[]) =>
-  app().ExportConfigSourceFiles(targetDir, source, configs);
+  call("ExportConfigSourceFiles", targetDir, source, configs);
 
-export const ConfigCenterListNamespaces = (profile: any) => app().ConfigCenterListNamespaces(profile);
+export const ConfigCenterListNamespaces = (profile: any) => call("ConfigCenterListNamespaces", profile);
 
-export const ConfigCenterListConfigs = (profile: any, request: any) => app().ConfigCenterListConfigs(profile, request);
+export const ConfigCenterListConfigs = (profile: any, request: any) => call("ConfigCenterListConfigs", profile, request);
 
-export const ConfigCenterGetConfig = (profile: any, ref: any) => app().ConfigCenterGetConfig(profile, ref);
+export const ConfigCenterGetConfig = (profile: any, ref: any) => call("ConfigCenterGetConfig", profile, ref);
 
-export const ConfigCenterPublishConfig = (profile: any, request: any) => app().ConfigCenterPublishConfig(profile, request);
+export const ConfigCenterPublishConfig = (profile: any, request: any) => call("ConfigCenterPublishConfig", profile, request);
 
-export const ConfigCenterDeleteConfig = (profile: any, ref: any) => app().ConfigCenterDeleteConfig(profile, ref);
+export const ConfigCenterDeleteConfig = (profile: any, ref: any) => call("ConfigCenterDeleteConfig", profile, ref);
 
 export const ConfigCenterPublishConfigFromApplyPlan = (profile: any, request: any) =>
-  app().ConfigCenterPublishConfigFromApplyPlan(profile, request);
+  call("ConfigCenterPublishConfigFromApplyPlan", profile, request);
 
-export const ConfigCenterDeleteConfigFromApplyPlan = (profile: any, ref: any) => app().ConfigCenterDeleteConfigFromApplyPlan(profile, ref);
+export const ConfigCenterDeleteConfigFromApplyPlan = (profile: any, ref: any) =>
+  call("ConfigCenterDeleteConfigFromApplyPlan", profile, ref);
 
-export const ConfigCenterListHistory = (profile: any, ref: any, page: any) => app().ConfigCenterListHistory(profile, ref, page);
+export const ConfigCenterListHistory = (profile: any, ref: any, page: any) => call("ConfigCenterListHistory", profile, ref, page);
 
-export const ConfigCenterGetHistoryDetail = (profile: any, ref: any, id: string) => app().ConfigCenterGetHistoryDetail(profile, ref, id);
+export const ConfigCenterGetHistoryDetail = (profile: any, ref: any, id: string) => call("ConfigCenterGetHistoryDetail", profile, ref, id);
 
-export const ConfigCenterTestConnection = (profile: any) => app().ConfigCenterTestConnection(profile);
+export const ConfigCenterTestConnection = (profile: any) => call("ConfigCenterTestConnection", profile);
 
-export const NacosDetectVersion = (baseUrl: string) => app().NacosDetectVersion(baseUrl);
+export const NacosDetectVersion = (baseUrl: string) => call("NacosDetectVersion", baseUrl);
 
 export const NacosLogin = (baseUrl: string, username: string, password: string, apiVersion: string) =>
-  app().NacosLogin(baseUrl, username, password, apiVersion);
+  call("NacosLogin", baseUrl, username, password, apiVersion);
 
 export const NacosNamespaces = (baseUrl: string, accessToken: string, apiVersion: string) =>
-  app().NacosNamespaces(baseUrl, accessToken, apiVersion);
+  call("NacosNamespaces", baseUrl, accessToken, apiVersion);
 
 export const NacosListConfigs = (
   baseUrl: string,
@@ -452,7 +497,7 @@ export const NacosListConfigs = (
   group: string,
   pageNo: number,
   pageSize: number
-) => app().NacosListConfigs(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize);
+) => call("NacosListConfigs", baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize);
 
 export const NacosGetConfig = (
   baseUrl: string,
@@ -461,7 +506,7 @@ export const NacosGetConfig = (
   namespace: string,
   dataId: string,
   group: string
-) => app().NacosGetConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group);
+) => call("NacosGetConfig", baseUrl, accessToken, apiVersion, namespace, dataId, group);
 
 export const NacosHistoryList = (
   baseUrl: string,
@@ -472,7 +517,7 @@ export const NacosHistoryList = (
   group: string,
   pageNo: number,
   pageSize: number
-) => app().NacosHistoryList(baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize);
+) => call("NacosHistoryList", baseUrl, accessToken, apiVersion, namespace, dataId, group, pageNo, pageSize);
 
 export const NacosHistoryDetail = (
   baseUrl: string,
@@ -482,7 +527,7 @@ export const NacosHistoryDetail = (
   dataId: string,
   group: string,
   nid: string
-) => app().NacosHistoryDetail(baseUrl, accessToken, apiVersion, namespace, dataId, group, nid);
+) => call("NacosHistoryDetail", baseUrl, accessToken, apiVersion, namespace, dataId, group, nid);
 
 export const NacosPublishConfig = (
   baseUrl: string,
@@ -493,7 +538,7 @@ export const NacosPublishConfig = (
   group: string,
   content: string,
   configType: string
-) => app().NacosPublishConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
+) => call("NacosPublishConfig", baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
 
 export const NacosDeleteConfig = (
   baseUrl: string,
@@ -502,7 +547,7 @@ export const NacosDeleteConfig = (
   namespace: string,
   dataId: string,
   group: string
-) => app().NacosDeleteConfig(baseUrl, accessToken, apiVersion, namespace, dataId, group);
+) => call("NacosDeleteConfig", baseUrl, accessToken, apiVersion, namespace, dataId, group);
 
 export const NacosPublishConfigFromApplyPlan = (
   baseUrl: string,
@@ -513,7 +558,7 @@ export const NacosPublishConfigFromApplyPlan = (
   group: string,
   content: string,
   configType: string
-) => app().NacosPublishConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
+) => call("NacosPublishConfigFromApplyPlan", baseUrl, accessToken, apiVersion, namespace, dataId, group, content, configType);
 
 export const NacosDeleteConfigFromApplyPlan = (
   baseUrl: string,
@@ -522,79 +567,79 @@ export const NacosDeleteConfigFromApplyPlan = (
   namespace: string,
   dataId: string,
   group: string
-) => app().NacosDeleteConfigFromApplyPlan(baseUrl, accessToken, apiVersion, namespace, dataId, group);
+) => call("NacosDeleteConfigFromApplyPlan", baseUrl, accessToken, apiVersion, namespace, dataId, group);
 
-export const CreateSSHTunnel = (connectionId: string, config: any) => app().CreateSSHTunnel(connectionId, config);
+export const CreateSSHTunnel = (connectionId: string, config: any) => call("CreateSSHTunnel", connectionId, config);
 
-export const TestSSHConnection = (config: any) => app().TestSSHConnection(config);
+export const TestSSHConnection = (config: any) => call("TestSSHConnection", config);
 
-export const StopSSHTunnel = (connectionId: string) => app().StopSSHTunnel(connectionId);
+export const StopSSHTunnel = (connectionId: string) => call("StopSSHTunnel", connectionId);
 
-export const StopAllSSHTunnels = () => app().StopAllSSHTunnels();
+export const StopAllSSHTunnels = () => call("StopAllSSHTunnels");
 
-export const GetSSHTunnelLocalPort = (connectionId: string) => app().GetSSHTunnelLocalPort(connectionId);
+export const GetSSHTunnelLocalPort = (connectionId: string) => call("GetSSHTunnelLocalPort", connectionId);
 
 // 快照管理
-export const CreateSnapshot = (source: any, configs: any[]) => app().CreateSnapshot(source, configs);
+export const CreateSnapshot = (source: any, configs: any[]) => call("CreateSnapshot", source, configs);
 
-export const GetSnapshot = (id: string) => app().GetSnapshot(id);
+export const GetSnapshot = (id: string) => call("GetSnapshot", id);
 
-export const ListSnapshots = () => app().ListSnapshots();
+export const ListSnapshots = () => call("ListSnapshots");
 
-export const DeleteSnapshot = (id: string) => app().DeleteSnapshot(id);
+export const DeleteSnapshot = (id: string) => call("DeleteSnapshot", id);
 
-export const ValidateSnapshot = (path: string) => app().ValidateSnapshot(path);
+export const ValidateSnapshot = (path: string) => call("ValidateSnapshot", path);
 
-export const SelectAppDataBackupSaveFile = (defaultName: string) => app().SelectAppDataBackupSaveFile(defaultName);
+export const SelectAppDataBackupSaveFile = (defaultName: string) => call("SelectAppDataBackupSaveFile", defaultName);
 
-export const SelectAppDataBackupOpenFile = () => app().SelectAppDataBackupOpenFile();
+export const SelectAppDataBackupOpenFile = () => call("SelectAppDataBackupOpenFile");
 
 export const WriteAppDataBackupFile = (path: string, plaintextJson: string, password: string, meta: any) =>
-  app().WriteAppDataBackupFile(path, plaintextJson, password, meta);
+  call("WriteAppDataBackupFile", path, plaintextJson, password, meta);
 
-export const ReadAppDataBackupFile = (path: string, password: string) => app().ReadAppDataBackupFile(path, password);
+export const ReadAppDataBackupFile = (path: string, password: string) => call("ReadAppDataBackupFile", path, password);
 
 export const CreateAppDataRecoveryPoint = (plaintextJson: string, password: string, meta: any) =>
-  app().CreateAppDataRecoveryPoint(plaintextJson, password, meta);
+  call("CreateAppDataRecoveryPoint", plaintextJson, password, meta);
 
-export const ListAppDataSnapshotFiles = () => app().ListAppDataSnapshotFiles();
+export const ListAppDataSnapshotFiles = () => call("ListAppDataSnapshotFiles");
 
-export const RestoreAppDataSnapshotFiles = (files: any[]) => app().RestoreAppDataSnapshotFiles(files);
+export const RestoreAppDataSnapshotFiles = (files: any[]) => call("RestoreAppDataSnapshotFiles", files);
 
-export const TestAppDataWebDAV = (target: any) => app().TestAppDataWebDAV(target);
+export const TestAppDataWebDAV = (target: any) => call("TestAppDataWebDAV", target);
 
-export const ListAppDataWebDAVBackups = (target: any) => app().ListAppDataWebDAVBackups(target);
+export const ListAppDataWebDAVBackups = (target: any) => call("ListAppDataWebDAVBackups", target);
 
 export const UploadAppDataWebDAVBackup = (target: any, plaintextJson: string, password: string, meta: any) =>
-  app().UploadAppDataWebDAVBackup(target, plaintextJson, password, meta);
+  call("UploadAppDataWebDAVBackup", target, plaintextJson, password, meta);
 
 export const DownloadAppDataWebDAVBackup = (target: any, remotePath: string, password: string) =>
-  app().DownloadAppDataWebDAVBackup(target, remotePath, password);
+  call("DownloadAppDataWebDAVBackup", target, remotePath, password);
 
-export const GetAppDataDocument = () => app().GetAppDataDocument();
+export const GetAppDataDocument = () => call("GetAppDataDocument");
 
-export const SaveAppDataDocument = (document: AppDataDocument) => app().SaveAppDataDocument(document);
+export const SaveAppDataDocument = (document: AppDataDocument) => call("SaveAppDataDocument", document);
 
 // 数据位置
-export const GetDataLocations = () => app().GetDataLocations();
-export const OpenDataFolder = (key: string) => app().OpenDataFolder(key);
+export const GetDataLocations = () => call("GetDataLocations");
+export const OpenDataFolder = (key: string) => call("OpenDataFolder", key);
 
 // 数据根运行形态与换根迁移
-export const GetRuntimeLayout = () => app().GetRuntimeLayout();
-export const SelectDataRootDirectory = () => app().SelectDataRootDirectory();
-export const PlanDataRootMigration = (target: string) => app().PlanDataRootMigration(target);
-export const MigrateDataRoot = (target: string) => app().MigrateDataRoot(target);
-export const CheckDataRootRollback = () => app().CheckDataRootRollback();
-export const RollbackDataRoot = () => app().RollbackDataRoot();
+export const GetRuntimeLayout = () => call("GetRuntimeLayout");
+export const SelectDataRootDirectory = () => call("SelectDataRootDirectory");
+export const PlanDataRootMigration = (target: string) => call("PlanDataRootMigration", target);
+export const MigrateDataRoot = (target: string) => call("MigrateDataRoot", target);
+export const CheckDataRootRollback = () => call("CheckDataRootRollback");
+export const RollbackDataRoot = () => call("RollbackDataRoot");
 
-export const TestSnapshotWebDAV = (target: any) => app().TestSnapshotWebDAV(target);
+export const TestSnapshotWebDAV = (target: any) => call("TestSnapshotWebDAV", target);
 
-export const ListSnapshotWebDAVPackages = (target: any) => app().ListSnapshotWebDAVPackages(target);
+export const ListSnapshotWebDAVPackages = (target: any) => call("ListSnapshotWebDAVPackages", target);
 
 export const UploadSnapshotWebDAVPackage = (target: any, snapshotId: string, password: string) =>
-  app().UploadSnapshotWebDAVPackage(target, snapshotId, password);
+  call("UploadSnapshotWebDAVPackage", target, snapshotId, password);
 
 export const ImportSnapshotWebDAVPackage = (target: any, remotePath: string, password: string) =>
-  app().ImportSnapshotWebDAVPackage(target, remotePath, password);
+  call("ImportSnapshotWebDAVPackage", target, remotePath, password);
 
 export {};

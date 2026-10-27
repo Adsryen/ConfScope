@@ -5,7 +5,7 @@
  * toast 等 5s 没出现，读 DOM 读到的是 `document.getElementById("root").children.length === 0`
  * —— 整棵应用树被卸载成白屏。根因链很短：
  *   · About 挂载时取反馈事实：src/api/app.ts 的 getFeedbackDiagnostics() 直接调 wailsjs 包装；
- *   · wailsjs 的包装是 `() => app().GetFeedbackDiagnostics()`，**同步**取方法；
+ *   · wailsjs 的包装原先是 `() => app().GetFeedbackDiagnostics()`，**同步**取方法；
  *   · 复测桥 window.go.app.App 的方法表里没有这个名字 ⇒ 同步抛 TypeError；
  *   · 同步抛错绕过了调用点的 `.catch()`，在 render 阶段炸穿，React 卸载整个 root。
  * 也就是说「产品新增一条绑定、桥的方法表没跟着补」这件事，代价不是某条用例红，
@@ -16,7 +16,7 @@
  * 「存密码进系统凭据库」「打包应用数据备份」「导出配置源文件」在复测里只是静默空转。
  *
  * 判据取两个事实源的交集，不是「App.ts 里写了就得补」：
- *   A = wailsjs/go/app/App.ts 里 `app().X(` 形态的运行时绑定全集；
+ *   A = wailsjs/go/app/App.ts 里 `call("X", ...)` 形态的运行时绑定全集（轮95 起唯一的原生出口）；
  *   B = src/（非测试文件）里以**值**形态 import 自 wailsjs/go/app/App 的名字（`type X` 只是类型，
  *       不构成运行时依赖）；
  *   要求 B ∩ A ⊆ WAILS_METHODS。Go 侧有、前端还不调用的方法不要求补替身
@@ -31,11 +31,11 @@ const BRIDGE_TABLE_TS = "tests/retest/bridge/installRetestBridge.ts";
 const BRIDGE_IMPL_TS = "tests/retest/bridge/retestBinding.ts";
 const APP_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*["'][^"']*wailsjs\/go\/app\/App["']/g;
 
-/** 事实源 A：wailsjs 里以 `app().Name(` 形态暴露的运行时绑定名（注释已剥掉）。 */
+/** 事实源 A：wailsjs 里经唯一出口 `call("Name", ...)` 暴露的运行时绑定名（注释已剥掉）。 */
 function runtimeBindingNames(): Set<string> {
   const src = readScannedSource("wailsjs/go/app/App.ts");
   const names = new Set<string>();
-  for (const m of src.matchAll(/app\(\)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) names.add(m[1]);
+  for (const m of src.matchAll(/\bcall\(\s*"([A-Za-z_][A-Za-z0-9_]*)"/g)) names.add(m[1]);
   return names;
 }
 
