@@ -926,6 +926,16 @@ let retestUpdateCheck: Record<string, unknown> | null = null;
 let retestDownloadedArtifact = "no-op";
 const retestActiveTunnels: string[] = [];
 
+// r104：模拟「用户确认过的主机密钥」。确认后同一 host:port 再探测就返回 trusted，
+// 用来复现产品侧「探测 → 弹确认 → 写入 → 重测成功」这条链，不需要真的 known_hosts 文件。
+const retestTrustedHostKeys = new Set<string>();
+
+// 与真机容器 confscope-retest-sshd2 一致的 ED25519 主机密钥（ssh-keyscan -t ed25519 实测取回），
+// 好处是复测读数里的指纹能和用户在自己机器上看到的那把钥匙对上。
+const RETEST_ED25519_BASE64 = "AAAAC3NzaC1lZDI1NTE5AAAAII169OLSMGVXq+oL8ZL3zeAUdxRAgc8eAQSXk/lrno5C";
+const RETEST_ED25519_FINGERPRINT = "SHA256:3W5UxeOXUQTdn6cFDV/NCQ3cRC5oLQNOA/ukyHSIYe0";
+const RETEST_CHANGED_FINGERPRINT = "SHA256:111111111111111111111111111111111111111";
+
 /*
  * provider 侧写入拒绝的桥内替身（轮79 E4 真机读数用）。
  *
@@ -999,7 +1009,9 @@ function takeRetestPublishRefusal(namespace: string, group: string, dataId: stri
     (item) => item.dataId === dataId && (!item.group || item.group === group) && (!item.namespace || item.namespace === namespace)
   );
   if (!wanted) return null;
-  const message = wanted.message ?? describeWriteRefusal("发布", namespace, group, dataId, `caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`);
+  const message =
+    wanted.message ??
+    describeWriteRefusal("发布", namespace, group, dataId, `caused: retest 注入的服务端拒绝 content rejected for ${dataId} ;`);
   retestPublishRefusalHits.push({ namespace, group, dataId, message });
   bridgeLog("publish-refused", namespace, group, dataId, "injected");
   return message;
@@ -1732,6 +1744,79 @@ export function createRetestInvoke(): RetestInvoke {
         }
         bridgeLog("ssh-test", host || "(empty)", "fail");
         throw new Error(`ssh: no route to host ${host || "(空)"}`);
+      }
+      case "ProbeSSHHostKey": {
+        // 三种裁决都用 host 名字选路，让 S5 能分别跑通：
+        //   127.0.0.1（state.ssh.host）→ trusted，保持既有「测试连接成功」路径不变
+        //   含 hk-unknown → 首次见，确认后转 trusted
+        //   含 hk-changed → 记录指纹与服务端出示的不一致，硬阻断
+        const cfg = normalizeSSHConfigLike(args[0]);
+        const host = String(cfg?.host ?? "");
+        const port = Number(cfg?.port ?? 22) > 0 ? Number(cfg?.port) : 22;
+        const state = loadRetestState();
+        const path = "/tmp/confscope-retest/ssh/known_hosts";
+        const recordId = `[${host}]:${port}`;
+        if (state.ssh && host === state.ssh.host) {
+          bridgeLog("ssh-probe", host, "trusted");
+          return {
+            status: "trusted",
+            host,
+            port,
+            recordId,
+            keyType: "ssh-ed25519",
+            fingerprint: RETEST_ED25519_FINGERPRINT,
+            knownHostsPath: path,
+          };
+        }
+        if (host.includes("hk-changed")) {
+          bridgeLog("ssh-probe", host, "hostKeyChanged");
+          return {
+            status: "hostKeyChanged",
+            host,
+            port,
+            recordId,
+            keyType: "ssh-ed25519",
+            keyBase64: RETEST_ED25519_BASE64,
+            fingerprint: RETEST_ED25519_FINGERPRINT,
+            recordFingerprint: RETEST_CHANGED_FINGERPRINT,
+            knownHostsPath: path,
+          };
+        }
+        if (host.includes("hk-unknown")) {
+          if (retestTrustedHostKeys.has(recordId)) {
+            bridgeLog("ssh-probe", host, "trusted-after-confirm");
+            return {
+              status: "trusted",
+              host,
+              port,
+              recordId,
+              keyType: "ssh-ed25519",
+              fingerprint: RETEST_ED25519_FINGERPRINT,
+              knownHostsPath: path,
+            };
+          }
+          bridgeLog("ssh-probe", host, "hostKeyUnknown");
+          return {
+            status: "hostKeyUnknown",
+            host,
+            port,
+            recordId,
+            keyType: "ssh-ed25519",
+            keyBase64: RETEST_ED25519_BASE64,
+            fingerprint: RETEST_ED25519_FINGERPRINT,
+            knownHostsPath: path,
+          };
+        }
+        bridgeLog("ssh-probe", host || "(empty)", "unreachable");
+        throw new Error(`ssh: 无法连接 ${host || "(空)"}:${port}`);
+      }
+      case "TrustSSHHostKey": {
+        const [host, port, keyType, keyBase64] = args as unknown[];
+        if (!String(keyBase64 ?? "")) throw new Error("retest bridge: 主机密钥不能为空");
+        const recordId = `[${String(host ?? "")}:${Number(port ?? 22) > 0 ? Number(port) : 22}]`;
+        retestTrustedHostKeys.add(recordId);
+        bridgeLog("ssh-trust", recordId, String(keyType ?? ""));
+        return null;
       }
       case "StopSSHTunnel": {
         // 与 Go 侧 Manager.StopTunnel 同语义：同步从隧道表里摘掉这条，

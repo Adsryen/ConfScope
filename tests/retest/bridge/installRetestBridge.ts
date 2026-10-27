@@ -57,6 +57,8 @@ const WAILS_METHODS = [
   "NacosDeleteConfigFromApplyPlan",
   "CreateSSHTunnel",
   "TestSSHConnection",
+  "ProbeSSHHostKey",
+  "TrustSSHHostKey",
   "StopSSHTunnel",
   "StopAllSSHTunnels",
   "GetSSHTunnelLocalPort",
