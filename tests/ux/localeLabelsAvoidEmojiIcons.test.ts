@@ -28,8 +28,16 @@ const EMOJI = /[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}\u{FE0F}]
 // 基线重新归零 —— 下一轮再冒出彩色 emoji 就是新增违规，必须当场修，不许再往里记条目。
 const SOURCE_BASELINE: { file: string; contains: string; why: string }[] = [];
 
-/** 署名白名单：页脚「Made with ❤️ by」是作者署名文案，不进任何控件的可访问名。 */
-const SIGNATURE_ALLOWLIST: { file: string; mustContain: string }[] = [{ file: "src/components/About.tsx", mustContain: "Made with" }];
+/**
+ * 零豁免（轮96 K1 清掉了最后一项）。
+ *
+ * 以前这里挂着关于页页脚的「Made with ❤️ by」，理由是署名文案不进控件的可访问名。
+ * 那句话真正的毛病不是心形，而是整页唯一一句没进 locale 的硬编码英文：中文界面下它照旧
+ * 显示英文。文案落到 locale 之后，彩色字形按本轮决定一并去掉（en-US 用 "Made by … with care"，
+ * zh-CN 用「由 … 用心打造」，两侧都不需要心形）。留一个空数组而不是删掉这段：谁再想加豁免，
+ * 必须先解释为什么那处不能走 locale。
+ */
+const SIGNATURE_ALLOWLIST: { file: string; mustContain: string }[] = [];
 
 function emojiIn(text: string): string[] {
   return text.match(EMOJI) ?? [];
@@ -64,8 +72,10 @@ describe("文案不用彩色 emoji 当图标（轮74 D2）", () => {
     }
   });
 
-  it("源码里的彩色 emoji 只剩署名与记账基线，且每一项都仍命中真实代码", () => {
-    const files = new Set([...SIGNATURE_ALLOWLIST.map((e) => e.file), ...SOURCE_BASELINE.map((e) => e.file), "src/components/About.tsx"]);
+  it("源码里的彩色 emoji 零豁免：两份清单都必须是空的，非空时每一项都要仍命中真实代码", () => {
+    expect(SIGNATURE_ALLOWLIST, "彩色 emoji 不设署名豁免了：页脚那句已进 locale 并去掉字形").toEqual([]);
+    expect(SOURCE_BASELINE, "记账基线已归零：再冒出来就是新增违规，当场修").toEqual([]);
+    const files = new Set([...SIGNATURE_ALLOWLIST.map((e) => e.file), ...SOURCE_BASELINE.map((e) => e.file)]);
     const offenders = sourceFiles()
       .filter((file) => !files.has(file))
       .flatMap((file) => offenderLines(file).map(({ at, line }) => `${at} → ${line.trim().slice(0, 60)}`));

@@ -28,7 +28,7 @@ const GROUP = "RETEST-PROD";
 /** WCAG 2.2 / 2.5.8 Target Size (Minimum)。 */
 const MIN_TARGET = 24;
 
-/** 唯一豁免：关于页页脚 "Made with ❤️ by Adsryen" 里的行内链接（句子内，尺寸由行盒决定）。 */
+/** 唯一豁免：关于页页脚那句署名里的行内链接（句子内，尺寸由行盒决定；轮96 K1 后文案走 locale，句子结构不变）。 */
 const EXEMPT = [{ cls: "about-footer-link-inline-exempt", reason: "页脚句子内的行内链接，WCAG 2.5.8 Inline exception" }];
 
 /**

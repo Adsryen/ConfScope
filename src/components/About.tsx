@@ -820,7 +820,8 @@ export default function About({
 
       <div className="about-footer">
         <p>
-          Made with ❤️ by <ExternalLink href="https://github.com/Adsryen">Adsryen</ExternalLink>
+          {t("about.madeWithPrefix")} <ExternalLink href="https://github.com/Adsryen">Adsryen</ExternalLink>{" "}
+          {t("about.madeWithSuffix")}
         </p>
         {!embedded && (
           <button className="btn btn-primary" onClick={onClose}>
