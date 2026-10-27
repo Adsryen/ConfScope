@@ -1956,6 +1956,36 @@ describe("ConfigBrowser 延迟重试与基线交换", () => {
     };
   }
 
+  /**
+   * 换作用域的另一条路：App 给浏览页的 key 是 `${连接}:${命名空间}`，换作用域 = 整棵子树重挂载。
+   *
+   * 上面那个 renderScoped 换的是 props，实例不换 ⇒ 实例内的 ref 一直活着，
+   * 「旧闭包读到的是冻结的旧作用域」这件事在 jsdom 里永远复现不了（轮97 K3 真机 CR-02 才抓到）。
+   * 这里给 ConfigBrowser 挂上会变的 key，让 React 真的卸载旧的、挂载新的，
+   * 顺带能演「浏览页整块不在界面里」（App 在无可用连接 / 连不上命名空间时换成提示）。
+   */
+  function renderKeyedScoped() {
+    localStorage.setItem("locale", "zh-CN");
+    const tree = (nextConn: Connection, nextTenant: string) => (
+      <I18nProvider>
+        <ConfigBrowser key={`${nextConn.id}:${nextTenant}`} conn={nextConn} tenant={nextTenant} />
+        <MessageCenter />
+        <ErrorDialog />
+      </I18nProvider>
+    );
+    const view = render(tree(conn, "public"));
+    return {
+      remount: (nextConn: Connection, nextTenant: string) => view.rerender(tree(nextConn, nextTenant)),
+      unmountPage: () =>
+        view.rerender(
+          <I18nProvider>
+            <MessageCenter />
+            <ErrorDialog />
+          </I18nProvider>
+        ),
+    };
+  }
+
   /** 台账里那条动作：报错时存进 errorCenter 的旧闭包，人可以很久之后再点它。 */
   function staleAction(): () => void {
     const item = latestError();
@@ -2063,6 +2093,52 @@ describe("ConfigBrowser 延迟重试与基线交换", () => {
     expect(notice?.message).toContain("qa / qa-public");
     // 这条说明自己不许再挂一个重试动作，否则把人引回同一个不成立的动作
     expect(notice?.onAction).toBeUndefined();
+  });
+
+  it("换作用域是按 key 重挂载时，旧「重试」同样一次请求都不发（真机 CR-02 的等价物）", async () => {
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("content denied"));
+    const shell = renderKeyedScoped();
+    fireEvent.click(await screen.findByText("app.json"));
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    const action = staleAction();
+
+    shell.remount(qaConn, "qa-public");
+    // 等新实例真的接管页面（列表按 qa 连接重发过一次），模块级作用域镜像才算跟上
+    await waitFor(() => expect(apiMocks.listConfigs.mock.calls.some((call) => call[0]?.id === "qa")).toBe(true));
+    apiMocks.getConfigDocument.mockClear();
+
+    await act(async () => {
+      action();
+    });
+
+    expect(apiMocks.getConfigDocument, "重挂载后旧闭包还是替已经离开的旧作用域取了一次正文").not.toHaveBeenCalled();
+    const notice = latestError();
+    expect(notice).toMatchObject({ level: "warning", title: "这次重试已过期" });
+    expect(notice?.message).toContain("dev / public");
+    expect(notice?.message).toContain("qa / qa-public");
+    expect(notice?.onAction).toBeUndefined();
+  });
+
+  it("浏览页整块不在界面里时，旧「重试」不发请求，只说页面已不在", async () => {
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("content denied"));
+    const shell = renderKeyedScoped();
+    fireEvent.click(await screen.findByText("app.json"));
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    const action = staleAction();
+
+    shell.unmountPage();
+    apiMocks.getConfigDocument.mockClear();
+
+    await act(async () => {
+      action();
+    });
+
+    // 旧形状在这里更坏：请求照发，结果写进一个已经不存在的视图，界面一个字都不动
+    expect(apiMocks.getConfigDocument, "页面都不在了还发一次读取，取回来的东西没人看得见").not.toHaveBeenCalled();
+    const notice = latestError();
+    expect(notice).toMatchObject({ level: "warning", title: "这次重试已过期" });
+    expect(notice?.message, "这条说明不能谎称「已经切到」别的作用域").toContain("配置浏览页已经不在当前界面里");
+    expect(notice?.message).toContain("dev / public");
   });
 
   it("作用域没变时旧「重试」照常重取（守卫不能写成永远拦）", async () => {

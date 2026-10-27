@@ -30,10 +30,27 @@ function scopeGuardIsWired(source: string): boolean {
   const body = lateActionBody(source);
   return (
     body !== "" &&
-    /const now = renderMirrorRef\.current;/.test(body) &&
+    scopeReadIsCrossInstance(source) &&
+    /const now = readBrowseScope\(\);/.test(body) &&
+    /if \(!now\) \{[\s\S]{0,300}?level:\s*"warning"[\s\S]{0,300}?return;\s*\}/.test(body) &&
     /now\.connId !== reported\.connId\s*\|\|\s*now\.tenant !== reported\.tenant/.test(body) &&
     /reportMessage\(\{[\s\S]{0,400}level:\s*"warning"/.test(body) &&
     /return;\s*\}\s*run\(\);/.test(body)
+  );
+}
+
+/**
+ * 作用域判定必须读模块级镜像（轮97 K3）。
+ *
+ * 读实例内的 renderMirrorRef 是修前那个形状：App 给浏览页的 key 是 `${connId}:${tenant}`，
+ * 换作用域 = 重挂载，旧实例那份账冻结在旧作用域上 ⇒ 旧闭包永远判成「作用域没变」。
+ * 所以「报到模块级 + 卸载时按身份清」两件事都得在场，少一条守卫就该判红。
+ */
+function scopeReadIsCrossInstance(source: string): boolean {
+  return (
+    /from "\.\.\/lib\/browseScopeMirror"/.test(source) &&
+    /scopeMirrorRef\.current = reportBrowseScope\(/.test(source) &&
+    /if \(scopeMirrorRef\.current\) clearBrowseScope\(scopeMirrorRef\.current\);/.test(source)
   );
 }
 
@@ -116,6 +133,9 @@ describe("延迟触发的重试先验作用域再执行", () => {
       expect(flat["config.retryStaleBody"], `${file} 缺正文`).toBeTruthy();
       expect(flat["config.retryStaleBody"], `${file} 要说清从哪切到哪`).toContain("{from}");
       expect(flat["config.retryStaleBody"]).toContain("{to}");
+      // 浏览页整个不在界面里时另有句式：只能报出报错那一刻的作用域，别说「已经切到」假话
+      expect(flat["config.retryStaleDetachedBody"], `${file} 缺「页面已不在」那条说明`).toBeTruthy();
+      expect(flat["config.retryStaleDetachedBody"], `${file} 那条说明要指名报错发生的作用域`).toContain("{from}");
     }
   });
 
@@ -134,8 +154,20 @@ describe("延迟触发的重试先验作用域再执行", () => {
     expect(lateStateStaysFresh(before), "修前没有镜像与 ref").toBe(false);
 
     const wired = [
+      'import { clearBrowseScope, readBrowseScope, reportBrowseScope } from "../lib/browseScopeMirror";',
+      "const scopeMirrorRef = useRef(null);",
+      "useEffect(() => {",
+      "  scopeMirrorRef.current = reportBrowseScope({ connId, tenant, scopeLabel });",
+      "});",
+      "useEffect(() => () => {",
+      "  if (scopeMirrorRef.current) clearBrowseScope(scopeMirrorRef.current);",
+      "}, []);",
       "const lateAction = (reported, run) => () => {",
-      "  const now = renderMirrorRef.current;",
+      "  const now = readBrowseScope();",
+      "  if (!now) {",
+      '    reportMessage({ level: "warning", title: "x", message: "y" });',
+      "    return;",
+      "  }",
       "  if (now.connId !== reported.connId || now.tenant !== reported.tenant) {",
       '    reportMessage({ level: "warning", title: "x", message: "y" });',
       "    return;",
@@ -154,8 +186,16 @@ describe("延迟触发的重试先验作用域再执行", () => {
     ].join("\n");
     expect(scopeGuardIsWired(wired), "写全了应当算绿").toBe(true);
     expect(contentRetryTiersAreHonest(wired), "分档写全了应当算绿").toBe(true);
-    const noReturn = wired.replace("    return;\n  }\n  run();", "  }\n  run();");
+    // 只摘最后那一个 return（作用域不符却继续 run），前一条 !now 分支的 return 留着
+    const noReturn = wired.replace(/\n    return;\n  \}\n  run\(\);/, "\n  }\n  run();");
     expect(scopeGuardIsWired(noReturn), "少了 return 会照常执行，必须判红").toBe(false);
+    // 轮97 K3 的真缺陷：作用域读回实例内的镜像，重挂载后那份账是冻结的
+    const instanceLocal = wired
+      .replace("const now = readBrowseScope();", "const now = renderMirrorRef.current;")
+      .replace(/if \(!now\) \{[\s\S]*?\n  \}\n/, "");
+    expect(scopeGuardIsWired(instanceLocal), "作用域改读实例内镜像（修前形状），必须判红").toBe(false);
+    const forgetsClear = wired.replace("  if (scopeMirrorRef.current) clearBrowseScope(scopeMirrorRef.current);\n", "");
+    expect(scopeGuardIsWired(forgetsClear), "卸载时不按身份清，旧实例会把新作用域顶掉，必须判红").toBe(false);
     const alwaysConfirms = wired
       .split("  if (sameConfig) {\n    void openConfig(item);\n    return;\n  }\n")
       .join("");

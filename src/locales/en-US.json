@@ -925,6 +925,7 @@
     "contentLoadFailed": "Failed to load config content",
     "retryStaleTitle": "This retry is stale",
     "retryStaleBody": "The error came from \"{from}\", but you are now in \"{to}\". Nothing was reloaded — open the item again from the current list.",
+    "retryStaleDetachedBody": "The error came from \"{from}\", but the config browser is no longer on screen. Nothing was reloaded — open it again from the config browser.",
     "group": "GROUP",
     "newConfigTitle": "New Configuration",
     "editConfigTitle": "Edit Configuration",

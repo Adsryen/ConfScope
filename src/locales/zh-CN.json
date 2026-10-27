@@ -925,6 +925,7 @@
     "contentLoadFailed": "配置内容加载失败",
     "retryStaleTitle": "这次重试已过期",
     "retryStaleBody": "报错发生在「{from}」，当前已经切到「{to}」。这次重试没有执行，请从当前列表重新加载要看的内容。",
+    "retryStaleDetachedBody": "报错发生在「{from}」，而配置浏览页已经不在当前界面里。这次重试没有执行，请回到配置浏览重新加载要看的内容。",
     "group": "GROUP",
     "newConfigTitle": "新建配置",
     "editConfigTitle": "编辑配置",

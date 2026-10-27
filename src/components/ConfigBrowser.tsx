@@ -3,6 +3,7 @@ import { Connection, connectionDisplayLabel, connectionProjectName } from "../st
 import { ConfigItem, getConfig, getConfigDocument, listConfigs, type ConfigDocument } from "../api/nacos";
 import type { ApplyEntryEndpoint, ApplyEntryPayload } from "../lib/applyEntry";
 import { busyProps } from "../lib/busyRegion";
+import { clearBrowseScope, readBrowseScope, reportBrowseScope, type BrowseScopeMirror } from "../lib/browseScopeMirror";
 import {
   buildContentReplaceApplyEntry,
   replacementImpact,
@@ -235,6 +236,27 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       scopeLabel: sourceLabel,
     };
   });
+  /**
+   * 作用域另报一份到模块级（轮97 K3）：这一份必须跨实例。
+   * 换连接 / 换命名空间时 App 按 key 重挂载整棵浏览页，旧实例的 ref 从此不再更新，
+   * 而台账里那条旧「重试」恰恰只能读旧实例手里的东西——照实例内的镜像判定「作用域没变」，
+   * 它就会替已经离开的旧作用域真发一次请求，界面还不给任何解释（真机 CR-02 实测）。
+   * 卸载时按身份清（`clearBrowseScope`）：换 key 时新实例可能已经先报上了新作用域。
+   */
+  const scopeMirrorRef = useRef<BrowseScopeMirror | null>(null);
+  useEffect(() => {
+    scopeMirrorRef.current = reportBrowseScope({
+      connId: conn.id ?? "",
+      tenant,
+      scopeLabel: sourceLabel,
+    });
+  });
+  useEffect(
+    () => () => {
+      if (scopeMirrorRef.current) clearBrowseScope(scopeMirrorRef.current);
+    },
+    []
+  );
   const targetConnections = useMemo(
     () =>
       connections
@@ -289,6 +311,10 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
    * ① 把界面甩回旧作用域，顺手静默顶掉用户在当前配置上打好的草稿；
    * ② 把旧作用域取回来的数据写进当前视图的 state，列表看着是新连接的内容。
    * 作用域换了就不猜意图：不执行，另起一条说明讲清楚为什么没动。
+   *
+   * 这一层判的是 `readBrowseScope()`（模块级），不是实例内的渲染镜像：换作用域 = 按 key 重挂载，
+   * 旧实例那份账从此冻结，照着它判永远得出「作用域没变」（轮97 K3 真机 CR-02 实测到的就是这条）。
+   * 浏览页整个不在界面里时同样拒——执行只会把结果写进一个不存在的视图。
    */
   const guardNavRef = useRef(guardNav);
   useEffect(() => {
@@ -296,7 +322,18 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   });
   const reportedScope = () => ({ connId: conn.id ?? "", tenant, scopeLabel: sourceLabel });
   const lateAction = (reported: { connId: string; tenant: string; scopeLabel: string }, run: () => void) => () => {
-    const now = renderMirrorRef.current;
+    const now = readBrowseScope();
+    if (!now) {
+      // 浏览页已经不在界面里（没连接 / 连不上命名空间时 App 整块换成提示）。
+      // 这时候执行重试就是把结果写进一个不存在的视图：不发请求，说清楚。
+      reportMessage({
+        level: "warning",
+        title: t("config.retryStaleTitle"),
+        message: t("config.retryStaleDetachedBody", { from: reported.scopeLabel }),
+        source: reported.scopeLabel,
+      });
+      return;
+    }
     if (now.connId !== reported.connId || now.tenant !== reported.tenant) {
       reportMessage({
         level: "warning",
