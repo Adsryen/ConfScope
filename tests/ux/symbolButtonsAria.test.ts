@@ -22,10 +22,14 @@ const SRC = join(PROJECT_ROOT, "src");
 /**
  * 按钮里可能出现的纯符号文本。`-` 放在末尾，避免它被当成区间起点把数字字母全吞进来。
  * `‹ › « »` 是分页/滚动条里常见的箭头，R29 补进来；`⌃ ⌄` 是折叠箭头，提前防一手。
+ * `✎ ✓ ✔ ⚠ ⌕` 轮93 补进来：连接树里悬停显形的重命名按钮就是这么一颗 `✎`，只有 `title` 时读屏念的是
+ * 字形名而不是动作，而旧字符集压根扫不到它 —— 判据的洞比漏改的那一处更值得记。
+ * 注意这五个是**单色字形不是彩色 emoji**（见 `localeLabelsAvoidEmojiIcons` 的口径），本守卫只管可访问名，
+ * 不管图标形态，两条口径各守各的。
  */
 // `⟳ ↻` 是刷新按钮的写法（轮66 WP-4）：这两颗在移除 disabled 上的 title 之前，
 // 可访问名只有 title 兜底过一眼，实际 accname 取的是内容「⟳」——读屏念不出意义。
-const SYMBOL_CHARS = "×✕✖⨯xX<>+−…↑↓⌄‹›«»⌃⟳↻-";
+const SYMBOL_CHARS = "×✕✖⨯xX<>+−…↑↓⌄‹›«»⌃⟳↻✎✓✔⚠⌕-";
 /**
  * `>` 与 `</button>` 之间只有符号。两侧用 `\s*` 而不是只吃空格，是因为属性一多 JSX 就折行：
  * 「>\n  ×\n</button>」才是站点的常态写法，只守单行等于没守。
@@ -149,6 +153,23 @@ describe("守卫自身不会漏掉 R29 那两类写法", () => {
     expect(buttons.map((button) => button.text)).toEqual(["‹", "›"]);
     // 上一版：字符集缺 ‹ ›，这两处压根扫不到；再退一步就算扫到也只认 title，全都会被放过
     expect(buttons.filter((button) => !button.hasAccessibleName).map((button) => button.text)).toEqual(["‹"]);
+  });
+
+  it("树内 ✎ 这类单色字形在扫描范围内（轮93：旧字符集漏它，缺陷从 R26 一路活到 R92）", () => {
+    const buttons = findSymbolButtons(
+      `<button\n  className="conn-tree-btn"\n  title="重命名项目"\n>\n  ✎\n</button>`
+    );
+    expect(buttons.map((button) => button.text)).toEqual(["✎"]);
+    expect(buttons[0].hasTitle).toBe(true);
+    expect(buttons[0].hasAccessibleName, "只有 title 时读屏念的是字形名，必须判不合格").toBe(false);
+
+    const labelled = findSymbolButtons(`<button className="conn-tree-btn" title="重命名项目" aria-label="重命名项目">✎</button>`);
+    expect(labelled[0].hasAccessibleName).toBe(true);
+
+    // 同一族的 ✓ ⚠ ⌕ 也进集：不验证就是又一次「扩了字符集但没扩探测器」
+    for (const glyph of ["✓", "✔", "⚠", "⌕"]) {
+      expect(findSymbolButtons(`<button title="动作">${glyph}</button>`).length, `${glyph} 应被扫到`).toBe(1);
+    }
   });
 
   it("只有 title 不算可访问名，aria-label 才算", () => {

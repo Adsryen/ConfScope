@@ -1146,6 +1146,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   <button
                     className="conn-tree-btn"
                     title={t("connection.renameProject")}
+                    aria-label={t("connection.renameProject")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setRenamingProject({ oldName: project.project, value: project.project });

@@ -245,6 +245,29 @@ describe("ConnectionManager", () => {
     expect(screen.getAllByRole("button", { name: "新增来源" })).toHaveLength(1);
   });
 
+  // 轮93：这颗按钮的可访问名只写在 title 上。按 W3C accname，<button> 有文本内容时名字取自文本，
+  // title 只在名字为空时兜底 —— 读屏念的是字形「✎」而不是「重命名项目」。用例同时钉两件事：
+  // 按可访问名拿得到这一颗（不是靠 getByTitle 蒙对），以及拿到之后真的点得进重命名。
+  it("树内的重命名按钮用可访问名就能拿到，点下去进入重命名", () => {
+    renderManager();
+
+    saveConnection({
+      name: "prod-public",
+      project: "订单系统",
+      environment: "生产",
+      source: "云上公网",
+    });
+
+    const renameButtons = screen.getAllByRole("button", { name: "重命名项目" });
+    expect(renameButtons, "重命名按钮的可访问名必须唯一且来自 aria-label").toHaveLength(1);
+    expect(screen.queryByRole("textbox", { name: "重命名项目" })).not.toBeInTheDocument();
+
+    fireEvent.click(renameButtons[0]);
+
+    const input = screen.getByRole("textbox", { name: "重命名项目" });
+    expect(input).toHaveValue("订单系统");
+  });
+
   it("uses fixed environment options", () => {
     renderManager();
 
