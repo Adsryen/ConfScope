@@ -3043,7 +3043,7 @@ textarea {
 .history-item-pin.on {
   color: var(--accent-text);
   border-color: rgba(79, 195, 247, 0.42);
-  background: rgba(79, 195, 247, 0.10);
+  background: rgba(79, 195, 247, 0.1);
 }
 /* meta 行里的钉住标记：字号与灰字跟着 .history-item-id，形状跟着 .history-item-src，
    只加一层 accent 描边表明它是「不会被动的那一行」。
@@ -3459,7 +3459,9 @@ button.diff-workflow-step-btn:hover {
   background: transparent;
   font: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 .diff-source-direction:hover,
 .diff-source-direction:focus-visible {
