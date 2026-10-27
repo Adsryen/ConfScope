@@ -42,7 +42,7 @@ function urlsCalled(): string[] {
  * /cs/configs，注入若下在 HTTP 层，这里就会看出被注入那条 dataId 的列表请求也一起挂了。
  */
 function stubNacos() {
-  globalThis.fetch = vi.fn(async (input: unknown, init?: { method?: string }) => {
+  globalThis.fetch = vi.fn(async (input: unknown) => {
     const url = String(input);
     const q = new URL(url).searchParams;
     if (q.get("pageNo")) {
