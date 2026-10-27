@@ -37,6 +37,19 @@ describe("轻提示的层叠顺序", () => {
     expect(cssNumber(".toaster", "z-index")).toBeLessThan(cssNumber(".help-popover", "z-index"));
   });
 
+  it("落位钉在右下角：顶部居中实测压住工具条与步骤条", () => {
+    // 为什么要静态读 CSS：这条约束的"违反"长得很像正常代码——把 right/bottom 换回 top+left:50%
+    // 一样能跑、单测一样绿，只有真机命中测试才量得出它压住了按钮（轮94 普查实测 3 档真遮挡）。
+    // 正控：下面两条判据在旧写法（top: 18px / left: 50% / translateX(-50%)）下必红。
+    expect(cssDecl(".toaster", "right")).toBe("16px");
+    expect(cssDecl(".toaster", "bottom")).toBe("16px");
+    const block = /\.toaster \{([^}]*)\}/m.exec(CSS)![1];
+    expect(block, ".toaster 不许回到顶部居中：那会压住连接选择器与对比页步骤按钮").not.toMatch(/(^|\n)\s*(top|left):/);
+    expect(block, "居中用的 translateX(-50%) 一并去掉，否则右下角会被拉回中间").not.toMatch(/transform:/);
+    // 条目靠右对齐：容器 flex 列默认 stretch，不写 align-items 时长短不一的提示会左对齐、右缘参差
+    expect(cssDecl(".toaster", "align-items")).toBe("flex-end");
+  });
+
   it("容器不吃事件、条目自己吃：悬停暂停与关闭按钮依赖这条", () => {
     expect(cssDecl(".toaster", "pointer-events")).toBe("none");
     expect(cssDecl(".toast", "pointer-events")).toBe("auto");

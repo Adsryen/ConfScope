@@ -247,6 +247,21 @@ textarea {
   position: relative;
 }
 
+/* 未读数的读屏播报载体（轮94）：视觉上只留角标，语义上要有活区。
+   不能 display:none——那会把整块从无障碍树里摘掉，读屏同样念不到。 */
+.message-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .message-center-btn {
   width: 100%;
   min-height: 34px;
@@ -5795,11 +5810,22 @@ button.diff-workflow-step-btn:hover {
 }
 
 /* ── Toast ── */
+/**
+ * 落位：右下角。顶部居中是"想当然"的那一版，实测压得住的只有空白：
+ * 11 视图 × 2 视口的真机普查（探针 tests/retest/specs/99-s-toast-placement.spec.ts，
+ * 判据=候选控件中心点的 elementFromPoint 落进这条提示里）量出 3 档真遮挡，
+ * 全都在用户正要下手的地方 —— 1280x820 配置浏览的连接选择器 `Retest Project▾`、
+ * 960x600 配置对比的「确认方向」「加载并对比」两颗步骤按钮。
+ * 右下角是瞬时反馈的通行落位，且这里没有任何常驻控件：`.message-panel` 从 left:196
+ * 起、最宽 420px，右对齐的提示最宽 360+16 ⇒ 960 下限窗口下起点约 782，两块不相交；
+ * 底部再没有别的 fixed 元素（grep `position: fixed` 只有弹框遮罩/启动遮罩/帮助气泡/消息面板）。
+ * 入场动画 translateY(8px)→0 正好是"从下方浮起"，不用改。
+ */
 .toaster {
   position: fixed;
-  left: 50%;
-  top: 18px;
-  transform: translateX(-50%);
+  right: 16px;
+  bottom: 16px;
+  align-items: flex-end;
   /* 必须高于 .error-overlay(420)：报错弹框开着的时候，toast 往往是唯一还能看见「已复制 / 已保存」的地方 */
   z-index: 460;
   display: flex;
