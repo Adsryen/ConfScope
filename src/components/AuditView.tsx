@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Connection, connectionEnvironmentName, connectionProjectName } from "../store/connections";
 import { getConfig, listAllConfigs } from "../api/nacos";
 import { detectFormat } from "../lib/format";
@@ -23,6 +23,11 @@ import type { DiffJumpParams } from "../lib/diffJump";
 
 // 轮46 R04：跳转参数的契约收在 src/lib/diffJump.ts 一份，这里只转出给既有引用方（App 从这里导入）。
 export type { DiffJumpParams, DiffJumpSideParams } from "../lib/diffJump";
+
+/** r111 窗口化渲染：行高 48px（border-box 含 1px 底边框，与 styles.css `.audit-matrix-body .audit-matrix-row` 的 height 同一实测口径）；
+ *  窗口两侧各留 10 行 overscan，快速滚动不露白。 */
+const MATRIX_ROW_HEIGHT = 48;
+const MATRIX_OVERSCAN = 10;
 
 interface Props {
   connections: Connection[];
@@ -119,6 +124,109 @@ function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, s
   );
 }
 
+/**
+ * 矩阵 body 的窗口化渲染（r111：2000×6 下全量行 DOM 节点 36021，超 C3 硬上限 16000，只挂可见窗口）：
+ * 全高 spacer 撑出滚动条，窗口按 translateY 平移。
+ * 滚动状态收在这个组件里——滚动事件只重渲染列表（可见窗口约几十行），
+ * 不带动工具栏 / 环境卡片 / 详情面板；程序化滚动（恢复记忆位置）也经浏览器 scroll 事件从这里同步。
+ * 行定位与斑马纹都按逻辑行序（matrixWindow.start + index）算，窗口滚动时条纹与选中态不漂移。
+ */
+interface AuditMatrixListProps {
+  rows: AuditRow[];
+  envIds: string[];
+  baseline: string;
+  selectedRowId: string | null;
+  onSelectRow: (row: AuditRow) => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
+}
+
+function AuditMatrixList({ rows, envIds, baseline, selectedRowId, onSelectRow, t }: AuditMatrixListProps) {
+  // 矩阵滚动位置：审计结果要手动跑一次才有，挂载时列表是空的（真实浏览器会把偏移夹回 0），
+  // 所以按条数作为列表版本，数据到达后再恢复一次（见 lib/viewState）。
+  const matrixScroll = useScrollMemory("audit.scroll.matrix", rows.length);
+  const [matrixScrollTop, setMatrixScrollTop] = useState(0);
+  const [matrixViewportH, setMatrixViewportH] = useState(0);
+
+  const matrixWindow = useMemo(() => {
+    const total = rows.length;
+    if (total === 0) return { start: 0, rows: [] as AuditRow[] };
+    const visible = Math.max(matrixViewportH, MATRIX_ROW_HEIGHT);
+    const start = Math.max(0, Math.min(Math.floor(matrixScrollTop / MATRIX_ROW_HEIGHT) - MATRIX_OVERSCAN, total - 1));
+    const end = Math.max(start + 1, Math.min(Math.ceil((matrixScrollTop + visible) / MATRIX_ROW_HEIGHT) + MATRIX_OVERSCAN, total));
+    return { start, rows: rows.slice(start, end) };
+  }, [rows, matrixScrollTop, matrixViewportH]);
+
+  // 容器挂载 / 尺寸变化（窗口 resize、详情面板挤占）时把 scrollTop 与可视高度读回状态。
+  // 同步走原生 scroll 监听：onScroll 属性直连 matrixScroll.onScroll（写 viewState），
+  // 这里不再包一层，视图状态守卫（ref/onScroll 直绑）和行为都保得住。
+  useLayoutEffect(() => {
+    const el = matrixScroll.ref.current;
+    if (!el) return;
+    const sync = () => {
+      setMatrixScrollTop((prev) => (prev === el.scrollTop ? prev : el.scrollTop));
+      setMatrixViewportH((prev) => (prev === el.clientHeight ? prev : el.clientHeight));
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      observer.disconnect();
+    };
+  }, [rows.length > 0, matrixScroll.ref]);
+
+  return (
+    <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
+      <div className="audit-matrix-spacer" style={{ position: "relative", height: rows.length * MATRIX_ROW_HEIGHT }}>
+        <div className="audit-matrix-window" style={{ transform: `translateY(${matrixWindow.start * MATRIX_ROW_HEIGHT}px)` }}>
+          {matrixWindow.rows.map((row, index) => (
+            <div
+              key={row.id}
+              className={`audit-matrix-row ${selectedRowId === row.id ? "selected" : ""}${
+                (matrixWindow.start + index) % 2 === 1 ? " zebra" : ""
+              }`}
+              onClick={() => onSelectRow(row)}
+              {...clickableRowProps(() => onSelectRow(row), { selected: selectedRowId === row.id })}
+            >
+              <div className="audit-cell key">
+                <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>{t(STATUS_LABELS[row.status])}</span>
+                <div className="audit-key-path">
+                  <span className="audit-dataid" title={row.dataId}>
+                    {row.dataId}
+                  </span>
+                  <span className="audit-key" title={row.key}>
+                    {row.key}
+                  </span>
+                </div>
+              </div>
+              {envIds.map((envId) => {
+                const cell = row.values[envId];
+                const isBaseline = envId === baseline;
+                if (!cell || !cell.exists) {
+                  return (
+                    <div key={envId} className="audit-cell missing">
+                      —
+                    </div>
+                  );
+                }
+                const differ = !isBaseline && baseline && row.values[baseline]?.value !== cell.value;
+                return (
+                  <div key={envId} className={`audit-cell value ${differ ? "differ" : ""}`} title={cell.value ?? ""}>
+                    <span className="audit-value">{cell.value ?? ""}</span>
+                    {cell.parseStatus === "error" && <span className="audit-parse-err">⚠</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuditView({ connections, onNavigateToDiff, onStartApply }: Props) {
   const { t } = useTranslation();
   // 矩阵详情每格的环境标题 id 前缀：让只读的 pre 用 aria-labelledby 指向它（R39）
@@ -207,7 +315,11 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const [normalizeEnabled, setNormalizeEnabled] = useRememberedState<boolean>("audit.normalizeEnabled", false);
   const [normalizeRules, setNormalizeRules] = useRememberedState<NormalizeRule[]>("audit.normalizeRules", []);
   const [normalizeForm, setNormalizeForm] = useState<NormalizeRule>({
-    id: "", type: "prefix", pattern: "", replacement: "", caseSensitive: false,
+    id: "",
+    type: "prefix",
+    pattern: "",
+    replacement: "",
+    caseSensitive: false,
   });
 
   // 导出
@@ -260,11 +372,12 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     if (!selectedRow || !baseline || !onNavigateToDiff) return;
     const baselineCell = selectedRow.values[baseline];
     // 找第一个值不匹配的环境
-    const targetEnvId = envIds.find((envId) => {
-      if (envId === baseline) return false;
-      const cell = selectedRow.values[envId];
-      return cell?.exists && cell.value !== baselineCell?.value;
-    }) ?? envIds.find((envId) => envId !== baseline);
+    const targetEnvId =
+      envIds.find((envId) => {
+        if (envId === baseline) return false;
+        const cell = selectedRow.values[envId];
+        return cell?.exists && cell.value !== baselineCell?.value;
+      }) ?? envIds.find((envId) => envId !== baseline);
     if (!targetEnvId) return;
     const targetEnv = envSources.find((env) => envKey(env) === targetEnvId);
     onNavigateToDiff({
@@ -368,9 +481,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
 
   const addSource = () => {
     if (envSources.length >= 6) return;
-    const unused = projectConns.filter(
-      (c) => c.sourceType !== "local-snapshot" && !envSources.some((s) => s.conn.id === c.id)
-    );
+    const unused = projectConns.filter((c) => c.sourceType !== "local-snapshot" && !envSources.some((s) => s.conn.id === c.id));
     if (unused.length === 0) return;
     setEnvSources((prev) => [
       ...prev,
@@ -428,7 +539,19 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               entriesList.push({ dataId: item.dataId, entries, format: fmt });
             } catch {
               // 单个配置加载失败不影响整体
-              entriesList.push({ dataId: item.dataId, entries: [{ key: "__parse__", value: t("audit.configLoadFailedValue"), valueType: "text" as const, sourcePath: "__parse__", parseStatus: "error" as ParseStatus }], format: "TEXT" });
+              entriesList.push({
+                dataId: item.dataId,
+                entries: [
+                  {
+                    key: "__parse__",
+                    value: t("audit.configLoadFailedValue"),
+                    valueType: "text" as const,
+                    sourcePath: "__parse__",
+                    parseStatus: "error" as ParseStatus,
+                  },
+                ],
+                format: "TEXT",
+              });
             }
           }
           gaps.push(...describeConfigListGaps(listResult, t).map((gap) => `${envShortLabel(env, t)}: ${gap}`));
@@ -513,10 +636,6 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [rows, statusFilter, hideIgnored, sortKey, sortDir]);
-
-  // 矩阵滚动位置：审计结果要手动跑一次才有，挂载时列表是空的（真实浏览器会把偏移夹回 0），
-  // 所以按条数作为列表版本，数据到达后再恢复一次（见 lib/viewState）。
-  const matrixScroll = useScrollMemory("audit.scroll.matrix", filteredRows.length);
 
   // 切换状态过滤
   const toggleStatusFilter = (status: string) => {
@@ -687,7 +806,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                   value={ignoreForm.reason}
                   onChange={(e) => setIgnoreForm({ ...ignoreForm, reason: e.target.value })}
                 />
-                <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>{t("audit.addRule")}</button>
+                <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>
+                  {t("audit.addRule")}
+                </button>
               </div>
             </div>
 
@@ -695,11 +816,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             <div className="audit-settings-section">
               <h4>{t("audit.normalizeTitle")}</h4>
               <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={normalizeEnabled}
-                  onChange={(e) => setNormalizeEnabled(e.target.checked)}
-                />
+                <input type="checkbox" checked={normalizeEnabled} onChange={(e) => setNormalizeEnabled(e.target.checked)} />
                 <span>{t("audit.normalizeEnabledLabel")}</span>
               </label>
               {normalizeEnabled && (
@@ -709,7 +826,11 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                       {normalizeRules.map((rule, i) => (
                         <div className="ignore-rule-item" key={rule.id}>
                           <span className="ignore-rule-text">
-                            {rule.type === "prefix" ? t("audit.normalizePrefix") : rule.type === "suffix" ? t("audit.normalizeSuffix") : t("audit.normalizeReplace")}
+                            {rule.type === "prefix"
+                              ? t("audit.normalizePrefix")
+                              : rule.type === "suffix"
+                                ? t("audit.normalizeSuffix")
+                                : t("audit.normalizeReplace")}
                             : {rule.pattern} → {rule.replacement || t("audit.normalizeDeleteHint")}
                             {rule.caseSensitive ? ` [${t("audit.caseSensitive")}]` : ""}
                           </span>
@@ -763,7 +884,9 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                     />
                     <span>{t("audit.caseSensitive")}</span>
                   </label>
-                  <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>{t("audit.addNormalizeRule")}</button>
+                  <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>
+                    {t("audit.addNormalizeRule")}
+                  </button>
                 </>
               )}
             </div>
@@ -788,11 +911,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
                 <span>JSON</span>
               </label>
               <label className="check-row audit-export-opt">
-                <input
-                  type="checkbox"
-                  checked={sanitizeExport}
-                  onChange={(e) => setSanitizeExport(e.target.checked)}
-                />
+                <input type="checkbox" checked={sanitizeExport} onChange={(e) => setSanitizeExport(e.target.checked)} />
                 <span>{t("audit.sanitizeToggle")}</span>
               </label>
             </div>
@@ -833,11 +952,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             </button>
           ))}
           <label className="check-row audit-filter-opt">
-            <input
-              type="checkbox"
-              checked={hideIgnored}
-              onChange={(e) => setHideIgnored(e.target.checked)}
-            />
+            <input type="checkbox" checked={hideIgnored} onChange={(e) => setHideIgnored(e.target.checked)} />
             <span>{t("audit.hideIgnored")}</span>
           </label>
           <span className="audit-filter-sort">
@@ -877,46 +992,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             </div>
           </div>
 
-          <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
-            {filteredRows.map((row) => (
-              <div
-                key={row.id}
-                className={`audit-matrix-row ${selectedRow?.id === row.id ? "selected" : ""}`}
-                onClick={() => setSelectedRow(row)}
-                {...clickableRowProps(() => setSelectedRow(row), { selected: selectedRow?.id === row.id })}
-              >
-                <div className="audit-cell key">
-                  <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>
-                    {t(STATUS_LABELS[row.status])}
-                  </span>
-                  <div className="audit-key-path">
-                    <span className="audit-dataid" title={row.dataId}>
-                      {row.dataId}
-                    </span>
-                    <span className="audit-key">{row.key}</span>
-                  </div>
-                </div>
-                {envIds.map((envId) => {
-                  const cell = row.values[envId];
-                  const isBaseline = envId === baseline;
-                  if (!cell || !cell.exists) {
-                    return <div key={envId} className="audit-cell missing">—</div>;
-                  }
-                  const differ = !isBaseline && baseline && row.values[baseline]?.value !== cell.value;
-                  return (
-                    <div
-                      key={envId}
-                      className={`audit-cell value ${differ ? "differ" : ""}`}
-                      title={cell.value ?? ""}
-                    >
-                      <span className="audit-value">{cell.value ?? ""}</span>
-                      {cell.parseStatus === "error" && <span className="audit-parse-err">⚠</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <AuditMatrixList
+            rows={filteredRows}
+            envIds={envIds}
+            baseline={baseline}
+            selectedRowId={selectedRow?.id ?? null}
+            onSelectRow={setSelectedRow}
+            t={t}
+          />
         </div>
       )}
 
@@ -964,9 +1047,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         </div>
       )}
 
-      {!rows.length && !loading && !error && (
-        <div className="pad-msg big">{t("audit.selectHint")}</div>
-      )}
+      {!rows.length && !loading && !error && <div className="pad-msg big">{t("audit.selectHint")}</div>}
     </div>
   );
 }

@@ -6904,12 +6904,18 @@ button.diff-workflow-step-btn:hover {
 }
 
 .audit-matrix-body .audit-matrix-row {
+  /* r111 窗口化渲染：行高钉死 48px（border-box 含 1px 底边框，本条即唯一事实源，
+     AuditView 的 MATRIX_ROW_HEIGHT 必须与此相等），translateY 窗口计算才不会和实际行位漂开。
+     行内长文本一律单行截断（.audit-key / .audit-dataid / .audit-value 的 ellipsis），不允许换行撑高。 */
+  height: 48px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   cursor: pointer;
   transition: background 0.1s;
 }
 
-.audit-matrix-body .audit-matrix-row:nth-child(even) {
+/* r111：窗口化后 DOM 里行的奇偶随滚动位置变化，nth-child 会闪动；斑马纹改显式类，
+   行号按逻辑行序算（AuditView 按 matrixWindow.start + index 打标），滚动时条纹稳定。 */
+.audit-matrix-body .audit-matrix-row.zebra {
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -7040,6 +7046,10 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-hi);
   font-family: monospace;
   font-weight: 500;
+  /* r111：长 key 换行会把行撑过 48px 步长；单行 + 省略号，全文挂 JSX 的 title。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .audit-value {
@@ -9618,9 +9628,10 @@ button.diff-workflow-step-btn:hover {
 .sel-value,
 .combo-val,
 
-/* 审计矩阵：格子与格子内的 dataId / 取值 */
+/* 审计矩阵：格子与格子内的 dataId / key / 取值 */
 .audit-cell,
 .audit-dataid,
+.audit-key,
 .audit-value,
 
 /* 历史 / 备份 / 任务 / 日志：dataId、名称、范围、详情元信息 */
