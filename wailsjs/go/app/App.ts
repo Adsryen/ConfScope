@@ -150,6 +150,8 @@ type GoApp = {
   ): Promise<void>;
   CreateSSHTunnel(connectionId: string, config: any): Promise<number>;
   TestSSHConnection(config: any): Promise<any>;
+  ProbeSSHHostKey(config: any): Promise<any>;
+  TrustSSHHostKey(host: string, port: number, keyType: string, keyBase64: string): Promise<void>;
   StopSSHTunnel(connectionId: string): Promise<void>;
   StopAllSSHTunnels(): Promise<void>;
   GetSSHTunnelLocalPort(connectionId: string): Promise<number>;
@@ -627,6 +629,10 @@ export const NacosDeleteConfigFromApplyPlan = (
 export const CreateSSHTunnel = (connectionId: string, config: any) => call("CreateSSHTunnel", connectionId, config);
 
 export const TestSSHConnection = (config: any) => call("TestSSHConnection", config);
+
+export const ProbeSSHHostKey = (config: any) => call("ProbeSSHHostKey", config);
+
+export const TrustSSHHostKey = (host: string, port: number, keyType: string, keyBase64: string) => call("TrustSSHHostKey", host, port, keyType, keyBase64);
 
 export const StopSSHTunnel = (connectionId: string) => call("StopSSHTunnel", connectionId);
 

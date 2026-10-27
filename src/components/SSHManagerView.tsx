@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TestSSHConnection } from "../../wailsjs/go/app/App";
+import { probeSSHHostKey, testSSHConnection, trustSSHHostKey, type HostKeyStatus } from "../api/ssh";
 import { useTranslation } from "../i18n";
 import type { Connection, SSHConfig } from "../store/connections";
 import {
@@ -12,6 +12,9 @@ import {
 } from "../store/sshProfiles";
 import NumberField from "./NumberField";
 import PasswordField from "./PasswordField";
+import ConfirmModal from "./ConfirmModal";
+import AlertModal from "./AlertModal";
+import { reportError } from "../lib/errorCenter";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -65,6 +68,9 @@ export default function SSHManagerView({ connections }: Props) {
   const [blockedRefs, setBlockedRefs] = useState<string[]>([]);
   const [pendingSaveImpact, setPendingSaveImpact] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
+  // 主机密钥裁决未通过时挂起确认/阻断弹层。config 用探测那一刻的快照：
+  // 确认并连接时再走完整流程，不会读到用户在弹层里改动的草稿（弹层有焦点陷阱，实际上改不到）。
+  const [hostKeyPrompt, setHostKeyPrompt] = useState<{ status: HostKeyStatus; config: SSHConfig } | null>(null);
 
   const referencedProfileIds = new Set(connections.map((conn) => conn.sshProfileId).filter(Boolean));
   const referencedProfiles = profiles.filter((profile) => referencedProfileIds.has(profile.id)).length;
@@ -165,13 +171,82 @@ export default function SSHManagerView({ connections }: Props) {
     setPendingSaveImpact(false);
   };
 
+  // 探测先行（r104）：先问主机密钥裁决，trusted 才真正拨号；
+  // 未信任/已变更不建连，分别交给确认对话与硬阻断提示。
+  const runSshTest = async (config: SSHConfig) => {
+    const snapshotKey = sshTestKey(config);
+    const startedAt = Date.now();
+    setTestingKey(snapshotKey);
+    setMessage({ ok: true, text: t('settings.sshProfileTesting') });
+    setBlockedRefs([]);
+    setPendingSaveImpact(false);
+    let promptOpened = false;
+    try {
+      const status = await probeSSHHostKey(config);
+      if (status.status === "trusted") {
+        const result = await testSSHConnection(config);
+        setMessage({
+          ok: true,
+          text: t('settings.sshProfileTestSuccess').replace("{time}", latencyText(result, startedAt)),
+        });
+        return;
+      }
+      if (status.status === "hostKeyUnknown" || status.status === "hostKeyChanged") {
+        promptOpened = true;
+        // 先收掉忙态再开弹层：用户在弹层里斟酌时，页面测试按钮不挂「测试中」。
+        setTestingKey((current) => (current === snapshotKey ? null : current));
+        setHostKeyPrompt({ status, config });
+        if (status.status === "hostKeyUnknown") {
+          setMessage({
+            ok: false,
+            text: t('ssh.hostKeyUnknownPrompt', {
+              recordId: status.recordId,
+              keyType: status.keyType ?? "",
+              fingerprint: status.fingerprint ?? "",
+              path: status.knownHostsPath,
+            }),
+          });
+        } else {
+          const blockedText = t('ssh.hostKeyChangedBlocked', {
+            recordId: status.recordId,
+            recordFingerprint: status.recordFingerprint ?? "",
+            keyType: status.keyType ?? "",
+            fingerprint: status.fingerprint ?? "",
+            path: status.knownHostsPath,
+          });
+          setMessage({ ok: false, text: blockedText });
+          // 变更是安全事件：消息中心留一条可回看的记录，不占即时播报。
+          reportError({
+            title: t('ssh.hostKeyChangedTitle'),
+            message: blockedText,
+            source: "ssh",
+            toast: false,
+          });
+        }
+        return;
+      }
+      // 防御分支：裁决值超出已知四值时按阻断处理，不静默放行。
+      setMessage({ ok: false, text: t('ssh.hostKeyVerdictUnknown', { verdict: String(status.status) }) });
+    } catch (e) {
+      setMessage({
+        ok: false,
+        text: t('settings.sshProfileTestFailed')
+          .replace("{error}", errorText(e))
+          .replace("{time}", fallbackLatencyText(startedAt)),
+      });
+    } finally {
+      if (!promptOpened) {
+        setTestingKey((current) => (current === snapshotKey ? null : current));
+      }
+    }
+  };
+
   const testSSHProfile = async () => {
     if (portBlock) {
       setMessage({ ok: false, text: portBlock });
       return;
     }
     const config = normalizeSSHConfig({ ...draft.config });
-    const snapshotKey = sshTestKey(config);
     if (!config.host.trim() || !config.username.trim()) {
       setMessage({ ok: false, text: t('settings.sshProfileRequired') });
       return;
@@ -184,28 +259,48 @@ export default function SSHManagerView({ connections }: Props) {
       setMessage({ ok: false, text: t('connection.keyRequired') });
       return;
     }
+    await runSshTest(config);
+  };
 
-    const startedAt = Date.now();
-    setTestingKey(snapshotKey);
-    setMessage({ ok: true, text: t('settings.sshProfileTesting') });
-    setBlockedRefs([]);
-    setPendingSaveImpact(false);
-    try {
-      const result = await TestSSHConnection(config);
-      setMessage({
-        ok: true,
-        text: t('settings.sshProfileTestSuccess').replace("{time}", latencyText(result, startedAt)),
-      });
-    } catch (e) {
-      setMessage({
-        ok: false,
-        text: t('settings.sshProfileTestFailed')
-          .replace("{error}", errorText(e))
-          .replace("{time}", fallbackLatencyText(startedAt)),
-      });
-    } finally {
-      setTestingKey((current) => (current === snapshotKey ? null : current));
+  // 首次未知主机：确认 = 写入记录并再走一遍完整流程（此时探测应已 trusted 直通拨号）。
+  const confirmHostKey = async () => {
+    const prompt = hostKeyPrompt;
+    if (!prompt || prompt.status.status !== "hostKeyUnknown") return;
+    const { status, config } = prompt;
+    setHostKeyPrompt(null);
+    if (!status.keyBase64) {
+      setMessage({ ok: false, text: t('ssh.hostKeyMissingPayload') });
+      return;
     }
+    const snapshotKey = sshTestKey(config);
+    setTestingKey(snapshotKey);
+    setMessage({ ok: true, text: t('ssh.hostKeyTrusting') });
+    try {
+      await trustSSHHostKey(status.host, status.port, status.keyType ?? "", status.keyBase64);
+      await runSshTest(config);
+    } catch (e) {
+      setTestingKey((current) => (current === snapshotKey ? null : current));
+      const failedText = t('ssh.hostKeyTrustFailed', { error: errorText(e) });
+      setMessage({ ok: false, text: failedText });
+      reportError({
+        title: t('ssh.hostKeyConfirmTitle'),
+        message: failedText,
+        source: "ssh",
+        toast: false,
+      });
+    }
+  };
+
+  // 首次未知主机：拒绝 = 不写记录、不拨号、不留半截连接。
+  const cancelHostKey = () => {
+    if (!hostKeyPrompt || hostKeyPrompt.status.status !== "hostKeyUnknown") return;
+    setHostKeyPrompt(null);
+    setMessage({ ok: false, text: t('ssh.hostKeyRejected') });
+  };
+
+  // 指纹变更：单按钮确认弹层，关掉即结束；全界面不提供任何放行入口。
+  const dismissHostKey = () => {
+    setHostKeyPrompt(null);
   };
 
   return (
@@ -453,6 +548,41 @@ export default function SSHManagerView({ connections }: Props) {
             </aside>
           </div>
         </section>
+
+        {/* 首次未知主机：四条事实进 details（主机:端口 / 算法 / SHA256 指纹 / 记录文件），
+            指纹是纯文本要点，word-break 折行不截断，天然可选中复制。 */}
+        {hostKeyPrompt && hostKeyPrompt.status.status === "hostKeyUnknown" && (
+          <ConfirmModal
+            title={t('ssh.hostKeyConfirmTitle')}
+            message={t('ssh.hostKeyConfirmMessage')}
+            details={[
+              `${t('ssh.hostKeyDetailEndpoint')}: ${hostKeyPrompt.status.host}:${hostKeyPrompt.status.port}`,
+              `${t('ssh.hostKeyDetailKeyType')}: ${hostKeyPrompt.status.keyType ?? ""}`,
+              `${t('ssh.hostKeyDetailFingerprint')}: ${hostKeyPrompt.status.fingerprint ?? ""}`,
+              `${t('ssh.hostKeyDetailKnownHostsPath')}: ${hostKeyPrompt.status.knownHostsPath}`,
+            ]}
+            confirmLabel={t('ssh.hostKeyConfirmButton')}
+            onConfirm={confirmHostKey}
+            onCancel={cancelHostKey}
+          />
+        )}
+        {/* 指纹变更：硬阻断。AlertModal 单按钮（知道了），footer 不出现第二个放行按钮。
+            本页是条件挂载（App 的 mode === "ssh" 三元链），弹层只可能在前台渲染，
+            active 取组件默认 true，与 SettingsView / BackupView 的传法一致。 */}
+        {hostKeyPrompt && hostKeyPrompt.status.status === "hostKeyChanged" && (
+          <AlertModal
+            title={t('ssh.hostKeyChangedTitle')}
+            messages={[
+              t('ssh.hostKeyChangedWarning'),
+              `${t('ssh.hostKeyChangedRecord')}: ${hostKeyPrompt.status.recordFingerprint ?? ""}`,
+              `${t('ssh.hostKeyChangedPresented')}: ${hostKeyPrompt.status.keyType ?? ""}（${t('ssh.hostKeyDetailFingerprint')} ${hostKeyPrompt.status.fingerprint ?? ""}）`,
+              `${t('ssh.hostKeyChangedPath')}: ${hostKeyPrompt.status.knownHostsPath}`,
+              `${t('ssh.hostKeyChangedRecordId')}: ${hostKeyPrompt.status.recordId}`,
+              t('ssh.hostKeyChangedGuidance'),
+            ]}
+            onClose={dismissHostKey}
+          />
+        )}
       </div>
     </div>
   );
