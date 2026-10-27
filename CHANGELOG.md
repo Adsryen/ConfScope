@@ -14,6 +14,10 @@ GitHub Release 正文与应用内更新面板都从这里取（scripts/sync-gith
 scripts/extract-release-notes.mjs），1.0.0 起各段已按 tag 区间提交取证回填。
 -->
 
+### Fixed
+- 审计矩阵在几千条配置时以前打开要等一会儿、滚动会一顿一顿；现在只画屏幕内那一屏的行，
+  行定位、复制、悬停看全文这些用法都不变。
+
 ## [1.9.20] - 2026-10-27
 
 ### Fixed
