@@ -29,6 +29,7 @@ function settings(startup: Partial<AppSettings["startup"]> = {}): AppSettings {
       lastShownChangelogVersion: "",
       ...startup,
     },
+    duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: [] },
   };
 }
 

@@ -68,7 +68,8 @@ function rowId(group: string, dataId: string, key: string): string {
   return [group, dataId, key].join("|");
 }
 
-function wildcardMatch(pattern: string | undefined, value: string): boolean {
+/** key 通配匹配（* = 任意串）：审计忽略规则与重复检查忽略清单共用这一个出处。 */
+export function wildcardMatch(pattern: string | undefined, value: string): boolean {
   if (!pattern) return true;
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`).test(value);

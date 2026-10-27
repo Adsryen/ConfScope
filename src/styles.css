@@ -7146,6 +7146,225 @@ button.diff-workflow-step-btn:hover {
   word-break: break-all;
 }
 
+/* ── 跨配置重复检查（r110）：只读面板 ──────────────────────────────────────
+   面板骨架与矩阵同列宽；行内件全部复用既有类（check-row / ignore-rules-list /
+   field-row / search-input / btn），只新增 dup-check* 自身结构。
+   不新增滚动容器（列表短，整页滚动承载）。 */
+
+.dup-check {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.dup-check-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.dup-check-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.dup-check-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.dup-check-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  margin-top: 10px;
+}
+
+.dup-check-stat {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.dup-check-ignores {
+  margin-top: 10px;
+}
+
+.dup-check-ignores-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.dup-check-ignores-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dup-check-ignores-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dup-check-ignores .field-row {
+  margin-top: 4px;
+}
+
+.dup-check-empty {
+  margin: 12px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.dup-check-count {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.dup-check-groups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dup-check-group {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.dup-check-group-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.dup-check-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 档位配色与审计摘要同一套 tint：值不同最扎眼（err），值相同次之（warn），正文全等中性（ok 偏蓝改 accent 更贴「一致」语义） */
+.dup-check-badge-diff {
+  background: rgba(244, 67, 54, 0.12);
+  color: var(--red-text);
+}
+
+.dup-check-badge-same {
+  background: rgba(255, 152, 0, 0.12);
+  color: #ffb74d;
+}
+
+.dup-check-badge-body {
+  background: rgba(0, 122, 204, 0.15);
+  color: var(--accent-text);
+}
+
+.dup-check-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dup-check-key code {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.dup-check-scope {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.dup-check-locations {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dup-check-loc {
+  flex-wrap: wrap;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.dup-check-loc:hover {
+  background: var(--bg-hover);
+}
+
+.dup-check-loc-label {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* ns/group/dataId 与取值都可能很长：单行截断，全文挂 title，且必须在可复制白名单里（守卫 R62） */
+.dup-check-loc-ref {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.dup-check-loc-value {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.dup-check-loc-role {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.dup-check-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.dup-check-actions-hint {
+  flex: 1 1 100%;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* ── OperationHistoryView / 操作历史 ── */
 
 .history-page {
@@ -9635,6 +9854,11 @@ button.diff-workflow-step-btn:hover {
 .audit-dataid,
 .audit-key,
 .audit-value,
+
+/* 跨配置重复检查（r110）：key / ns-group-dataId / 值都单行截断，原文必须抄得走（全文另挂 title） */
+.dup-check-key,
+.dup-check-loc-ref,
+.dup-check-loc-value,
 
 /* 历史 / 备份 / 任务 / 日志：dataId、名称、范围、详情元信息 */
 .history-dataid,

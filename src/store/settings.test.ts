@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadSettings, saveSettings, updateCompareSettings, updateProxySettings, updateStartupSettings } from "./settings";
+import {
+  loadSettings,
+  saveSettings,
+  subscribeSettings,
+  updateCompareSettings,
+  updateDuplicateCheckSettings,
+  updateProxySettings,
+  updateStartupSettings,
+} from "./settings";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -32,6 +40,7 @@ describe("settings store", () => {
       update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
       startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
+      duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: [] },
     });
 
     localStorage.setItem("cs.settings", "{bad json");
@@ -41,6 +50,7 @@ describe("settings store", () => {
       update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
       compare: { sortConnections: true, sortNamespaces: true },
       startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
+      duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: [] },
     });
   });
 
@@ -64,6 +74,7 @@ describe("settings store", () => {
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
       startup: { lastOpenedVersion: "1.2.0", lastShownWelcomeVersion: "", lastShownChangelogVersion: "1.2.0" },
+      duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: ["*.tmp"] },
     });
 
     updateProxySettings({ httpProxy: "http://proxy.local:8080" });
@@ -73,6 +84,7 @@ describe("settings store", () => {
       update: { skipVersion: "1.2.0", lastCheckAt: "2026-06-28T00:00:00Z", lastSeenVersion: "" },
       compare: { sortConnections: false, sortNamespaces: true },
       startup: { lastOpenedVersion: "1.2.0", lastShownWelcomeVersion: "", lastShownChangelogVersion: "1.2.0" },
+      duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: ["*.tmp"] },
     });
   });
 
@@ -95,6 +107,68 @@ describe("settings store", () => {
       lastOpenedVersion: "1.3.0",
       lastShownWelcomeVersion: "1.3.0",
       lastShownChangelogVersion: "",
+    });
+  });
+});
+
+describe("duplicateCheck settings (r110)", () => {
+  it("falls back to defaults when an old document lacks the section", () => {
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        proxy: { httpProxy: "", httpsProxy: "", noProxy: "" },
+        update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
+        compare: { sortConnections: true, sortNamespaces: true },
+        startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
+      })
+    );
+
+    expect(loadSettings().duplicateCheck).toEqual({
+      keyDupEnabled: true,
+      exactBodyEnabled: true,
+      ignoredKeyPatterns: [],
+    });
+  });
+
+  it("filters non-string patterns and keeps booleans from a malformed section", () => {
+    localStorage.setItem(
+      "cs.settings",
+      JSON.stringify({
+        duplicateCheck: {
+          keyDupEnabled: false,
+          ignoredKeyPatterns: ["db.*", 42, null, { pattern: "x" }],
+        },
+      })
+    );
+
+    expect(loadSettings().duplicateCheck).toEqual({
+      keyDupEnabled: false,
+      exactBodyEnabled: true,
+      ignoredKeyPatterns: ["db.*"],
+    });
+  });
+
+  it("persists a whole ignore-list patch and notifies subscribers once", () => {
+    let notified = 0;
+    const unsubscribe = subscribeSettings(() => {
+      notified += 1;
+    });
+
+    updateDuplicateCheckSettings({ ignoredKeyPatterns: ["db.*", "redis.*"] });
+    unsubscribe();
+
+    expect(loadSettings().duplicateCheck.ignoredKeyPatterns).toEqual(["db.*", "redis.*"]);
+    expect(notified).toBe(1);
+  });
+
+  it("keeps the other criteria when patching the ignore list", () => {
+    updateDuplicateCheckSettings({ keyDupEnabled: false });
+    updateDuplicateCheckSettings({ ignoredKeyPatterns: ["tmp.*"] });
+
+    expect(loadSettings().duplicateCheck).toEqual({
+      keyDupEnabled: false,
+      exactBodyEnabled: true,
+      ignoredKeyPatterns: ["tmp.*"],
     });
   });
 });

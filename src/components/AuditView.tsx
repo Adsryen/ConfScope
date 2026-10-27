@@ -5,12 +5,21 @@ import { detectFormat } from "../lib/format";
 import { environmentTone } from "../lib/envTone";
 import { normalizeConfig, type ConfigEntry, type ParseStatus } from "../lib/normalize";
 import { buildAuditMatrix, type AuditRow, type AuditSource, type IgnoreRule } from "../lib/audit";
+import { checkDuplicateConfigs, type DuplicateGroup, type DuplicateLocation } from "../lib/duplicateConfigCheck";
+import { updateDuplicateCheckSettings } from "../store/settings";
+import { useSettings } from "../lib/useSettings";
 import { useTranslation } from "../i18n";
 import { environmentLabel, localizeDefaultName } from "../lib/defaultNameCopy";
 import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
 import { reportError } from "../lib/errorCenter";
 import { exportAuditCSV, exportAuditJSON, downloadFile } from "../lib/export";
-import { applyEntryRiskSummary, type ApplyEntryEndpoint, type ApplyEntryPayload, type ApplyEntryRef } from "../lib/applyEntry";
+import {
+  applyEntryRiskSummary,
+  type ApplyEntryEndpoint,
+  type ApplyEntryItem,
+  type ApplyEntryPayload,
+  type ApplyEntryRef,
+} from "../lib/applyEntry";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
 import { createAuditSession, auditSessionEvent, endAuditSession } from "../lib/auditSessionLog";
@@ -294,6 +303,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   }, [projectConns]);
 
   const [rows, setRows] = useState<AuditRow[]>([]);
+  // r110：审计已取回的全量来源（重复检查的输入）。只在内存里用，不写数据文件（R6 只读）。
+  const [auditSources, setAuditSources] = useState<AuditSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 聚合列表的不完整信号（命中安全上限 / 有页失败）与已扫描条数，两者都必须让用户看见
@@ -306,6 +317,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const resetRef = useScrollResetRef([selectedRow?.dataId ?? "", selectedRow?.key ?? ""]);
   const [baseline, setBaseline] = useState<string>("");
   const [showSettings, setShowSettings] = useRememberedState<boolean>("audit.showSettings", false);
+
+  // r110：重复检查的判据开关与忽略清单走设置通道（cs.settings → appDataDoc 数据文件），
+  // 重启后仍在；不新开 localStorage 键、不动 schemaVersion。
+  const dupSettings = useSettings().duplicateCheck;
+  const [dupIgnoreInput, setDupIgnoreInput] = useState("");
+  // 每组的勾选顺序 = 出口顺序：第 1 个勾选是来源（对比左/回退保留），第 2 个是目标（对比右/回退覆盖）。
+  // 键用 locKey 而不是 envId：同环境两份来源（归一化后同一身份）envId 相同，envId 在组内不唯一。
+  const [dupSelection, setDupSelection] = useState<Map<string, string[]>>(new Map());
 
   // 忽略规则
   const [ignoreRules, setIgnoreRules] = useRememberedState<IgnoreRule[]>("audit.ignoreRules", []);
@@ -475,6 +494,123 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     [normalizeEnabled, normalizeRules]
   );
 
+  // ── r110 重复配置检查（只读）────────────────────────────────────────────
+  // 对审计已取回 sources 的纯计算：判据与忽略清单来自设置，名称归一化复用矩阵同一口径。
+  // R5 规模读数见 PRD「实测结论」——当前规模纯计算为毫秒级，直接同帧算；
+  // 若将来超阈值，改走任务中心后台跑，不许在 UI 线程扫全表。
+  const dupResult = useMemo(() => {
+    if (auditSources.length < 2) return null;
+    return checkDuplicateConfigs(auditSources, {
+      criteria: { keyDup: dupSettings.keyDupEnabled, exactBody: dupSettings.exactBodyEnabled },
+      ignoredKeyPatterns: dupSettings.ignoredKeyPatterns,
+      normalizeName: normalizeEnabled ? applyNormalize : undefined,
+    });
+  }, [
+    auditSources,
+    dupSettings.keyDupEnabled,
+    dupSettings.exactBodyEnabled,
+    dupSettings.ignoredKeyPatterns,
+    normalizeEnabled,
+    applyNormalize,
+  ]);
+
+  const addDupIgnorePattern = () => {
+    const pattern = dupIgnoreInput.trim();
+    if (!pattern) return;
+    if (!dupSettings.ignoredKeyPatterns.includes(pattern)) {
+      updateDuplicateCheckSettings({ ignoredKeyPatterns: [...dupSettings.ignoredKeyPatterns, pattern] });
+    }
+    setDupIgnoreInput("");
+  };
+
+  const removeDupIgnorePattern = (pattern: string) => {
+    updateDuplicateCheckSettings({
+      ignoredKeyPatterns: dupSettings.ignoredKeyPatterns.filter((item) => item !== pattern),
+    });
+  };
+
+  const addDupIgnorePatternFor = (key: string) => {
+    if (dupSettings.ignoredKeyPatterns.includes(key)) return;
+    updateDuplicateCheckSettings({ ignoredKeyPatterns: [...dupSettings.ignoredKeyPatterns, key] });
+  };
+
+  const toggleDupLocation = (groupId: string, locKey: string) => {
+    setDupSelection((prev) => {
+      const current = prev.get(groupId) ?? [];
+      const next = current.includes(locKey) ? current.filter((item) => item !== locKey) : [...current, locKey].slice(-2); // 最多 2 个，第 3 个勾选顶掉最早勾选
+      const updated = new Map(prev);
+      updated.set(groupId, next);
+      return updated;
+    });
+  };
+
+  const orderedPicked = useCallback(
+    (group: DuplicateGroup): DuplicateLocation[] =>
+      (dupSelection.get(group.id) ?? [])
+        .map((locKey) => group.locations.find((loc) => loc.locKey === locKey))
+        .filter((loc): loc is DuplicateLocation => loc !== undefined),
+    [dupSelection]
+  );
+
+  // 出口一：送去对比（复用既有 DiffView 跳转，第 1 个勾选在左、第 2 个在右）。
+  const handleDupCompare = useCallback(
+    (group: DuplicateGroup) => {
+      const [left, right] = orderedPicked(group);
+      if (!left || !right || !onNavigateToDiff) return;
+      onNavigateToDiff({
+        leftConnId: left.connId,
+        rightConnId: right.connId,
+        left: { tenant: left.namespace, group: left.group, dataId: left.dataId },
+        right: { tenant: right.namespace, group: right.group, dataId: right.dataId },
+      });
+    },
+    [orderedPicked, onNavigateToDiff]
+  );
+
+  // 出口二：生成回退计划（复用 apply 通道只生成计划，不直接写）。
+  // 只给「值不同」档：值相同的组两份一样，回退没有意义。
+  const handleDupRollbackPlan = useCallback(
+    (group: DuplicateGroup) => {
+      if (!group.key || !onStartApply) return;
+      const [sourceLoc, targetLoc] = orderedPicked(group);
+      if (!sourceLoc || !targetLoc) return;
+      const sourceConn = connections.find((c) => c.id === sourceLoc.connId);
+      const targetConn = connections.find((c) => c.id === targetLoc.connId);
+      if (!sourceConn || !targetConn) return;
+      const sourceRef: ApplyEntryRef = {
+        provider: sourceConn.provider ?? "nacos",
+        connectionId: sourceConn.id,
+        namespace: sourceLoc.namespace,
+        group: sourceLoc.group,
+        dataId: sourceLoc.dataId,
+        key: group.key,
+      };
+      const targetRef: ApplyEntryRef = {
+        provider: targetConn.provider ?? "nacos",
+        connectionId: targetConn.id,
+        namespace: targetLoc.namespace,
+        group: targetLoc.group,
+        dataId: targetLoc.dataId,
+        key: group.key,
+      };
+      const item: ApplyEntryItem = { ...targetRef, sourceRef, targetRef };
+      // 端点命名与矩阵行同一个 helper：label 是 envLabel 口径，跳转/计划页显示一致。
+      const endpointFor = (loc: DuplicateLocation, conn: Connection): ApplyEntryEndpoint =>
+        applyEntryEndpoint({ conn, namespace: loc.namespace, group: loc.group, dataIdFilter: "" }, t);
+      onStartApply({
+        sourceType: "audit",
+        scope: "key",
+        source: endpointFor(sourceLoc, sourceConn),
+        target: endpointFor(targetLoc, targetConn),
+        items: [item],
+        rangeSummary: applyEntryRiskSummary([item], 0),
+        origin: { mode: "audit", returnMode: "audit" },
+      });
+    },
+    [orderedPicked, connections, onStartApply, t]
+  );
+  // ────────────────────────────────────────────────────────────────────────
+
   const updateSource = (index: number, patch: Partial<EnvSource>) => {
     setEnvSources((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
@@ -501,6 +637,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     setLoading(true);
     setError(null);
     setRows([]);
+    setAuditSources([]);
+    setDupSelection(new Map());
     setSelectedRow(null);
     setRunGaps([]);
     setScanCount(0);
@@ -586,6 +724,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         normalizeName: normalizeEnabled ? applyNormalize : (name: string) => name,
       });
       setRows(matrix);
+      // 矩阵与重复检查共用这一份来源，不重复取数。
+      setAuditSources(sources);
       setBaseline(envSources[0] ? envKey(envSources[0]) : "");
       const statusSummary: Record<string, number> = {};
       for (const row of matrix) {
@@ -1045,6 +1185,177 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             })}
           </div>
         </div>
+      )}
+
+      {/* r110 跨配置重复检查（只读）：与矩阵共用本次审计取回的结果，纯计算、不取数不写数 */}
+      {dupResult && (
+        <section className="dup-check" aria-label={t("dupCheck.title")}>
+          <div className="dup-check-head">
+            <h4>{t("dupCheck.title")}</h4>
+            <p className="dup-check-hint">{t("dupCheck.hint")}</p>
+          </div>
+          <div className="dup-check-bar">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={dupSettings.keyDupEnabled}
+                onChange={(e) => updateDuplicateCheckSettings({ keyDupEnabled: e.target.checked })}
+              />
+              <span>{t("dupCheck.criterionKeyDup")}</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={dupSettings.exactBodyEnabled}
+                onChange={(e) => updateDuplicateCheckSettings({ exactBodyEnabled: e.target.checked })}
+              />
+              <span>{t("dupCheck.criterionExactBody")}</span>
+            </label>
+            <span className="dup-check-stat">
+              {t("dupCheck.checkedConfigs", { count: dupResult.checkedSources })}
+              {dupSettings.keyDupEnabled ? ` · ${t("dupCheck.checkedKeys", { count: dupResult.checkedKeys })}` : ""}
+              {dupSettings.exactBodyEnabled && dupResult.parseSkippedSources > 0
+                ? ` · ${t("dupCheck.parseSkipped", { count: dupResult.parseSkippedSources })}`
+                : ""}
+            </span>
+          </div>
+          <div className="dup-check-ignores">
+            <div className="dup-check-ignores-head">
+              <span className="dup-check-ignores-label">{t("dupCheck.ignoreKeysLabel")}</span>
+              {dupSettings.ignoredKeyPatterns.length === 0 && <span className="dup-check-ignores-empty">{t("dupCheck.ignoreEmpty")}</span>}
+            </div>
+            {dupSettings.ignoredKeyPatterns.length > 0 && (
+              <div className="ignore-rules-list">
+                {dupSettings.ignoredKeyPatterns.map((pattern) => (
+                  <div className="ignore-rule-item" key={pattern}>
+                    <span className="ignore-rule-text">
+                      <code>{pattern}</code>
+                    </span>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => removeDupIgnorePattern(pattern)}
+                      aria-label={t("dupCheck.ignoreRemoveAria", { pattern })}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="field-row">
+              <input
+                type="text"
+                className="search-input mono"
+                spellCheck={false}
+                placeholder={t("dupCheck.ignoreKeyPlaceholder")}
+                aria-label={t("dupCheck.ignoreKeyPlaceholder")}
+                value={dupIgnoreInput}
+                onChange={(e) => setDupIgnoreInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addDupIgnorePattern();
+                }}
+              />
+              <button type="button" className="btn btn-ghost btn-sm" onClick={addDupIgnorePattern} disabled={!dupIgnoreInput.trim()}>
+                {t("dupCheck.ignoreAdd")}
+              </button>
+            </div>
+          </div>
+          {dupResult.groups.length === 0 ? (
+            <p className="dup-check-empty">
+              {!dupSettings.keyDupEnabled && !dupSettings.exactBodyEnabled ? t("dupCheck.noResultsAllOff") : t("dupCheck.noResults")}
+            </p>
+          ) : (
+            <>
+              <p className="dup-check-count">
+                {t(dupResult.groups.length === 1 ? "dupCheck.groupCountOne" : "dupCheck.groupCount", {
+                  count: dupResult.groups.length,
+                })}
+              </p>
+              <ul className="dup-check-groups">
+                {dupResult.groups.map((group) => {
+                  const groupKey = group.key;
+                  const picked = dupSelection.get(group.id) ?? [];
+                  return (
+                    <li className="dup-check-group" key={group.id}>
+                      <div className="dup-check-group-head">
+                        <span
+                          className={`dup-check-badge ${
+                            group.criterion === "exactBody"
+                              ? "dup-check-badge-body"
+                              : group.tier === "diffValue"
+                                ? "dup-check-badge-diff"
+                                : "dup-check-badge-same"
+                          }`}
+                        >
+                          {t(
+                            group.criterion === "exactBody"
+                              ? "dupCheck.badgeExactBody"
+                              : group.tier === "diffValue"
+                                ? "dupCheck.badgeKeyDupDiffValue"
+                                : "dupCheck.badgeKeyDupSameValue"
+                          )}
+                        </span>
+                        {groupKey && (
+                          <span className="dup-check-key">
+                            <code title={groupKey}>{groupKey}</code>
+                            <CopyButton text={groupKey} ariaLabel={t("dupCheck.copyKeyAria", { key: groupKey })} />
+                          </span>
+                        )}
+                        <span className="dup-check-scope">{t("dupCheck.scopeSummary", { count: group.configCount })}</span>
+                        {groupKey && (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => addDupIgnorePatternFor(groupKey)}>
+                            {t("dupCheck.ignoreThisKey")}
+                          </button>
+                        )}
+                      </div>
+                      <ul className="dup-check-locations">
+                        {group.locations.map((loc) => {
+                          const pi = picked.indexOf(loc.locKey);
+                          return (
+                            <li key={loc.locKey}>
+                              <label className="check-row dup-check-loc">
+                                <input type="checkbox" checked={pi >= 0} onChange={() => toggleDupLocation(group.id, loc.locKey)} />
+                                <span className="dup-check-loc-label">{loc.label}</span>
+                                <code className="dup-check-loc-ref" title={`${loc.namespace}/${loc.group}/${loc.dataId}`}>
+                                  {loc.namespace}/{loc.group}/{loc.dataId}
+                                </code>
+                                {pi === 0 && <span className="dup-check-loc-role">{t("dupCheck.sourceRole")}</span>}
+                                {pi === 1 && <span className="dup-check-loc-role">{t("dupCheck.targetRole")}</span>}
+                                {group.criterion === "keyDup" && loc.value !== undefined && (
+                                  <code className="dup-check-loc-value" title={loc.value}>
+                                    {loc.value}
+                                  </code>
+                                )}
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      <div className="dup-check-actions">
+                        <span className="dup-check-actions-hint">
+                          {t(group.criterion === "keyDup" && group.tier === "diffValue" ? "dupCheck.rollbackHint" : "dupCheck.compareHint")}
+                        </span>
+                        <button type="button" className="btn btn-sm" disabled={picked.length !== 2} onClick={() => handleDupCompare(group)}>
+                          {t("dupCheck.compare")}
+                        </button>
+                        {group.criterion === "keyDup" && group.tier === "diffValue" && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={picked.length !== 2}
+                            onClick={() => handleDupRollbackPlan(group)}
+                          >
+                            {t("dupCheck.rollbackPlan")}
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
       )}
 
       {!rows.length && !loading && !error && <div className="pad-msg big">{t("audit.selectHint")}</div>}

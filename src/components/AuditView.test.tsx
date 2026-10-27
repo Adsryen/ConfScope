@@ -131,6 +131,8 @@ describe("AuditView", () => {
   beforeEach(() => {
     // 视图状态存在模块内存里（R27）：用例之间必须隔离，否则上一条记住的项目/筛选会污染这一条
     clearViewState();
+    // r110 重复检查的判据开关/忽略清单写 localStorage：用例之间清掉，避免跨用例污染
+    localStorage.removeItem("cs.settings");
     apiMocks.listConfigs.mockReset();
     apiMocks.listAllConfigs.mockReset();
     apiMocks.getConfig.mockReset();
@@ -660,5 +662,259 @@ describe("AuditView", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     // 折叠的那块内容真的出来了，aria-expanded 不是在骗人
     expect(document.querySelector(".audit-settings")).toBeInTheDocument();
+  });
+
+  // ── r110 跨配置重复检查 ─────────────────────────────────────────────────
+  // 夹具：两环境，各两份配置（dataId 故意不对称，「同一配置」= 归一化 group|dataId，跨环境同 dataId 不报）。
+  //   a.yaml：c1/c2 都有，db.host 值不同（1.1.1.1 / 3.3.3.3）
+  //   b.yaml（c1）与 c.yaml（c2）：正文条目集完全相同（顺序无关）→ 正文全等
+  // 期望三组：db.host 值不同档（跨 3 个配置、4 处位置）→ cache.ttl 值相同档（跨 2 个配置）→ 正文全等（跨 2 个配置）。
+  const dupConns = () => [
+    makeConnection({ id: "c1", name: "dev", environmentName: "Development", sourceName: "lan" }),
+    makeConnection({ id: "c2", name: "prod", environmentName: "Production", sourceName: "cloud" }),
+  ];
+
+  const dupFixture = () => {
+    apiMocks.listConfigs.mockImplementation((conn: Connection) => ({
+      pageItems:
+        conn.id === "c1"
+          ? [
+              { dataId: "a.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+              { dataId: "b.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+            ]
+          : [
+              { dataId: "a.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+              { dataId: "c.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+            ],
+      totalCount: 2,
+    }));
+    apiMocks.getConfig.mockImplementation((conn: Connection, _ns: string, dataId: string) =>
+      Promise.resolve(
+        conn.id === "c1"
+          ? dataId === "a.yaml"
+            ? "db.host: 1.1.1.1"
+            : "cache.ttl: 300\ndb.host: 2.2.2.2"
+          : dataId === "a.yaml"
+            ? "db.host: 3.3.3.3"
+            : "db.host: 2.2.2.2\ncache.ttl: 300"
+      )
+    );
+  };
+
+  // 按「环境标签 + dataId」定位组内一处位置：同一 dataId 在多环境各出现一次，环境标签才是区分键
+  const dupLocation = (panel: HTMLElement, env: string, dataId: string): HTMLLabelElement => {
+    const hit = Array.from(panel.querySelectorAll("label.dup-check-loc")).find(
+      (el) =>
+        el.querySelector(".dup-check-loc-label")?.textContent === env &&
+        el.querySelector(".dup-check-loc-ref")?.textContent === `public/DEFAULT_GROUP/${dataId}`
+    ) as HTMLLabelElement | undefined;
+    if (!hit) throw new Error(`location not found: ${env} / ${dataId}`);
+    return hit;
+  };
+
+  const dupButton = (root: HTMLElement, text: string): HTMLButtonElement => {
+    const hit = Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.trim() === text);
+    if (!hit) throw new Error(`button not found: ${text}`);
+    return hit as HTMLButtonElement;
+  };
+
+  const dupDupSettings = () => JSON.parse(localStorage.getItem("cs.settings") as string).duplicateCheck;
+
+  it("审计后渲染重复检查面板：三档分列、位置带取值、跨配置数可解释（R1/R3）", async () => {
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    expect(panel.className).toBe("dup-check");
+
+    // 三档各出一组，按「值不同 → 值相同 → 正文全等」排序
+    const groups = Array.from(panel.querySelectorAll("li.dup-check-group")) as HTMLElement[];
+    expect(groups).toHaveLength(3);
+    expect(groups[0].querySelector(".dup-check-badge-diff")?.textContent).toBe("dupCheck.badgeKeyDupDiffValue");
+    expect(groups[1].querySelector(".dup-check-badge-same")?.textContent).toBe("dupCheck.badgeKeyDupSameValue");
+    expect(groups[2].querySelector(".dup-check-badge-body")?.textContent).toBe("dupCheck.badgeExactBody");
+    expect(panel.querySelector(".dup-check-count")?.textContent).toBe("dupCheck.groupCount");
+
+    // 值不同档：命中 key 可见；4 处位置按环境标签排序、各带该处取值
+    expect(groups[0].querySelector(".dup-check-key code")?.textContent).toBe("db.host");
+    const values = Array.from(groups[0].querySelectorAll("code.dup-check-loc-value")).map((el) => el.textContent);
+    expect(values).toEqual(["1.1.1.1", "2.2.2.2", "3.3.3.3", "2.2.2.2"]);
+    // 位置 ref 是 ns/group/dataId，title 带全文
+    const firstRef = groups[0].querySelector("code.dup-check-loc-ref") as HTMLElement;
+    expect(firstRef.textContent).toBe("public/DEFAULT_GROUP/a.yaml");
+    expect(firstRef).toHaveAttribute("title", "public/DEFAULT_GROUP/a.yaml");
+    expect(groups[0].querySelectorAll("label.dup-check-loc")).toHaveLength(4);
+    // 三组都给出跨配置数；统计行报已检查配置数
+    expect(panel.querySelectorAll(".dup-check-scope")).toHaveLength(3);
+    expect(panel.querySelector(".dup-check-stat")?.textContent).toContain("dupCheck.checkedConfigs");
+
+    // 值不同档有复制/忽略/对比/回退四个动作；正文全等组没有单 key，只有「送去对比」
+    expect(groups[0].querySelectorAll("button")).toHaveLength(4);
+    expect(groups[1].querySelectorAll("button")).toHaveLength(3);
+    expect(groups[2].querySelectorAll("button")).toHaveLength(1);
+    expect(groups[2].querySelectorAll("code.dup-check-loc-value")).toHaveLength(0);
+    expect(dupButton(groups[0], "dupCheck.rollbackPlan")).toBeTruthy();
+    expect(groups[1].textContent).not.toContain("dupCheck.rollbackPlan");
+    expect(groups[2].textContent).not.toContain("dupCheck.rollbackPlan");
+  });
+
+  it("重复组勾选两个位置后「送去对比」按勾选顺序左右交给 DiffView（R4 出口一）", async () => {
+    const onNavigate = vi.fn();
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} onNavigateToDiff={onNavigate} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const group = panel.querySelector("li.dup-check-group") as HTMLElement; // 值不同档在前
+    const compareBtn = dupButton(group, "dupCheck.compare");
+    expect(compareBtn.disabled).toBe(true);
+
+    fireEvent.click(dupLocation(panel, "Development / dev / public", "a.yaml").querySelector("input") as HTMLInputElement);
+    fireEvent.click(dupLocation(panel, "Production / prod / public", "a.yaml").querySelector("input") as HTMLInputElement);
+
+    // 第 1 个勾选标来源、第 2 个标目标
+    expect(group.querySelectorAll(".dup-check-loc-role")).toHaveLength(2);
+    expect(group.querySelectorAll(".dup-check-loc-role")[0].textContent).toBe("dupCheck.sourceRole");
+    expect(group.querySelectorAll(".dup-check-loc-role")[1].textContent).toBe("dupCheck.targetRole");
+    expect(compareBtn.disabled).toBe(false);
+
+    fireEvent.click(compareBtn);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith({
+      leftConnId: "c1",
+      rightConnId: "c2",
+      left: { tenant: "public", group: "DEFAULT_GROUP", dataId: "a.yaml" },
+      right: { tenant: "public", group: "DEFAULT_GROUP", dataId: "a.yaml" },
+    });
+  });
+
+  it("值不同档勾选两个位置后「生成回退计划」复用 apply 通道，只出计划不写入（R4 出口二）", async () => {
+    const onStartApply = vi.fn();
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} onStartApply={onStartApply} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const group = panel.querySelector("li.dup-check-group") as HTMLElement; // 值不同档在前
+
+    fireEvent.click(dupLocation(panel, "Development / dev / public", "a.yaml").querySelector("input") as HTMLInputElement);
+    fireEvent.click(dupLocation(panel, "Production / prod / public", "a.yaml").querySelector("input") as HTMLInputElement);
+
+    fireEvent.click(dupButton(group, "dupCheck.rollbackPlan"));
+
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect(onStartApply).toHaveBeenCalledWith({
+      sourceType: "audit",
+      scope: "key",
+      source: {
+        provider: "nacos",
+        connectionId: "c1",
+        connectionName: "dev",
+        namespace: "public",
+        label: "Development / dev / public",
+      },
+      target: {
+        provider: "nacos",
+        connectionId: "c2",
+        connectionName: "prod",
+        namespace: "public",
+        label: "Production / prod / public",
+      },
+      items: [
+        {
+          provider: "nacos",
+          connectionId: "c2",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "a.yaml",
+          key: "db.host",
+          sourceRef: {
+            provider: "nacos",
+            connectionId: "c1",
+            namespace: "public",
+            group: "DEFAULT_GROUP",
+            dataId: "a.yaml",
+            key: "db.host",
+          },
+          targetRef: {
+            provider: "nacos",
+            connectionId: "c2",
+            namespace: "public",
+            group: "DEFAULT_GROUP",
+            dataId: "a.yaml",
+            key: "db.host",
+          },
+        },
+      ],
+      rangeSummary: {
+        count: 1,
+        skippedCount: 0,
+        riskLevel: "low",
+        riskReasons: [],
+      },
+      origin: {
+        mode: "audit",
+        returnMode: "audit",
+      },
+    });
+  });
+
+  it("判据开关走设置通道持久化：关掉 keyDup 后两档组都消失、正文全等仍在（R1/R2）", async () => {
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
+
+    const keyDupToggle = panel.querySelector(".dup-check-bar label.check-row input") as HTMLInputElement;
+    expect(keyDupToggle.checked).toBe(true);
+    fireEvent.click(keyDupToggle);
+
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(1);
+    expect(screen.queryByText("dupCheck.badgeKeyDupDiffValue")).toBeNull();
+    expect(screen.queryByText("dupCheck.badgeKeyDupSameValue")).toBeNull();
+    expect(screen.getByText("dupCheck.badgeExactBody")).toBeTruthy();
+    expect(dupDupSettings().keyDupEnabled).toBe(false);
+  });
+
+  it("「忽略此 key」写入忽略清单并即时生效，× 移除后组恢复；忽略清单不影响正文判据（R2）", async () => {
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    expect(screen.getByText("dupCheck.ignoreEmpty")).toBeTruthy();
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
+
+    const [dbGroup] = Array.from(panel.querySelectorAll("li.dup-check-group")) as HTMLElement[];
+    fireEvent.click(dupButton(dbGroup, "dupCheck.ignoreThisKey"));
+
+    // db.host 被忽略：值不同档消失；值相同档（cache.ttl）与正文全等档不受忽略清单影响
+    expect(screen.queryByText("dupCheck.badgeKeyDupDiffValue")).toBeNull();
+    expect(screen.getByText("dupCheck.badgeKeyDupSameValue")).toBeTruthy();
+    expect(screen.getByText("dupCheck.badgeExactBody")).toBeTruthy();
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(2);
+    // 忽略清单 chip 出现、带移除入口
+    expect(panel.querySelector(".ignore-rule-text code")?.textContent).toBe("db.host");
+    expect(dupDupSettings().ignoredKeyPatterns).toContain("db.host");
+
+    fireEvent.click(screen.getByRole("button", { name: "dupCheck.ignoreRemoveAria" }));
+
+    // 移除后组恢复、清单回空
+    expect(screen.getByText("dupCheck.badgeKeyDupDiffValue")).toBeTruthy();
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
+    expect(dupDupSettings().ignoredKeyPatterns).toEqual([]);
   });
 });

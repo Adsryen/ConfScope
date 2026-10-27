@@ -21,11 +21,21 @@ export interface StartupSettings {
   lastShownChangelogVersion: string;
 }
 
+export interface DuplicateCheckSettings {
+  /** 判据①：同 key 跨配置（值相同/值不同分两档）。 */
+  keyDupEnabled: boolean;
+  /** 判据②：正文归一化后全等。 */
+  exactBodyEnabled: boolean;
+  /** 忽略的 key 模式（支持 * 通配）。字段可选，缺省空数组。 */
+  ignoredKeyPatterns: string[];
+}
+
 export interface AppSettings {
   proxy: ProxySettings;
   update: UpdateSettings;
   compare: CompareSettings;
   startup: StartupSettings;
+  duplicateCheck: DuplicateCheckSettings;
 }
 
 const KEY = "cs.settings";
@@ -56,6 +66,8 @@ const defaults: AppSettings = {
   update: { skipVersion: "", lastCheckAt: "", lastSeenVersion: "" },
   compare: { sortConnections: true, sortNamespaces: true },
   startup: { lastOpenedVersion: "", lastShownWelcomeVersion: "", lastShownChangelogVersion: "" },
+  // r110 重复检查：两判据默认开（PRD R1），忽略清单默认空。
+  duplicateCheck: { keyDupEnabled: true, exactBodyEnabled: true, ignoredKeyPatterns: [] },
 };
 
 export function loadSettings(): AppSettings {
@@ -118,6 +130,18 @@ export function updateStartupSettings(startup: Partial<StartupSettings>) {
   });
 }
 
+/** r110 重复检查设置：数组字段（ignoredKeyPatterns）调用方传整份，布尔用 patch。 */
+export function updateDuplicateCheckSettings(patch: Partial<DuplicateCheckSettings>) {
+  const current = loadSettings();
+  saveSettings({
+    ...current,
+    duplicateCheck: {
+      ...current.duplicateCheck,
+      ...patch,
+    },
+  });
+}
+
 function normalizeSettings(value: unknown): AppSettings {
   const input = value as Partial<AppSettings>;
   return {
@@ -139,6 +163,14 @@ function normalizeSettings(value: unknown): AppSettings {
       lastOpenedVersion: stringValue(input?.startup?.lastOpenedVersion),
       lastShownWelcomeVersion: stringValue(input?.startup?.lastShownWelcomeVersion),
       lastShownChangelogVersion: stringValue(input?.startup?.lastShownChangelogVersion),
+    },
+    // 旧文档没有这一节：全部落到默认值（两判据开、忽略清单空），不动 schemaVersion。
+    duplicateCheck: {
+      keyDupEnabled: boolValue(input?.duplicateCheck?.keyDupEnabled, defaults.duplicateCheck.keyDupEnabled),
+      exactBodyEnabled: boolValue(input?.duplicateCheck?.exactBodyEnabled, defaults.duplicateCheck.exactBodyEnabled),
+      ignoredKeyPatterns: Array.isArray(input?.duplicateCheck?.ignoredKeyPatterns)
+        ? input.duplicateCheck.ignoredKeyPatterns.filter((p): p is string => typeof p === "string")
+        : [],
     },
   };
 }
