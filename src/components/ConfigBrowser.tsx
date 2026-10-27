@@ -689,6 +689,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       setContentError(message);
       setContent("");
       setMetadata(null);
+      // 基线未知时「改用服务端内容」这条出口必须一起收掉：它做的是 setDraft(content)，而 content
+      // 刚被清成空串——留着它就等于给「整份正文换成空」这件事留了一颗可点的按钮。
+      setRemoteMoved(null);
       reportError({
         title: t("config.contentLoadFailed"),
         source: `${sourceLabel} / ${item.group} / ${item.dataId}`,
@@ -831,6 +834,12 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
    */
   const saveAsPlan = () => {
     if (!selected) return;
+    if (contentError) {
+      // 基线未知就不许生成计划：content 已被清成空串，buildDirectWriteExitEntry 拿草稿对上这份空基线，
+      // 产出的是一份「整文件覆盖」——服务端那份新值会被静默抹掉。判据只看基线可知与否，不去猜内容。
+      setSaveError(t("config.planBlockedNoBaseline"));
+      return;
+    }
     const problems = validateConfigIssues(draft, fmt);
     if (problems.length) {
       setValidateErrs(problems.map((p) => ({ text: p.message, line: p.line }))); // 弹框提示并禁止生成计划
@@ -1467,8 +1476,16 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                   </div>
                 )}
                 {contentError && selected && <InlineError message={contentError} onRetry={() => openConfig(selected)} />}
-                {!contentLoading && !contentError && editing && (
+                {!contentLoading && editing && (
                   <>
+                    {contentError && (
+                      <div className="browser-baseline-unknown" {...statusMessageProps("info")}>
+                        <span className="browser-baseline-unknown-text">{t("config.baselineUnknownNotice")}</span>
+                        <span className="browser-baseline-unknown-actions">
+                          <CopyButton text={draft} label={t("config.copyDraft")} />
+                        </span>
+                      </div>
+                    )}
                     {remoteMoved && (
                       <div className="browser-remote-moved" {...statusMessageProps("info")}>
                         <span className="browser-remote-moved-text">
@@ -1508,9 +1525,19 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                       <button className="btn btn-ghost btn-sm" onClick={cancelEditing}>
                         {t("common.cancel")}
                       </button>
-                      <button className="btn btn-primary btn-sm" onClick={saveAsPlan} title={t("config.saveShortcutHint")}>
-                        {t("config.saveAsPlan")}
-                      </button>
+                      {/* 禁用理由写在看得见的文案上：琥珀条已经说明「基线未知」，这里不再往 disabled
+                          按钮上挂 title（轮26 F-1 / 轮66 复验：原生 disabled 收不到 pointer 事件，
+                          title 整段不弹）。Ctrl+S 走同一条 saveAsPlan，拒绝时把理由落进 saveError。 */}
+                      <span className="btn-guard" title={t("config.saveShortcutHint")}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={saveAsPlan}
+                          disabled={!!contentError}
+                          aria-disabled={!!contentError}
+                        >
+                          {t("config.saveAsPlan")}
+                        </button>
+                      </span>
                     </div>
                     <div className="editor-host grow">
                       <CodeEditor

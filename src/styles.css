@@ -1934,6 +1934,32 @@ textarea {
   gap: 8px;
 }
 
+/* 正文重取失败、编辑区还留着草稿时的那条琥珀说明（轮97 K1）。
+   与 .browser-remote-moved 一族同写法同底色：rgba tint 叠在面板底（承托面 --bg / --bg-hover
+   两档由 contrastTokens W1/W2 一起钉住，族内一旦分叉当场判红）。这里刻意不复用同一个类名，
+   因为两条说明语义不同（一条说服务端换了、一条说服务端没取到），站点文案与动作也不同。 */
+.browser-baseline-unknown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: 6px;
+  background: rgba(215, 186, 125, 0.12);
+  color: var(--amber-h);
+  font-size: 12px;
+}
+.browser-baseline-unknown-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.browser-baseline-unknown-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 /* 应用计划草稿生成中（R6 / D7）：原先只有静止文案，看起来像渲染已结束；
    低幅度透明度脉冲表示"仍在进行"，并在减弱动效偏好下关闭 */
 .apply-draft-loading {

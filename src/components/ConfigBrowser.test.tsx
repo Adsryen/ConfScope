@@ -2124,3 +2124,164 @@ describe("ConfigBrowser 延迟重试与基线交换", () => {
     expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
   });
 });
+
+// ── 轮97 K1：正文重取失败不许把编辑区连同未保存草稿一起吞掉 ──
+
+describe("ConfigBrowser 正文重取失败时的编辑出口", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.getConfigDocument.mockReset();
+    apiMocks.publishConfig.mockReset();
+    clearTasks();
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "db.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ])
+    );
+    apiMocks.getConfigDocument.mockResolvedValue(docOf('{"server":{"port":8080}}'));
+  });
+
+  function docOf(content: string, format = "json") {
+    return { content, format, version: "", source: "nacos", updateTime: "" };
+  }
+
+  /** 服务端那边发生了一次变化：走的是写后失效那条自动重取，与人点「重试」是同一条 openConfig。 */
+  async function serverRewrites(next?: { content: string } | Error) {
+    if (next instanceof Error) apiMocks.getConfigDocument.mockRejectedValueOnce(next);
+    else if (next) apiMocks.getConfigDocument.mockResolvedValue(next);
+    await act(async () => {
+      publishConfigChange({ connectionId: "dev", namespace: "public", refs: [{ dataId: "app.json", group: "DEFAULT_GROUP" }] });
+    });
+  }
+
+  async function waitForBanner(selector: string) {
+    return waitFor(() => {
+      const el = document.querySelector<HTMLElement>(selector);
+      expect(el, `${selector} 应该渲染出来`).not.toBeNull();
+      return el!;
+    });
+  }
+
+  async function editDraft(draft: string) {
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await waitFor(() => expect(document.querySelector("textarea")).toBeInTheDocument());
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: draft } });
+  }
+
+  it("编辑中重取失败：草稿还在、还能接着改，琥珀条把「基线未知」说清", async () => {
+    const onStartApply = vi.fn();
+    renderBrowser("zh-CN", conn, "public", { onStartApply });
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await editDraft('{"server":{"port":9090}}');
+
+    await serverRewrites(new Error("read denied"));
+
+    const banner = await waitForBanner(".browser-baseline-unknown");
+    expect(banner.textContent).toContain("还没保存的草稿");
+    expect(banner.textContent).toContain("整份文件");
+    // 草稿一字没丢，而且还在可编辑的那块里（不是只读回显）
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: '{"server":{"port":9191}}' } });
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9191}}');
+    // 两条出口同时在场：错误卡管重试，琥珀条管把草稿抄走
+    expect(document.querySelector(".inline-error")).toBeInTheDocument();
+    expect(within(banner).getByRole("button", { name: "复制草稿" })).toBeInTheDocument();
+  });
+
+  it("基线未知时生成计划这条路是死的，Ctrl+S 也只给一句看得见的理由", async () => {
+    const onStartApply = vi.fn();
+    renderBrowser("zh-CN", conn, "public", { onStartApply });
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await editDraft('{"server":{"port":9090}}');
+    await serverRewrites(new Error("read denied"));
+    await waitForBanner(".browser-baseline-unknown");
+
+    expect(screen.getByRole("button", { name: "生成变更计划" })).toBeDisabled();
+    // 按钮点不动之外，快捷键那条路径也必须自己拦下来（disabled 不拦键盘）
+    fireEvent.keyDown(document.querySelector("textarea")!, { key: "s", ctrlKey: true });
+    expect(await screen.findByText("服务端正文还没取到，现在生成计划会把整份文件覆盖上去：请先重试载入。")).toBeInTheDocument();
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(apiMocks.publishConfig).not.toHaveBeenCalled();
+    expect(loadOperationHistory()).toEqual([]);
+  });
+
+  it("重试成功后一切恢复：琥珀条收起、计划入口回来、基线交换那条判定照常生效", async () => {
+    const onStartApply = vi.fn();
+    renderBrowser("zh-CN", conn, "public", { onStartApply });
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await editDraft('{"server":{"port":9090}}');
+    await serverRewrites(new Error("read denied"));
+    await waitForBanner(".browser-baseline-unknown");
+    expect(screen.getByRole("button", { name: "生成变更计划" })).toBeDisabled();
+
+    apiMocks.getConfigDocument.mockResolvedValue(docOf('{"server":{"port":7070}}'));
+    fireEvent.click(within(document.querySelector(".inline-error")!).getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(document.querySelector(".browser-baseline-unknown")).not.toBeInTheDocument());
+    // 服务端真值既不等于旧正文也不等于草稿：轮96 K2 那条基线交换说明必须接得上
+    const moved = await waitForBanner(".browser-remote-moved");
+    expect(moved.textContent).toContain("服务端已把 app.json");
+    const plan = screen.getByRole("button", { name: "生成变更计划" });
+    await waitFor(() => expect(plan).toBeEnabled());
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    fireEvent.click(plan);
+    await waitFor(() => expect(onStartApply).toHaveBeenCalledTimes(1));
+    const payload = onStartApply.mock.calls[0][0] as ApplyEntryPayload;
+    expect(payload.items[0].sourceValueOverride?.content).toBe('{"server":{"port":9090}}');
+  });
+
+  it("先交换过基线、再重取失败时，那颗会把草稿换成空正文的按钮跟着收掉", async () => {
+    renderBrowser("zh-CN", conn, "public", { onStartApply: vi.fn() });
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await editDraft('{"server":{"port":9090}}');
+
+    await serverRewrites(docOf('{"server":{"port":7070}}'));
+    await waitForBanner(".browser-remote-moved");
+
+    await serverRewrites(new Error("read denied"));
+    await waitForBanner(".browser-baseline-unknown");
+
+    // 「改用服务端内容」做的是 setDraft(content)，而此刻 content 是空串：留着它等于留一颗清空草稿的按钮
+    expect(document.querySelector(".browser-remote-moved")).not.toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+  });
+
+  it("失败态的「复制草稿」抄走的就是编辑器里那份，不另造第二份真相", async () => {
+    const { copyText } = await import("../lib/clipboard");
+    vi.mocked(copyText).mockClear();
+    vi.mocked(copyText).mockResolvedValue(true);
+    renderBrowser("zh-CN", conn, "public", { onStartApply: vi.fn() });
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await editDraft('{"server":{"port":9090}}');
+    await serverRewrites(new Error("read denied"));
+    const banner = await waitForBanner(".browser-baseline-unknown");
+
+    // 抄的是「屏幕上这一份」：改了草稿再点，拿到的就是改完的那份
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: '{"server":{"port":9191}}' } });
+    fireEvent.click(within(banner).getByRole("button", { name: "复制草稿" }));
+
+    await waitFor(() => expect(copyText).toHaveBeenCalledTimes(1));
+    expect(copyText).toHaveBeenCalledWith('{"server":{"port":9191}}');
+  });
+
+  it("只读态正文加载失败时，不拿一份空正文冒充「这份配置本来就是空的」", async () => {
+    apiMocks.getConfigDocument.mockRejectedValue(new Error("read denied"));
+    renderBrowser("zh-CN", conn, "public", { onStartApply: vi.fn() });
+    fireEvent.click(await screen.findByText("app.json"));
+
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    expect(document.querySelector(".code-area"), "失败态不许渲染正文视图").toBeNull();
+    const card = document.querySelector<HTMLElement>(".inline-error")!;
+    expect(card.textContent).toContain("read denied");
+    expect(within(card).getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+});

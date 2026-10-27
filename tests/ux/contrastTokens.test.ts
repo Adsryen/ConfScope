@@ -401,6 +401,9 @@ describe("G5 文字色对实际承托面（承托面按真机实测配对）", (
    * 这张表也无从谈起）。改回 rgba 之后，tintOf 能拿到真实 tint，族内两处一旦分叉也当场报红。
    */
   const WARN_AMBER = tintOf(".browser-remote-moved");
+  // 轮97 K1 的「基线未知」条与轮96 K2 的「服务端已改」条同族：同一条编辑区上方，两种语境。
+  expect(tintOf(".browser-baseline-unknown"), "琥珀提示条一族分叉了，W1/W2 承托面要按新的那一档重新列")
+    .toBe(WARN_AMBER);
   expect(tintOf(".test-msg.warn"), "琥珀警告条底色分叉了，W1/W2 承托面要按新的那一档重新列")
     .toBe(WARN_AMBER);
 
@@ -429,7 +432,7 @@ describe("G5 文字色对实际承托面（承托面按真机实测配对）", (
     { name: "E2 is-current ∘ --bg（当前命中行正文）", bg: composite(LINE_CURRENT, BG), colors: [...codeColors, RED_TEXT_P] },
     // 警告条正文 --amber-h、条内 ghost 按钮 --text（.btn-ghost 背景 transparent，字直接落在 tint 上）。
     // dim 不放进来：它在这一档上实测 3.88，而条内确实没有次要文本——将来要加就得换成 raised。
-    { name: "W1 amber warn tint ∘ --bg（草稿基线交换提示条：承托面按样式表链推导）", bg: composite(WARN_AMBER, BG), colors: [AMBER_H_P, TEXT_P] },
+    { name: "W1 amber warn tint ∘ --bg（基线未知 / 基线交换两条琥珀提示条共用这一档：承托面按样式表链推导）", bg: composite(WARN_AMBER, BG), colors: [AMBER_H_P, TEXT_P] },
     { name: "W2 amber warn tint ∘ --bg-hover（同一配对在更亮的面板上也必须达标）", bg: composite(WARN_AMBER, BG_HOVER), colors: [AMBER_H_P, TEXT_P] },
     { name: "F --red-fill（当前命中实心红底）", bg: RED_FILL, colors: [["#ffffff", "#ffffff"]] },
   ];
