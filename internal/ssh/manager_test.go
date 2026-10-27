@@ -1,12 +1,20 @@
 package ssh
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// testKnownHostsPath 给单测一个稳定的 known_hosts 位置：
+// 这些用例不碰主机密钥裁决本身，只需路径可解析。
+func testKnownHostsPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "known_hosts")
+}
+
 func TestManagerReturnsErrorForMissingTunnelPort(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 
 	_, err := manager.GetLocalPort("missing")
 	if err == nil {
@@ -18,7 +26,7 @@ func TestManagerReturnsErrorForMissingTunnelPort(t *testing.T) {
 }
 
 func TestManagerGetTunnelReturnsNilForMissingTunnel(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 
 	if got := manager.GetTunnel("missing"); got != nil {
 		t.Fatalf("GetTunnel returned %#v, want nil", got)
@@ -26,21 +34,21 @@ func TestManagerGetTunnelReturnsNilForMissingTunnel(t *testing.T) {
 }
 
 func TestManagerStopTunnelIsIdempotent(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 
 	manager.StopTunnel("missing")
 	manager.StopTunnel("missing")
 }
 
 func TestManagerStopAllIsIdempotent(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 
 	manager.StopAll()
 	manager.StopAll()
 }
 
 func TestManagerDoesNotStoreTunnelWhenStartFails(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 
 	_, err := manager.CreateTunnel("conn", Config{
 		Host:       "127.0.0.1",
@@ -59,7 +67,7 @@ func TestManagerDoesNotStoreTunnelWhenStartFails(t *testing.T) {
 }
 
 func TestManagerReusesExistingTunnelForSameConfig(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 	config := Config{
 		Host:       "jump.example.com",
 		Port:       22,

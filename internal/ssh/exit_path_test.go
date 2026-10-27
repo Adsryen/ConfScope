@@ -177,7 +177,7 @@ func tunnelWithFakeParts(config Config, listener *fakeListener) (*Tunnel, *fakeC
 
 func TestStopIsNotBlockedByPendingDial(t *testing.T) {
 	gate := newGateDialer(33000)
-	tunnel := withGate(NewTunnel(testTunnelConfig("jump-a")), gate)
+	tunnel := withGate(NewTunnel(testTunnelConfig("jump-a"), NewKnownHosts("")), gate)
 
 	started := make(chan int, 1)
 	errs := make(chan error, 1)
@@ -219,7 +219,7 @@ func TestStopIsNotBlockedByPendingDial(t *testing.T) {
 
 func TestStopIsIdempotentAndReportsPort(t *testing.T) {
 	gate := newGateDialer(33001)
-	tunnel := withGate(NewTunnel(testTunnelConfig("jump-b")), gate)
+	tunnel := withGate(NewTunnel(testTunnelConfig("jump-b"), NewKnownHosts("")), gate)
 
 	close(gate.release)
 
@@ -249,7 +249,7 @@ func TestStopAllWithCeilingNamesStuckConnection(t *testing.T) {
 	blocker := make(chan struct{})
 	t.Cleanup(func() { close(blocker) }) // 放掉那条卡住的 Close，别让 goroutine 悬着
 
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 	stuckListener := &fakeListener{addr: &net.TCPAddr{Port: 1}, block: blocker}
 	freeListener := &fakeListener{addr: &net.TCPAddr{Port: 2}}
 	stuck, _ := tunnelWithFakeParts(testTunnelConfig("stuck"), stuckListener)
@@ -274,7 +274,7 @@ func TestStopAllWithCeilingNamesStuckConnection(t *testing.T) {
 }
 
 func TestStopAllWithoutCeilingStopsEverything(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 	firstListener := &fakeListener{addr: &net.TCPAddr{Port: 3}}
 	secondListener := &fakeListener{addr: &net.TCPAddr{Port: 4}}
 	first, firstClient := tunnelWithFakeParts(testTunnelConfig("one"), firstListener)
@@ -296,7 +296,7 @@ func TestStopAllWithoutCeilingStopsEverything(t *testing.T) {
 }
 
 func TestStopAllWithCeilingReturnsNilWhenAllStopInTime(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
 	firstListener := &fakeListener{addr: &net.TCPAddr{Port: 5}}
 	secondListener := &fakeListener{addr: &net.TCPAddr{Port: 6}}
 	first, _ := tunnelWithFakeParts(testTunnelConfig("one"), firstListener)
@@ -311,8 +311,8 @@ func TestStopAllWithCeilingReturnsNilWhenAllStopInTime(t *testing.T) {
 
 func TestManagerStaysUsableWhileOneTunnelDials(t *testing.T) {
 	gate := newGateDialer(33003)
-	manager := NewManager()
-	manager.newTunnel = func(config Config) *Tunnel { return withGate(NewTunnel(config), gate) }
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
+	manager.newTunnel = func(config Config, hostKeys *KnownHosts) *Tunnel { return withGate(NewTunnel(config, hostKeys), gate) }
 
 	// 先放一条「已经能用」的连接进去，证明拨号期间对它的操作不受影响。
 	readyListener := &fakeListener{addr: &net.TCPAddr{Port: 9}}
@@ -357,8 +357,8 @@ func TestManagerStaysUsableWhileOneTunnelDials(t *testing.T) {
 // 停止请求落在拨号进行中：刚拨好的隧道必须当场收回，不许复活。
 func TestStopTunnelDuringDialDoesNotResurrectTunnel(t *testing.T) {
 	gate := newGateDialer(33004)
-	manager := NewManager()
-	manager.newTunnel = func(config Config) *Tunnel { return withGate(NewTunnel(config), gate) }
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
+	manager.newTunnel = func(config Config, hostKeys *KnownHosts) *Tunnel { return withGate(NewTunnel(config, hostKeys), gate) }
 
 	creating := make(chan error, 1)
 	go func() {
@@ -398,8 +398,8 @@ func TestStopTunnelDuringDialDoesNotResurrectTunnel(t *testing.T) {
 // 同配置且端口可用时必须复用，不再拨第二次，也不许把已经建好的那条关掉。
 func TestConcurrentCreateReusesCommittedTunnel(t *testing.T) {
 	gate := newGateDialer(33005)
-	manager := NewManager()
-	manager.newTunnel = func(config Config) *Tunnel { return withGate(NewTunnel(config), gate) }
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
+	manager.newTunnel = func(config Config, hostKeys *KnownHosts) *Tunnel { return withGate(NewTunnel(config, hostKeys), gate) }
 	config := testTunnelConfig("jump-g")
 
 	firstErrs := make(chan error, 1)
@@ -440,8 +440,8 @@ func TestConcurrentCreateReusesCommittedTunnel(t *testing.T) {
 // 换配置重建：旧的那条要在锁外停掉，新的顶上。
 func TestCreateTunnelWithChangedConfigReplacesOldTunnel(t *testing.T) {
 	gate := newGateDialer(33006)
-	manager := NewManager()
-	manager.newTunnel = func(config Config) *Tunnel { return withGate(NewTunnel(config), gate) }
+	manager := NewManager(func() string { return testKnownHostsPath(t) })
+	manager.newTunnel = func(config Config, hostKeys *KnownHosts) *Tunnel { return withGate(NewTunnel(config, hostKeys), gate) }
 
 	oldListener := &fakeListener{addr: &net.TCPAddr{Port: 7}}
 	oldTunnel, oldClient := tunnelWithFakeParts(testTunnelConfig("old"), oldListener)

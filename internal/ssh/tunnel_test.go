@@ -28,7 +28,7 @@ func TestCreateSSHConfigUsesPasswordAuth(t *testing.T) {
 		Username: "root",
 		AuthType: "password",
 		Password: "secret",
-	})
+	}, NewKnownHosts(""))
 
 	config, err := tunnel.createSSHConfig()
 	if err != nil {
@@ -49,7 +49,7 @@ func TestCreateSSHConfigRejectsUnsupportedAuthType(t *testing.T) {
 	tunnel := NewTunnel(Config{
 		Username: "root",
 		AuthType: "agent",
-	})
+	}, NewKnownHosts(""))
 
 	_, err := tunnel.createSSHConfig()
 	if err == nil {
@@ -63,7 +63,7 @@ func TestCreateSSHConfigRejectsUnsupportedAuthType(t *testing.T) {
 func TestParsePrivateKeyWithoutPassphrase(t *testing.T) {
 	tunnel := NewTunnel(Config{
 		PrivateKey: testPrivateKey(t),
-	})
+	}, NewKnownHosts(""))
 
 	signer, err := tunnel.parsePrivateKey()
 	if err != nil {
@@ -77,7 +77,7 @@ func TestParsePrivateKeyWithoutPassphrase(t *testing.T) {
 func TestParsePrivateKeyReturnsErrorForInvalidKey(t *testing.T) {
 	tunnel := NewTunnel(Config{
 		PrivateKey: "not a private key",
-	})
+	}, NewKnownHosts(""))
 
 	_, err := tunnel.parsePrivateKey()
 	if err == nil {
@@ -88,7 +88,7 @@ func TestParsePrivateKeyReturnsErrorForInvalidKey(t *testing.T) {
 func TestStoppedTunnelCannotStart(t *testing.T) {
 	tunnel := NewTunnel(Config{
 		AuthType: "password",
-	})
+	}, NewKnownHosts(""))
 	tunnel.Stop()
 
 	_, err := tunnel.Start()

@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -50,6 +51,7 @@ const acceptRetryDelay = 50 * time.Millisecond
 // Tunnel is a running SSH tunnel instance.
 type Tunnel struct {
 	config    Config
+	hostKeys  *KnownHosts
 	dialer    sshDialFunc
 	listenFn  listenFunc
 	sshClient sshClientConn
@@ -59,9 +61,12 @@ type Tunnel struct {
 	closed    bool
 }
 
-func NewTunnel(config Config) *Tunnel {
+// NewTunnel 创建隧道。hostKeys 是主机密钥校验器，不可为 nil：
+// 没有校验器的隧道在 Start 时会被拒绝，而不是静默放行（r104）。
+func NewTunnel(config Config, hostKeys *KnownHosts) *Tunnel {
 	return &Tunnel{
-		config: config,
+		config:   config,
+		hostKeys: hostKeys,
 		dialer: func(addr string, cfg *ssh.ClientConfig) (sshClientConn, error) {
 			client, err := ssh.Dial("tcp", addr, cfg)
 			if err != nil {
@@ -154,13 +159,16 @@ func (t *Tunnel) GetLocalPort() int {
 }
 
 func (t *Tunnel) createSSHConfig() (*ssh.ClientConfig, error) {
-	return createSSHConfig(t.config)
+	return createSSHConfig(t.config, t.hostKeys)
 }
 
-func createSSHConfig(config Config) (*ssh.ClientConfig, error) {
+func createSSHConfig(config Config, hostKeys *KnownHosts) (*ssh.ClientConfig, error) {
+	if hostKeys == nil {
+		return nil, errors.New("SSH 主机密钥校验器未配置，拒绝建立未校验的隧道")
+	}
 	sshConfig := &ssh.ClientConfig{
 		User:            config.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: verify host keys before production use.
+		HostKeyCallback: hostKeys.HostKeyCallback(config.Host, config.Port),
 		Timeout:         10 * time.Second,
 	}
 
@@ -206,13 +214,13 @@ func parsePrivateKey(config Config) (ssh.Signer, error) {
 }
 
 // TestConnection verifies that the SSH server can be reached and authenticated.
-func TestConnection(config Config) (TestResult, error) {
+func TestConnection(config Config, hostKeys *KnownHosts) (TestResult, error) {
 	startedAt := time.Now()
 	if config.Port <= 0 {
 		config.Port = 22
 	}
 
-	sshConfig, err := createSSHConfig(config)
+	sshConfig, err := createSSHConfig(config, hostKeys)
 	if err != nil {
 		return TestResult{LatencyMs: time.Since(startedAt).Milliseconds()}, fmt.Errorf("failed to create SSH config: %w", err)
 	}

@@ -64,12 +64,23 @@ type App struct {
 	revisions     *revisions.Store
 }
 
+// sshKnownHostsPath 解析 SSH 主机密钥记录（known_hosts）的落点。
+// 与其他数据共用同一套数据根解析：数据根整体搬家（换根迁移）后，
+// 下一次连接自动落到新位置，管理器按路径变化重建校验器。
+func sshKnownHostsPath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(portabledata.DataRootFor(exePath), "ssh", "known_hosts")
+}
+
 // NewApp 创建应用服务实例。
 func NewApp() *App {
 	nacosClient := nacos.NewClient()
 	return &App{
 		nacos:  nacosClient,
-		sshMgr: ssh.NewManager(),
+		sshMgr: ssh.NewManager(sshKnownHostsPath),
 		providers: map[provider.ProviderType]provider.ConfigProvider{
 			provider.ProviderNacos:  provider.NewNacosProvider(nacosClient),
 			provider.ProviderApollo: provider.NewApolloProvider(nil),
@@ -729,7 +740,22 @@ func (a *App) CreateSSHTunnel(connectionId string, config ssh.Config) (int, erro
 }
 
 func (a *App) TestSSHConnection(config ssh.Config) (ssh.TestResult, error) {
-	return ssh.TestConnection(config)
+	hostKeys, err := a.sshMgr.KnownHosts()
+	if err != nil {
+		return ssh.TestResult{}, err
+	}
+	return ssh.TestConnection(config, hostKeys)
+}
+
+// ProbeSSHHostKey 探测 SSH 服务器出示的主机密钥并给出裁决（不建隧道、不完成认证）。
+// 界面据此决定：未知 → 展示指纹让用户确认；已变更 → 硬阻断。
+func (a *App) ProbeSSHHostKey(config ssh.Config) (ssh.HostKeyStatus, error) {
+	return a.sshMgr.ProbeHostKey(config)
+}
+
+// TrustSSHHostKey 把用户确认过的主机密钥写进 known_hosts。
+func (a *App) TrustSSHHostKey(host string, port int, keyType, keyBase64 string) error {
+	return a.sshMgr.TrustHostKey(host, port, keyType, keyBase64)
 }
 
 // StopSSHTunnel 停止指定连接的 SSH 隧道。

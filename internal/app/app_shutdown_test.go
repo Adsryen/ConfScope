@@ -79,7 +79,7 @@ func TestShutdownIgnoresMissingSSHManagerAndReturnsPromptly(t *testing.T) {
 
 func TestShutdownReturnsPromptlyWithEmptyTunnelTable(t *testing.T) {
 	recorder := captureShutdownLogLines(t)
-	app := &App{sshMgr: ssh.NewManager()}
+	app := &App{sshMgr: ssh.NewManager(func() string { return "" })}
 
 	mustShutdownWithin(t, 500*time.Millisecond, app)
 
@@ -94,7 +94,7 @@ func TestShutdownReturnsPromptlyWithEmptyTunnelTable(t *testing.T) {
 // 退出诊断必须点名到连接：用户报「装不上」时，日志里得看得出是谁拖住了退出。
 func TestReportPendingTunnelsOnShutdownNamesConnections(t *testing.T) {
 	recorder := captureShutdownLogLines(t)
-	app := &App{sshMgr: ssh.NewManager()}
+	app := &App{sshMgr: ssh.NewManager(func() string { return "" })}
 
 	app.reportPendingTunnelsOnShutdown([]string{"c_mqze3n5l_19oeti", "c_second"})
 
@@ -133,7 +133,7 @@ func TestShutdownUsesBoundedStopperAndNamesStuckConnections(t *testing.T) {
 	}
 	t.Cleanup(func() { stopAllTunnelsOnShutdown = original })
 
-	app := &App{sshMgr: ssh.NewManager()}
+	app := &App{sshMgr: ssh.NewManager(func() string { return "" })}
 	mustShutdownWithin(t, 500*time.Millisecond, app)
 
 	if len(calls) != 1 {

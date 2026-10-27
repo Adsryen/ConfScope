@@ -4,10 +4,15 @@
 package ssh
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // 提交结果（createTunnel 与 commit 之间的约定）。
@@ -19,13 +24,22 @@ const (
 
 // Manager 管理多个 SSH 隧道实例。
 //
-// 锁纪律（本轮立的规矩，别再改回去）：m.mu 只保护两张表，绝不跨越
-// dial / Close 这类可阻塞动作。理由见 CreateTunnel 与 StopAllWithCeiling 的注释。
+// 锁纪律：m.mu 只保护两张表，绝不跨越
+// dial / Close 这类可阻塞动作。khMu 只保护「当前数据根对应的校验器实例」
+// 这一对内存字段，同样不跨可阻塞动作。
 type Manager struct {
 	tunnels map[string]*Tunnel
 	// newTunnel 是创建隧道的接缝：默认 NewTunnel，单测换成「拨号可以被外界控制」的假隧道。
 	// 没有这条缝，退出路径上的并发与超时行为就只能靠真网络去撞 —— 那等于没验证过。
-	newTunnel func(Config) *Tunnel
+	newTunnel func(Config, *KnownHosts) *Tunnel
+	// knownHostsPath 由宿主（桌面端）给出：known_hosts 落在当前数据根下。
+	// 用解析函数而不是固定字符串，是因为数据根可以整体搬家（换根迁移），
+	// 搬家之后下一次连接必须自动落到新位置。
+	knownHostsPath func() string
+	// khMu 保护 kh：解析路径、按需换实例这一小步。
+	khMu sync.Mutex
+	// kh 是当前数据根对应的 known_hosts 实例；路径变了就重建（见 knownHosts）。
+	kh *KnownHosts
 	// stopEpoch 是每条连接的「这一格的隧道作废」计数：手动停止、换配置重建、
 	// StopAll 都让它自增。创建动作在拨号前记下自己看到的值，提交时比对 ——
 	// 否则会出现「用户点了停止，隧道却在你拨号完成之后悄悄复活」。
@@ -38,12 +52,93 @@ type Manager struct {
 }
 
 // NewManager 创建新的隧道管理器。
-func NewManager() *Manager {
+// knownHostsPath 返回 known_hosts 文件位置（当前数据根下）；
+// 返回空串视为未配置，任何需要主机密钥裁决的动作都会失败，而不是跳过校验。
+func NewManager(knownHostsPath func() string) *Manager {
 	return &Manager{
-		tunnels:   make(map[string]*Tunnel),
-		stopEpoch: make(map[string]uint64),
-		newTunnel: func(config Config) *Tunnel { return NewTunnel(config) },
+		tunnels:        make(map[string]*Tunnel),
+		stopEpoch:      make(map[string]uint64),
+		knownHostsPath: knownHostsPath,
+		newTunnel:      func(config Config, hostKeys *KnownHosts) *Tunnel { return NewTunnel(config, hostKeys) },
 	}
+}
+
+// knownHosts 取当前数据根对应的 known_hosts 实例；路径变了（换根迁移）就重建。
+func (m *Manager) knownHosts() (*KnownHosts, error) {
+	m.khMu.Lock()
+	defer m.khMu.Unlock()
+
+	path := ""
+	if m.knownHostsPath != nil {
+		path = m.knownHostsPath()
+	}
+	if path == "" {
+		return nil, errors.New("SSH 主机密钥校验不可用：数据目录未能解析，拒绝建立未校验的隧道")
+	}
+	if m.kh == nil || m.kh.Path() != path {
+		m.kh = NewKnownHosts(path)
+	}
+	return m.kh, nil
+}
+
+// KnownHosts 返回本管理器的主机密钥存储（探测与信任接口共用同一份）。
+func (m *Manager) KnownHosts() (*KnownHosts, error) {
+	return m.knownHosts()
+}
+
+// TrustHostKey 把用户确认过的主机密钥写进 known_hosts（r104 R2 的落盘一步）。
+func (m *Manager) TrustHostKey(host string, port int, keyType, keyBase64 string) error {
+	hostKeys, err := m.knownHosts()
+	if err != nil {
+		return err
+	}
+	return hostKeys.Add(host, port, keyType, keyBase64)
+}
+
+// ProbeHostKey 拨一次 SSH 服务器，取回它出示的主机密钥并裁决
+// （不完成认证、不建隧道）：结果交给界面决定弹确认还是直接阻断。
+func (m *Manager) ProbeHostKey(config Config) (HostKeyStatus, error) {
+	if config.Host == "" {
+		return HostKeyStatus{}, errors.New("SSH 主机名不能为空")
+	}
+	hostKeys, err := m.knownHosts()
+	if err != nil {
+		return HostKeyStatus{}, err
+	}
+	if config.Port <= 0 {
+		config.Port = 22
+	}
+
+	// 探测阶段只取回出示的钥匙，裁决在 Judge 里做：
+	// 裁决依据与真正建连用的是同一份 known_hosts，口径不会分叉。
+	//
+	// x/crypto 没有「只握手不认证」的公开入口（NewClientConn 也会走到认证）。
+	// 所以探测不带任何认证方法：客户端内置的 "none" 尝试会被服务器拒掉，
+	// 但拒绝发生在主机密钥交换「之后」——回调抓到钥匙即说明握手完成，
+	// 这次 auth 失败是探测的预期结果，不代表握手有问题。
+	var presented ssh.PublicKey
+	sshConfig := &ssh.ClientConfig{
+		User: config.Username,
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			presented = key
+			return nil
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
+	client, err := ssh.Dial("tcp", addr, sshConfig)
+	if client != nil {
+		_ = client.Close()
+	}
+
+	if presented == nil {
+		if err != nil {
+			return HostKeyStatus{}, fmt.Errorf("无法连接 SSH 服务器 %s: %w", addr, err)
+		}
+		return HostKeyStatus{}, fmt.Errorf("SSH 服务器 %s 没有出示主机密钥", addr)
+	}
+	return hostKeys.Judge(config.Host, config.Port, presented), nil
 }
 
 // CreateTunnel 创建并启动 SSH 隧道。
@@ -70,12 +165,18 @@ func (m *Manager) CreateTunnel(connectionId string, config Config) (int, error) 
 	// epoch 必须在拨号之前取：上面那次 forget 是我们自己发起的重建，不该作废接下来这一步。
 	_, epoch := m.inspect(connectionId)
 
-	// 拨号在锁外：目标跳板机不可达时这里可以阻塞很久，
-	// 期间用户仍然能停止别的隧道、能查活动连接列表、能让程序退出。
-	tunnel := m.newTunnel(config)
-	localPort, err := tunnel.Start()
+	// 校验器在拨号前就位：主机密钥裁决是握手的一部分，缺了它就不许拨号。
+	hostKeys, err := m.knownHosts()
 	if err != nil {
 		return 0, fmt.Errorf("failed to start tunnel for connection %s: %w", connectionId, err)
+	}
+
+	// 拨号在锁外：目标跳板机不可达时这里可以阻塞很久，
+	// 期间用户仍然能停止别的隧道、能查活动连接列表、能让程序退出。
+	tunnel := m.newTunnel(config, hostKeys)
+	localPort, dialErr := tunnel.Start()
+	if dialErr != nil {
+		return 0, fmt.Errorf("failed to start tunnel for connection %s: %w", connectionId, dialErr)
 	}
 
 	outcome, reusedPort, stale := m.commit(connectionId, tunnel, config, epoch)
