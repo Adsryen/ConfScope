@@ -366,6 +366,7 @@ describe("G5 文字色对实际承托面（承托面按真机实测配对）", (
   const TEXT = token("text");
   const RED_H = token("red-h");
   const RED_TEXT_RAISED = token("red-text-raised");
+  const AMBER_H = token("amber-h");
 
   const tintOf = (sel: string): string => {
     const rule = rules().find((r) => normalizeSelector(r.sel) === sel);
@@ -393,12 +394,23 @@ describe("G5 文字色对实际承托面（承托面按真机实测配对）", (
   expect(codeColors.length, "一条 .hljs-* 颜色都没解析出来，多半是规则解析器失效了").toBeGreaterThanOrEqual(6);
   codeColors.push(["--text", TEXT]);
 
+  /**
+   * 琥珀警告条一族（W1/W2）：底色必须是 rgba tint 写法，叠在面板底上。
+   * 为什么 tintOf 只认 rgba——轮96 K2 写过 `color-mix(in srgb, var(--amber) 12%, var(--bg-panel))`，
+   * `--bg-panel` 全站没声明，于是整条 background 静默失效，提示条只剩一圈边框（承托面根本不存在，
+   * 这张表也无从谈起）。改回 rgba 之后，tintOf 能拿到真实 tint，族内两处一旦分叉也当场报红。
+   */
+  const WARN_AMBER = tintOf(".browser-remote-moved");
+  expect(tintOf(".test-msg.warn"), "琥珀警告条底色分叉了，W1/W2 承托面要按新的那一档重新列")
+    .toBe(WARN_AMBER);
+
   const DIM_P: [string, string] = ["--text-dim", DIM];
   const RAISED_P: [string, string] = ["--text-dim-raised", DIM_RAISED];
   const TEXT_P: [string, string] = ["--text", TEXT];
   const RED_TEXT_P: [string, string] = ["--red-text", RED_TEXT];
   const RED_RAISED_P: [string, string] = ["--red-text-raised", RED_TEXT_RAISED];
   const RED_H_P: [string, string] = ["--red-h", RED_H];
+  const AMBER_H_P: [string, string] = ["--amber-h", AMBER_H];
 
   const surfaces: Array<{ name: string; bg: string; colors: Array<[string, string]> }> = [
     { name: "A1 --bg（代码区正文与行号槽 / 统一视图正文）", bg: BG, colors: [...codeColors, DIM_P, RAISED_P, RED_TEXT_P, RED_H_P] },
@@ -415,6 +427,10 @@ describe("G5 文字色对实际承托面（承托面按真机实测配对）", (
     { name: "D2 hit28 ∘ is-hit ∘ --bg（命中行上的命中词）", bg: composite(HIT28, composite(LINE_HIT, BG)), colors: [RED_TEXT_P, RED_RAISED_P] },
     { name: "E1 is-hit ∘ --bg（命中行正文）", bg: composite(LINE_HIT, BG), colors: [...codeColors, RED_TEXT_P] },
     { name: "E2 is-current ∘ --bg（当前命中行正文）", bg: composite(LINE_CURRENT, BG), colors: [...codeColors, RED_TEXT_P] },
+    // 警告条正文 --amber-h、条内 ghost 按钮 --text（.btn-ghost 背景 transparent，字直接落在 tint 上）。
+    // dim 不放进来：它在这一档上实测 3.88，而条内确实没有次要文本——将来要加就得换成 raised。
+    { name: "W1 amber warn tint ∘ --bg（草稿基线交换提示条：承托面按样式表链推导）", bg: composite(WARN_AMBER, BG), colors: [AMBER_H_P, TEXT_P] },
+    { name: "W2 amber warn tint ∘ --bg-hover（同一配对在更亮的面板上也必须达标）", bg: composite(WARN_AMBER, BG_HOVER), colors: [AMBER_H_P, TEXT_P] },
     { name: "F --red-fill（当前命中实心红底）", bg: RED_FILL, colors: [["#ffffff", "#ffffff"]] },
   ];
 
