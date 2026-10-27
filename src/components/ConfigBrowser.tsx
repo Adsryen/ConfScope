@@ -15,7 +15,7 @@ import { effectiveProvider, supportsConfigHistory } from "../lib/configCapabilit
 import { localRevisionStoreAvailable } from "../lib/configRevisions";
 import { BATCH_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import { detectFormat, Format, FORMATS } from "../lib/format";
-import { reportError } from "../lib/errorCenter";
+import { reportError, reportMessage } from "../lib/errorCenter";
 import { toast } from "../lib/toast";
 import { validateConfigIssues } from "../lib/validate";
 import { useTranslation } from "../i18n";
@@ -152,6 +152,15 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const [validateErrs, setValidateErrs] = useState<AlertItem[]>([]);
   // 写后失效：选中项被计划删除/移走时清空选中，并在空态给出可见说明（不静默变空）
   const [removedByPlan, setRemovedByPlan] = useState<{ dataId: string; group: string } | null>(null);
+  /**
+   * 草稿还在编辑器里，服务端正文却被这次重取换成了另一个值（轮96 K2）。
+   *
+   * 为什么单独立一条状态：`dirty = editing && draft !== content`，而重取只动 `content` 不动
+   * `draft` —— 用户看到的还是自己那份，屏幕上没有任何东西说明「你正在拿旧基线做改动」。
+   * 轮43 那条写后失效要的就是自动重取，不能因此把草稿顶掉；两条都要，就得把这次基线变化
+   * 说出来，并把「改用服务端内容」这个决定交回用户。
+   */
+  const [remoteMoved, setRemoteMoved] = useState<{ dataId: string; group: string } | null>(null);
   // 编辑态命令式入口：查找栏、以及校验错误「跳到第 N 行」的落点（R22 / R28）
   const editorRef = useRef<CodeEditorHandle>(null);
   /**
@@ -197,6 +206,35 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   const connectionName = conn.name || connectionLabel(conn, t);
   const namespaceLabel = tenant || "public";
   const sourceLabel = `${connectionName} / ${namespaceLabel}`;
+  /**
+   * 最新一轮渲染的状态镜像（轮96 K2）。
+   *
+   * 谁在用：① `openConfig` 在 await 之后才判断「这次重取是不是压在一份未保存草稿上」；
+   * ② 消息中心里那条「重试」被点下去时，判断作用域还是不是报错那一刻的那个。
+   * 两类判定都不许读闭包 —— `onAction` 是报错时就存进台账的旧函数，那时候的
+   * editing/draft/content/selected/conn/tenant 全是点进去那一刻的旧值，照着判断必然判错。
+   * 这份镜像每轮渲染刷新，只有 ref 本身稳定，所以旧闭包也能读到最新状态。
+   */
+  const renderMirrorRef = useRef({
+    editing,
+    draft,
+    content,
+    selected,
+    connId: conn.id,
+    tenant,
+    scopeLabel: sourceLabel,
+  });
+  useEffect(() => {
+    renderMirrorRef.current = {
+      editing,
+      draft,
+      content,
+      selected,
+      connId: conn.id,
+      tenant,
+      scopeLabel: sourceLabel,
+    };
+  });
   const targetConnections = useMemo(
     () =>
       connections
@@ -243,6 +281,51 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
       action();
     }
   };
+  /**
+   * 延迟动作（消息中心里的「重试」）先验作用域，再决定要不要执行（轮96 K2）。
+   *
+   * `reportError` 的 `onAction` 连同那一刻的闭包一起存进 errorCenter 台账，人可以很久之后才点它：
+   * 先把弹框关掉，换个连接、换个命名空间，再点那条重试。照旧闭包执行会做两件坏事 ——
+   * ① 把界面甩回旧作用域，顺手静默顶掉用户在当前配置上打好的草稿；
+   * ② 把旧作用域取回来的数据写进当前视图的 state，列表看着是新连接的内容。
+   * 作用域换了就不猜意图：不执行，另起一条说明讲清楚为什么没动。
+   */
+  const guardNavRef = useRef(guardNav);
+  useEffect(() => {
+    guardNavRef.current = guardNav;
+  });
+  const reportedScope = () => ({ connId: conn.id ?? "", tenant, scopeLabel: sourceLabel });
+  const lateAction = (reported: { connId: string; tenant: string; scopeLabel: string }, run: () => void) => () => {
+    const now = renderMirrorRef.current;
+    if (now.connId !== reported.connId || now.tenant !== reported.tenant) {
+      reportMessage({
+        level: "warning",
+        title: t("config.retryStaleTitle"),
+        message: t("config.retryStaleBody", { from: reported.scopeLabel, to: now.scopeLabel }),
+        source: now.scopeLabel,
+      });
+      return;
+    }
+    run();
+  };
+  /**
+   * 正文重试的分档（轮96 K2 取证后的口径）：
+   * - 还是那份配置 ⇒ 直接重取。`openConfig` 不退编辑态也不写 `draft`，草稿压在旧基线上时
+   *   走上面那条基线交换提示；这里再套一层「放弃后这些改动会丢失」就是假话；
+   * - 人已经切到别的配置 ⇒ 这是一次跨配置跳转，有草稿必须经 `guardNav` 确认（「切换后将丢失」）。
+   * guardNav 取 ref 里那份，判定才是点击那一刻的 dirty，而不是报错那一刻的。
+   */
+  const retryContentLoad = (item: ConfigItem, reported: { connId: string; tenant: string; scopeLabel: string }) =>
+    lateAction(reported, () => {
+      const mirror = renderMirrorRef.current;
+      const sameConfig =
+        !!mirror.selected && mirror.selected.dataId === item.dataId && mirror.selected.group === item.group;
+      if (sameConfig) {
+        void openConfig(item);
+        return;
+      }
+      guardNavRef.current(() => void openConfig(item));
+    });
   const rememberGroups = (list: ConfigItem[], fallbackGroup?: string) => {
     const extraGroup = fallbackGroup?.trim();
     setKnownGroups((prev) => {
@@ -348,7 +431,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         message,
         detail: message,
         actionLabel: t("common.retry"),
-        onAction: () => searchAllContent(query, group),
+        onAction: lateAction(reportedScope(), () => searchAllContent(query, group)),
       });
     } finally {
       if (my === contentSearchReqId.current) setContentSearching(false);
@@ -388,7 +471,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         message,
         detail: message,
         actionLabel: t("common.retry"),
-        onAction: () => fetchList(term, page, group),
+        onAction: lateAction(reportedScope(), () => fetchList(term, page, group)),
       });
     } finally {
       if (my === listReqId.current) setListLoading(false);
@@ -582,6 +665,21 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     try {
       const document = await getConfigDocument(conn, tenant, item.dataId, item.group);
       if (my !== reqId.current) return; // 已有更晚的点击，丢弃本次结果
+      // 基线交换检测：还停在编辑态、草稿与旧正文不等、重取的又是同一份配置、服务端真值确实
+      // 与旧正文不同，且真值仍与草稿不同 —— 五条同时成立才报。最后那条别省：就地编辑生成计划执行
+      // 回来后，服务端真值就是用户自己写的那份（轮43 ST-01），此时草稿并不落后，报出来是假警报。
+      const mirror = renderMirrorRef.current;
+      const sameConfig =
+        !!mirror.selected && mirror.selected.dataId === item.dataId && mirror.selected.group === item.group;
+      setRemoteMoved(
+        mirror.editing &&
+          mirror.draft !== mirror.content &&
+          sameConfig &&
+          document.content !== mirror.content &&
+          document.content !== mirror.draft
+          ? { dataId: item.dataId, group: item.group }
+          : null,
+      );
       setContent(document.content);
       setMetadata({ version: document.version, source: document.source, updateTime: document.updateTime });
       setFmt(detectFormat(item.dataId, document.format || item.configType, document.content));
@@ -597,7 +695,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         message,
         detail: message,
         actionLabel: t("common.retry"),
-        onAction: () => openConfig(item),
+        onAction: retryContentLoad(item, reportedScope()),
       });
     } finally {
       if (my === reqId.current) setContentLoading(false);
@@ -609,6 +707,8 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setEditing(false);
     setSaveError(null);
     setShowDelete(false);
+    // 换配置就没有「压在草稿上的基线」这回事了：这条提示只在当前这份配置的编辑态里有意义。
+    setRemoteMoved(null);
   }, [selected?.dataId, selected?.group]);
 
   /**
@@ -634,7 +734,9 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     // 内容搜索态下命中集是按搜索词过滤的，判「还在不在」要用那次枚举到的全集。
     const pool = searchMode === "content" ? contentScopeItemsRef.current : itemsRef.current;
     if (pool.some((item) => configResultKey(item) === configResultKey(target))) {
-      void openConfig(target); // 正文改由服务端真值重新填，dirty 会随之重算
+      // 正文改由服务端真值重新填。有草稿时 openConfig 只换基线并亮出说明，草稿与编辑态原样留着
+      // （轮96 K2）—— 轮43 要的是「别让界面停在写入前那一刻」，不是「顺手把用户写的东西顶掉」。
+      void openConfig(target);
       return;
     }
     setSelected(null);
@@ -909,7 +1011,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
         message,
         detail: message,
         actionLabel: t("common.retry"),
-        onAction: () => createSnapshot(),
+        onAction: lateAction(reportedScope(), () => createSnapshot()),
       });
     } finally {
       setSnapshotSaving(false);
@@ -1367,6 +1469,29 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 {contentError && selected && <InlineError message={contentError} onRetry={() => openConfig(selected)} />}
                 {!contentLoading && !contentError && editing && (
                   <>
+                    {remoteMoved && (
+                      <div className="browser-remote-moved" {...statusMessageProps("info")}>
+                        <span className="browser-remote-moved-text">
+                          {t("config.remoteMovedNotice", { dataId: remoteMoved.dataId })}
+                        </span>
+                        <span className="browser-remote-moved-actions">
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            type="button"
+                            onClick={() => {
+                              // 这条提示本身就是确认，点它的人已经知道会发生什么：不再套一层弹框。
+                              setDraft(content);
+                              setRemoteMoved(null);
+                            }}
+                          >
+                            {t("config.remoteMovedRewrite")}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" type="button" onClick={() => setRemoteMoved(null)}>
+                            {t("config.remoteMovedKeep")}
+                          </button>
+                        </span>
+                      </div>
+                    )}
                     <div className="fmt-bar">
                       <span className="fmt-label">{t("config.editFormat")}</span>
                       <Select

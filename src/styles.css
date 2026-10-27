@@ -1907,6 +1907,33 @@ textarea {
   color: var(--text);
 }
 
+/* 草稿基线被重取换掉（轮96 K2）：编辑态顶部一条横向说明，不遮正文、不抢焦点，
+   只在真的发生过基线交换时出现。底色走全站警告条的同一写法——琥珀 tint 叠在面板底上
+   （与 .test-msg.warn / .diff-warning 同族，承托面实测 --bg，配对由 contrastTokens G5 钉），
+   不用 color-mix 去混一个不存在的令牌：混出来的整条声明会静默失效，等于没有底色。
+   按钮靠右，窄详情区里文案先换行、按钮整排落下去，不许出现「半颗按钮」的截断。 */
+.browser-remote-moved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: 6px;
+  background: rgba(215, 186, 125, 0.12);
+  color: var(--amber-h);
+  font-size: 12px;
+}
+.browser-remote-moved-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.browser-remote-moved-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 /* 应用计划草稿生成中（R6 / D7）：原先只有静止文案，看起来像渲染已结束；
    低幅度透明度脉冲表示"仍在进行"，并在减弱动效偏好下关闭 */
 .apply-draft-loading {

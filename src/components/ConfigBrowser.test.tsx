@@ -1909,3 +1909,218 @@ describe("ConfigBrowser 写后失效", () => {
     expect(apiMocks.listConfigs).not.toHaveBeenCalled();
   });
 });
+
+// ── 轮96 K2：延迟动作与基线交换 ──
+//
+// 上面那条静态守卫只读源码文本，抓不到「运行起来是不是真的这样」。这一组按 errorCenter
+// 台账里存的那份 onAction 真点一次：那正是报错弹框与消息中心两颗按钮实际调用的函数。
+describe("ConfigBrowser 延迟重试与基线交换", () => {
+  const qaConn: Connection = { ...conn, id: "qa", name: "qa", baseUrl: "http://localhost:8849/nacos" };
+
+  beforeEach(() => {
+    localStorage.clear();
+    clearErrors();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.getConfigDocument.mockReset();
+    apiMocks.publishConfig.mockReset();
+    apiMocks.deleteConfig.mockReset();
+    clearTasks();
+    apiMocks.listConfigs.mockResolvedValue(
+      configPage([
+        { dataId: "app.json", group: "DEFAULT_GROUP", content: "", configType: "json" },
+        { dataId: "db.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" },
+      ])
+    );
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8080}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
+  });
+
+  /** 受控外壳：换连接 / 换命名空间靠 rerender，模拟人在页面里把作用域切走。 */
+  function renderScoped(browserConn: Connection = conn, tenant = "public") {
+    localStorage.setItem("locale", "zh-CN");
+    const tree = (nextConn: Connection, nextTenant: string) => (
+      <I18nProvider>
+        <ConfigBrowser conn={nextConn} tenant={nextTenant} />
+        <MessageCenter />
+        <ErrorDialog />
+      </I18nProvider>
+    );
+    const view = render(tree(browserConn, tenant));
+    return {
+      setScope: (nextConn: Connection, nextTenant: string) => view.rerender(tree(nextConn, nextTenant)),
+    };
+  }
+
+  /** 台账里那条动作：报错时存进 errorCenter 的旧闭包，人可以很久之后再点它。 */
+  function staleAction(): () => void {
+    const item = latestError();
+    expect(item?.onAction, "报错必须带上重试动作").toBeTypeOf("function");
+    return item!.onAction!;
+  }
+
+  async function openEditorWithDraft(draft: string) {
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await waitFor(() => expect(document.querySelector("textarea")).toBeInTheDocument());
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: draft } });
+  }
+
+  it("重取把基线换掉时草稿原样留着，并给出两个去向", async () => {
+    renderScoped();
+    fireEvent.click(await screen.findByText("app.json"));
+    await expectCodeContains("8080");
+    await openEditorWithDraft('{"server":{"port":9090}}');
+
+    // 服务端在这期间被别的计划改掉了
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":7070}}',
+      format: "json",
+      version: "v3",
+      source: "nacos",
+      updateTime: "",
+    });
+
+    await act(async () => {
+      publishConfigChange({
+        connectionId: "dev",
+        namespace: "public",
+        refs: [{ dataId: "app.json", group: "DEFAULT_GROUP" }],
+      });
+    });
+
+    // 草稿不被顶掉，编辑态不退
+    await waitFor(() => expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}'));
+    const banner = document.querySelector<HTMLElement>(".browser-remote-moved");
+    expect(banner?.textContent).toContain("服务端已把 app.json");
+
+    // 选「继续用我的改动」：只收起提示，草稿原样
+    fireEvent.click(within(banner!).getByRole("button", { name: "继续用我的改动" }));
+    await waitFor(() => expect(document.querySelector(".browser-remote-moved")).not.toBeInTheDocument());
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+
+    // 服务端又改了一次，这次选「改用服务端最新内容」
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":6060}}',
+      format: "json",
+      version: "v4",
+      source: "nacos",
+      updateTime: "",
+    });
+    await act(async () => {
+      publishConfigChange({
+        connectionId: "dev",
+        namespace: "public",
+        refs: [{ dataId: "app.json", group: "DEFAULT_GROUP" }],
+      });
+    });
+    const banner2 = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(".browser-remote-moved");
+      expect(el).toBeInTheDocument();
+      return el!;
+    });
+    fireEvent.click(within(banner2).getByRole("button", { name: "改用服务端最新内容" }));
+    await waitFor(() => expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":6060}}'));
+    expect(document.querySelector(".browser-remote-moved")).not.toBeInTheDocument();
+
+    // 落到真值后未保存态就该清掉：再切配置不该弹「切换后将丢失」，直接跳过去
+    apiMocks.getConfigDocument.mockImplementation(async (_c: Connection, _t: string, dataId: string) => ({
+      content: dataId === "db.yaml" ? "url: jdbc:mysql://retest/db" : '{"server":{"port":6060}}',
+      format: dataId === "db.yaml" ? "yaml" : "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    }));
+    fireEvent.click(screen.getByText("db.yaml"));
+    await expectCodeContains("jdbc");
+    expect(screen.queryByText("当前配置有未保存的编辑，切换后将丢失这些改动。")).not.toBeInTheDocument();
+  });
+
+  it("换了作用域后台账里的旧「重试」不再执行，只说明已过期", async () => {
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("content denied"));
+    const shell = renderScoped();
+    fireEvent.click(await screen.findByText("app.json"));
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    const action = staleAction();
+
+    // 人把弹框关掉，换到另一套连接 + 命名空间
+    shell.setScope(qaConn, "qa-public");
+    // 等新作用域真的接管页面（列表按 qa 连接重发过一次），镜像才算跟上
+    await waitFor(() => expect(apiMocks.listConfigs.mock.calls.some((call) => call[0]?.id === "qa")).toBe(true));
+    apiMocks.getConfigDocument.mockClear();
+
+    await act(async () => {
+      action();
+    });
+
+    expect(apiMocks.getConfigDocument, "过期重试不许再发请求").not.toHaveBeenCalled();
+    const notice = latestError();
+    expect(notice).toMatchObject({ level: "warning", title: "这次重试已过期" });
+    expect(notice?.message).toContain("dev / public");
+    expect(notice?.message).toContain("qa / qa-public");
+    // 这条说明自己不许再挂一个重试动作，否则把人引回同一个不成立的动作
+    expect(notice?.onAction).toBeUndefined();
+  });
+
+  it("作用域没变时旧「重试」照常重取（守卫不能写成永远拦）", async () => {
+    apiMocks.getConfigDocument.mockRejectedValueOnce(new Error("content denied"));
+    renderScoped();
+    fireEvent.click(await screen.findByText("app.json"));
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    const action = staleAction();
+
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8081}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
+    await act(async () => {
+      action();
+    });
+
+    await expectCodeContains("8081");
+    expect(latestError()?.title).not.toBe("这次重试已过期");
+  });
+
+  it("旧重试要跳到别的配置时，先按当前草稿确认，不当场顶掉", async () => {
+    apiMocks.getConfigDocument.mockImplementation(async (_c: Connection, _t: string, dataId: string) => {
+      if (dataId === "db.yaml") throw new Error("db read denied");
+      return { content: '{"server":{"port":8080}}', format: "json", version: "", source: "nacos", updateTime: "" };
+    });
+    renderScoped();
+    fireEvent.click(await screen.findByText("db.yaml"));
+    await waitFor(() => expect(latestError()?.title).toBe("配置内容加载失败"));
+    const action = staleAction();
+
+    // 换到另一份配置打草稿（作用域没变，只是配置不同）
+    apiMocks.getConfigDocument.mockResolvedValue({
+      content: '{"server":{"port":8080}}',
+      format: "json",
+      version: "",
+      source: "nacos",
+      updateTime: "",
+    });
+    fireEvent.click(screen.getByText("app.json"));
+    await expectCodeContains("8080");
+    await openEditorWithDraft('{"server":{"port":9090}}');
+
+    await act(async () => {
+      action();
+    });
+
+    // 这是一次跨配置跳转：有草稿必须先确认，不能直接把草稿连带视图一起换掉
+    expect(await screen.findByText("当前配置有未保存的编辑，切换后将丢失这些改动。")).toBeInTheDocument();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+    apiMocks.getConfigDocument.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "留在当前" }));
+    await waitFor(() => expect(screen.queryByText("当前配置有未保存的编辑，切换后将丢失这些改动。")).not.toBeInTheDocument());
+    expect(apiMocks.getConfigDocument, "取消跳转就不该去读另一份配置").not.toHaveBeenCalled();
+    expect(document.querySelector("textarea")).toHaveValue('{"server":{"port":9090}}');
+  });
+});
