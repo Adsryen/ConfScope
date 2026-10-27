@@ -2349,6 +2349,25 @@ describe("ConfigBrowser 正文重取失败时的编辑出口", () => {
     expect(copyText).toHaveBeenCalledWith('{"server":{"port":9191}}');
   });
 
+  // 轮102 D2：两颗导出按钮原先共用同一枚下载图标，光看图标分不出「导出当前列表」和
+  // 「导出源文件到目录」——两者落点完全不同（一个出清单，一个把配置原文铺到本地目录）。
+  // 这里钉的是画法必须不同；标签不同早就是绿的（getByTitle 两条各自命中）。
+  it("两颗导出按钮的图标是两种画法，不是同一枚复用", async () => {
+    renderBrowser();
+    await screen.findByText("app.json");
+
+    const pathOf = (btn: HTMLElement) =>
+      Array.from(btn.querySelectorAll("path"))
+        .map((p) => p.getAttribute("d"))
+        .join("|");
+
+    const listBtn = screen.getByTitle("导出当前列表");
+    const sourceBtn = screen.getByTitle("导出源文件到目录");
+    expect(pathOf(listBtn)).not.toBe("");
+    expect(pathOf(sourceBtn)).not.toBe("");
+    expect(pathOf(listBtn)).not.toBe(pathOf(sourceBtn));
+  });
+
   it("只读态正文加载失败时，不拿一份空正文冒充「这份配置本来就是空的」", async () => {
     apiMocks.getConfigDocument.mockRejectedValue(new Error("read denied"));
     renderBrowser("zh-CN", conn, "public", { onStartApply: vi.fn() });

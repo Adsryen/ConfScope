@@ -37,10 +37,28 @@ describe("TaskCenter", () => {
     clearTasks();
   });
 
-  it("renders empty state when no tasks", () => {
-    renderWithI18n(<TaskCenter />);
+  // 轮102 D4：零行时右栏那句「选择一个任务」是多余的第二次空态——上面已经说了没有任务。
+  // jsdom 不做布局，所以这里钉的是 JSX 侧的契约（打没打 list-empty 类）；
+  // 「右栏真的不再占位、整页只剩一条空态」由真机用例量：
+  // tests/retest/specs/99-s-r102-layout-regressions.spec.ts（含删掉 CSS 规则就判红的对照组）。
+  it("列表零行时给主从容器打上 list-empty，收成单列", () => {
+    const { container } = renderWithI18n(<TaskCenter />);
     expect(screen.getByText("暂无任务")).toBeDefined();
-    expect(screen.getByText("选择一个任务")).toBeDefined();
+    const split = container.querySelector<HTMLElement>(".data-split.task-center-content");
+    expect(split?.classList.contains("list-empty")).toBe(true);
+    // 占位文案仍在 DOM 内（由 CSS 摘掉），但它必须坐在 .data-detail 里，
+    // 否则 styles.css 那条 .list-empty .data-detail{display:none} 就管不到它。
+    const detail = split?.querySelector<HTMLElement>(".data-detail");
+    expect(detail?.querySelector(".data-empty-state")).toBeTruthy();
+  });
+
+  it("有任务时不打 list-empty，右栏照常占位", async () => {
+    const { container } = renderWithI18n(<TaskCenter />);
+    await act(async () => {
+      getTaskManager().createTask("r102 导出任务", "export");
+    });
+    const split = container.querySelector<HTMLElement>(".data-split.task-center-content");
+    expect(split?.classList.contains("list-empty")).toBe(false);
   });
 
   it("renders task list with items", async () => {

@@ -112,7 +112,9 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
         </div>
       </div>
 
-      <div className="data-split task-center-content">
+      {/* R102-D4：列表一条任务都没有时收成单列，别再并排两条空态（见 styles.css .list-empty）。
+          选中项由上面的 effect 归位——tasks 为空时必然是 null，所以这个判据就够，不必再比 selectedTask。 */}
+      <div className={`data-split task-center-content${tasks.length === 0 ? " list-empty" : ""}`}>
         <div className="data-list task-list">
           {tasks.length === 0 ? (
             <div className="data-empty-state">

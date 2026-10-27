@@ -454,7 +454,10 @@ export default function OperationHistoryView({ connections, onStartApply, focusR
       )}
 
       {/* 操作列表 */}
-      <div className="data-split history-content">
+      {/* R102-D4：筛选后一条记录都不剩时收成单列。判据取渲染用的 allRecords
+          而不是原始条数——右栏占位写的是「选中一条记录」，可筛选后压根没有行可选，
+          这时候并排两句空态同样多余。 */}
+      <div className={`data-split history-content${allRecords.length === 0 ? " list-empty" : ""}`}>
         <div className="data-list op-history-list" ref={listScroll.ref} onScroll={listScroll.onScroll}>
           {allRecords.length === 0 ? (
             <div className="data-empty-state">

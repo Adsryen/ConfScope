@@ -2042,6 +2042,19 @@ textarea {
   align-items: center;
 }
 
+/*
+ * 轮102 R102-D3：动作行窄了就换行，不裁字。
+ * 这颗栏在浏览侧栏里，1440 视口下只有 339px 可用：分组下拉(160) + 两颗导出图标(32×2)
+ * + 「创建当前列表快照」(106) + 间距 = 348，超出 9px。原先靠 max-width:118 + ellipsis
+ * 把按钮压到 101px（实测 scrollWidth 104 > clientWidth 101），文案渲染成「创建当前列表快…」；
+ * 860 视口更狠，裁掉 33px。内容搜索命中时还会再多一颗「批量替换」，超出的那部分
+ * 原本全靠压缩消化。换行只是多占一行高，列表少一行——比让用户猜被省略号吃掉的词强。
+ */
+.browser-action-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
 .browser-search .search-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -2081,10 +2094,7 @@ textarea {
 }
 
 .snapshot-action-btn {
-  flex: 0 1 auto;
-  max-width: 118px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 .browser-count {
@@ -4044,12 +4054,27 @@ button.diff-workflow-step-btn:hover {
   display: flex;
   gap: 8px;
 }
-/* ConnectionManager.tsx:1707 是裸 .check-field，:1334 是 `field check-field`——
+/* ConnectionManager.tsx:1717 是裸 .check-field，:1375 是 `field check-field`——
    .field{flex:1} 和它同特异度，此前靠顺序决胜。裸类名与复合并列（R80），两处作用面都保住。 */
-.check-field,
-.field.check-field {
+.check-field {
   flex: 0 0 120px;
   justify-content: flex-end;
+}
+
+/*
+ * 轮102 R102-D5：复选框不能沿用 .field 的竖排。
+ * .field 的 flex-direction:column 是给「标题在上、控件在下」的输入框用的，复选框是行内控件：
+ * 竖排把它顶到标签下一行还左对齐（真机实测标签 y=300、方框 y=321，左缘同为 x=1280），
+ * 而同行右侧留着一片空白，读起来像漏渲染。现在单独把这条改回一行：
+ * 方框跟标签后头，整组贴到列的右缘，并与左边输入框的底边对齐（align-items:flex-end）。
+ * 宽度也不再钉死 120px——那条是给列向排布用的，行向内钉宽只会让长标签溢出。
+ */
+.field.check-field {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .check-field input {
   width: 16px;
@@ -8068,6 +8093,37 @@ button.diff-workflow-step-btn:hover {
 /* R79：备份页与任务中心共用这一套 grid。两个变体类原先各自还写着 display:flex / flex:1 /
    overflow:hidden，同特异度又写在前面，在这里被整条反超——纯死声明，已删；
    变体之间真正生效的差异（列宽、margin-top）写在段尾那两条同名的规则里。 */
+/*
+ * 轮102 R102-D4：列表一条都没有时，右栏占位是多余的第二次空态。
+ * 原先 .data-split 恒为两列，左栏渲染「暂无 X」+ 右栏渲染「选择一个 X 查看详情」，
+ * 两条空态上下并排（真机 860 视口实测 .data-empty-state 命中 2 个），用户对着两句话
+ * 其中一句在说「请先有东西可选」——而它上面已经说过了。JSX 在空列表时不渲染右栏，
+ * 这里把栅格收成单列，左栏占满，空态在自己的格子里居中。
+ */
+.data-split.list-empty,
+.data-split.history-content.list-empty,
+.data-split.backup-content.list-empty,
+.data-split.task-center-content.list-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.data-split.list-empty .data-list {
+  display: flex;
+  flex-direction: column;
+  border-right: 0;
+}
+
+/* 栅格只留一列时右栏必须真的退出布局：留着它会被塞进隐式第二行，
+   空列表页下面多出一整块渐变背景的死区。display:none 同时把它从无障碍树里摘掉，
+   屏读也不会念一句没人能点的「选择一个任务查看详情」。 */
+.data-split.list-empty .data-detail {
+  display: none;
+}
+
+.data-split.list-empty .data-empty-state {
+  flex: 1 0 auto;
+}
+
 .data-split {
   display: grid;
   grid-template-columns: minmax(260px, 34%) minmax(0, 1fr);
@@ -8611,9 +8667,17 @@ button.diff-workflow-step-btn:hover {
   background: rgba(79, 195, 247, 0.14);
 }
 
+/*
+ * 轮102 R102-D1：预览区必须保住可用高度。
+ * 原先只写 min-height:0，允许 flex 把它压到 0——真机实测（tests/retest/results/r102/probe.json）
+ * 视口 ≤900px 时 .diff-panel 与 .diff-body 高度都是 0，第 4 步看不到任何差异，
+ * 而且解析警告条压在统计/表头上（重叠面积 1.07 万–1.19 万 px²）：面板被压扁后子节点照旧绘制，
+ * 后面的兄弟节点却按被压扁后的盒定位，两层文字叠在一起。
+ * 现在给一个下限：矮窗口下由 .apply-detail 自己滚动，预览不再被挤没。
+ */
 .apply-diff-preview {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 320px;
   display: flex;
   flex-direction: column;
   margin-bottom: 12px;
@@ -9234,10 +9298,19 @@ button.diff-workflow-step-btn:hover {
   .data-split,
   .data-split.history-content,
   .data-split.backup-content,
-  .data-split.task-center-content {
+  .data-split.task-center-content,
+  .data-split.list-empty,
+  .data-split.history-content.list-empty,
+  .data-split.backup-content.list-empty,
+  .data-split.task-center-content.list-empty {
     grid-template-columns: 1fr;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  /* R102-D4：单列 + 空列表时左栏就是整页，别再按 42vh 截它的空态高度。 */
+  .data-split.list-empty .data-list {
+    max-height: none;
   }
 
   /* R83：.backup-list / .task-list 的基础规则也各写了一遍 border-right（同特异度），

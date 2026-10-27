@@ -1118,4 +1118,44 @@ describe("OperationHistoryView", () => {
 
     expect((second.container.querySelector(".data-list") as HTMLElement).scrollTop).toBe(260);
   });
+
+  // 轮102 D4：列表零行时右栏那句「选择一条操作记录」是多余的第二次空态。
+  // 这里钉 JSX 侧契约（零行 ⇒ 打 list-empty 类；有行 ⇒ 不打），
+  // 「右栏真的退出布局、整页只剩一条空态」由真机用例量：
+  // tests/retest/specs/99-s-r102-layout-regressions.spec.ts，
+  // 那边还有一条对照组：删掉 styles.css 的 .list-empty 规则就判红。
+  it("筛到零行时收成单列，清掉筛选后右栏回来", async () => {
+    localStorage.setItem(
+      "cs.operationHistory",
+      JSON.stringify([
+        {
+          id: "r102-1",
+          type: "publish",
+          result: "success",
+          timestamp: "2026-07-06T10:00:00Z",
+          connectionId: "conn-1",
+          connectionName: "prod",
+          namespace: "public",
+          group: "DEFAULT_GROUP",
+          dataId: "app.yaml",
+        },
+      ])
+    );
+    const { view } = renderHistory([conn]);
+    await view.findByText("app.yaml");
+    const split = view.container.querySelector<HTMLElement>(".data-split.history-content");
+    expect(split?.classList.contains("list-empty")).toBe(false);
+    expect(split?.querySelector<HTMLElement>(".data-detail")?.classList.contains("history-detail-panel")).toBe(true);
+
+    // 判据用类和行数，不用文案：「暂无操作记录」同时出现在顶部计数行和列表空态里，
+    // findByText 会撞多个命中；而「命中几个」恰恰不是这条用例要钉的东西。
+    const filterInput = view.getByLabelText("输入 dataId 筛选");
+    fireEvent.change(filterInput, { target: { value: "必然筛空的关键字" } });
+    await waitFor(() => expect(view.container.querySelectorAll(".data-list-item").length).toBe(0));
+    expect(split?.classList.contains("list-empty")).toBe(true);
+
+    fireEvent.change(filterInput, { target: { value: "" } });
+    await waitFor(() => expect(split?.classList.contains("list-empty")).toBe(false));
+    expect(view.container.querySelectorAll(".data-list-item").length).toBe(1);
+  });
 });

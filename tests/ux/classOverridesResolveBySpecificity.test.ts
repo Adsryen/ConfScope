@@ -432,8 +432,10 @@ describe("跨类覆盖由特异度决胜，不赌文档顺序（R83）", () => {
     // 轮74 A1：`.btn-danger,` 这条并列没了——danger 拆成描边档（只以 .btn-ghost.btn-danger 出现）
     // 和实心档 .btn-danger-fill 两个类名，裸 btn-danger 在全站 0 处用法，
     // 「静止态必须有底色」由 hoverToneRulesResolveBySpecificity 的 danger-fill 用例钉。
+    // 轮102 R102-D5：`.check-field` 这条成对写法拆成了两条不同内容的规则
+    // （裸类名管一行里的复选框，复合管表单列里的复选框），并列反而会把行内复选框钉回竖排。
+    // 它由下面那条按 sel 精确指认的用例接管，不是把守卫删了。
     const PAIRS = [
-      [".check-field,", ".field.check-field {"],
       [".data-split,", ".data-split.backup-content,"],
       [".data-split,", ".data-split.history-content,"],
       [".data-split,", ".data-split.task-center-content"],
@@ -465,6 +467,25 @@ describe("跨类覆盖由特异度决胜，不赌文档顺序（R83）", () => {
     const stackMedia = blanked.indexOf(".diff-sources {\n    grid-template-columns: 1fr;");
     expect(baseSources, "找不到 .diff-sources 基础规则").toBeGreaterThan(-1);
     expect(stackMedia, "找不到窄屏堆叠那个 @media 里的 .diff-sources").toBeGreaterThan(baseSources);
+  });
+
+  it("轮102 R102-D5：复选框两种用法各自一条规则，不许合并回同特异度赌顺序", () => {
+    // ConnectionManager.tsx:1375 是 `field check-field`（表单列里的复选框），:1717 是裸 `check-field`
+    // （同一行里的复选框）。轮102 把复选框从 .field 的竖排里拆出来：竖排会把方框顶到标签下一行还左对齐，
+    // 而这两种用法的宽度意图本来就不同（列内贴右缘 / 行内占 120px），所以两条规则声明的内容不再相同。
+    const decls = collectDecls(CSS);
+    const bare = decls.filter((d) => d.sel === ".check-field");
+    const compound = decls.filter((d) => d.sel === ".field.check-field");
+    expect(bare.length > 0, "找不到裸 .check-field 规则：:1717 那处复选框会失去宽度").toBe(true);
+    expect(compound.length > 0, "找不到 .field.check-field 规则：:1375 那处会退回 .field 的竖排").toBe(true);
+    const declOf = (list: Decl[], prop: string) => list.find((d) => d.prop === prop)?.value;
+    expect(declOf(compound, "flex-direction"), "复选框必须行内排布，写回 column 就是把方框顶到下一行").toBe("row");
+
+    // 防假绿：整条复合规则被摘掉时，主守卫必须当场指出「同特异度赌顺序」回来了。
+    const stripped = CSS.replace(/\.field\.check-field \{[^}]*\}/, "");
+    expect(stripped, "变异对照没命中复合规则，这条自检本身失效了").not.toContain(".field.check-field {");
+    const hits = orderDecidedConflicts(stripped).filter((row) => row.includes("check-field"));
+    expect(hits.length > 0, "摘掉复合规则却没人报警，上面的指认等于没写").toBe(true);
   });
 
   it("R83：.btn 不许再声明 border-color，否则 tone 的长写又跟它赌顺序", () => {

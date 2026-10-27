@@ -77,12 +77,23 @@ function isSandboxEnvironment(conn: Connection): boolean {
   return /sandbox|沙箱/i.test(`${conn.name} ${conn.environmentName ?? ""} ${conn.sourceName ?? ""} ${(conn.tags ?? []).join(" ")}`);
 }
 
-type BrowserToolIconName = "refresh" | "add" | "download";
+/**
+ * 工具条图标。名字与 browserToolIconPath 的键一一对应，加一颗就加一条路径。
+ *
+ * 轮102 R102-D2：两颗导出按钮原先共用同一个 download 画法，鼠标不悬停就完全分不出
+ * 「导出当前列表」和「导出源文件到目录」——真机量到两条 path 一模一样。图标必须自己说清
+ * 导出的是「一份清单」还是「一个目录里的源文件」，title/aria-label 只算第二道兜底。
+ */
+type BrowserToolIconName = "refresh" | "add" | "download" | "list" | "folder-export";
 
 const browserToolIconPath: Record<BrowserToolIconName, string[]> = {
   refresh: ["M19 7v5h-5", "M18 12a6 6 0 10-1.8 4.2", "M19 12l-3.5-3.5"],
   add: ["M12 5v14", "M5 12h14"],
   download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
+  // 一份清单：三条项目符号 + 逐行文字（圆头短横在 15px 下读作点）
+  list: ["M9 6h11", "M9 12h11", "M9 18h11", "M4.5 6h.5", "M4.5 12h.5", "M4.5 18h.5"],
+  // 目录 + 向下箭头：正文落进文件夹，与「导出一份清单」区分开
+  "folder-export": ["M4 8v10h16V10h-7l-2-2H4z", "M12 12v4", "M10 14.5l2 2 2-2"],
 };
 
 function BrowserToolIcon({ name }: { name: BrowserToolIconName }) {
@@ -1320,7 +1331,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 disabled={sourceExporting}
                 onClick={exportCurrentList}
               >
-                <BrowserToolIcon name="download" />
+                <BrowserToolIcon name="list" />
               </button>
             )}
             {items.length > 0 && (
@@ -1339,7 +1350,7 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
                 disabled={sourceExporting}
                 onClick={exportSourceFilesToDirectory}
               >
-                <BrowserToolIcon name="download" />
+                <BrowserToolIcon name="folder-export" />
               </button>
             )}
             {!isLocalSnapshot && items.length > 0 && (

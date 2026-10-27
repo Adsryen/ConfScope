@@ -41,7 +41,6 @@ const TRUNCATED = /text-overflow\s*:[^;]*ellipsis|-webkit-line-clamp\s*:/;
 const NOT_REQUIRED: Record<string, string> = {
   ".side-label": "侧栏导航文案：按钮里的标签不是要抄的内容，放开反而干扰点按",
   ".env-badge": "两三字的环境徽章，且同一行右侧就是完整环境列",
-  ".snapshot-action-btn": "按钮文案就是「创建快照」这类固定词，没有可抄的内容",
 };
 
 /** 整块正文都该能抄走的容器（正文在子树里，自身不一定带省略号）。 */
