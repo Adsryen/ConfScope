@@ -91,7 +91,8 @@ func TestKnownHostsWritesOpenSSHCompatibleLine(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("写入行数 = %d, want 1: %q", len(lines), raw)
 	}
-	want := "jump.example.com:2222 " + key.Type() + " " + base64.StdEncoding.EncodeToString(wire)
+	// OpenSSH 形状：非 22 端口一律 [host]:port（ssh-keyscan 对 DNS 名同样加方括号）
+	want := "[jump.example.com]:2222 " + key.Type() + " " + base64.StdEncoding.EncodeToString(wire)
 	if lines[0] != want {
 		t.Fatalf("写入行 = %q, want OpenSSH 形状 %q", lines[0], want)
 	}
@@ -113,6 +114,8 @@ func TestFingerprintUsesOpenSSHSHA256Form(t *testing.T) {
 func TestKnownHostsLookupPortPinning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	// 一台机器的两个身份：2222 端口的固定记录，与任意端口的裸主机记录。
+	// jump.example.com:2222 是无方括号的旧写法（2026-10-28 收紧前写入的记录）：
+	// 读侧必须照常命中，老记录不因写法收紧而失效。
 	writeKnownHostsFile(t, path, strings.Join([]string{
 		"jump.example.com:2222 ssh-ed25519 " + ed25519VectorKeyB64,
 		"other.example.com ssh-ed25519 " + ed25519VectorKeyB64,
@@ -217,6 +220,36 @@ func TestKnownHostsAddRefusesDifferentKeyForSameRecord(t *testing.T) {
 	// 同一把钥匙重复信任是幂等的。
 	if err := kh.Add("jump.example.com", 2222, keyA.Type(), base64.StdEncoding.EncodeToString(wireA)); err != nil {
 		t.Fatalf("重复信任同一把钥匙应当幂等, got %v", err)
+	}
+}
+
+// 老记录用 host:port 旧写法、新写入用 [host]:port：同一身份，不能劈成两条。
+// 否则「旧记录 + 新钥匙」并存会把指纹变更的硬阻断变成并集信任。
+func TestKnownHostsAddDedupAcrossRecordIDNotations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	writeKnownHostsFile(t, path, "jump.example.com:2222 ssh-ed25519 "+ed25519VectorKeyB64+"\n")
+	kh := NewKnownHosts(path)
+
+	// 同一把钥匙跨写法重复信任：幂等，不追加第二条。
+	if err := kh.Add("jump.example.com", 2222, "ssh-ed25519", ed25519VectorKeyB64); err != nil {
+		t.Fatalf("跨写法重复信任同一把钥匙应当幂等, got %v", err)
+	}
+
+	// 不同钥匙：旧记录必须拦下（而不是追加一条 [jump.example.com]:2222）。
+	keyB, wireB := testServerKey(t)
+	if err := kh.Add("jump.example.com", 2222, keyB.Type(), base64.StdEncoding.EncodeToString(wireB)); err == nil {
+		t.Fatal("Add(B) 成功，want 拒绝 —— 旧写法的同一记录已有另一把钥匙")
+	}
+
+	raw, _ := os.ReadFile(path)
+	if strings.Count(string(raw), "\n") != 1 {
+		t.Fatalf("文件应只有 1 行, got: %q", raw)
+	}
+	if strings.Count(string(raw), ed25519VectorKeyB64) != 1 {
+		t.Fatalf("向量钥匙记录数异常: %q", raw)
+	}
+	if strings.Contains(string(raw), base64.StdEncoding.EncodeToString(wireB)) {
+		t.Fatalf("B 被写进了文件，want 只留旧记录: %q", raw)
 	}
 }
 
@@ -358,8 +391,8 @@ func TestKnownHostsConcurrentAddKeepsEveryRecord(t *testing.T) {
 	}
 }
 
-// recordID：22 端口写裸主机（与 OpenSSH 习惯一致），非 22 端口写 host:port，
-// IP 字面量加方括号。
+// recordID：22 端口写裸主机（与 OpenSSH 习惯一致）；非 22 端口一律 [host]:port——
+// 方括号只看端口是否为默认，与 IP / DNS 名无关（ssh-keyscan 真机实测口径）。
 func TestRecordIDShapes(t *testing.T) {
 	cases := []struct {
 		host string
@@ -368,7 +401,7 @@ func TestRecordIDShapes(t *testing.T) {
 	}{
 		{"jump.example.com", 22, "jump.example.com"},
 		{"jump.example.com", 0, "jump.example.com"},
-		{"jump.example.com", 2222, "jump.example.com:2222"},
+		{"jump.example.com", 2222, "[jump.example.com]:2222"},
 		{"10.0.0.7", 2222, "[10.0.0.7]:2222"},
 		{"10.0.0.7", 22, "10.0.0.7"},
 	}

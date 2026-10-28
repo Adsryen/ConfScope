@@ -126,16 +126,14 @@ func (k *KnownHosts) Path() string {
 }
 
 // recordID 是 (host, port) 在 known_hosts 里的身份写法：
-// 22 端口写裸主机（与 OpenSSH 习惯一致）；非 22 端口写 host:port，
-// IP 字面量按 OpenSSH 的写法加方括号。
+// 22 端口写裸主机（与 OpenSSH 习惯一致）；非 22 端口一律写 [host]:port——
+// 方括号规则只看端口是否为默认，与 IP / DNS 名无关
+// （ssh-keyscan 真机输出实测：[127.0.0.1]:2223 与 [localhost]:2223 同款）。
 func recordID(host string, port int) string {
 	if port <= 0 || port == 22 {
 		return host
 	}
-	if net.ParseIP(host) != nil {
-		return fmt.Sprintf("[%s]:%d", host, port)
-	}
-	return fmt.Sprintf("%s:%d", host, port)
+	return fmt.Sprintf("[%s]:%d", host, port)
 }
 
 // fingerprintOf 返回 OpenSSH 形式的 SHA256 指纹：SHA256: + 无填充 base64。
