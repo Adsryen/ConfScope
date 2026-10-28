@@ -3962,7 +3962,12 @@ button.diff-workflow-step-btn:hover {
   background: rgba(244, 71, 71, 0.18);
   color: var(--red-text);
   border-radius: 2px;
-  padding: 0 1px;
+  /* 这里不许出现 padding / margin / border-width / letter-spacing 等任何参与布局的属性：
+     配置浏览编辑态是透明 textarea 叠在高亮 pre 之上，光标与选区画在 textarea 层、
+     看到的字在 pre 层。只给 pre 层的命中词加 1px 内边距，textarea 没有，
+     该行左侧每处命中就把可见文字推右 2px（实测单行 4 处命中最坏 8.07px ≈ 一个多字符宽），
+     用户看到的光标位置和实际改动的字符就对不上。底色与描边走 background / box-shadow，
+     两者都不参与布局，视觉不减。 */
   box-shadow: inset 0 0 0 1px rgba(244, 71, 71, 0.5);
 }
 .code-area .search-hit {
@@ -5086,6 +5091,13 @@ button.diff-workflow-step-btn:hover {
   caret-color: var(--text-hi);
   outline: none;
   z-index: 2;
+}
+/* 编辑态选区自己定色。textarea 的文字是透明的（字形由底下的 pre 层画），浏览器默认选区
+   是实心蓝并把选中文字刷成白：划选时那截字形会被选区带糊掉，深底上对比也不足。
+   选区底色 + color: transparent，字形继续由 pre 层画透出来。 */
+.code-editor-ta::selection {
+  background: rgba(56, 116, 195, 0.42);
+  color: transparent;
 }
 .code-editor-ta::placeholder {
   color: var(--text-dim);
