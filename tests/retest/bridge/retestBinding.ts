@@ -245,6 +245,31 @@ function normalizeSSHConfigLike(input: unknown): Record<string, unknown> {
   return c;
 }
 
+/**
+ * 与 Go 侧 internal/ssh/knownhosts.go 的 recordID() 同一条规则，替身必须照抄：
+ * 22 端口写裸主机名，非 22 端口一律写 [host]:port——方括号只看端口是否为默认值，
+ * 与 IP / DNS 名无关（commit 98acd43 统一到这个写法，与 OpenSSH/ssh-keyscan 真机输出一致）。
+ * 探测与写入两侧共用这一个函数——两侧格式一旦分叉，用户确认后重探永远查不到
+ * 已信任记录，界面会停在同一句「未信任」上，真机复测红掉却查不出产品问题。
+ */
+function retestRecordId(host: string, port: number): string {
+  const p = port > 0 ? port : 22;
+  if (p === 22) return host;
+  return `[${host}]:${p}`;
+}
+
+/**
+ * 主机密钥替身走哪条向量，由 host 或 username 里的标记决定。
+ * 标记允许放进 username，是为了让 host 保持成 IP 字面量——这样 `[ip]:port`
+ * 这种记录身份写法也能被真的走一遍，而不是只测主机名那一路。
+ */
+function retestHostKeyVector(cfg: Record<string, unknown> | null | undefined): "unknown" | "changed" | null {
+  const hay = String(cfg?.host ?? "") + " " + String(cfg?.username ?? "");
+  if (hay.includes("hk-changed")) return "changed";
+  if (hay.includes("hk-unknown")) return "unknown";
+  return null;
+}
+
 function v1(ep: NacosEndpoint, path: string, query: Record<string, string>): string {
   const qs = Object.entries(query)
     .filter(([, v]) => v !== undefined)
@@ -1737,7 +1762,25 @@ export function createRetestInvoke(): RetestInvoke {
         // 否则 throw（UI catch → 「SSH 连接失败：…（…ms）」红色反馈）。
         const cfg = normalizeSSHConfigLike(args[0]);
         const host = String(cfg?.host ?? "");
+        const port = Number(cfg?.port ?? 22) > 0 ? Number(cfg?.port) : 22;
         const state = loadRetestState();
+        const vector = retestHostKeyVector(cfg);
+        // r104 之后「测试 SSH」前一定先过主机密钥裁决。替身按同样顺序放行，
+        // 并在两条安全向量上留下可区分的读数：
+        //   hk-unknown：只有已确认写入记录的主机才允许拨号（未确认就被拨号 = 产品旁路）
+        //   hk-changed：任何情况下都不拨号，被拨号即报特定错误
+        if (vector === "changed") {
+          bridgeLog("ssh-test", host, "blocked-changed");
+          throw new Error("ssh: retest bridge 拒绝拨号（主机密钥已变更，产品侧不应发起连接）");
+        }
+        if (vector === "unknown") {
+          if (retestTrustedHostKeys.has(retestRecordId(host, port))) {
+            bridgeLog("ssh-test", host, "ok-after-trust");
+            return { latencyMs: 15 };
+          }
+          bridgeLog("ssh-test", host, "blocked-untrusted");
+          throw new Error("ssh: retest bridge 拒绝拨号（主机密钥未确认，产品侧不应发起连接）");
+        }
         if (state.ssh && host === state.ssh.host) {
           bridgeLog("ssh-test", host, "ok");
           return { latencyMs: 12 };
@@ -1746,8 +1789,8 @@ export function createRetestInvoke(): RetestInvoke {
         throw new Error(`ssh: no route to host ${host || "(空)"}`);
       }
       case "ProbeSSHHostKey": {
-        // 三种裁决都用 host 名字选路，让 S5 能分别跑通：
-        //   127.0.0.1（state.ssh.host）→ trusted，保持既有「测试连接成功」路径不变
+        // 三种裁决的选路看 host 与 username 里的标记，让真机复测能分别跑通：
+        //   127.0.0.1（state.ssh.host）且无标记 → trusted，既有「测试连接成功」路径不变
         //   含 hk-unknown → 首次见，确认后转 trusted
         //   含 hk-changed → 记录指纹与服务端出示的不一致，硬阻断
         const cfg = normalizeSSHConfigLike(args[0]);
@@ -1755,8 +1798,9 @@ export function createRetestInvoke(): RetestInvoke {
         const port = Number(cfg?.port ?? 22) > 0 ? Number(cfg?.port) : 22;
         const state = loadRetestState();
         const path = "/tmp/confscope-retest/ssh/known_hosts";
-        const recordId = `[${host}]:${port}`;
-        if (state.ssh && host === state.ssh.host) {
+        const recordId = retestRecordId(host, port);
+        const vector = retestHostKeyVector(cfg);
+        if (state.ssh && host === state.ssh.host && !vector) {
           bridgeLog("ssh-probe", host, "trusted");
           return {
             status: "trusted",
@@ -1768,7 +1812,7 @@ export function createRetestInvoke(): RetestInvoke {
             knownHostsPath: path,
           };
         }
-        if (host.includes("hk-changed")) {
+        if (vector === "changed") {
           bridgeLog("ssh-probe", host, "hostKeyChanged");
           return {
             status: "hostKeyChanged",
@@ -1782,7 +1826,7 @@ export function createRetestInvoke(): RetestInvoke {
             knownHostsPath: path,
           };
         }
-        if (host.includes("hk-unknown")) {
+        if (vector === "unknown") {
           if (retestTrustedHostKeys.has(recordId)) {
             bridgeLog("ssh-probe", host, "trusted-after-confirm");
             return {
@@ -1813,7 +1857,7 @@ export function createRetestInvoke(): RetestInvoke {
       case "TrustSSHHostKey": {
         const [host, port, keyType, keyBase64] = args as unknown[];
         if (!String(keyBase64 ?? "")) throw new Error("retest bridge: 主机密钥不能为空");
-        const recordId = `[${String(host ?? "")}:${Number(port ?? 22) > 0 ? Number(port) : 22}]`;
+        const recordId = retestRecordId(String(host ?? ""), Number(port ?? 22) > 0 ? Number(port) : 22);
         retestTrustedHostKeys.add(recordId);
         bridgeLog("ssh-trust", recordId, String(keyType ?? ""));
         return null;
