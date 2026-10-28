@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin && !linux
 
 package securestore
 
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestCredentialManagerStoreReturnsUnsupportedOnNonWindows(t *testing.T) {
+func TestCredentialManagerStoreReturnsUnsupportedOnUnimplementedPlatform(t *testing.T) {
 	store := NewCredentialManagerStore()
 	ref, err := NewSecretRef("poc", "unsupported-test", "")
 	if err != nil {
@@ -23,5 +23,12 @@ func TestCredentialManagerStoreReturnsUnsupportedOnNonWindows(t *testing.T) {
 	}
 	if err := store.Delete(context.Background(), ref); !errors.Is(err, ErrUnsupportedPlatform) {
 		t.Fatalf("Delete error = %v, want ErrUnsupportedPlatform", err)
+	}
+}
+
+func TestLargeStoreReturnsUnsupportedOnUnimplementedPlatform(t *testing.T) {
+	_, err := NewLargeStore("/tmp/confscope-test")
+	if !errors.Is(err, ErrUnsupportedPlatform) {
+		t.Fatalf("NewLargeStore error = %v, want ErrUnsupportedPlatform", err)
 	}
 }

@@ -90,6 +90,10 @@ func runWriteSecureSecret(
 	}
 
 	if err := store.Put(ctx, secretRef, secretValue); err != nil {
+		if errors.Is(err, securestore.ErrSecretTooLarge) {
+			return result, fmt.Errorf("%w: 凭据长度 %d 字节，超过系统凭据库单项上限 %d 字节，未迁移，明文保留原样",
+				securestore.ErrSecretTooLarge, len(secretValue), securestore.MaxCredentialBlobSize)
+		}
 		return result, err
 	}
 	got, err := store.Get(ctx, secretRef)
