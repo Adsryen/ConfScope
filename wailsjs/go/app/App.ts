@@ -33,6 +33,9 @@ type GoApp = {
   WriteSecureSecret(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
   ReadSecureSecret(ref: SecureSecretRef): Promise<string>;
   DeleteSecureSecret(ref: SecureSecretRef): Promise<void>;
+  WriteLargeSecret(ref: LargeSecretRef, value: string): Promise<LargeSecretWriteResult>;
+  ReadLargeSecret(ref: LargeSecretRef): Promise<string>;
+  DeleteLargeSecret(ref: LargeSecretRef): Promise<void>;
   AppendAuditEvent(raw: string): Promise<void>;
   ClearAuditTrail(): Promise<void>;
   ReadAuditLogLines(limit: number): Promise<string[]>;
@@ -278,6 +281,19 @@ export interface SecureSecretRef {
   field: string;
 }
 
+export interface LargeSecretRef {
+  namespace: string;
+  ownerId: string;
+  field: string;
+}
+
+export interface LargeSecretWriteResult {
+  ref: LargeSecretRef;
+  storage: string;
+  valueSize: number;
+  verified: boolean;
+}
+
 export interface SecureSecretWriteResult {
   ref: SecureSecretRef;
   targetName: string;
@@ -482,6 +498,12 @@ export const WriteSecureSecret = (ref: SecureSecretRef, value: string) => call("
 export const ReadSecureSecret = (ref: SecureSecretRef) => call("ReadSecureSecret", ref);
 
 export const DeleteSecureSecret = (ref: SecureSecretRef) => call("DeleteSecureSecret", ref);
+
+export const WriteLargeSecret = (ref: LargeSecretRef, value: string) => call("WriteLargeSecret", ref, value);
+
+export const ReadLargeSecret = (ref: LargeSecretRef) => call("ReadLargeSecret", ref);
+
+export const DeleteLargeSecret = (ref: LargeSecretRef) => call("DeleteLargeSecret", ref);
 
 export const AppendAuditEvent = (raw: string) => call("AppendAuditEvent", raw);
 export const ClearAuditTrail = () => call("ClearAuditTrail");

@@ -120,6 +120,12 @@ const WAILS_METHODS = [
   "WriteSecureSecret",
   "ReadSecureSecret",
   "DeleteSecureSecret",
+  // 大凭据（SSH 私钥 / passphrase / 密码）读写，src/lib/credentialSecrets.ts 与
+  // src/store/{connections,sshProfiles}.ts 经 wailsjs 调用。缺替身时删除连接与档案的
+  // 清理分支只是被 catch 吞掉的 rejection，复测里看不出任何异常。
+  "WriteLargeSecret",
+  "ReadLargeSecret",
+  "DeleteLargeSecret",
   // 便携快照文件列表/恢复（src/api/appDataBackup.ts，应用数据备份打包与还原用它）
   "ListAppDataSnapshotFiles",
   "RestoreAppDataSnapshotFiles",

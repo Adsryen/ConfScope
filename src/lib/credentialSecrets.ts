@@ -1,13 +1,22 @@
+import { DeleteLargeSecret, ReadLargeSecret, WriteLargeSecret } from "../../wailsjs/go/app/App";
 import { deleteSecureSecret, readSecureSecret, writeSecureSecret } from "../api/secureStore";
 import { loadAppDataBackupState, saveAppDataBackupState, type AppDataWebDAVSettings } from "../store/appDataBackup";
-import { loadConnections, updateConnection, type Connection } from "../store/connections";
+import { loadConnections, updateConnection, type Connection, type SSHConfig } from "../store/connections";
+import { getSSHProfile, loadSSHProfiles, upsertSSHProfile, type SSHProfile } from "../store/sshProfiles";
 import { loadSnapshotWebDAVState, saveSnapshotWebDAVState, type SnapshotWebDAVSettings } from "../store/snapshotWebDAV";
 import { translate } from "../locales";
 import { errorText } from "./errorText";
 
 export type CredentialSecretNamespace = "connection" | "app-data-webdav" | "snapshot-webdav" | "app-data-backup";
 export type StoredSecretStatus = "stored" | "missing" | "unsupported";
-export const CONNECTION_SECRET_FIELDS = ["password", "accessKeyId", "accessKeySecret", "securityToken", "apolloToken", "consulToken"] as const;
+export const CONNECTION_SECRET_FIELDS = [
+  "password",
+  "accessKeyId",
+  "accessKeySecret",
+  "securityToken",
+  "apolloToken",
+  "consulToken",
+] as const;
 export type ConnectionSecretField = (typeof CONNECTION_SECRET_FIELDS)[number];
 
 export interface SecureSecretRef {
@@ -29,10 +38,36 @@ export interface StoredSecretPointer extends SecureSecretRef {
   status: StoredSecretStatus;
 }
 
+export const SSH_SECRET_FIELDS = ["password", "privateKey", "passphrase"] as const;
+export type SSHSecretField = (typeof SSH_SECRET_FIELDS)[number];
+export type LargeSecretNamespace = "connection-ssh" | "ssh-profile";
+
+export interface LargeSecretRef {
+  namespace: LargeSecretNamespace;
+  ownerId: string;
+  field: SSHSecretField;
+}
+
+export interface LargeSecretWriteResult {
+  ref: LargeSecretRef;
+  storage: string;
+  valueSize: number;
+  verified: boolean;
+}
+
+export interface LargeSecretPointer extends Omit<StoredSecretPointer, "namespace" | "field"> {
+  namespace: LargeSecretNamespace;
+  field: SSHSecretField;
+  storage: string;
+}
+
 export interface SecureStoreClient {
   write(ref: SecureSecretRef, value: string): Promise<SecureSecretWriteResult>;
   read(ref: SecureSecretRef): Promise<string>;
   delete(ref: SecureSecretRef): Promise<void>;
+  writeLarge(ref: LargeSecretRef, value: string): Promise<LargeSecretWriteResult>;
+  readLarge(ref: LargeSecretRef): Promise<string>;
+  deleteLarge(ref: LargeSecretRef): Promise<void>;
 }
 
 interface CredentialSecretDeps {
@@ -47,7 +82,7 @@ interface WriteSecretInput extends SecureSecretRef {
 export type CredentialMigrationItemStatus = "migrated" | "skipped" | "unsupported" | "failed";
 
 export interface CredentialMigrationItem {
-  namespace: CredentialSecretNamespace;
+  namespace: string;
   ownerId: string;
   field: string;
   ref: string;
@@ -70,6 +105,13 @@ const defaultClient: SecureStoreClient = {
   },
   read: (ref) => readSecureSecret(ref),
   delete: (ref) => deleteSecureSecret(ref),
+  writeLarge: async (ref, value) => {
+    const result = await WriteLargeSecret(ref, value);
+    // Go 侧回显的 ref 是三串字符串，指针要保住本地窄类型，因此以入参为准
+    return { storage: result.storage, valueSize: result.valueSize, verified: result.verified, ref };
+  },
+  readLarge: (ref) => ReadLargeSecret(ref),
+  deleteLarge: (ref) => DeleteLargeSecret(ref),
 };
 
 function clientFromDeps(deps?: CredentialSecretDeps): SecureStoreClient {
@@ -88,7 +130,7 @@ function refFromPointer(pointer: StoredSecretPointer): SecureSecretRef {
   };
 }
 
-export function formatStoredSecretRef(ref: SecureSecretRef): string {
+export function formatStoredSecretRef(ref: { namespace: string; ownerId: string; field: string }): string {
   return `${ref.namespace}.${ref.ownerId}.${ref.field}`;
 }
 
@@ -107,7 +149,12 @@ function isStoredSecretStatus(value: unknown): value is StoredSecretStatus {
 export function normalizeStoredSecretPointer(value: unknown): StoredSecretPointer | null {
   if (!isObjectRecord(value)) return null;
   if (!isCredentialSecretNamespace(value.namespace) || !isStoredSecretStatus(value.status)) return null;
-  if (typeof value.ref !== "string" || typeof value.ownerId !== "string" || typeof value.field !== "string" || typeof value.migratedAt !== "string") {
+  if (
+    typeof value.ref !== "string" ||
+    typeof value.ownerId !== "string" ||
+    typeof value.field !== "string" ||
+    typeof value.migratedAt !== "string"
+  ) {
     return null;
   }
   if (!value.ref || !value.ownerId || !value.field || !value.migratedAt) return null;
@@ -154,6 +201,53 @@ export function deleteStoredSecret(pointer: StoredSecretPointer, deps?: Credenti
   return clientFromDeps(deps).delete(refFromPointer(pointer));
 }
 
+export async function writeAndVerifyLargeSecret(
+  input: LargeSecretRef & { value: string },
+  deps?: CredentialSecretDeps
+): Promise<LargeSecretPointer> {
+  const ref: LargeSecretRef = {
+    namespace: input.namespace,
+    ownerId: input.ownerId,
+    field: input.field,
+  };
+  const result = await clientFromDeps(deps).writeLarge(ref, input.value);
+  if (!result.verified) {
+    throw new Error(translate("credentials.writeVerifyFailed"));
+  }
+  return {
+    ref: formatStoredSecretRef(ref),
+    namespace: ref.namespace,
+    ownerId: ref.ownerId,
+    field: ref.field,
+    migratedAt: nowFromDeps(deps),
+    status: "stored",
+    storage: result.storage,
+  };
+}
+
+export async function resolveLargeSecret(pointer: LargeSecretPointer, deps?: CredentialSecretDeps): Promise<string> {
+  if (pointer.status !== "stored") {
+    throw new Error(translate("credentials.statusUnresolvable", { ref: pointer.ref, status: pointer.status }));
+  }
+  try {
+    return await clientFromDeps(deps).readLarge({
+      namespace: pointer.namespace,
+      ownerId: pointer.ownerId,
+      field: pointer.field,
+    });
+  } catch (e) {
+    throw new Error(translate("credentials.missingAfterMigration", { ref: pointer.ref, detail: errorText(e) }));
+  }
+}
+
+export function deleteLargeStoredSecret(pointer: LargeSecretPointer, deps?: CredentialSecretDeps): Promise<void> {
+  return clientFromDeps(deps).deleteLarge({
+    namespace: pointer.namespace,
+    ownerId: pointer.ownerId,
+    field: pointer.field,
+  });
+}
+
 const APP_DATA_BACKUP_PASSWORD_REF: SecureSecretRef = {
   namespace: "app-data-backup",
   ownerId: "default",
@@ -168,7 +262,11 @@ export async function saveAppDataBackupPassword(password: string, deps?: Credent
 }
 
 export async function resolveAppDataBackupPassword(pointer: StoredSecretPointer, deps?: CredentialSecretDeps): Promise<string> {
-  if (pointer.namespace !== APP_DATA_BACKUP_PASSWORD_REF.namespace || pointer.ownerId !== APP_DATA_BACKUP_PASSWORD_REF.ownerId || pointer.field !== APP_DATA_BACKUP_PASSWORD_REF.field) {
+  if (
+    pointer.namespace !== APP_DATA_BACKUP_PASSWORD_REF.namespace ||
+    pointer.ownerId !== APP_DATA_BACKUP_PASSWORD_REF.ownerId ||
+    pointer.field !== APP_DATA_BACKUP_PASSWORD_REF.field
+  ) {
     throw new Error(translate("credentials.backupPasswordRefInvalid"));
   }
   return resolveSecret(pointer, deps);
@@ -190,7 +288,7 @@ function migrationRef(namespace: CredentialSecretNamespace, ownerId: string, fie
 
 function recordMigrationItem(
   summary: CredentialMigrationSummary,
-  ref: SecureSecretRef,
+  ref: { namespace: string; ownerId: string; field: string },
   status: CredentialMigrationItemStatus,
   error?: string
 ): void {
@@ -272,7 +370,45 @@ export async function hydrateConnectionSecrets(conn: Connection, deps?: Credenti
   return next;
 }
 
-export async function hydrateAppDataWebDAVSettings(settings: AppDataWebDAVSettings, deps?: CredentialSecretDeps): Promise<AppDataWebDAVSettings> {
+function sshConfigFieldValue(config: SSHConfig | undefined, field: SSHSecretField): string {
+  return config?.[field] ?? "";
+}
+
+export async function hydrateSSHConfigFields(
+  config: SSHConfig | undefined,
+  refs: Partial<Record<SSHSecretField, LargeSecretPointer>> | undefined,
+  deps?: CredentialSecretDeps
+): Promise<SSHConfig | undefined> {
+  if (!config || !refs) return config;
+  const next: SSHConfig = { ...config };
+  for (const field of SSH_SECRET_FIELDS) {
+    if (sshConfigFieldValue(next, field)) continue;
+    const pointer = refs[field];
+    if (pointer?.status !== "stored") continue;
+    next[field] = await resolveLargeSecret(pointer, deps);
+  }
+  return next;
+}
+
+export async function hydrateSSHProfile(profile: SSHProfile, deps?: CredentialSecretDeps): Promise<SSHProfile> {
+  if (!profile.sshSecretRefs) return profile;
+  const config = await hydrateSSHConfigFields(profile.config, profile.sshSecretRefs, deps);
+  return { ...profile, config: config ?? profile.config };
+}
+
+export async function resolveConnectionSSHConfig(conn: Connection, deps?: CredentialSecretDeps): Promise<SSHConfig | undefined> {
+  // 与 sshProfiles.connectionSSHConfig 同口径：档案优先于内联配置。
+  const profile = getSSHProfile(conn.sshProfileId);
+  if (profile) {
+    return hydrateSSHConfigFields(profile.config, profile.sshSecretRefs, deps);
+  }
+  return hydrateSSHConfigFields(conn.sshConfig, conn.sshSecretRefs, deps);
+}
+
+export async function hydrateAppDataWebDAVSettings(
+  settings: AppDataWebDAVSettings,
+  deps?: CredentialSecretDeps
+): Promise<AppDataWebDAVSettings> {
   if (settings.password || settings.passwordSecretRef?.status !== "stored") return settings;
   return {
     ...settings,
@@ -280,7 +416,10 @@ export async function hydrateAppDataWebDAVSettings(settings: AppDataWebDAVSettin
   };
 }
 
-export async function hydrateSnapshotWebDAVSettings(settings: SnapshotWebDAVSettings, deps?: CredentialSecretDeps): Promise<SnapshotWebDAVSettings> {
+export async function hydrateSnapshotWebDAVSettings(
+  settings: SnapshotWebDAVSettings,
+  deps?: CredentialSecretDeps
+): Promise<SnapshotWebDAVSettings> {
   if (settings.password || settings.passwordSecretRef?.status !== "stored") return settings;
   return {
     ...settings,
@@ -293,6 +432,16 @@ export function countMigratableStoredCredentials(): number {
   for (const conn of loadConnections()) {
     for (const field of CONNECTION_SECRET_FIELDS) {
       if (connectionSecretValue(conn, field)) count += 1;
+    }
+    if (conn.sshConfig) {
+      for (const field of SSH_SECRET_FIELDS) {
+        if (sshConfigFieldValue(conn.sshConfig, field)) count += 1;
+      }
+    }
+  }
+  for (const profile of loadSSHProfiles()) {
+    for (const field of SSH_SECRET_FIELDS) {
+      if (sshConfigFieldValue(profile.config, field)) count += 1;
     }
   }
   if (loadAppDataBackupState().webdav.password) count += 1;
@@ -346,6 +495,81 @@ async function migrateConnectionCredentials(summary: CredentialMigrationSummary,
   }
 }
 
+async function migrateLargeSecretValue(
+  summary: CredentialMigrationSummary,
+  input: LargeSecretRef & { value: string },
+  deps?: CredentialSecretDeps
+): Promise<LargeSecretPointer | null> {
+  const ref: LargeSecretRef = { namespace: input.namespace, ownerId: input.ownerId, field: input.field };
+  if (!input.value) {
+    recordMigrationItem(summary, ref, "skipped");
+    return null;
+  }
+  try {
+    const pointer = await writeAndVerifyLargeSecret({ ...ref, value: input.value }, deps);
+    recordMigrationItem(summary, ref, "migrated");
+    return pointer;
+  } catch (e) {
+    recordMigrationItem(summary, ref, isUnsupportedError(e) ? "unsupported" : "failed", errorText(e));
+    return null;
+  }
+}
+
+async function migrateConnectionSSHSecrets(summary: CredentialMigrationSummary, deps?: CredentialSecretDeps): Promise<void> {
+  for (const conn of loadConnections()) {
+    const config = conn.sshConfig;
+    if (!config) continue;
+    const refs: Partial<Record<SSHSecretField, LargeSecretPointer>> = { ...(conn.sshSecretRefs ?? {}) };
+    const cleared: Partial<SSHConfig> = {};
+    let changed = false;
+
+    for (const field of SSH_SECRET_FIELDS) {
+      const value = sshConfigFieldValue(config, field);
+      if (!value && refs[field]?.status === "stored") {
+        recordMigrationItem(summary, { namespace: "connection-ssh", ownerId: conn.id, field }, "skipped");
+        continue;
+      }
+      const pointer = await migrateLargeSecretValue(summary, { namespace: "connection-ssh", ownerId: conn.id, field, value }, deps);
+      if (pointer) {
+        refs[field] = pointer;
+        cleared[field] = "";
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      updateConnection(conn.id, { ...{ sshConfig: { ...config, ...cleared } }, sshSecretRefs: refs });
+    }
+  }
+}
+
+async function migrateSSHProfileSecrets(summary: CredentialMigrationSummary, deps?: CredentialSecretDeps): Promise<void> {
+  for (const profile of loadSSHProfiles()) {
+    const config = profile.config;
+    const refs: Partial<Record<SSHSecretField, LargeSecretPointer>> = { ...(profile.sshSecretRefs ?? {}) };
+    const cleared: Partial<SSHConfig> = {};
+    let changed = false;
+
+    for (const field of SSH_SECRET_FIELDS) {
+      const value = sshConfigFieldValue(config, field);
+      if (!value && refs[field]?.status === "stored") {
+        recordMigrationItem(summary, { namespace: "ssh-profile", ownerId: profile.id, field }, "skipped");
+        continue;
+      }
+      const pointer = await migrateLargeSecretValue(summary, { namespace: "ssh-profile", ownerId: profile.id, field, value }, deps);
+      if (pointer) {
+        refs[field] = pointer;
+        cleared[field] = "";
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      upsertSSHProfile({ id: profile.id, name: profile.name, config: { ...config, ...cleared }, sshSecretRefs: refs });
+    }
+  }
+}
+
 async function migrateAppDataWebDAVCredential(summary: CredentialMigrationSummary, deps?: CredentialSecretDeps): Promise<void> {
   const state = loadAppDataBackupState();
   if (!state.webdav.password && state.webdav.passwordSecretRef?.status === "stored") {
@@ -393,6 +617,8 @@ async function migrateSnapshotWebDAVCredential(summary: CredentialMigrationSumma
 export async function migrateStoredCredentials(deps?: CredentialSecretDeps): Promise<CredentialMigrationSummary> {
   const summary = emptyMigrationSummary();
   await migrateConnectionCredentials(summary, deps);
+  await migrateConnectionSSHSecrets(summary, deps);
+  await migrateSSHProfileSecrets(summary, deps);
   await migrateAppDataWebDAVCredential(summary, deps);
   await migrateSnapshotWebDAVCredential(summary, deps);
   return summary;

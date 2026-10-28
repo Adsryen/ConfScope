@@ -49,6 +49,7 @@ const goApp = {
   GetSSHTunnelLocalPort: vi.fn(),
   StopSSHTunnel: vi.fn(),
   ReadSecureSecret: vi.fn(),
+  ReadLargeSecret: vi.fn(),
   AppendConfigRevision: vi.fn(),
 };
 
@@ -133,6 +134,7 @@ describe("nacos api compatibility bridge", () => {
       globalAdmin: true,
     });
     goApp.ReadSecureSecret.mockImplementation(async (ref: { field: string }) => `stored-${ref.field}`);
+    goApp.ReadLargeSecret.mockImplementation(async (ref: { field: string }) => `large-${ref.field}`);
     // 记历史默认成功：具体用例再改成 reject，或直接断言调用参数。
     resetConfigRevisionAccelerator();
     goApp.AppendConfigRevision.mockResolvedValue({ appended: true, reason: "appended", record: {} });
@@ -608,8 +610,12 @@ describe("nacos api compatibility bridge", () => {
     await expect(testConnection(apolloConn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
     await expect(testConnection(consulConn)).resolves.toEqual({ accessToken: "", tokenTtl: 0, globalAdmin: false });
 
-    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ provider: "apollo", accessToken: "stored-apolloToken" }));
-    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(expect.objectContaining({ provider: "consul", accessToken: "stored-consulToken" }));
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "apollo", accessToken: "stored-apolloToken" })
+    );
+    expect(goApp.ConfigCenterTestConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "consul", accessToken: "stored-consulToken" })
+    );
   });
 
   it("maps generic DEFAULT_GROUP inputs to Apollo cluster for diff and audit flows", async () => {
@@ -713,7 +719,9 @@ describe("nacos api compatibility bridge", () => {
       totalCount: 1,
       pageNumber: 1,
       pagesAvailable: 1,
-      pageItems: [{ dataId: "apps/order/app.yaml", group: "apps/order/", content: "server:\n  port: 8080\n", configType: "yaml", updateTime: "42" }],
+      pageItems: [
+        { dataId: "apps/order/app.yaml", group: "apps/order/", content: "server:\n  port: 8080\n", configType: "yaml", updateTime: "42" },
+      ],
     });
     await expect(getConfig(conn, "dc1", "apps/order/app.yaml", "apps/order/")).resolves.toBe("server:\n  port: 8080\n");
 
@@ -833,7 +841,14 @@ describe("nacos api compatibility bridge", () => {
       accessKeyId: "",
       accessKeySecret: "",
       secretRefs: {
-        accessKeyId: { ref: "r-ak", namespace: "connection", ownerId: "conn-apply-write-mse", field: "accessKeyId", migratedAt: "", status: "stored" },
+        accessKeyId: {
+          ref: "r-ak",
+          namespace: "connection",
+          ownerId: "conn-apply-write-mse",
+          field: "accessKeyId",
+          migratedAt: "",
+          status: "stored",
+        },
         accessKeySecret: {
           ref: "r-sk",
           namespace: "connection",
@@ -861,7 +876,10 @@ describe("nacos api compatibility bridge", () => {
       content: "a: 1",
       format: "yaml",
     });
-    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(signedProfile, expectedRef(conn, "ns-a", "common.yml", "DEFAULT_GROUP"));
+    expect(goApp.ConfigCenterDeleteConfigFromApplyPlan).toHaveBeenCalledWith(
+      signedProfile,
+      expectedRef(conn, "ns-a", "common.yml", "DEFAULT_GROUP")
+    );
     expect(goApp.NacosLogin).not.toHaveBeenCalled();
   });
 
@@ -927,6 +945,122 @@ describe("nacos api compatibility bridge", () => {
     );
   });
 
+  it("dials SSH tunnels with credentials resolved from the system credential store", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-migrated"),
+      baseUrl: "http://nacos.internal:8845/nacos",
+      sshConfig: {
+        host: "jump.example.com",
+        port: 37380,
+        username: "root",
+        authType: "key",
+        password: "",
+        privateKey: "",
+        passphrase: "",
+      },
+      sshSecretRefs: {
+        privateKey: {
+          ref: "connection-ssh.conn-ssh-migrated.privateKey",
+          namespace: "connection-ssh",
+          ownerId: "conn-ssh-migrated",
+          field: "privateKey",
+          migratedAt: "2026-10-28T00:00:00.000Z",
+          status: "stored",
+          storage: "dpapi-file",
+        },
+        passphrase: {
+          ref: "connection-ssh.conn-ssh-migrated.passphrase",
+          namespace: "connection-ssh",
+          ownerId: "conn-ssh-migrated",
+          field: "passphrase",
+          migratedAt: "2026-10-28T00:00:00.000Z",
+          status: "stored",
+          storage: "dpapi-file",
+        },
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValue(12900);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledWith(
+      conn.id,
+      expect.objectContaining({ privateKey: "large-privateKey", passphrase: "large-passphrase" })
+    );
+  });
+
+  it("resolves migrated SSH credentials through the referenced profile", async () => {
+    localStorage.setItem(
+      "cs.sshProfiles",
+      JSON.stringify([
+        {
+          id: "profile-1",
+          name: "跳板机",
+          config: { host: "jump-profile.example.com", port: 22, username: "ops", authType: "password", password: "" },
+          sshSecretRefs: {
+            password: {
+              ref: "ssh-profile.profile-1.password",
+              namespace: "ssh-profile",
+              ownerId: "profile-1",
+              field: "password",
+              migratedAt: "2026-10-28T00:00:00.000Z",
+              status: "stored",
+              storage: "dpapi-file",
+            },
+          },
+          createdAt: "2026-10-28T00:00:00.000Z",
+          updatedAt: "2026-10-28T00:00:00.000Z",
+        },
+      ])
+    );
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-profile-migrated"),
+      baseUrl: "http://nacos.internal:8845/nacos",
+      sshProfileId: "profile-1",
+      sshConfig: {
+        host: "ignored-inline.example.com",
+        port: 22,
+        username: "ignored",
+        authType: "password",
+        password: "ignored-inline-secret",
+      },
+    };
+    goApp.CreateSSHTunnel.mockResolvedValue(12901);
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).resolves.toEqual([]);
+
+    expect(goApp.CreateSSHTunnel).toHaveBeenCalledWith(
+      conn.id,
+      expect.objectContaining({ host: "jump-profile.example.com", username: "ops", password: "large-password" })
+    );
+  });
+
+  it("surfaces the re-enter credential copy instead of dialing with an empty key", async () => {
+    const conn: Connection = {
+      ...makeConnection("conn-ssh-lost"),
+      baseUrl: "http://nacos.internal:8845/nacos",
+      sshConfig: { host: "jump.example.com", port: 22, username: "root", authType: "key", privateKey: "" },
+      sshSecretRefs: {
+        privateKey: {
+          ref: "connection-ssh.conn-ssh-lost.privateKey",
+          namespace: "connection-ssh",
+          ownerId: "conn-ssh-lost",
+          field: "privateKey",
+          migratedAt: "2026-10-28T00:00:00.000Z",
+          status: "stored",
+          storage: "dpapi-file",
+        },
+      },
+    };
+    goApp.ReadLargeSecret.mockRejectedValueOnce(new Error("secret not found"));
+    goApp.ConfigCenterListNamespaces.mockResolvedValue([]);
+
+    await expect(listNamespaces(conn)).rejects.toThrow(/connection-ssh\.conn-ssh-lost\.privateKey/);
+    expect(goApp.CreateSSHTunnel).not.toHaveBeenCalled();
+  });
+
   it("derives SSH tunnel target from the Nacos base URL", async () => {
     const conn: Connection = {
       ...makeConnection("conn-ssh-derived"),
@@ -971,8 +1105,7 @@ describe("nacos api compatibility bridge", () => {
       },
     };
     goApp.CreateSSHTunnel.mockResolvedValueOnce(5972).mockResolvedValueOnce(6001);
-    goApp.ConfigCenterListNamespaces
-      .mockResolvedValueOnce([])
+    goApp.ConfigCenterListNamespaces.mockResolvedValueOnce([])
       .mockRejectedValueOnce(
         new Error(
           '无法连接到服务器: Get "http://localhost:5972/nacos/v3/console/core/namespace/list": dial tcp [::1]:5972: connectex: No connection could be made because the target machine actively refused it.'
@@ -987,7 +1120,6 @@ describe("nacos api compatibility bridge", () => {
     expect(goApp.StopSSHTunnel).toHaveBeenCalledWith(conn.id);
     expect(goApp.ConfigCenterListNamespaces).toHaveBeenLastCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:6001/nacos" }));
   });
-
 
   it("adopts backend current SSH tunnel port when frontend cache is stale", async () => {
     const conn: Connection = {
@@ -1031,8 +1163,14 @@ describe("nacos api compatibility bridge", () => {
 
     expect(goApp.CreateSSHTunnel).toHaveBeenCalledTimes(1);
     expect(goApp.ConfigCenterListNamespaces).toHaveBeenCalledTimes(2);
-    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(1, expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" }));
-    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(2, expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" }));
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" })
+    );
+    expect(goApp.ConfigCenterListNamespaces).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ baseUrl: "http://127.0.0.1:9682/nacos" })
+    );
   });
 
   it("rebuilds SSH tunnels and retries when login response is cut off", async () => {

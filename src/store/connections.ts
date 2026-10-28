@@ -1,6 +1,7 @@
 // Nacos 连接的本地持久化。桌面端单机工具，连接信息（含密码）存 localStorage。
 
-import type { ConnectionSecretField, StoredSecretPointer } from "../lib/credentialSecrets";
+import { DeleteLargeSecret } from "../../wailsjs/go/app/App";
+import type { ConnectionSecretField, LargeSecretPointer, SSHSecretField, StoredSecretPointer } from "../lib/credentialSecrets";
 
 export interface SSHConfig {
   /** SSH 服务器地址 */
@@ -94,10 +95,13 @@ export interface Connection {
   consulDatacenter?: string;
   /** Consul KV key prefix，用于限定浏览范围。 */
   consulKeyPrefix?: string;
-  /** 已迁移到系统凭据库的小凭据指针；SSH auth family 暂不迁移。 */
+  /** 已迁移到系统凭据库的小凭据指针。 */
   secretRefs?: Partial<Record<ConnectionSecretField, StoredSecretPointer>>;
+  /** 内联 SSH 凭据迁移到大凭据库后的指针（profile 凭据在 SSHProfile.sshSecretRefs）。 */
+  sshSecretRefs?: Partial<Record<SSHSecretField, LargeSecretPointer>>;
 }
 
+const CONNECTION_SSH_SECRET_FIELDS: SSHSecretField[] = ["password", "privateKey", "passphrase"];
 const KEY = "cs.connections";
 let idSeq = 0;
 const CONNECTION_SECRET_FIELDS: ConnectionSecretField[] = [
@@ -156,7 +160,23 @@ export function updateConnection(id: string, patch: Partial<Omit<Connection, "id
 }
 
 export function deleteConnection(id: string) {
-  saveAll(loadConnections().filter((c) => c.id !== id));
+  const list = loadConnections();
+  const target = list.find((c) => c.id === id);
+  saveAll(list.filter((c) => c.id !== id));
+  purgeSSHSecretPointers(target?.sshSecretRefs);
+}
+
+function purgeSSHSecretPointers(refs: Partial<Record<SSHSecretField, LargeSecretPointer>> | undefined): void {
+  if (!refs) return;
+  void (async () => {
+    for (const pointer of Object.values(refs)) {
+      try {
+        await DeleteLargeSecret({ namespace: pointer.namespace, ownerId: pointer.ownerId, field: pointer.field });
+      } catch {
+        // 尽力清理：系统凭据库条目删除失败不阻塞连接删除流程
+      }
+    }
+  })();
 }
 
 export function renameProject(oldName: string, newName: string): Connection[] {
@@ -217,17 +237,46 @@ function normalizeStoredConnection(value: unknown): Connection | null {
   // 历史版本的回写清单漏了 defaultGroup，导致持久化连接丢失默认 group、
   // group 筛选/下拉回退成"全部分组"。这里按字段白名单合并原始记录，
   // 确保新增字段不会被迁移流程静默丢弃。
-  // 注意：secretRefs 是对象字段，由 normalizeConnectionSecretRefs 规范化
-  // （空对象→undefined），不能参与标量回填，否则会把规范化后的 undefined
-  // 覆盖回原始空对象，破坏"无效引用应丢弃"的既有语义。
+  // 注意：secretRefs / sshSecretRefs 是对象字段，分别由 normalizeConnectionSecretRefs /
+  // normalizeConnectionSSHSecretRefs 规范化（空对象→undefined），不能参与标量回填，
+  // 否则会把规范化后的 undefined 覆盖回原始空对象，破坏"无效引用应丢弃"的既有语义。
   const knownFields = [
-    "id", "name", "projectId", "projectName", "environmentId", "environmentName",
-    "sourceName", "sourceType", "localPath", "forceLocalSnapshot", "localValidation",
-    "readonly", "isDefaultSource", "tags", "provider", "distribution", "authType",
-    "baseUrl", "username", "password", "accessKeyId", "accessKeySecret", "securityToken",
-    "defaultNamespace", "defaultGroup", "sshConfig", "sshProfileId", "useProxy",
-    "apolloEnv", "apolloAppId", "apolloCluster", "apolloNamespaceName", "apolloToken",
-    "consulToken", "consulDatacenter", "consulKeyPrefix",
+    "id",
+    "name",
+    "projectId",
+    "projectName",
+    "environmentId",
+    "environmentName",
+    "sourceName",
+    "sourceType",
+    "localPath",
+    "forceLocalSnapshot",
+    "localValidation",
+    "readonly",
+    "isDefaultSource",
+    "tags",
+    "provider",
+    "distribution",
+    "authType",
+    "baseUrl",
+    "username",
+    "password",
+    "accessKeyId",
+    "accessKeySecret",
+    "securityToken",
+    "defaultNamespace",
+    "defaultGroup",
+    "sshConfig",
+    "sshProfileId",
+    "useProxy",
+    "apolloEnv",
+    "apolloAppId",
+    "apolloCluster",
+    "apolloNamespaceName",
+    "apolloToken",
+    "consulToken",
+    "consulDatacenter",
+    "consulKeyPrefix",
   ] as const;
   const target = conn as unknown as Record<string, unknown>;
   for (const field of knownFields) {
@@ -269,6 +318,39 @@ function normalizeConnectionSecretRefs(value: unknown): Partial<Record<Connectio
   const refs: Partial<Record<ConnectionSecretField, StoredSecretPointer>> = {};
   for (const field of CONNECTION_SECRET_FIELDS) {
     const pointer = normalizeSecretPointer(value[field]);
+    if (pointer) refs[field] = pointer;
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
+}
+
+function normalizeSSHSecretPointer(value: unknown): LargeSecretPointer | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const status = value.status;
+  if (status !== "stored" && status !== "missing" && status !== "unsupported") return undefined;
+  const ref = stringValue(value.ref);
+  const ownerId = stringValue(value.ownerId);
+  const field = stringValue(value.field);
+  const migratedAt = stringValue(value.migratedAt);
+  const storage = stringValue(value.storage);
+  if (!ref || !ownerId || !field || !migratedAt || !storage) return undefined;
+  if (value.namespace !== "connection-ssh") return undefined;
+  if (!(field === "password" || field === "privateKey" || field === "passphrase")) return undefined;
+  return {
+    ref,
+    namespace: "connection-ssh",
+    ownerId,
+    field,
+    migratedAt,
+    status: status as LargeSecretPointer["status"],
+    storage,
+  };
+}
+
+function normalizeConnectionSSHSecretRefs(value: unknown): Partial<Record<SSHSecretField, LargeSecretPointer>> | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const refs: Partial<Record<SSHSecretField, LargeSecretPointer>> = {};
+  for (const field of CONNECTION_SSH_SECRET_FIELDS) {
+    const pointer = normalizeSSHSecretPointer(value[field]);
     if (pointer) refs[field] = pointer;
   }
   return Object.keys(refs).length > 0 ? refs : undefined;
@@ -319,5 +401,6 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     consulDatacenter: raw.consulDatacenter?.trim() || "",
     consulKeyPrefix: raw.consulKeyPrefix?.trim() || "",
     secretRefs: normalizeConnectionSecretRefs(raw.secretRefs),
+    sshSecretRefs: normalizeConnectionSSHSecretRefs(raw.sshSecretRefs),
   };
 }

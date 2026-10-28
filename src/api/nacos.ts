@@ -1,10 +1,4 @@
-import {
-  NacosDetectVersion,
-  NacosLogin,
-  CreateSSHTunnel,
-  GetSSHTunnelLocalPort,
-  StopSSHTunnel,
-} from "../../wailsjs/go/app/App";
+import { NacosDetectVersion, NacosLogin, CreateSSHTunnel, GetSSHTunnelLocalPort, StopSSHTunnel } from "../../wailsjs/go/app/App";
 import { formatDateTime } from "../lib/formatDateTime";
 import {
   getConfig as configCenterGetConfig,
@@ -28,7 +22,7 @@ import { translate } from "../locales";
 import type { Connection } from "../store/connections";
 import { connectionSSHConfig } from "../store/sshProfiles";
 import { nacosAuthUsesAccessKey, nacosRequestSignRequested } from "../lib/nacosSigning";
-import { hydrateConnectionSecrets } from "../lib/credentialSecrets";
+import { hydrateConnectionSecrets, resolveConnectionSSHConfig } from "../lib/credentialSecrets";
 import { effectiveProvider } from "../lib/configCapabilities";
 import { observeLoadedDocument } from "../lib/configRevisions";
 import { errorText } from "../lib/errorText";
@@ -69,7 +63,10 @@ async function cachedTunnelUrl(conn: Connection, originalBaseUrl: string): Promi
 }
 
 async function createTunnelUrl(conn: Connection, originalBaseUrl: string): Promise<string> {
-  const sshConfig = connectionSSHConfig(conn);
+  // SSH 的 password / privateKey / passphrase 迁移到系统凭据库后，主数据里只剩指针，
+  // 明文只能在真正拨号的前一刻取回；connectionSSHConfig 看得到 host/username，
+  // 但用它拨号会带着空凭据去连，报出来的是"认证失败"这种和原因无关的错。
+  const sshConfig = await resolveConnectionSSHConfig(conn);
   if (!sshConfig) return originalBaseUrl;
 
   // 解析原始 baseUrl，提取 context-path 和协议
@@ -138,7 +135,6 @@ export async function closeTunnelAndWait(connId: string): Promise<void> {
 export function closeTunnel(connId: string) {
   void closeTunnelAndWait(connId).catch(() => undefined);
 }
-
 
 function hasSSHConfig(conn: Connection): boolean {
   return !!connectionSSHConfig(conn);
@@ -537,7 +533,6 @@ export async function testConnection(conn: Connection): Promise<LoginResult> {
   });
 }
 
-
 export async function listNamespaces(conn: Connection): Promise<Namespace[]> {
   return withProfile(conn, async (profile) => {
     const items = await configCenterListNamespaces(profile);
@@ -730,12 +725,7 @@ export async function publishConfigFromApplyPlan(
   );
 }
 
-export async function publishConfigRefFromApplyPlan(
-  conn: Connection,
-  ref: ConfigRef,
-  content: string,
-  configType: string
-): Promise<void> {
+export async function publishConfigRefFromApplyPlan(conn: Connection, ref: ConfigRef, content: string, configType: string): Promise<void> {
   if (conn.sourceType === "local-snapshot") {
     throw new Error(translate("api.localSnapshotPublishReadonly"));
   }

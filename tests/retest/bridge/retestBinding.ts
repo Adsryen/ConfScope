@@ -1158,6 +1158,38 @@ export function resetRetestSecureSecrets(): void {
   pendingConfigSourceExportDir = null;
 }
 
+/**
+ * 大 secret 的引用校验与目标名，逐条对齐 securestore.NewLargeRef / LargeRef.TargetName：
+ *   · namespace 只接受 connection-ssh / ssh-profile，field 只接受 SSH auth family 三个字段，
+ *     非法值复刻 Go 的 `invalid secret reference: namespace "x"` 文案（带引号带原值）；
+ *   · ownerId 沿用小凭据那套片段字符校验；
+ *   · 目标名 ConfScope/<namespace>/<ownerID>/<field>（大 secret 的 field 必填）。
+ */
+const RETEST_LARGE_NAMESPACES = ["connection-ssh", "ssh-profile"];
+const RETEST_LARGE_FIELDS = ["password", "privateKey", "passphrase"];
+/** internal/securestore/securestore.go:19 MaxLargeSecretSize。 */
+const RETEST_LARGE_SECRET_MAX = 1024 * 1024;
+/** Windows 侧大凭据走 DPAPI 加密文件（securestore_windows_large.go:87），桥默认按主战场形态回报。 */
+const RETEST_LARGE_STORAGE = "dpapi-file";
+
+function retestLargeTargetName(ref: Record<string, unknown>): string {
+  const namespace = String(ref?.namespace ?? "").trim();
+  if (!RETEST_LARGE_NAMESPACES.includes(namespace)) {
+    throw new Error(`invalid secret reference: namespace "${namespace}"`);
+  }
+  const ownerId = String(ref?.ownerId ?? "").trim();
+  if (ownerId === "") throw new Error("invalid secret reference: ownerID");
+  for (const ch of ownerId) {
+    const ok = (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch === "-" || ch === "_" || ch === ".";
+    if (!ok) throw new Error("invalid secret reference: ownerID");
+  }
+  const field = String(ref?.field ?? "").trim();
+  if (!RETEST_LARGE_FIELDS.includes(field)) {
+    throw new Error(`invalid secret reference: field "${field}"`);
+  }
+  return `${RETEST_SECRET_TARGET_PREFIX}/${namespace}/${ownerId}/${field}`;
+}
+
 /** 与 securestore.SecretRef.TargetName() 同构：非法片段直接复刻 Go 的错误文案。 */
 function retestSecretTargetName(ref: Record<string, unknown>): string {
   const part = (name: string): string => {
@@ -1199,6 +1231,9 @@ export function createRetestInvoke(): RetestInvoke {
   const snapshotsList: unknown[] = [];
   // 系统凭据库替身（键 = TargetName）；便携快照目录的文件表（键 = 相对路径）
   const secureSecretStore = new Map<string, string>();
+  // 大 secret 另开一张表：与 secureSecretStore 同生命周期按用例复位，
+  // 分开是因为两者校验规则不同（小凭据 namespace 可带 field 为空，大凭据两者都必填精确值）。
+  const largeSecretStore = new Map<string, string>();
   const snapshotFiles = new Map<string, { contentBase64: string; mode: number }>();
 
   const getEndpoint = (args: unknown[]): NacosEndpoint => {
@@ -2042,6 +2077,34 @@ export function createRetestInvoke(): RetestInvoke {
         if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
         // 幂等：删不存在的目标也算成功（securestore_windows.go:119 not-found → nil）
         secureSecretStore.delete(targetName);
+        return null;
+      }
+      case "WriteLargeSecret": {
+        const ref = (args[0] ?? {}) as Record<string, unknown>;
+        const value = String(args[1] ?? "");
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        const targetName = retestLargeTargetName(ref);
+        const valueSize = new TextEncoder().encode(value).length;
+        if (valueSize > RETEST_LARGE_SECRET_MAX) {
+          throw new Error(`secret too large: ${valueSize} > ${RETEST_LARGE_SECRET_MAX}`);
+        }
+        largeSecretStore.set(targetName, value);
+        // Go 侧写完立刻读回校验，不一致就删掉并报「验证系统凭据读回失败」；
+        // 内存替身不存在读不回，verified 恒真，storage 恒按 Windows 形态回报。
+        return { ref, storage: RETEST_LARGE_STORAGE, valueSize, verified: true };
+      }
+      case "ReadLargeSecret": {
+        const targetName = retestLargeTargetName((args[0] ?? {}) as Record<string, unknown>);
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        const value = largeSecretStore.get(targetName);
+        if (value === undefined) throw new Error(`secret not found: ${targetName}`);
+        return value;
+      }
+      case "DeleteLargeSecret": {
+        const targetName = retestLargeTargetName((args[0] ?? {}) as Record<string, unknown>);
+        if (secureStoreUnsupported) throw new Error("secure store unsupported on this platform");
+        // 幂等：与 Go 侧 not-found → nil 同口径，删不掉也算成功
+        largeSecretStore.delete(targetName);
         return null;
       }
       case "ListAppDataSnapshotFiles": {
