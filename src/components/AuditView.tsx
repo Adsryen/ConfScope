@@ -188,7 +188,7 @@ function AuditMatrixList({ rows, envIds, baseline, selectedRowId, onSelectRow, t
 
   return (
     <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
-      <div className="audit-matrix-spacer" style={{ position: "relative", height: rows.length * MATRIX_ROW_HEIGHT }}>
+      <div className="audit-matrix-spacer" style={{ height: rows.length * MATRIX_ROW_HEIGHT }}>
         <div className="audit-matrix-window" style={{ transform: `translateY(${matrixWindow.start * MATRIX_ROW_HEIGHT}px)` }}>
           {matrixWindow.rows.map((row, index) => (
             <div

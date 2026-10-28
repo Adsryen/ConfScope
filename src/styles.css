@@ -6889,6 +6889,18 @@ button.diff-workflow-step-btn:hover {
   min-height: 0;
 }
 
+/* r111 窗口化：spacer 以全部行的总高撑起滚动范围，window 只平移可见切片。
+   静态属性钉在这里（cssHooks 守卫要求 JSX 用到的类名必须有规则），
+   inline style 只留动态几何（spacer 的 height、window 的 translateY）。
+   will-change: transform 把窗口提升为合成层，translateY 滚动不得牵动行子树回流。 */
+.audit-matrix-spacer {
+  position: relative;
+}
+
+.audit-matrix-window {
+  will-change: transform;
+}
+
 .audit-matrix-header {
   position: sticky;
   top: 0;
