@@ -47,6 +47,7 @@ import { PROJECT_ROOT, stripComments } from "./scanUtils";
 
 const WORKFLOW = ".github/workflows/release.yml";
 const CHECKER_GO = "internal/updatecheck/checker.go";
+const ARTIFACT_GO = "internal/updatecheck/artifact.go";
 const NOTES_SCRIPT = "scripts/extract-release-notes.mjs";
 const SYNC_SCRIPT = "scripts/sync-github-release-notes.mjs";
 const REPO = "Adsryen/ConfScope";
@@ -256,6 +257,24 @@ function goJsonTags(structName: string): string[] {
   return [...m[1].matchAll(/json:"([^",]+)/g)].map((found) => found[1]);
 }
 
+/**
+ * Go 侧 publishedAssetNames 的键（manifest 平台键 → 发布文件名）。
+ *
+ * 这张表是客户端「我该下哪一个文件」的判据：构建矩阵加一路平台而这里没有对应键，
+ * 那一档的机器检查更新时只会拿到 "no asset for platform ..."，界面表现为「永远没更新」。
+ */
+function goPublishedAssetKeys(): string[] {
+  const text = stripComments(readFileSync(join(PROJECT_ROOT, ARTIFACT_GO), "utf8"));
+  const m = /var publishedAssetNames = map\[string\]string\{([\s\S]*?)\n\}/.exec(text);
+  if (!m) throw new Error(`${ARTIFACT_GO} 里找不到 var publishedAssetNames 这张表`);
+  const installer = /const InstallerPlatformKey = "([^"]+)"/.exec(text)?.[1] ?? "";
+  const keys: string[] = [];
+  for (const found of m[1].matchAll(/^\s*(?:"([^"]+)"|([A-Za-z_]\w*)):\s*"/gm)) {
+    keys.push(found[1] ?? (found[2] === "InstallerPlatformKey" ? installer : found[2]));
+  }
+  return keys.filter(Boolean);
+}
+
 /** Go 查表键的形态：CurrentPlatform() 必须是 "<GOOS>-<GOARCH>"，与 CI 的键写法同源。 */
 function currentPlatformFormat(): string {
   const text = stripComments(readFileSync(join(PROJECT_ROOT, CHECKER_GO), "utf8"));
@@ -463,12 +482,18 @@ describe("发版链路的契约对齐（轮52）", () => {
     expect(currentPlatformFormat()).toBe("%s-%s");
     const targets = matrixTargets(jobBlocks(text).build);
     expect(targets.length, "构建矩阵解析不出来，守卫口径失效").toBeGreaterThanOrEqual(4);
-    expect(targets.map((target) => target.key).sort()).toEqual([
+    const keys = targets.map((target) => target.key).sort();
+    expect(keys).toEqual([
       "darwin-amd64",
       "darwin-arm64",
       "linux-amd64",
+      "linux-arm64",
       "windows-amd64",
+      "windows-arm64",
     ]);
+    // 矩阵每一路都得在 Go 那张查表里有键，否则这一档的机器只会收到 "no asset for platform X"
+    const goKeys = goPublishedAssetKeys();
+    expect(keys.filter((key) => !goKeys.includes(key)), "构建矩阵有这一路，Go 的 publishedAssetNames 里没有").toEqual([]);
   });
 
   it("jq 模板用到的 --arg 全部落进 update.json，反之亦然", () => {
@@ -538,12 +563,16 @@ function wailsVersionGateProblems(script: string): string[] {
   });
 
   it("变异对照：矩阵加一路平台但清单没跟着加，必须判红", () => {
+    // 拿 windows/amd64 改成 windows/arm64 已经不算「新增一路」了（arm64 档是真出过的），
+    // 这里改成一个 CI 与 Go 都没登记过的键，变异才仍然指向那条真实的漏登记形态。
     const mutated = text.replace(
-      "          - os: windows-latest\n            platform: windows\n            goarch: amd64",
-      "          - os: windows-latest\n            platform: windows\n            goarch: arm64"
+      "          - os: ubuntu-22.04\n            platform: linux\n            goarch: amd64",
+      "          - os: ubuntu-22.04\n            platform: freebsd\n            goarch: amd64"
     );
     expect(mutated).not.toBe(text);
-    expect(manifestProblems(mutated).some((problem) => problem.includes("windows-arm64"))).toBe(true);
+    expect(manifestProblems(mutated).some((problem) => problem.includes("freebsd-amd64"))).toBe(true);
+    // 同一档的 Go 查表也会缺键：两侧必须一起红，不是只红 CI 那一侧
+    expect(goPublishedAssetKeys().includes("freebsd-amd64")).toBe(false);
   });
 
   it("变异对照：删掉一个平台条目、或哈希的文件名与 fileName 不一致，都必须判红", () => {
