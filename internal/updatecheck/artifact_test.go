@@ -171,8 +171,11 @@ func TestNormalizeAssetFillsReadableFileName(t *testing.T) {
 	if got := defaultFileName("windows-amd64"); got != "confscope-windows-amd64-portable.exe" {
 		t.Fatalf("defaultFileName(windows) = %q", got)
 	}
-	if got := defaultFileName("linux-arm64"); got != "confscope-linux-arm64" {
-		t.Fatalf("defaultFileName(其他) = %q", got)
+	if got := defaultFileName("linux-arm64"); got != "confscope-linux-arm64.tar.gz" {
+		t.Fatalf("defaultFileName(linux-arm64) = %q，与发布资产名不同源", got)
+	}
+	if got := defaultFileName("freebsd-arm64"); got != "confscope-freebsd-arm64" {
+		t.Fatalf("defaultFileName(未知键) = %q，兜底规则变了", got)
 	}
 }
 

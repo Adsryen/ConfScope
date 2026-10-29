@@ -46,9 +46,13 @@ const InstallerPlatformKey = "windows-amd64-installer"
 var publishedAssetNames = map[string]string{
 	"windows-amd64":      "confscope-windows-amd64-portable.exe",
 	InstallerPlatformKey: "confscope-windows-amd64-installer.exe",
+	"windows-arm64":      "confscope-windows-arm64-portable.exe",
 	"linux-amd64":        "confscope-linux-amd64.tar.gz",
 	"linux-amd64-deb":    "confscope-linux-amd64.deb",
 	"linux-amd64-rpm":    "confscope-linux-amd64.rpm",
+	"linux-arm64":        "confscope-linux-arm64.tar.gz",
+	"linux-arm64-deb":    "confscope-linux-arm64.deb",
+	"linux-arm64-rpm":    "confscope-linux-arm64.rpm",
 	"darwin-arm64":       "confscope-macos-arm64.dmg",
 	"darwin-amd64":       "confscope-macos-amd64.dmg",
 }
@@ -81,8 +85,12 @@ func (s Selection) CandidateKeys() []string {
 	case "windows":
 		// 只有安装版才该拿安装包：便携版拿安装包等于让用户多跑一次安装程序，
 		// 而它本来只需要覆盖一个 exe。
-		if s.Mode == portabledata.RuntimeModeInstalled {
-			return []string{InstallerPlatformKey, base}
+		// 且安装包目前只有 amd64 条目（NSIS 无 arm64 官方支持矩阵）：
+		// arm64 机器若把 amd64 安装包键排进候选，命中后等于把 x86 程序静默发给 ARM 用户，
+		// 所以只有「本架构的安装包条目恰好就是当前发布的安装包」时才前置。
+		installerKey := base + "-installer"
+		if s.Mode == portabledata.RuntimeModeInstalled && installerKey == InstallerPlatformKey {
+			return []string{installerKey, base}
 		}
 		return []string{base}
 	case "linux":
