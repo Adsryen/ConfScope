@@ -26,7 +26,8 @@ interface SweepTarget {
 
 /**
  * 三个落点，与种子数据的真实分布一致：
- * publish.py 只写 A/retest-dev 与 B/retest-qa，A/retest-qa 由晋级（E4）类用例写入。
+ * publish.py 只写 A/retest-dev 与 B/retest-qa；A/retest-qa 是旧晋级用例留下的落点，
+ * 用例已不再往那儿写，扫描留着只为把历史残留清出去。
  * 少扫一个组合 = 那个组合里的残留照样污染下一批。
  */
 export function sweepTargets(): SweepTarget[] {

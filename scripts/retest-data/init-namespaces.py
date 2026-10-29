@@ -34,11 +34,14 @@ import urllib.request
 # 这里镜像它的两个 Nacos 端点；改那边必须同步改这里）。
 #
 # 每侧要建哪些命名空间，来自用例的真实前提（不是容器里恰好残留了什么）：
-#   A：retest-dev（沙箱/来源侧）——**只有这一个**。
-#   B：retest-qa（沙箱侧）。
-# A 侧必须没有 retest-qa。98-remaining E4 与 99-s-promote-entry S31 共用这条前提：
+#   A：retest-dev（来源侧）——**只有这一个**。
+#   B：retest-qa（沙箱/目标侧）。
+# A 侧必须没有 retest-qa。这条闸门原本是 98-remaining E4 与 99-s-promote-entry S31 的前提：
 # 它们的晋级目标是 A/retest-qa，而 retest-qa 在 A 上是个「还不存在的租户」，
 # 用例验的正是产品能力「沿用沙箱命名空间 → 提示晋级会新建它，而不是覆盖同名配置」。
+# 写后晋级入口已撤除，两条用例改为只判「目标侧落库范围」与「入口缺席」，这条前提失去了用例级消费者。
+# 闸门先留着守住「每侧一套租户」的环境基线：A 上一旦多出同名租户，命名空间候选与 dataId 取数
+# 集合就和用例里写死的读数不同；要真删它，先按下面的反证办法跑一遍，别凭推理。
 # 真机读数（/tmp/cs/r84-full-retest.log:12564，A 侧无 retest-qa，全批 168 passed）：
 #   [E4] 命名空间提醒读数 = ["retest-qa 在 Retest Nacos A 上不是已有的命名空间：晋级会新建它……"]
 # 反证（/tmp/cs/r87-full-retest.log:25467，本脚本曾把 retest-qa 建到 A 上，S31 红）：
@@ -49,19 +52,18 @@ import urllib.request
 # （E4 的 overrideAReQaGateway/publishAExtraMarker 直接 POST tenant=retest-qa，
 # 未注册租户照样写进去并精确读回 200，见本文件开头 ghost-probe 的实测）。
 # 结论：改 ENVS 前先跑一次反证——把它删掉，看相关用例是否还绿，别凭推理给测试环境补数据。
-# 这条前提由 MUST_NOT_EXIST 把关：A 上一旦出现 retest-qa，脚本直接非 0 退出，
-# 而不是等 S31/E4 在批里红成「产品坏了」。
+# 这条基线由 MUST_NOT_EXIST 把关：A 上一旦出现 retest-qa，脚本直接非 0 退出，
+# 而不是让按命名空间列表取数的用例在批里红成「产品坏了」。
 ENVS = {
     "a": ("http://127.0.0.1:19848/nacos", ["retest-dev"]),
     "b": ("http://127.0.0.1:19849/nacos", ["retest-qa"]),
 }
 DESC = "ConfScope retest"
 
-# 断言「必须不存在」的命名空间：S31 与 E4 的现场前提就是 retest-qa 在 A 上还没被建出来，
-# 它们验的是产品那条「沿用沙箱命名空间 → 目标上这套租户不存在 ⇒ 晋级会新建它，
-# 而不是覆盖同名配置」的提醒（zh-CN.json 的 apply.promoteNamespaceMissing）。
-# 租户一旦存在，产品如实不提醒、选择器里的括注也不再为空，两条用例同时红，
-# 而红字看起来像产品坏了。与 ENVS 同为一处口径，改这里必须一起改上面那段实测。
+# 断言「必须不存在」的命名空间：环境基线，每侧只一套租户（见上面那段来历）。
+# 旧的晋级用例靠它验「目标上这套租户不存在 ⇒ 会新建它」的提醒，那套入口已撤除；
+# 现在它的作用是拦住「有人往 A 的同名租户里写了数据」这类环境漂移。
+# 与 ENVS 同为一处口径，改这里必须一起改上面那段实测。
 MUST_NOT_EXIST = {"a": ["retest-qa"]}
 
 
@@ -136,9 +138,9 @@ def review():
         banned = [ns for ns in MUST_NOT_EXIST.get(side, []) if ns in have]
         if banned:
             raise RuntimeError(
-                f"[{side}] 出现了用例前提要求「不存在」的命名空间：{banned}（现有 {sorted(have)}）。"
-                "98-remaining E4 与 99-s-promote-entry S31 验的是「目标上这套租户还不存在 ⇒ 提示晋级会新建它」，"
-                f"把它建出来产品就不提醒了，两条用例会一起红。删掉它：DELETE {{base}}"
+                f"[{side}] 出现了环境基线要求「不存在」的命名空间：{banned}（现有 {sorted(have)}）。"
+                "每侧只一套租户是这批用例读数的地基；A 上的 retest-qa 是旧写后晋级用例的残留落点，"
+                f"留着它，命名空间候选与 dataId 取数的集合就和用例写死的预期不一致。删掉它：DELETE {{base}}"
                 "/v1/console/namespaces?namespaceId=" + banned[0] + "（先清里面的配置再删租户）"
             )
         print(f"[{side}] 复核通过：{sorted(have)}")

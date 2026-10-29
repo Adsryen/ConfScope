@@ -37,7 +37,7 @@ async function runSingleApply(page: import("@playwright/test").Page): Promise<st
   const progressPanel = page.locator(".apply-task-progress").first();
   await expect(progressPanel).toBeVisible({ timeout: 60_000 });
   await expect(progressPanel.locator(".task-status-success")).toBeVisible({ timeout: 60_000 });
-  // 晋级/执行后 Nacos 写库存在最终一致性窗口：先回读一次，特征值缺失时轮询重试
+  // 执行后 Nacos 写库存在最终一致性窗口：先回读一次，特征值缺失时轮询重试
   let after = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
   const before = await fetchNacosContent("http://127.0.0.1:19848/nacos", NS_A, "svc-gateway.yaml", GROUP);
   if (before.includes("qps: 10000") && !after.includes("qps: 10000")) {
@@ -49,7 +49,7 @@ async function runSingleApply(page: import("@playwright/test").Page): Promise<st
   }
   // 落库断言：apply 计划项为字段级分类执行（override/skip 混合），B 侧保留
   // prod 结构行属预期；用 A 侧 dev 特征值（rate-limit 关闭 + qps 10000）验证
-  // 变更项已真实写入 B 侧。整文档覆盖语义由 98-E4（晋级全链路）验证。
+  // 变更项已真实写入 B 侧。计划外的配置是否被波及由 98-E4（执行落库范围）验证。
   if (before.includes("qps: 10000")) expect(after, "B 侧缺少 A 侧 dev 特征值，apply 未落库").toContain("qps: 10000");
   return after;
 }
@@ -82,10 +82,10 @@ test("C1 配置矩阵: 双环境执行审计生成一致性矩阵", async ({ pag
   await page.screenshot({ path: "results/c1-audit-matrix.png", fullPage: true });
 });
 
-// E2: 沙箱验证标记 + 「历史页不得再长出写入口」（轮76 把晋级入口整体搬去变更计划第5步）。
+// E2: 沙箱验证标记 + 「历史页不得再长出写入口」。
 //
 // 保留的原价值：标记沙箱验证这条只读状态戳仍必须能在历史页就地打下（审计面不能空转）。
-// 新增的反向守卫：历史页不许再出现任何晋级写入口——旧用例钉的正是已废弃的设计。
+// 反向守卫：写后晋级入口整站归零（r113 撤除面板组件），历史页更不许长出任何晋级写入口。
 test("E2 操作历史: 沙箱验证标记 + 历史页不再有晋级入口", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
@@ -104,17 +104,14 @@ test("E2 操作历史: 沙箱验证标记 + 历史页不再有晋级入口", asy
   await expect(verifyBtn).toBeVisible({ timeout: 30_000 });
   await verifyBtn.click();
   await expect(page.getByText("已保存沙箱验证").first()).toBeVisible({ timeout: 30_000 });
-  // 反向守卫（轮76 的当前契约，全部锁在 .history-page 作用域内）：
-  // ① 历史页整页不许有「晋级」按钮；② 旧的 .history-promote-row 不许长回来；
-  // ③ 跟进面板只留一句指路文案，把人送去第5步。
-  // 为什么必须限定作用域：计划页常驻保活，第5步晋级面板里那颗「按本次验证晋级」仍在 DOM 中
-  // （只是不可见）。写成全站计数 0 就把「历史页没有晋级入口」这条真契约
-  // 测成「全站不许存在晋级按钮」的假命题——S31 能全站计数 0 只是因为它先把晋级点掉了。
+  // 反向守卫：① 历史页整页不许有「晋级」按钮；② 旧的 .history-promote-row 不许长回来；
+  // ③ 跟进面板只剩回退与状态戳，不再有任何「晋级」字样（含指往第5步的指路句）；
+  // ④ 晋级面板组件已从代码里删除，全站计数必须是 0——这一条不必再限定作用域，
+  //    因为计划页常驻保活也带不出一个不存在的组件。
   await expect(page.locator(".history-page button", { hasText: "晋级" })).toHaveCount(0);
   await expect(page.locator(".history-page .history-promote-row")).toHaveCount(0);
-  await expect(page.locator(".history-page .history-followup-panel")).toContainText(
-    "晋级到生产的入口在变更计划第5步"
-  );
+  await expect(page.locator(".history-page .history-followup-panel")).not.toContainText("晋级");
+  await expect(page.locator(".apply-promote-panel")).toHaveCount(0);
   await page.screenshot({ path: "results/e2-sandbox-verify.png", fullPage: true });
 });
 

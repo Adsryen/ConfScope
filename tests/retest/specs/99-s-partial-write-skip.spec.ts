@@ -15,7 +15,7 @@
  *         第 2 项一次都没被尝试；操作历史里成功记录的「本次改动」只有第 3 项。
  * PS-02 计划生成后由「另一个人」把目标写成我们要的那一版（外部 publish A 内容到 B）
  *       → dry-run 报「计划写入 0 项」并说明 2 项已达成 → 执行 → 屏上如实说没有写入、
- *         没有绿色成功横幅也没有晋级面板、桥侧 0 条 publish、操作历史 0 条 apply 记录。
+ *         没有绿色成功横幅、桥侧 0 条 publish、操作历史 0 条 apply 记录。
  *
  * A3 的反向真机读数（目标变成第三个值 ⇒ 照样拦）已由 99-s-apply-failure-error-once.spec.ts 覆盖，
  * 这里不重复造。
@@ -292,7 +292,7 @@ test("PS-02 目标已经是这一版: dry-run 报 0 项、执行不写不记历�
   await confirmAndExecute(page, "success");
   expect(water.publishCountAll(), `全部已达成还是发了写请求：\n${water.tail()}`).toBe(0);
 
-  // ③ 界面如实：没有绿色成功横幅那句「变更执行完成」，摊开项清单，不给晋级面板
+  // ③ 界面如实：没有绿色成功横幅那句「变更执行完成」，摊开项清单
   const box = view.locator(".apply-already-applied").first();
   await expect(box).toBeVisible({ timeout: T });
   const boxText = await box.innerText();
@@ -303,7 +303,6 @@ test("PS-02 目标已经是这一版: dry-run 报 0 项、执行不写不记历�
   const screen = await view.innerText();
   expect(screen, "什么都没写却报成变更执行完成").not.toMatch(/变更执行完成/);
   await expect(view.locator(".apply-execution-notice"), "已达成屏不该再出那条执行横幅").toHaveCount(0);
-  await expect(view.locator(".apply-promote-panel"), "什么都没写却亮出晋级面板").toHaveCount(0);
   await page.screenshot({ path: "results/s33-already-applied-only.png", fullPage: true });
 
   // ④ 服务端仍是「另一个人」写的那份，没被这一轮改动

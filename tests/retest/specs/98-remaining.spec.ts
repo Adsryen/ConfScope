@@ -1,6 +1,6 @@
-import { test, expect, fetchNacosContent } from "./retestTest";
+import { test, expect, fetchNacosContent, fetchNacosContentUntil } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
-import { republishRetestData, publishAExtraMarker, overrideAReQaGateway, E4_MARKER_CONFIG, E4_TARGET_OVERRIDE } from "../bridge/republishData";
+import { republishRetestData } from "../bridge/republishData";
 import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { loadRetestState } from "../state";
 
@@ -53,119 +53,59 @@ async function runSingleApply(page: import("@playwright/test").Page): Promise<vo
   if (before.includes("qps: 10000")) expect(after, "B 侧缺少 A 侧 dev 特征值，apply 未落库").toContain("qps: 10000");
 }
 
-// E4 晋级全链路：沙箱验证 → 第5步面板晋级到另一目标 → dry-run → 执行 → 目标侧落库。
+// E4 执行落库范围：一次执行只碰计划里那条 dataId。
 //
-// 真人视角：apply 到「沙箱」(B) 后就地标记验证通过，从第5步晋级面板晋级到 A（另一受管连接），
-// 计划来源=B、目标=A/retest-qa，执行后 A 侧内容与 B 侧一致（真实回读断言）。
-//
-// 轮76 把晋级入口整体搬出操作历史（PostApplyPromotionPanel 是唯一入口），所以本用例跑完 apply
-// 就停在第5步就地操作面板——不再 navigate 去历史页，那会把面板现场（执行态）丢掉。
-// 它钉的是 S31 没钉的两件事：① 晋级真实落库；② 执行范围受控（A 独有 dataId 不得被整体刷掉）。
-test("E4 晋级全链路: 第5步标记验证→晋级→dry-run→执行→目标落库", async ({ page, retest }) => {
+// 真人视角：把 A/retest-dev 的 svc-gateway.yaml 应用到 B/retest-qa，同 group 的邻居配置与源侧
+// 那条正文都必须一个字节不动。本用例只钉执行本身的三件事（写后晋级面板已在 r113 整块撤除，
+// 入口缺席由 S31 与 99-t 判定，不在此重复）：
+// ① 执行真实落库：目标侧带上源侧特征值，且相对执行前确实变了；
+// ② 写方向只朝目标：来源侧正文原样；
+// ③ 范围只到计划内 dataId：同租户同 group 的邻居一字未动（不会整片刷掉）；
+// ④ 服务端只留下这一次 apply 记录：操作历史最新一行是本次执行，且不额外长出写后记录。
+test("E4 执行落库范围: 只写计划内 dataId，源侧与邻居配置不动", async ({ page, retest }) => {
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
 
+  // 执行前三份基线：源侧正文、同租户邻居正文、目标侧正文
+  const sourceBefore = await fetchNacosContent(BASE_A, NS_A, "svc-gateway.yaml", GROUP);
+  const neighborBefore = await fetchNacosContent(BASE_B, NS_B, "svc-search.yaml", GROUP);
+  const targetBefore = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
+  expect(sourceBefore, "源侧播种不带 dev 特征值，本用例失去意义").toContain("qps: 10000");
+  expect(neighborBefore.length, "邻居配置 svc-search.yaml 不在目标租户里，判不了范围").toBeGreaterThan(0);
+  console.log(`[E4] 执行前基线: 源侧 ${sourceBefore.length}B / 邻居 ${neighborBefore.length}B / 目标 ${targetBefore.length}B`);
+
   await runSingleApply(page);
-  // 晋级差异标记（两个，都走服务端直改，不借应用自己的写路径）：
-  // 1) A/retest-qa 里放一个 B 侧不存在的 dataId —— 晋级计划不含它，
-  //    若执行后仍存在，即证明执行范围受控（不会整体把 A 刷成 B）。
-  // 2) 把 A/retest-qa 的 svc-gateway.yaml 覆盖成与沙箱 B 不同的内容 ——
-  //    晋级后它必须变成沙箱内容，证明晋级执行真实写库且方向 B→A。
-  await publishAExtraMarker(BASE_A, "retest-qa");
-  const markerBefore = await fetchNacosContent(BASE_A, "retest-qa", E4_MARKER_CONFIG.dataId, E4_MARKER_CONFIG.group);
-  expect(markerBefore).toContain("e4: promote-marker");
-  await overrideAReQaGateway(BASE_A);
-  expect(await fetchNacosContent(BASE_A, "retest-qa", "svc-gateway.yaml", GROUP)).toContain(E4_TARGET_OVERRIDE.split("\n")[0]);
-  console.log("[E4] A/retest-qa 差异标记 dataId + 目标覆盖已就位");
 
-  // 第5步晋级面板现场：回读结论如实、未标记时晋级按钮必须是灰的
-  const panel = page.locator(".apply-promote-panel").first();
-  await expect(panel).toBeVisible({ timeout: 15_000 });
-  const stepValues = panel.locator(".apply-promote-step-value");
-  await expect(stepValues.nth(0)).toContainText("全部项与写入一致", { timeout: 15_000 });
-  await expect(stepValues.nth(1)).toHaveText("未标记");
-  const promoteBtn = panel.locator("button", { hasText: "按本次验证晋级" }).last();
-  await expect(promoteBtn).toBeDisabled();
+  // ① 真实落库（Nacos 写库有最终一致性窗口，轮询到特征值出现为止）
+  const targetAfter = await fetchNacosContentUntil(
+    BASE_B,
+    NS_B,
+    "svc-gateway.yaml",
+    GROUP,
+    (c) => c.includes("qps: 10000")
+  );
+  expect(targetAfter, "目标侧没带上源侧 dev 特征值").toContain("qps: 10000");
+  expect(targetAfter, "正文没变却把执行记成成功").not.toBe(targetBefore);
 
-  // 标记沙箱验证通过 → 验证行转「已标记（…」并亮起来，晋级按钮由灰转可点
-  await panel.locator("button", { hasText: "标记沙箱验证通过" }).last().click();
-  await expect(stepValues.nth(1)).toContainText("已标记（", { timeout: 30_000 });
-  await expect(stepValues.nth(1)).toHaveClass(/is-ok/);
-  await expect(stepValues.nth(1)).toContainText("Retest Nacos B");
-  await expect(promoteBtn).toBeEnabled({ timeout: 15_000 });
+  // ② 写方向只朝目标
+  expect(await fetchNacosContent(BASE_A, NS_A, "svc-gateway.yaml", GROUP), "执行回写了来源侧").toBe(sourceBefore);
 
-  // 生产目标候选：必须是「除沙箱(B)外」的连接，默认落在 Retest Nacos A
-  const targetField = panel.locator(".apply-promote-target").first();
-  await expect(targetField.locator(".sel-value")).toHaveText("Retest Nacos A");
-  await targetField.locator(".sel-trigger").click({ force: true });
-  const targetMenu = page.locator(".sel-menu-portal").first();
-  await expect(targetMenu).toBeVisible({ timeout: 10_000 });
-  const targetOptions = await targetMenu.locator(".sel-option").allTextContents();
-  console.log("[E4] 晋级候选 =", JSON.stringify(targetOptions));
-  expect(targetOptions.some((o) => o.includes("Retest Nacos A")), "Retest Nacos A 不在晋级候选里").toBe(true);
-  expect(targetOptions.some((o) => o.includes("Retest Nacos B")), "沙箱自身不得作为晋级目标").toBe(false);
-  await page.keyboard.press("Escape");
+  // ③ 范围受控：计划外的同租户配置必须原样
+  expect(await fetchNacosContent(BASE_B, NS_B, "svc-search.yaml", GROUP), "计划外的配置被波及").toBe(neighborBefore);
+  await page.screenshot({ path: "results/e4-scope-executed.png", fullPage: true });
 
-  // 命名空间保持默认「沿用沙箱（retest-qa）」：retest-qa 在 A 上不是已列出的租户，
-  // 面板该给「晋级会新建它」那句提醒——本轮不判它消失，只把读数如实记进日志。
-  const namespaceField = panel.locator(".apply-promote-namespace");
-  await expect(namespaceField.locator(".sel-value")).toHaveText("沿用沙箱（retest-qa）");
-  console.log("[E4] 命名空间提醒读数 =", JSON.stringify(await namespaceField.locator(".apply-promote-namespace-note").allInnerTexts()));
-
-  // 点晋级 → 生成晋级计划
-  await promoteBtn.click();
-  await expect(page.locator(".apply-view").first()).toBeVisible({ timeout: 15_000 });
-  await page
-    .locator(".apply-view .apply-workspace, .apply-view .inline-error")
-    .first()
-    .waitFor({ state: "visible", timeout: 60_000 });
-  const genFailed = await page.getByText("变更计划生成失败").first().isVisible().catch(() => false);
-  expect(genFailed, "晋级计划必须成功生成").toBe(false);
-  const summary = await page.locator(".apply-view .apply-plan-summary").first().innerText();
-  // 来源=B（沙箱）、目标=A
-  expect(summary).toContain("Retest Nacos B");
-  expect(summary).toContain("Retest Nacos A");
-  await page.screenshot({ path: "results/e4-promotion-plan.png", fullPage: true });
-
-  // dry-run → 执行
-  const selectAllBtn = page.getByRole("button", { name: "全选" }).first();
-  if (await selectAllBtn.count()) await selectAllBtn.click();
-  const dryRunBtn = page.locator("button", { hasText: "Dry-run 检查" }).last();
-  await dryRunBtn.click({ force: true }).catch(() => undefined);
-  await expect(page.locator(".apply-execution-notice").filter({ hasText: "Dry-run 检查通过" })).toBeVisible({ timeout: 60_000 });
-  await page.locator(".apply-confirm-check input").check();
-  const execBtn = page.locator("button", { hasText: "执行变更" }).last();
-  await execBtn.click({ force: true }).catch(() => undefined);
-  const promoteProgress = page.locator(".apply-task-progress").first();
-  await expect(promoteProgress).toBeVisible({ timeout: 60_000 });
-  await expect(promoteProgress.locator(".task-status-success")).toBeVisible({ timeout: 60_000 });
-  // 晋级执行后 Nacos 写库存在最终一致性窗口：轮询直至目标侧 == 沙箱内容（或超时）。
-  const bSnapshot = await fetchNacosContent(BASE_B, NS_B, "svc-gateway.yaml", GROUP);
-  let aAfter = "";
-  for (let i = 0; i < 20; i++) {
-    aAfter = await fetchNacosContent(BASE_A, "retest-qa", "svc-gateway.yaml", GROUP);
-    if (aAfter.trim() === bSnapshot.trim()) break;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  const execNotice = page.locator(".apply-execution-notice").first();
-  if (await execNotice.count()) {
-    const txt = await execNotice.innerText();
-    expect(txt, "执行回执必须是成功通知").toMatch(/完成|成功/);
-  }
-  await page.screenshot({ path: "results/e4-promotion-executed.png", fullPage: true });
-
-  // 落库验证：晋级目标 A/retest-qa 的 svc-gateway.yaml 必须 == B/retest-qa 沙箱内容
-  // （apply A→B 时 B/retest-qa 已等于 A/retest-dev，即沙箱内容；晋级把它带回 A 的目标 ns）。
-  expect(aAfter.trim(), "晋级执行后 A/retest-qa 侧必须等于 B/retest-qa 沙箱内容").toBe(bSnapshot.trim());
-  // 范围控制验证：计划外的 dataId（A 独有标记）不得被误删/误改
-  const markerAfter = await fetchNacosContent(BASE_A, "retest-qa", E4_MARKER_CONFIG.dataId, E4_MARKER_CONFIG.group);
-  expect(markerAfter, "计划外 dataId 必须保持原样").toContain("e4: promote-marker");
-  // 操作历史应出现 promote 类型记录
+  // ④ 这次执行在操作历史里只留一条「配置变更计划」记录：最新一行必须是本次 apply，
+  //    且列表里不许再长出「沙箱晋级」那种写后额外记录（旧的写后晋级路径正是这么刷的）。
+  //    作用域必须收在记录行：类型筛选下拉里始终保留「沙箱晋级」选项供旧记录展示，
+  //    整页文本判这个词会被下拉恒定命中，判不出任何事。
   await navigate(page, "操作历史");
-  const body = await page.locator("body").innerText();
-  expect(body).toMatch(/晋级|promote/i);
-  await page.screenshot({ path: "results/e4-promotion-done.png", fullPage: true });
+  const applyRecord = page.getByRole("button", { name: /配置变更计划.*svc-gateway\.yaml/ }).first();
+  await expect(applyRecord, "执行后操作历史应留下这条记录").toBeVisible({ timeout: 30_000 });
+  const historyItems = page.locator(".op-history-list .op-history-item");
+  await expect(historyItems.first().locator(".history-type.apply"), "最新一条不是本次执行记录").toBeVisible();
+  await expect(historyItems.locator(".history-type.promote"), "一次执行多刷出了写后晋级记录").toHaveCount(0);
+  await page.screenshot({ path: "results/e4-scope-history.png", fullPage: true });
 });
 
 // B7-fix 复测：dataId 手填不存在值 → 加载并对比必须给出明确错误（不再静默回退）
