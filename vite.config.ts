@@ -65,6 +65,11 @@ export default defineConfig({
       ignored: ["**/build/**", "**/tests/retest/**", "**/results/**", "**/test-results/**", "**/local-backups/**"],
     },
     optimizeDeps: {
+      // 扫描范围锁死在真正的入口 html。默认值是「全项目 *.html」，会一路爬进
+      // local-backups/ 里的 WebView 备份（那底下有一整份 Chromium 扩展）和任务目录的
+      // 取证页，撞上扩展里 typescript.js import 的 source-map-support 就报「依赖没装」
+      // 并让 dev server 直接退出——1420 上一次莫名 404、真机批全批空手而归就是这个。
+      entries: ["index.html"],
       exclude: ["**/local-backups/**"],
     },
   },
@@ -84,6 +89,10 @@ export default defineConfig({
       "tests/smoke/native/global-setup.test.ts",
       "tests/smoke/native/global-teardown.test.ts",
       ".tmp/**",
+      // 任务目录里的取证/试验 spec 也是 Playwright 文件（r112 落过一次坑：
+      // .trellis/tasks/**/research/99-t*.spec.ts 被当单测收集，import ./retestTest 直接解析失败，
+      // 283 个文件里红 2 个）。任务草稿不进单测链路。
+      ".trellis/**",
     ],
   },
 });
