@@ -261,13 +261,20 @@ export default function DiffPanel({
     resetFindForNewContent,
   } = find;
 
-  // 换内容把滚动位置拉回起点（R9）。这条是轮48 顺手修的真 bug：本面板此前根本没接这个 hook，
+  // 换文件把滚动位置拉回起点（R9）。这条是轮48 顺手修的真 bug：本面板此前根本没接这个 hook，
   // 批量态点下一个 dataId 之后正文仍停在上一份文件的偏移处，看起来像「内容没换」。
   //
   // onReset 是轮56 加的第二件事，顺序由 hook 保证（先归零再回调）：外部搜索词下传时，
   // 归零之后紧接着把首个命中行拉进视口——否则左栏写着「第 25 行」，点进来却永远停在文件开头。
   // 定位口径整个待在 useFindLayer 里（与改词那条出口同一出处），本文件不许自己写 scrollTop。
-  useScrollResetOnContentChange(bodyRef, [leftText, rightText], find.locateFirstExternalHit);
+  //
+  // key 传的是**两侧标签**（连接 / 命名空间 / dataId 就是这一屏的身份），不是正文（轮134 缺陷 A）：
+  // 本面板的正文会被就地改掉——点「拿左侧到右侧预览」的箭头、在「微调右侧」抽屉里手改——
+  // 这些都不是换文件。用正文当 key 时，用户正看着的那一段会被整屏拽回顶端，左右两列同处
+  // .diff-body 这一个滚动容器，所以看到的是「两侧一起跳顶」。
+  // 换成标签之后，两条出口各归各：切 dataId ⇒ 标签变 ⇒ 归零 + 定位；就地改内容 ⇒ 位置不动。
+  // 不许再把 leftText / rightText 加回这里——那等于把轮134 的缺陷重新装回去。
+  useScrollResetOnContentChange(bodyRef, [leftLabel, rightLabel], find.locateFirstExternalHit);
 
   /**
    * 串侧守卫（轮66）：只沿左栏往下拖 3 行也会把右侧卷进选区（实测左起左止命中右 2 格、173 字符），

@@ -26,8 +26,10 @@ const NS_B = state.nacos.b.namespace;
 const GROUP = "RETEST-PROD";
 
 const ARROW_SEL = ".batch-diff-main button[aria-label='拿左侧到右侧预览']";
-/** 滚动位置允许的自然抖动（px）：布局重排不该动 scrollTop，2px 内视为没动。 */
+/** 滚动位置允许的自然抖动（px）：布局重排不该动 scrollTop，2px 内视为没动（MA-02 用，那条里草稿和滚动都不该有任何变化）。 */
 const SCROLL_TOLERANCE_PX = 2;
+/** 一行行高（styles.css 的 `.diff-row { min-height: 19px }`），MA-01 用它当「允许重排」的上限。 */
+const ROW_HEIGHT_PX = 19;
 
 async function enterBatchGatewayDiff(page: import("@playwright/test").Page) {
   await navigate(page, "配置对比");
@@ -65,6 +67,38 @@ async function readBodyScroll(page: import("@playwright/test").Page) {
     }
     return { self, chain };
   });
+}
+
+/**
+ * 每行的高度（按 DOM 序）+ 视口上方那些行的累计高度。
+ * 用在 MA-01 的留痕上：合并只改一行的正文，若 scrollTop 有小偏移，得说清它是
+ * 「上方某行重排后变矮/变高」这种内容重排，还是「有人又把滚动归零了一次」。
+ */
+async function readRowGeometry(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const body = document.querySelector(".batch-diff-main .diff-panel .diff-body") as HTMLElement;
+    const rows = Array.from(body.querySelectorAll<HTMLElement>(".diff-row"));
+    const heights = rows.map((r) => r.offsetHeight);
+    const viewTop = body.getBoundingClientRect().top;
+    let aboveViewport = 0;
+    let firstVisibleIndex = -1;
+    rows.forEach((r, i) => {
+      if (r.getBoundingClientRect().bottom <= viewTop) aboveViewport += heights[i];
+      else if (firstVisibleIndex < 0) firstVisibleIndex = i;
+    });
+    return { rowCount: rows.length, heights, aboveViewport, firstVisibleIndex, scrollTop: body.scrollTop };
+  });
+}
+
+/** 逐行高度差，只留下真的变了的行（没有变化就返回空数组，不拿 354 个 0 去刷屏）。 */
+function diffRowHeights(before: number[], after: number[]) {
+  const out: { index: number; from: number; to: number }[] = [];
+  const n = Math.min(before.length, after.length);
+  for (let i = 0; i < n; i += 1) {
+    if (before[i] !== after[i]) out.push({ index: i, from: before[i], to: after[i] });
+  }
+  if (after.length !== before.length) out.push({ index: -1, from: before.length, to: after.length });
+  return out;
 }
 
 /** 把 .diff-body 滚到可滚区间的 50%，读回确认（防止「没滚上去」的假测量）。 */
@@ -109,6 +143,7 @@ test("MA-01 点「拿左侧到右侧预览」后 .diff-body 滚动位置必须�
   await scrollToMidBody(page);
   const before = await readBodyScroll(page);
   expect(before.self.top, "前置：滚动没有落到 50% 位置，测量无效").toBeGreaterThan(100);
+  const rowsBefore = await readRowGeometry(page);
 
   await domClickFirstArrow(page);
   // 合并必须真实发生（摘要计数 + 行级 merge 标记），否则后面读到的 0 没有归因
@@ -117,17 +152,34 @@ test("MA-01 点「拿左侧到右侧预览」后 .diff-body 滚动位置必须�
   expect(mergeRows, "合并没有落到行上，这条判据空转").toBeGreaterThan(0);
 
   const after = await readBodyScroll(page);
+  const rowsAfter = await readRowGeometry(page);
   console.log(
     `[MA-01 滚动留痕] 点击前 scrollTop=${before.self.top} scrollLeft=${before.self.left}（scrollHeight=${before.self.scrollHeight} clientHeight=${before.self.clientHeight}）` +
-      ` → 点击后 scrollTop=${after.self.top} scrollLeft=${after.self.left}；merge 行=${mergeRows}` +
+      ` → 点击后 scrollTop=${after.self.top} scrollLeft=${after.self.left}（scrollHeight=${after.self.scrollHeight} clientHeight=${after.self.clientHeight}）；merge 行=${mergeRows}` +
       `；祖先链=${JSON.stringify(before.chain.filter((c) => c.scrollable))}（可滚层）`
   );
+  console.log(
+    `[MA-01 重排留痕] 行数 ${rowsBefore.rowCount} → ${rowsAfter.rowCount}；首个可见行 ${rowsBefore.firstVisibleIndex} → ${rowsAfter.firstVisibleIndex}` +
+      `；视口上方累计行高 ${rowsBefore.aboveViewport} → ${rowsAfter.aboveViewport}（差 ${rowsAfter.aboveViewport - rowsBefore.aboveViewport}）` +
+      `；逐行高度变化 ${JSON.stringify(diffRowHeights(rowsBefore.heights, rowsAfter.heights))}`
+  );
 
+  // 判据是「用户正看着的那一行还在那一行」，不是「scrollTop 一个像素都不许动」：
+  // 合并会改正文、行数 114 → 115、行高也会重排（实测 index=1 那行 24 → 19，视口上方累计少 5px），
+  // 这 5px 是内容自己的位移，谁也拦不住。拦住的是「整屏弹回开头」这件事。
+  // 2026-10-29 修复前后各跑一次：修复前 scrollTop 1057 → 0、首个可见行 47 → 0；
+  // 修复后 scrollTop 1057 → 1052（正好等于上方重排的 -5）、首个可见行 47 → 47。
+  expect(
+    rowsAfter.firstVisibleIndex,
+    `点箭头把视口弹回了文件开头：首个可见行 ${rowsBefore.firstVisibleIndex} → ${rowsAfter.firstVisibleIndex}` +
+      `（scrollTop ${before.self.top} → ${after.self.top}）。同一份文件被合并改内容不是换文件，不该触发归零。`
+  ).toBe(rowsBefore.firstVisibleIndex);
+  expect(after.self.top, "滚动位置落到了顶端：缺陷 A 复发").toBeGreaterThan(100);
+  // 允许的重排上限 = 一行行高。超过它就是「弹走了不止一行」，得单独归因，不许混在重排里过。
   expect(
     Math.abs(after.self.top - before.self.top),
-    `「拿左侧到右侧预览」把 .diff-body 从 scrollTop=${before.self.top} 拽回 ${after.self.top}：` +
-      `同一份文件被合并改内容，不是换文件，不该触发归零（右侧两列同处此容器，所以「两侧一起跳顶」）`
-  ).toBeLessThanOrEqual(SCROLL_TOLERANCE_PX);
+    `scrollTop 偏移 ${after.self.top - before.self.top}px 超过一行行高，不像内容重排，像有人又动了一次滚动`
+  ).toBeLessThanOrEqual(ROW_HEIGHT_PX);
   await page.screenshot({ path: "results/ma01-merge-arrow-scroll.png" });
 });
 

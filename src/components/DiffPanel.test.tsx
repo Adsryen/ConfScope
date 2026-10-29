@@ -357,13 +357,41 @@ describe("DiffPanel 外部搜索词的定位（轮56）", () => {
     expect(body().scrollTop).toBe(expectedScrollTop(26));
   });
 
-  it("换正文（点批量列表的下一个命中行）：归零之后紧接着定位，不闪文件开头", () => {
+  it("换文件（批量态点下一个 dataId，两侧标签一起变）：归零之后紧接着定位，不闪文件开头", () => {
     const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
     makeScrollable();
-    rerender(tree(panelProps({ searchTerm: TERM_A, leftText: TEXT2, rightText: TEXT2 })));
-    // 词没变、正文变了：只有宿主挂在 useScrollResetOnContentChange 上的 onReset 会走这一拽
+    rerender(
+      tree(
+        panelProps({
+          searchTerm: TERM_A,
+          leftText: TEXT2,
+          rightText: TEXT2,
+          leftLabel: "dev/app-b.yaml",
+          rightLabel: "prod/app-b.yaml",
+        })
+      )
+    );
+    // 词没变、这一屏换成了另一对文件：宿主挂在 useScrollResetOnContentChange 上的 onReset 走这一拽
     expect(firstHitRow()).toBe(26);
     expect(body().scrollTop).toBe(expectedScrollTop(26));
+  });
+
+  it("归零看的是「换没换文件」，不是「正文变没变」：换文件只换标签、正文逐字相同也要归零", () => {
+    const { rerender } = render(tree(panelProps({})));
+    makeScrollable();
+    body().scrollTop = 500;
+    // 两份文件内容一模一样（批量态里相邻两项常有一样的正文），只有标签换了
+    rerender(tree(panelProps({ leftLabel: "dev/app-b.yaml", rightLabel: "prod/app-b.yaml" })));
+    expect(body().scrollTop).toBe(0);
+  });
+
+  it("同一对文件被就地改内容（点合并箭头、微调右侧）：滚动位置必须保住，不许跳回开头", () => {
+    const { rerender } = render(tree(panelProps({ searchTerm: TERM_A })));
+    makeScrollable();
+    body().scrollTop = 500;
+    // 标签没换、只有右侧正文被合并改掉：用户看的就是这一屏，跳顶会把他的位置弄丢（轮134 缺陷 A）
+    rerender(tree(panelProps({ searchTerm: TERM_A, rightText: TEXT2 })));
+    expect(body().scrollTop, "同一对文件的正文改动把滚动拽回了第一处命中").toBe(500);
   });
 
   it("零命中不插手：停在用户正看着的地方，不许把他弹回开头", () => {
