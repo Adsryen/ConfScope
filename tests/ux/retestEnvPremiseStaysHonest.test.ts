@@ -18,15 +18,15 @@
  * 2. MUST_NOT_EXIST 必须声明 a 侧禁 retest-qa，且与 ENVS 不许自相矛盾（同一租户又「该建」又「该没有」）；
  * 3. review() 必须真的读 MUST_NOT_EXIST 做复核，main 必须 ensure_all() + review() 都调
  *    ——只声明不检查等于没有守卫，而 CI 恰恰只跑这一个脚本；
- * 4. 用例侧的依赖必须还在：S31 还硬断言那句「不是已有的命名空间」、E4 的现场前提注释还在
- *    ——它们哪天不再依赖这条前提，才允许重新讨论要不要把租户建出来；
+ * 4. 用例侧的依赖必须还在：E4 的现场前提注释还在
+ *    ——它哪天不再依赖这条前提，才允许重新讨论要不要把租户建出来；
  * 5. 与 tests/retest/state.ts 的 nacos.a/b.namespace 同源（改一侧忘另一侧的漂移方向是 CI 红），
  *    且 A 侧禁的不许是 A 自己浏览的基准租户；
  * 6. 脚本文件头必须留着真机读数（ghost 探针那批标识 + /v1/console/namespaces），
  *    不许把环境口径写成又一句无据的断言。
  * 变异自检（改坏任一条，本文件必须变红）：① 把 retest-qa 加回 A 的 ENVS；
  * ② 把 MUST_NOT_EXIST 的复核从 review() 里删掉；③ 把 state.ts 的 a.namespace 改成 retest-qa；
- * ④ 删掉 S31 的提醒断言或 E4 注释里那条前提；⑤ 删掉脚本头部的实测读数段。
+ * ④ 删掉 E4 注释里那条前提；⑤ 删掉脚本头部的实测读数段。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,10 +36,6 @@ import { PROJECT_ROOT } from "./scanUtils";
 const SCRIPT = "scripts/retest-data/init-namespaces.py";
 const STATE = "tests/retest/state.ts";
 const E4_SPEC = "tests/retest/specs/98-remaining.spec.ts";
-const S31_SPEC = "tests/retest/specs/99-s-promote-entry-in-step5.spec.ts";
-
-/** 产品那条提醒的中文原文（zh-CN.json 的 apply.promoteNamespaceMissing 前半句）。 */
-const MISSING_NOTE = "不是已有的命名空间";
 
 /** E4 侧写下的同一条前提（措辞不同：它把自己的现场前提记在注释里，读数打进日志）。 */
 const E4_PREMISE = "不是已列出的租户";
@@ -73,15 +69,18 @@ describe("retest 命名空间前提（ENVS 该建的 / MUST_NOT_EXIST 该没有�
     expect(envNamespaces(source, "b")).toEqual(["retest-qa"]);
   });
 
-  it("A 侧被明令禁止出现 retest-qa（E4 与 S31 的晋级目标必须是「还没建出来的租户」）", () => {
-    expect(forbiddenNamespaces(source, "a"), "MUST_NOT_EXIST 少了 a 侧的 retest-qa：租户一存在产品就不提醒，两条用例一起红").toEqual([
+  it("A 侧被明令禁止出现 retest-qa（E4 的晋级目标必须是「还没建出来的租户」）", () => {
+    expect(forbiddenNamespaces(source, "a"), "MUST_NOT_EXIST 少了 a 侧的 retest-qa：租户一存在产品就不提醒，用例跟着红").toEqual([
       "retest-qa",
     ]);
     // 两条口径不能自相矛盾：同一个租户不许又「该建」又「该没有」。
     for (const side of ["a", "b"] as const) {
       const built = envNamespaces(source, side);
       const banned = forbiddenNamespaces(source, side);
-      expect(banned.filter((ns) => built.includes(ns)), `${side} 侧同时要求建又要求没有：${JSON.stringify(banned)}`).toEqual([]);
+      expect(
+        banned.filter((ns) => built.includes(ns)),
+        `${side} 侧同时要求建又要求没有：${JSON.stringify(banned)}`
+      ).toEqual([]);
     }
   });
 
@@ -98,8 +97,7 @@ describe("retest 命名空间前提（ENVS 该建的 / MUST_NOT_EXIST 该没有�
   });
 
   it("用例侧仍然依赖这条前提（不再依赖了才准重新讨论建不建）", () => {
-    // S31 把它写成硬断言，E4 把自己的现场前提写在注释里并如实记读数——两条都还吃这条前提。
-    expect(read(S31_SPEC), "S31 不再断言那句「目标上这套租户还不存在 ⇒ 晋级会新建它」，环境前提的硬断言消失了").toContain(MISSING_NOTE);
+    // S31 的第5步入口随 r113 撤除、硬断言也随之消失；现在只剩 E4 还吃这条前提（现场前提写在注释里并如实记读数）。
     expect(read(E4_SPEC), "E4 不再把命名空间提醒的读数当现场前提（它靠的是 retest-qa 在 A 上还没被列出来）").toContain(E4_PREMISE);
   });
 
