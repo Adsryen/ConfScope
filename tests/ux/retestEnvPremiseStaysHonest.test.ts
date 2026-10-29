@@ -18,15 +18,17 @@
  * 2. MUST_NOT_EXIST 必须声明 a 侧禁 retest-qa，且与 ENVS 不许自相矛盾（同一租户又「该建」又「该没有」）；
  * 3. review() 必须真的读 MUST_NOT_EXIST 做复核，main 必须 ensure_all() + review() 都调
  *    ——只声明不检查等于没有守卫，而 CI 恰恰只跑这一个脚本；
- * 4. 用例侧的依赖必须还在：E4 的现场前提注释还在
- *    ——它哪天不再依赖这条前提，才允许重新讨论要不要把租户建出来；
+ * 4. 用例侧不再吃这条前提（r113 之后 E4 只判落库范围、S31 的晋级入口整块撤除），
+ *    于是这条从「钉住依赖」翻成「钉住依赖已消失」：E4 不许再把 A 缺租户写成现场前提，
+ *    它的目标侧必须仍是 B/retest-qa，脚本也必须把闸门写成环境基线而不是用例依赖；
  * 5. 与 tests/retest/state.ts 的 nacos.a/b.namespace 同源（改一侧忘另一侧的漂移方向是 CI 红），
  *    且 A 侧禁的不许是 A 自己浏览的基准租户；
  * 6. 脚本文件头必须留着真机读数（ghost 探针那批标识 + /v1/console/namespaces），
  *    不许把环境口径写成又一句无据的断言。
  * 变异自检（改坏任一条，本文件必须变红）：① 把 retest-qa 加回 A 的 ENVS；
  * ② 把 MUST_NOT_EXIST 的复核从 review() 里删掉；③ 把 state.ts 的 a.namespace 改成 retest-qa；
- * ④ 删掉 E4 注释里那条前提；⑤ 删掉脚本头部的实测读数段。
+ * ④ 把旧措辞「不是已列出的租户」写回 E4 注释、或把 E4 的目标侧改成别的租户；
+ * ⑤ 删掉脚本头部的实测读数段。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,8 +39,14 @@ const SCRIPT = "scripts/retest-data/init-namespaces.py";
 const STATE = "tests/retest/state.ts";
 const E4_SPEC = "tests/retest/specs/98-remaining.spec.ts";
 
-/** E4 侧写下的同一条前提（措辞不同：它把自己的现场前提记在注释里，读数打进日志）。 */
+/** r113 之前 E4 写下的现场前提（它把读数记在注释里）。现在只用来判「这句不许再出现」。 */
 const E4_PREMISE = "不是已列出的租户";
+
+/** E4 现在的目标侧：写向 B 的基准租户，所以「A 侧不许长出同名租户」才是环境基线而非用例依赖。 */
+const E4_TARGET_LINE = "应用到 B/retest-qa";
+
+/** 脚本自己对该闸门的定性（真机侧结论，不是推理）：用例级消费者已消失，留着只守基线。 */
+const SCRIPT_BASELINE = "这条前提失去了用例级消费者";
 
 function read(rel: string): string {
   return readFileSync(join(PROJECT_ROOT, rel), "utf8");
@@ -96,9 +104,13 @@ describe("retest 命名空间前提（ENVS 该建的 / MUST_NOT_EXIST 该没有�
     expect(main).toContain("ensure_all()");
   });
 
-  it("用例侧仍然依赖这条前提（不再依赖了才准重新讨论建不建）", () => {
-    // S31 的第5步入口随 r113 撤除、硬断言也随之消失；现在只剩 E4 还吃这条前提（现场前提写在注释里并如实记读数）。
-    expect(read(E4_SPEC), "E4 不再把命名空间提醒的读数当现场前提（它靠的是 retest-qa 在 A 上还没被列出来）").toContain(E4_PREMISE);
+  it("用例侧不再依赖这条前提，闸门以环境基线的身份留着（口径要三处对齐）", () => {
+    const e4 = read(E4_SPEC);
+    // 617fc1c 之后没有任何用例再吃这条前提：E4 改判执行落库范围、S31 驱动的是已撤除的晋级入口。
+    // 守卫不因此删掉——它翻面钉住「新口径」，把这条判断留在磁盘上而不是留在会话记忆里。
+    expect(e4, "E4 又把「A 上没有 retest-qa」写成现场前提：那条用例早已不驱动晋级入口").not.toContain(E4_PREMISE);
+    expect(e4, "E4 的目标侧不再是 B/retest-qa：这条基线为什么还在，要重新核对一遍").toContain(E4_TARGET_LINE);
+    expect(source, "脚本把闸门又写成用例级前提：用例侧已无消费者，如实写成环境基线").toContain(SCRIPT_BASELINE);
   });
 
   it("与 tests/retest/state.ts 的基准命名空间同源", () => {
