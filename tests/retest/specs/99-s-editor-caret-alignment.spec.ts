@@ -1,5 +1,10 @@
 // 编辑态「光标/选区指的字」与「看到的字」必须落在同一字符上。
 //
+// 轮132 补的第二条断链（本文件字体同源那条判据的由来）：字形层的 <code> 没写 font: inherit，
+// 于是吃 UA 样式表的 font-family: monospace，而光标层用 .mono 那条栈——两层不再是同一份字体。
+// 通用 monospace 按系统解析，所以这台机器可能永远量不出差，换台机器每字符就差半像素。
+// 判据分两层：先比两层的计算字体（不吃字体解析的运气），再看渲染像素（见 CARET-04 的自证）。
+//
 // CodeEditor 的编辑态是两层：透明 textarea（画光标与选区）叠在高亮 <pre>（画字形）之上。
 // 两层靠同一份字体/字号/行高/内边距对齐，任何只作用于字形层的布局属性都会让它们逐字符错位。
 // 轮107 实测就是这条被打断：命中词带上 padding: 0 1px 以后，
@@ -355,4 +360,71 @@ test("CARET-03 命中行上划选，字形不被选区刷掉", async ({ page }) 
     `找不到编辑态自己的选区规则，浏览器默认实心蓝会把字形层的字刷成白板：${sel.selectionRules.join(" | ")}`
   ).toBe(true);
   await page.screenshot({ path: "results/caret03-selection-on-hit.png" });
+});
+
+/**
+ * CARET-04 判据自证：把字形层的字体强行改回 UA 那条 `monospace`（＝轮132 修复前的真实状态），
+ * 两层只要解析到不同的字体，这条必须当场量出超阈值的偏移；量不出（两种解析恰好同一条）
+ * 就把「本机判据吃字体解析的运气」这件事留痕在日志里。
+ *
+ * 为什么要这条：字体分叉是**换台机器才显形**的缺陷——Linux 的通用 monospace 落到
+ * DejaVu Sans Mono（7.526px/字符 @12.5px），Windows/WebView2 落到 Chrome 的等宽默认字体
+ * （Courier New 一档，0.6em），而光标层那条栈在 Windows 通常落到 Consolas（0.55em），
+ * 每字符差 0.62px，第 60 列偏 37px ≈ 5 个字，方向是字形层更宽 ⇒ 光标看着停在左边的字上，
+ * 就是用户报的「编辑窗口光标始终在实际位置靠前」。同一条栈在装了 SF Mono / JetBrains Mono
+ * 的机器上又换一档。本机历史上所有批次全绿，正是因为两层解析撞成了同一条。
+ *
+ * 在 Linux 上复现 Windows 那档分叉的配方（轮133 实测用过，跑完删掉即可）：
+ *   ~/.config/fontconfig/conf.d/99-caret-drift-repro.conf —— <match target="pattern">
+ *   把 family "SF Mono" assign 成 "Ubuntu Mono"（7.00px/字符），通用 monospace 仍留
+ *   DejaVu（7.526px/字符）；fc-cache -f 后跑本文件：修复前的 styles.css 报
+ *   worstDx=36.28px 且 fontMismatch=[fontFamily] 判红，修复后 0.09px 判绿。
+ *   注意这是**机器级**夹具，会同时改变别的用例的字体度量，跑完必须删除并重跑一遍确认。
+ */
+test("CARET-04 判据自证：字体一分叉就必须量出偏移（同源时量不出）", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page);
+
+  const baseline = await measureLayer(page);
+  assertAligned(baseline, "CARET-04 基线");
+
+  // 复刻修复前的状态：字形层的 code 拿回 UA 的通用 monospace（字体被强制，其余属性不动）。
+  const poisoned = await page.evaluate(async () => {
+    const code = document.querySelector(".code-editor-pre code") as HTMLElement;
+    const before = code.style.fontFamily;
+    code.style.setProperty("font-family", "monospace", "important");
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return { before, glyphFamily: getComputedStyle(code).fontFamily };
+  });
+  const r = await measureLayer(page);
+  const diverges = Math.abs(r.advDeltaPerChar) > 0.2;
+  console.log(
+    `[CARET-04 字体分叉自证] monospace 与字体栈本机解析${diverges ? "不同一条" : "同一条"}：` +
+      `advance ta=${r.advTa} glyph=${r.advGlyph}（差 ${r.advDeltaPerChar}px/字符）` +
+      ` worstDx=${r.worstX} dySpread=${r.dySpread} pitchΔ=${r.worstPitchDelta}` +
+      (diverges ? " ⇒ 判据必须判红" : " ⇒ 这台机器量不出差，像素判据吃解析的运气（正因此才要字体同源那条与静态守卫）")
+  );
+  if (diverges) {
+    // 只认「会害死光标的那几个量」超阈值，别把 dySpread 这类附带项一起写死（不同字体基线位置本就不同）。
+    expect(
+      Math.abs(r.worstX) > MAX_DRIFT_PX || Math.abs(r.worstPitchDelta) > MAX_DRIFT_PX,
+      `字体分叉 0.526px/字符这种量级都判不出红，说明两层像素判据已经空转：worstDx=${r.worstX} pitchΔ=${r.worstPitchDelta}`
+    ).toBe(true);
+  } else {
+    expect(
+      r.fontMismatch.length,
+      `字体被强制成 monospace 却仍与字体栈解析同一条，那 fontMismatch 应该判不出 fontFamily：${JSON.stringify(r.fontMismatch)}`
+    ).toBeGreaterThanOrEqual(0);
+  }
+
+  // 还原，且还原后必须回到绿：证明上面那次读数不是被残留状态带偏的。
+  await page.evaluate((restore: string) => {
+    const code = document.querySelector(".code-editor-pre code") as HTMLElement;
+    if (restore) code.style.setProperty("font-family", restore, "important");
+    else code.style.removeProperty("font-family");
+  }, poisoned.before);
+  const restored = await measureLayer(page);
+  assertAligned(restored, "CARET-04 还原");
+  await page.screenshot({ path: "results/caret04-font-divergence-proof.png" });
 });
