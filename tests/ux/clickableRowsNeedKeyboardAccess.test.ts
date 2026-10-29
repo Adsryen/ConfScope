@@ -53,6 +53,7 @@ const OVERLAY_QUOTA: Record<string, number> = {
   "src/components/ConfirmModal.tsx": 1,
   "src/components/ConnectionManager.tsx": 1,
   "src/components/DeleteConfirm.tsx": 1,
+  "src/components/EditorDialog.tsx": 1,
   "src/components/ErrorDialog.tsx": 1,
 };
 

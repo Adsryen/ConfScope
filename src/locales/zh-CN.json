@@ -1171,7 +1171,7 @@
     "mergePlanNoChanges": "没有可生成变更计划的预览变更",
     "manualTune": "微调右侧",
     "manualTuneEditing": "完成微调",
-    "manualTuneHint": "手写「{label}」最终要接收的内容：机器挑不准的部分（内网地址、密码、命名空间、开关默认值）在这里改。保存后以此文本进入变更计划。",
+    "manualTuneHint": "手写最终要接收的内容：机器挑不准的部分（内网地址、密码、命名空间、开关默认值）在这里改。保存后以此文本进入变更计划。",
     "manualTuneSave": "保存微调",
     "manualTuneReset": "还原为右侧原内容",
     "manualTuneDiscardTitle": "还原人工微调的内容？",

@@ -1171,7 +1171,7 @@
     "mergePlanNoChanges": "No preview changes can be materialized into a change plan",
     "manualTune": "Tune right side",
     "manualTuneEditing": "Finish tuning",
-    "manualTuneHint": "Hand-write what \"{label}\" should finally receive: use this where picking blocks is not enough (intranet addresses, secrets, namespaces, switch defaults). Saving carries this text into the change plan.",
+    "manualTuneHint": "Hand-write the content that should finally be received: use this where picking blocks is not enough (intranet addresses, secrets, namespaces, switch defaults). Saving carries this text into the change plan.",
     "manualTuneSave": "Save tune",
     "manualTuneReset": "Restore original right content",
     "manualTuneDiscardTitle": "Restore the hand-tuned content?",

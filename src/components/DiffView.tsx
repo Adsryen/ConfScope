@@ -1841,13 +1841,20 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     });
   };
 
-  /** 抽屉里的「取消」只是收起编辑态：草稿留在宿主，已保存的微调结果不受影响。 */
+  /**
+   * 收起弹层：草稿留在宿主，已保存的微调结果不受影响。
+   * 两条出口的分工（r136 弹窗化后必须分开）：
+   * - `dismissTuneEditor()` 只收起——保存成功走这条，刚写上去的解释不能被自己抹掉；
+   * - `closeTuneEditor()` 收起 + 清解释——取消 / Esc / 点遮罩 / 再点一次入口按钮走这条。
+   */
+  const dismissTuneEditor = () => setTuneEditingKey(null);
+
   const closeTuneEditor = () => {
-    setTuneEditingKey(null);
+    dismissTuneEditor();
     setTuneNotice(null);
   };
 
-  /** 批量：切换选中文件时抽屉跟着收起（草稿不丢，切回来接着写）。 */
+  /** 批量：切换选中文件时弹窗跟着收起（草稿不丢，切回来接着写）。 */
   const selectedBatchTuneKey = selectedBatchItem ? batchTuneKey(selectedBatchItem.dataId) : null;
   const batchTuneOpen =
     Boolean(selectedBatchItem) && tuneEditingKey === selectedBatchTuneKey && selectedBatchItem.presence !== "right-only";
@@ -1890,9 +1897,10 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     }
     setTunedDataIds((current) => (current.has(item.dataId) ? current : new Set(current).add(item.dataId)));
     writeTuneDraft(key, { content: draft.content, errors: [] });
-    // 保存后**留在**编辑态：抽屉收起的话，R6 那句「行级挑选标记已清空」的解释会跟着一起消失，
-    // 而用户下一次点箭头时恰恰需要它。收起交给「完成微调」/Esc。
+    // R6 那句「行级挑选标记已清空」的解释先写上，再收起弹窗：解释渲染在 diff 结果上方，
+    // 关窗后照样看得见（弹窗化之前为了不让它跟着抽屉消失才把编辑态留着，现在不需要了）。
     setTuneNotice(clearedMarks > 0 ? t("diff.manualTuneMarksCleared") : null);
+    dismissTuneEditor();
     const matchGroup =
       (matchResults ?? []).find((match) => match.dataId === item.dataId)?.rightGroup ?? right.group ?? "DEFAULT_GROUP";
     auditTuneEvent({ action: "tune", scope: "batch", dataId: item.dataId, group: matchGroup, content: draft.content, clearedMarks });
@@ -1955,8 +1963,9 @@ export default function DiffView({ active = true, connections, onConnectionsChan
     }
     setSingleTune({ content: draft.content, errors: [] });
     writeTuneDraft(SINGLE_TUNE_KEY, { content: draft.content, errors: [] });
-    // 同批量：保存不收抽屉，收起由「完成微调」/Esc 负责（见 commitBatchTune 的注释）。
+    // 同批量：保存即收起弹窗（见 commitBatchTune 的注释）。单条没有行级挑块，不写解释。
     setTuneNotice(null);
+    dismissTuneEditor();
     auditTuneEvent({
       action: "tune",
       scope: "single",
@@ -2781,8 +2790,15 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                             onCancel={closeTuneEditor}
                             onReset={() => resetBatchTune(selectedBatchItem)}
                             resetDisabled={!tunedDataIds.has(selectedBatchItem.dataId) && !mergePreviews[selectedBatchItem.dataId]}
-                            notice={tuneNotice ?? undefined}
                           />
+                        )}
+                        {tuneNotice && (
+                          <div className="diff-tune-notice" {...statusMessageProps("info")}>
+                            <span className="diff-tune-notice-text">{tuneNotice}</span>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTuneNotice(null)}>
+                              {t("diff.manualTuneNoticeDismiss")}
+                            </button>
+                          </div>
                         )}
                         <DiffPanel
                           leftLabel={selectedBatchItem.leftLabel}
@@ -2834,8 +2850,15 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                     onCancel={closeTuneEditor}
                     onReset={resetSingleTune}
                     resetDisabled={!singleTune}
-                    notice={undefined}
                   />
+                )}
+                {tuneNotice && (
+                  <div className="diff-tune-notice" {...statusMessageProps("info")}>
+                    <span className="diff-tune-notice-text">{tuneNotice}</span>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTuneNotice(null)}>
+                      {t("diff.manualTuneNoticeDismiss")}
+                    </button>
+                  </div>
                 )}
                 <DiffPanel
                   leftLabel={leftLoaded.label}

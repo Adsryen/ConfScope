@@ -2461,10 +2461,24 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     return document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement | null;
   }
 
-  /** 确认弹层与抽屉都有「Cancel」，取按钮时按 .modal-footer 限定。 */
+  /**
+   * r136 起页面上可能同时有两个 `.modal-footer`：微调弹层与确认弹层都带底栏，且都有「Cancel」。
+   * 取确认框的按钮必须锁到 `.modal-sm`（ConfirmModal 自己的类），否则拿到的会是弹层那颗。
+   */
   function modalButton(name: string): HTMLButtonElement | null {
     return (
-      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-footer button")).find((button) => button.textContent === name) ?? null
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-sm .modal-footer button")).find(
+        (button) => button.textContent === name
+      ) ?? null
+    );
+  }
+
+  /** 微调弹层（EditorDialog）底栏的按钮。 */
+  function tuneDialogButton(name: string): HTMLButtonElement | null {
+    return (
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-editor .modal-footer button")).find(
+        (button) => button.textContent === name
+      ) ?? null
     );
   }
 
@@ -2597,18 +2611,22 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001" } });
     fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
     expect(await screen.findByText("1 files queued for the right target")).toBeInTheDocument();
+    // r136：保存即收起弹层，字迹已经落在右侧预览上（徽标 + 汇总条），不用再守着编辑区
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    // R7：还原丢掉的是手写的正文，找不回来 ⇒ 必须先问一句
-    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    // R7：还原丢掉的是手写的正文，找不回来 ⇒ 必须先问一句。还原在弹层底栏，先重开一次
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.click(tuneDialogButton("Restore original right content")!);
     expect(await screen.findByText(/cannot be recovered/)).toBeInTheDocument();
-    // 反悔：字迹、徽标、抽屉都保持原样，什么都没发生
+    // 反悔：字迹、徽标、弹层都保持原样，什么都没发生
     fireEvent.click(modalButton("Cancel")!);
-    await waitFor(() => expect(document.querySelector(".modal-footer")).toBeNull());
+    // r136 起页面上还留着弹层自己的底栏，「确认框关掉了」只能按 .modal-sm 判
+    await waitFor(() => expect(document.querySelector(".modal-sm .modal-footer")).toBeNull());
     expect(screen.getByText("Manually tuned")).toBeInTheDocument();
     expect(tuneTextarea()).not.toBeNull();
     expect(document.body.textContent).toContain("port: 7001");
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    fireEvent.click(tuneDialogButton("Restore original right content")!);
     fireEvent.click(modalButton("Discard and restore")!);
     await waitFor(() => expect(screen.getByText("No merge preview changes yet")).toBeInTheDocument());
     expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
@@ -2628,13 +2646,16 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     // 手写回与服务端原文一字不差 ⇒ 没有可丢的东西
     fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 9090" } });
     fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+    // 保存即收起：这一句在 r136 之前是「留在编辑态」的反证，现在改成「弹层已经不在」
+    expect(await screen.findByRole("button", { name: "Tune right side" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore original right content" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.click(tuneDialogButton("Restore original right content")!);
     await waitFor(() => expect(tuneTextarea()).toBeNull());
     expect(document.querySelector(".modal-footer")).toBeNull();
   });
 
-  it("collapsing the drawer never discards the hand-written body", async () => {
+  it("collapsing the dialog never discards the hand-written body", async () => {
     renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
     fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
     await screen.findByText("Generated 1 file comparisons");
@@ -2650,6 +2671,74 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     expect(tuneTextarea()!.value).toBe("server:\n  port: 7001\n# 手写的第三行");
     // 收起不等于落进计划：没保存的草稿不影响要写出去的正文
     expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
+  });
+
+  // ── r136：微调从内嵌抽屉改成弹窗后的四条契约 ──────────────────────────────
+  it("opens the tune editor as a dialog titled with the file being tuned", async () => {
+    renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    const dialog = await screen.findByRole("dialog");
+    // 弹层挡住背后，列表位置认不出文件了——标题必须自己把「在改哪一份」说清楚
+    expect(dialog.querySelector(".modal-header h3")?.textContent).toContain("Fine-tune right side:");
+    expect(dialog.querySelector(".modal-header h3")?.textContent).toContain("app.yaml");
+    // 初始焦点在正文里，不在 × 上：一开就能直接打字 / Ctrl+F
+    expect(dialog.querySelector(".code-editor-ta")).toBe(document.activeElement);
+  });
+
+  it("keeps a failed validation inside the dialog instead of collapsing it", async () => {
+    renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    await waitFor(() => expect(tuneErrorText()).toContain("Content cannot be empty"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".apply-edit-errors")).toBeInTheDocument();
+    expect(screen.queryByText("Manually tuned")).not.toBeInTheDocument();
+  });
+
+  it("shows the marks-cleared note above the diff after saving, and dismisses it on click", async () => {
+    renderBatchTune("server:\n  port: 8080\nname: demo", "server:\n  port: 9090\nname: demo");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Take left to right preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    fireEvent.change(tuneTextarea()!, { target: { value: "server:\n  port: 7001\nname: demo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save tune" }));
+
+    // 解释不能跟着弹层一起消失：它说的是「下一次点箭头含义变了」，正是关掉窗口后要面对的事
+    await waitFor(() => expect(document.querySelector(".modal-overlay")).toBeNull());
+    const notice = await screen.findByText(/previous row-level picks were cleared/);
+    expect(notice.closest(".diff-tune-notice")).not.toBeNull();
+    expect(notice.closest(".modal-overlay")).toBeNull();
+    expect(screen.getByText("Manually tuned")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss this note" }));
+    expect(document.querySelector(".diff-tune-notice")).toBeNull();
+    // 收起解释不影响已保存的结果
+    expect(screen.getByText("Manually tuned")).toBeInTheDocument();
+  });
+
+  it("leaves the draft untouched when Escape closes the dialog", async () => {
+    renderBatchTune("server:\n  port: 8080", "server:\n  port: 9090");
+    fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
+    await screen.findByText("Generated 1 file comparisons");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    const handwritten = "server:\n  port: 7001\n# 手写的第三行";
+    fireEvent.change(tuneTextarea()!, { target: { value: handwritten } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".modal-overlay")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Tune right side" }));
+    expect(tuneTextarea()!.value).toBe(handwritten);
   });
 
   it("records the manual tune in the compare session without the config body", async () => {

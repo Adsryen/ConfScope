@@ -8979,6 +8979,10 @@ button.diff-workflow-step-btn:hover {
    没有出错，只是用户的下一次点击含义变了。不自带 .field-hint：那是灰色辅助说明语义，
    且两个同特异度类都声明 color 会撞上 R83 顺序守卫（字号行距在这里自己写全）。 */
 .diff-tune-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 7px 9px;
   border: 1px solid rgba(220, 220, 170, 0.3);
   border-left: 3px solid var(--yellow);
@@ -8988,6 +8992,17 @@ button.diff-workflow-step-btn:hover {
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/* r136：解释条从抽屉里搬到 diff 结果上方，右侧多了一颗「收起这条说明」。
+   文字吃掉剩余宽度、按钮不被挤扁——两者都靠 flex 分工，不靠先后顺序决胜。 */
+.diff-tune-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-tune-notice .btn {
+  flex-shrink: 0;
 }
 
 /* 「这一项将写入的内容是人手写的」：批量结果头、单配置入口、第四步列表与详情共用一颗。 */
