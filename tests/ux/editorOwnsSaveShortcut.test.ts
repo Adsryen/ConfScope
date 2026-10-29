@@ -9,7 +9,8 @@
  * - 编辑区内由 CodeEditor 的 onSave 接管（保存的是这份内容），判据来自 lib/saveShortcut 单一事实源；
  * - 编辑区之外没有保存语义，由 App 挂的全局兜底把原生对话框吞掉，且必须先看 defaultPrevented，
  *   否则一次按键会存两遍；
- * - 没有保存动作的宿主（变更计划的目标内容编辑器）不许装作接管。
+ * - 没有保存动作的宿主不许装作接管；真有保存动作的宿主必须接管（r136 迁移：
+ *   第四步「编辑目标内容」改成弹窗后确有「保存并重新校验」，不接管就是弹窗里按键毫无反馈）。
  */
 import { describe, expect, it } from "vitest";
 import { loadLocale, readScannedSource, sourceFiles } from "./scanUtils";
@@ -52,8 +53,9 @@ describe("保存快捷键只认一个出口（波27 R47）", () => {
       .filter((file) => file !== EDITOR && file !== LIB)
       .map((file) => ({ file, hits: countMatches(WIRING, readScannedSource(file)) }))
       .filter((entry) => entry.hits > 0);
-    // 轮60 第三步人工微调也真有保存动作（Ctrl+S = 保存这份手写正文），两个宿主一起入清单
+    // 轮60 第三步人工微调、r136 第四步「编辑目标内容」都真有保存动作，一起入清单
     expect(wired.map((entry) => entry.file).sort()).toEqual([
+      "src/components/ApplyPlanView.tsx",
       "src/components/ConfigBrowser.tsx",
       "src/components/ConfigEditor.tsx",
       "src/components/DiffView.tsx",
@@ -62,8 +64,13 @@ describe("保存快捷键只认一个出口（波27 R47）", () => {
     expect(countMatches(WIRING, sourceFiles().map(readScannedSource).join("\n"))).toBeGreaterThanOrEqual(2);
   });
 
-  it("没有保存动作的宿主不许装作接管（变更计划的目标内容编辑器）", () => {
-    expect(readScannedSource("src/components/ApplyPlanView.tsx")).not.toMatch(WIRING);
+  it("变更计划的目标内容编辑器接管 Ctrl+S（r136 从「不许接管」迁移为「必须接管」）", () => {
+    // 迁移前的断言是 not.toMatch(WIRING)，理由是「它没有保存动作」——这个前提已经不成立：
+    // 同一个向导里第三步按 Ctrl+S 能存正文，第四步过去按了没反应，两边不对称就是缺陷。
+    // 现在要求它出现，并且接的必须是提交这条路径（不是随便一个空函数）。
+    const host = readScannedSource("src/components/ApplyPlanView.tsx");
+    expect(host).toMatch(WIRING);
+    expect(host).toMatch(/onSave=\{commitEdit\}/);
   });
 
   it("App 挂了全局兜底，浏览态/列表/设置页也不会漏出原生保存对话框", () => {

@@ -8925,23 +8925,13 @@ button.diff-workflow-step-btn:hover {
   background: var(--bg2);
 }
 
-.apply-edit-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .apply-edit-hint {
   font-size: 12px;
   color: var(--text-dim);
 }
 
-.apply-edit-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
+/* r136：.apply-edit-head / .apply-edit-actions 已删除——两处编辑面板的动作行搬进了
+   弹层底部的 .modal-footer，留着就是 deadCssSelectorsStayClean 会钉红的死规则。 */
 
 .apply-edit-errors {
   display: flex;

@@ -20,6 +20,7 @@ import {
 import { busyProps } from "../lib/busyRegion";
 import { formatDateTime } from "../lib/formatDateTime";
 import CodeEditor from "./CodeEditor";
+import EditorDialog from "./EditorDialog";
 import { validateConfig } from "../lib/validate";
 import { describeParseError } from "../lib/parseErrorCopy";
 import { applyEntryStepsAreNavigable, type ApplyEntryPayload } from "../lib/applyEntry";
@@ -205,6 +206,7 @@ function PlanItemList({
   selectedId,
   selectedIds,
   appliedIds,
+  draftIds,
   onSelect,
   onToggleSelected,
   onSelectAll,
@@ -215,6 +217,8 @@ function PlanItemList({
   selectedIds: Set<string>;
   /** 本计划里已经真写进目标的项（轮134）：勾不回来，也再不许被写第二遍。 */
   appliedIds: Set<string>;
+  /** 有还没保存的手写字迹的项（r136）：弹层收起后也要能在列表里看出哪一项带着草稿。 */
+  draftIds: Set<string>;
   onSelect: (id: string) => void;
   onToggleSelected: (id: string) => void;
   onSelectAll: () => void;
@@ -267,6 +271,11 @@ function PlanItemList({
                 {t("apply.manualTuned")}
               </span>
             )}
+            {draftIds.has(item.id) && (
+              <span className="tune-badge" title={t("apply.editTargetDraftBadgeHint")}>
+                {t("apply.editTargetDraftBadge")}
+              </span>
+            )}
             {applied && (
               <span className="tune-badge is-applied" title={t("apply.itemAppliedHint")}>
                 {t("apply.itemApplied")}
@@ -280,7 +289,7 @@ function PlanItemList({
 }
 
 /**
- * 内联「编辑目标内容」面板里还没保存的东西。
+ * 「编辑目标内容」弹层里还没保存的东西（r136 起是弹层，原来内嵌在详情上方）。
  *
  * 这份状态以前挂在 ItemDetail 自己的 useState 上：切换选中的配置项时组件不会重置，
  * 于是 A 项写了一半的内容会带着面板一起显示在 B 项上，点「保存」就把 A 的正文
@@ -296,12 +305,21 @@ interface TargetEdit {
 function ItemDetail({
   item,
   edit,
+  editOpen,
+  hasDraft,
   onEditChange,
+  onEditOpenChange,
   onCommitEdit,
 }: {
   item: ApplyPlanItem;
+  /** 未保存的手写正文（按 itemId 存在父层）；收起弹层不动它。 */
   edit?: TargetEdit;
+  /** 弹层是否开着。开合与草稿是两件事：关窗不该等于丢弃字迹（r136）。 */
+  editOpen: boolean;
+  /** 这一项带着「和计划里不一样」的手写正文。判据只在父层算一次（draftItemIds），这里复用。 */
+  hasDraft: boolean;
   onEditChange: (itemId: string, next: TargetEdit | null) => void;
+  onEditOpenChange: (open: boolean) => void;
   onCommitEdit: (itemId: string, content: string) => void;
 }) {
   const { t } = useTranslation();
@@ -310,8 +328,16 @@ function ItemDetail({
   const currentAfter = valueText(item.afterValue, missingLabel);
   const canEdit = item.action !== "delete";
 
-  const startEdit = () => onEditChange(item.id, { content: currentAfter, errors: [] });
-  const cancelEdit = () => onEditChange(item.id, null);
+  /**
+   * 打开弹层：已有草稿就原样重开，没有才用计划里当前的 afterValue 播种。
+   * 「重开就用计划值覆盖草稿」是这一轮最容易写错的一行——那等于把用户刚写的几十行换回旧内容。
+   */
+  const startEdit = () => {
+    if (!edit) onEditChange(item.id, { content: currentAfter, errors: [] });
+    onEditOpenChange(true);
+  };
+  /** × / 取消 / Esc / 点遮罩四条出口共用：只收起，草稿留在父层（永久丢弃另有出口，带二次确认）。 */
+  const dismissEdit = () => onEditOpenChange(false);
   const commitEdit = () => {
     if (!edit) return;
     const problems = validateConfig(edit.content, diffFormat);
@@ -319,6 +345,7 @@ function ItemDetail({
       onEditChange(item.id, { content: edit.content, errors: problems });
       return;
     }
+    // 校验通过才交给父层：写计划、清草稿、收起弹层（commitTargetEdit）。
     onCommitEdit(item.id, edit.content);
   };
   const hasFatalParseError = item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
@@ -355,41 +382,50 @@ function ItemDetail({
           </span>
         )}
         {item.blockReason && <span>{t("apply.blockReasonLine", { reason: blockReasonLabel(t, item.blockReason) })}</span>}
-        {canEdit && !edit && (
+        {canEdit && !editOpen && (
           <button className="btn btn-ghost btn-sm" type="button" onClick={startEdit}>
-            {t("apply.editTarget")}
+            {hasDraft ? t("apply.editTargetResume") : t("apply.editTarget")}
           </button>
         )}
       </div>
-      {edit && (
-        <div className="apply-edit-panel">
-          <div className="apply-edit-head">
-            <span className="apply-edit-hint">{t("apply.editTargetHint")}</span>
-            <div className="apply-edit-actions">
-              <button className="btn btn-ghost btn-sm" type="button" onClick={cancelEdit}>
+      {edit && editOpen && (
+        <EditorDialog
+          title={t("apply.editTargetDialogTitle", { dataId: item.ref.dataId })}
+          hint={t("apply.editTargetHint")}
+          onClose={dismissEdit}
+          footer={
+            <>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={dismissEdit}>
                 {t("common.cancel")}
               </button>
               <button className="btn btn-primary btn-sm" type="button" onClick={commitEdit}>
                 {t("apply.editTargetSave")}
               </button>
+            </>
+          }
+        >
+          <div className="apply-edit-panel">
+            {edit.errors.length > 0 && (
+              <div className="apply-edit-errors" {...statusMessageProps("error")}>
+                {edit.errors.map((err, i) => (
+                  <div key={i}>{err}</div>
+                ))}
+              </div>
+            )}
+            <div className="apply-edit-editor">
+              <CodeEditor
+                value={edit.content}
+                onChange={(content) => onEditChange(item.id, { content, errors: [] })}
+                format={diffFormat}
+                ariaLabel={t("apply.editTarget")}
+                // 同一个向导里第三步能 Ctrl+S 存正文，第四步过去按了没反应——补齐这条对称。
+                // 本页由 App.tsx 的 `mode === "apply"` 条件挂载，离开这一步整棵卸载，
+                // 弹层不存在「替别的视图抢 Esc」的风险，所以不接 active（第三步常驻保活才需要）。
+                onSave={commitEdit}
+              />
             </div>
           </div>
-          {edit.errors.length > 0 && (
-            <div className="apply-edit-errors" {...statusMessageProps("error")}>
-              {edit.errors.map((err, i) => (
-                <div key={i}>{err}</div>
-              ))}
-            </div>
-          )}
-          <div className="apply-edit-editor">
-            <CodeEditor
-              value={edit.content}
-              onChange={(content) => onEditChange(item.id, { content, errors: [] })}
-              format={diffFormat}
-              ariaLabel={t("apply.editTarget")}
-            />
-          </div>
-        </div>
+        </EditorDialog>
       )}
       <div className="apply-diff-preview">
         <div className="apply-dryrun-note">{t("apply.dryRunPreviewNote")}</div>
@@ -829,6 +865,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 未保存的「编辑目标内容」：itemId -> 草稿。只有本页会写，切选中项不丢，离开前拦一道。
   const [targetEdits, setTargetEdits] = useState<Record<string, TargetEdit>>({});
+  // 弹层开在哪一项（r136）：与 targetEdits 分开存——关窗只收起，字迹继续留在草稿表里。
+  const [openEditId, setOpenEditId] = useState<string | null>(null);
   const [askDiscardEdits, setAskDiscardEdits] = useState(false);
   // 写入进行中点「返回」/stepper 回退：先确认一次再走（R55-A5）
   const [askLeaveDuringRun, setAskLeaveDuringRun] = useState(false);
@@ -1052,7 +1090,20 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     });
   }, []);
 
-  const unsavedEditCount = Object.keys(targetEdits).length;
+  // 「有没保存的手改」判据（r136）：草稿正文与计划里当前正文不一致才算。
+  // 只是点开弹层看了一眼、一个字没改，不该亮起徽章，也不该在返回时多问一句「丢弃字迹」——
+  // 这种什么都没丢却喊丢的提示，会让用户下一次直接随手确认掉真正该拦的那一次。
+  const draftItemIds = new Set(
+    plan
+      ? plan.items
+          .filter((item) => {
+            const draft = targetEdits[item.id];
+            return Boolean(draft && draft.content !== valueText(item.afterValue, t("apply.valueMissing")));
+          })
+          .map((item) => item.id)
+      : []
+  );
+  const unsavedEditCount = draftItemIds.size;
   // 「返回」和 stepper 回退都会卸载本页，未保存的目标内容随之消失——有草稿时先问一句。
   // 记下来时的目标步骤，确认后才带着它走，避免「放弃草稿」把用户丢到别的步骤。
   const pendingBackStepRef = useRef<WorkflowStepId | undefined>(undefined);
@@ -1132,6 +1183,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     (itemId: string, content: string) => {
       handleEditAfterValue(itemId, content);
       updateTargetEdit(itemId, null);
+      setOpenEditId((prev) => (prev === itemId ? null : prev));
     },
     [handleEditAfterValue, updateTargetEdit]
   );
@@ -1489,6 +1541,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
                 selectedId={selectedItem?.id ?? ""}
                 selectedIds={selectedIds}
                 appliedIds={appliedItemIds}
+                draftIds={draftItemIds}
                 onSelect={setSelectedId}
                 onToggleSelected={toggleSelectedItem}
                 onSelectAll={selectAllItems}
@@ -1498,7 +1551,10 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
                 <ItemDetail
                   item={selectedItem}
                   edit={targetEdits[selectedItem.id]}
+                  editOpen={openEditId === selectedItem.id}
+                  hasDraft={draftItemIds.has(selectedItem.id)}
                   onEditChange={updateTargetEdit}
+                  onEditOpenChange={(open) => setOpenEditId(open ? selectedItem.id : null)}
                   onCommitEdit={commitTargetEdit}
                 />
               ) : (

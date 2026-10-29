@@ -1814,20 +1814,25 @@ describe("ApplyPlanView", () => {
     expect(onBack).toHaveBeenCalledWith(undefined);
   });
 
-  it("returns immediately when nothing is unsaved, and after cancelling the panel", async () => {
+  it("returns immediately when nothing is unsaved, and asks once after cancelling the editor", async () => {
     const { onBack } = renderTwoItems();
     await screen.findByRole("button", { name: "Edit Target" });
     fireEvent.click(backButton());
     expect(onBack).toHaveBeenCalledTimes(1);
 
-    // 面板里点「取消」＝草稿作废，之后再按「返回」不该再多问一句
+    // r136：弹层里点「取消」＝收起，字迹留在草稿里。以前它把刚写的几十行直接抹掉，
+    // 第四步贴着真要写进生产的那份内容，这样丢字比第三步更致命 ⇒ 现在「返回」要拦一道，
+    // 确认「放弃草稿」才真的走（永久丢弃只剩这一条出口，且带二次确认）。
     fireEvent.click(screen.getByRole("button", { name: "Edit Target" }));
     fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" })); // 编辑面板自己的「取消」
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" })); // 编辑弹层自己的「取消」
     expect(editorTextarea()).not.toBeInTheDocument();
     fireEvent.click(backButton());
+    const ask = await screen.findByRole("dialog", { name: "Discard unsaved target content?" });
+    expect(ask).toBeInTheDocument();
+    expect(onBack).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(ask).getByRole("button", { name: "Discard and go back" }));
     expect(onBack).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("the stepper back route goes through the same guard and keeps its focus step", async () => {
@@ -1842,6 +1847,88 @@ describe("ApplyPlanView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Discard and go back" }));
     expect(onBack).toHaveBeenCalledWith("choose");
+  });
+
+  // ── r136：「编辑目标内容」改成弹窗后的契约 ────────────────────────────────
+  it("opens the target editor as a dialog titled with the dataId being edited", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit target content:/ });
+    // 弹层挡住背后的列表：标题必须自己说清在改哪一份，否则用户只能靠记忆
+    expect(dialog.querySelector(".modal-header h3")?.textContent).toContain("app.properties");
+    expect(dialog.querySelector(".code-editor-ta")).toBe(document.activeElement);
+  });
+
+  it("closes the dialog on save and clears the unsaved-draft badge", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    // 只是点开弹层、一个字没改：这一项不算「有没保存的手改」，不该提前亮徽章
+    expect(screen.queryByText("Unsaved manual edit")).not.toBeInTheDocument();
+
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=7000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+    await waitFor(() => expect(document.querySelector(".modal-overlay")).toBeNull());
+    expect(document.querySelector(".apply-edit-panel")).toBeNull();
+    // 草稿已经变成计划里的值：徽章与「继续编辑」入口都该跟着消失
+    expect(screen.queryByText("Unsaved manual edit")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Target" })).toBeInTheDocument();
+    expect(await screen.findByText("7000")).toBeInTheDocument();
+  });
+
+  it("asks nothing when the editor is opened and closed without a change", async () => {
+    const { onBack } = renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.keyDown(editorTextarea()!, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".modal-overlay")).toBeNull());
+
+    // 看了一眼就走：既没有徽章，也不该在返回时冒出「丢弃未保存的目标内容」
+    expect(screen.queryByText("Unsaved manual edit")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Target" })).toBeInTheDocument();
+    fireEvent.click(backButton());
+    expect(screen.queryByRole("dialog", { name: "Discard unsaved target content?" })).not.toBeInTheDocument();
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps validation errors inside the dialog when a save is refused", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=8099\nserver.port=9000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save & Re-validate" }));
+    await waitFor(() => expect(document.querySelector(".apply-edit-errors")).not.toBeNull());
+
+    const dialog = screen.getByRole("dialog", { name: /Edit target content:/ });
+    expect(dialog.querySelector(".apply-edit-errors")).toHaveTextContent(/server\.port/);
+  });
+
+  it("keeps the draft after cancel: badge on the row, resume label, same bytes on reopen", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    const handwritten = "server.port=8099\n# 手写的第二行";
+    fireEvent.change(editorTextarea()!, { target: { value: handwritten } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.querySelector(".modal-overlay")).toBeNull());
+
+    // 收起不等于丢弃：列表里要能看出哪一项带着没保存的字迹
+    expect(screen.getByText("Unsaved manual edit")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue editing" }));
+    expect(editorTextarea()!.value).toBe(handwritten);
+
+    // 未保存的草稿不该混进别的项：换一行收起，字迹仍只跟着原来那一项
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(itemRows()[1]);
+    expect(document.querySelector(".modal-overlay")).toBeNull();
+    expect(screen.getAllByText("Unsaved manual edit")).toHaveLength(1);
+    expect(itemRows()[0].textContent).toContain("Unsaved manual edit");
+  });
+
+  it("treats Ctrl+S inside the dialog as clicking Save & Re-validate", async () => {
+    renderTwoItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Target" }));
+    fireEvent.change(editorTextarea()!, { target: { value: "server.port=7001" } });
+    const savesBefore = storeMocks.saveApplyPlan.mock.calls.length;
+    fireEvent.keyDown(editorTextarea()!, { key: "s", ctrlKey: true });
+    await waitFor(() => expect(storeMocks.saveApplyPlan.mock.calls.length).toBeGreaterThan(savesBefore));
+    expect(document.querySelector(".modal-overlay")).toBeNull();
   });
 
   it("keeps the failed validation message with the draft instead of dropping it", async () => {
