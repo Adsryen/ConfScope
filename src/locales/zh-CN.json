@@ -257,6 +257,7 @@
     "executing": "执行中...",
     "executionFailed": "变更执行失败",
     "selectionCount": "已选变更项：{count}",
+    "selectionCountWithApplied": "已选变更项：{count} ｜ 已应用 {applied} 项，还剩 {remaining} 项可继续执行",
     "selectAll": "全选",
     "selectNone": "全不选",
     "executeSelected": "执行选中（{count}）",

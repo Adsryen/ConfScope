@@ -645,7 +645,11 @@ function ConfirmationPanel({
         <h4>{t("apply.confirmationTitle")}</h4>
         <span>{protectedTarget ? t("apply.protectedNotice") : t("apply.normalNotice")}</span>
       </div>
-      <div className="apply-selection-note">{t("apply.selectionCount", { count: selectedCount })}</div>
+      <div className="apply-selection-note">
+        {appliedCount > 0 && remainingWork > 0
+          ? t("apply.selectionCountWithApplied", { count: selectedCount, applied: appliedCount, remaining: remainingWork })
+          : t("apply.selectionCount", { count: selectedCount })}
+      </div>
       {manualConfirmRequired ? (
         <div className="field">
           <label className="field-label" htmlFor="apply-confirmation-text">

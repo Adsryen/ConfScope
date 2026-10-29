@@ -257,6 +257,7 @@
     "executing": "Executing...",
     "executionFailed": "Change execution failed",
     "selectionCount": "Selected change items: {count}",
+    "selectionCountWithApplied": "Selected change items: {count} | {applied} applied, {remaining} left to run",
     "selectAll": "Select all",
     "selectNone": "Select none",
     "executeSelected": "Execute selected ({count})",

@@ -2154,6 +2154,8 @@ describe("ApplyPlanView", () => {
       expect(checks()[1]).not.toBeChecked();
       expect(document.querySelectorAll(".apply-item-row")[1]).toHaveClass("applied");
       expect(screen.getByText("Applied")).toBeInTheDocument();
+      // 分批之间确认区要自己把账说清：执行按钮上方不能只留一句「已选变更项：0」让人猜
+      expect(screen.getByText("Selected change items: 0 | 1 applied, 1 left to run")).toBeInTheDocument();
       // 没写过的那项必须还能选、还能执行——这正是用户点不下去的那颗按钮
       expect(checks()[0]).toBeEnabled();
       fireEvent.click(checks()[0]);
@@ -2166,6 +2168,9 @@ describe("ApplyPlanView", () => {
         expect.any(Object),
         expect.objectContaining({ selectedItemIds: [plan.items[0].id] })
       );
+      // 整版都写完了，进度那句收掉，改由按钮守卫说「这一版没有剩下要写的项」
+      await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[0]).toHaveClass("applied"));
+      expect(screen.getAllByText("Selected change items: 0")).toHaveLength(2);
     });
 
     it("两项都写完才收口：执行按钮灰掉，原因点名「这一版没有剩下要写的项」而不是让用户猜", async () => {

@@ -178,6 +178,8 @@ test("MA-01 三项计划分两批执行：第二批只写没写过的那条，�
   await expect(rowBox(page, 1)).toBeDisabled();
   await expect(rowBox(page, 2)).toBeEnabled();
   await expect(rowBox(page, 2)).not.toBeChecked();
+  // 账要说全：勾选项被项级账本摘掉后，只留一句「已选变更项：0」就是在让人猜按钮为什么点不下去
+  await expect(view.locator(".apply-selection-note")).toContainText("已应用 2 项，还剩 1 项可继续执行", { timeout: T });
   // 此刻还剩一条没写：收口那句「都写完了」不许提前出现，缺的只是勾选
   await expect(view.locator(".apply-blocker-hint")).toContainText("至少勾选一项配置。", { timeout: T });
   await expect(view.locator(".apply-blocker-hint")).not.toContainText("本计划里可执行的项都已经写入目标了");
@@ -196,6 +198,9 @@ test("MA-01 三项计划分两批执行：第二批只写没写过的那条，�
 
   // ⑤ 整版写完才收口：执行按钮灰掉、原因点名「都写完了」，三项都带「已应用」
   await expect(rowOf(page, 2)).toHaveClass(/applied/, { timeout: T });
+  // 整版写完，进度那句收掉，出口由按钮守卫那一行给（同一件事不在两处各说一遍）
+  await expect(view.locator(".apply-selection-note")).toContainText("已选变更项：0", { timeout: T });
+  await expect(view.locator(".apply-selection-note")).not.toContainText("还剩");
   const allAppliedReason = "本计划里可执行的项都已经写入目标了";
   await expect(view.locator(".apply-blocker-hint")).toContainText(allAppliedReason, { timeout: T });
   await expect(view.locator(".apply-blocker-hint")).not.toContainText("至少勾选一项配置。");

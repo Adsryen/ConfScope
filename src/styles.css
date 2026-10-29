@@ -8777,6 +8777,27 @@ button.diff-workflow-step-btn:hover {
   border-left: 3px solid var(--red);
 }
 
+/* 项级账本（轮134）：这一条已经真写进目标了。整行淡下去但保留悬停与选中——
+   行还是要点开看改了什么，只是它不再出现在「还能写几次」的账里。 */
+.apply-item-row.applied {
+  color: var(--text-dim);
+}
+
+.apply-item-row.applied .apply-item-key {
+  opacity: 0.75;
+}
+
+.apply-item-row.applied .apply-item-check {
+  cursor: not-allowed;
+}
+
+/* 已应用与「人工微调过的内容」是两件事，不能共用同一颗橙色徽章的观感 */
+.tune-badge.is-applied {
+  border-color: rgba(78, 201, 176, 0.45);
+  color: #9fe4cf;
+  background: rgba(78, 201, 176, 0.12);
+}
+
 .apply-item-main {
   min-width: 0;
   display: flex;
