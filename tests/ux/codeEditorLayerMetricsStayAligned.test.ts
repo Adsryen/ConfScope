@@ -15,9 +15,15 @@
  * 而样式表只有一份，两层的选择器也都固定，正则扫一遍就能钉死。
  * 浏览器不报错、tsc 不管、真机上一眼看不出，只有拿光标去对字的时候才暴露——正是该静态守的静默故障。
  *
- * 故意没有豁免基线：字形层唯一合法的差异是「颜色和底色」，布局属性一条都不该有。
- * 真要加一条带布局属性的字形层规则，说明设计已经变了（比如改成单层渲染），那时改的是这份守卫的判据，
- * 不是往基线里塞一行把它静音。
+ * 判据的精确形状（轮134 精化：轮132 的字体修复被这条守卫自己打红之后才想清楚的）：
+ * 字形层不许「自己发明」度量，但允许「把自己交回继承」——
+ * UA 样式表给 <code> 写着 font-family: monospace，作者样式不在字形层写一条继承就吃它，
+ * 两层从此逐字符错位（轮132 的 P0 光标偏左正是这条）。
+ * 所以合法的布局声明只有一种：值恰好是中性值（见 NEUTRAL_METRIC_VALUES）。
+ * padding: 0 1px、letter-spacing: .5px、font-family: monospace、display: block 一律判红——
+ * 轮107 那次错位就是 .search-hit 的 padding: 0 1px 把字形一路推右（最坏 8.07px ≈ 1.07 个字符）。
+ * 中性值之外没有别的豁免基线：真要加一条带自选度量的字形层规则，说明设计已经变了
+ * （比如改成单层渲染），那时改的是这份守卫的判据本身，不是往基线里塞一行把它静音。
  *
  * 不在名单里的属性也要说明理由，别当成漏了：
  * - font-style（.hljs-* 的斜体）：等宽字体没有真斜体面，Chromium 用合成倾斜，
@@ -90,6 +96,56 @@ const METRIC_PROPS = [
 ];
 
 /** 两层共用的那份规则必须声明的几何属性——只在一份规则里写一遍，改一处两层同时生效。 */
+/**
+ * 字形层唯一合法的布局声明：把这一层交回容器/继承的中性值。
+ * 表里没有的那些属性（display / position / width / transform / zoom…）写不出中性值，
+ * 出现在只命中字形层的规则里一律判红。
+ */
+const NEUTRAL_METRIC_VALUES: Record<string, string[]> = {
+  font: ["inherit"],
+  "font-family": ["inherit"],
+  "font-size": ["inherit"],
+  "font-weight": ["inherit"],
+  "font-stretch": ["inherit"],
+  "letter-spacing": ["inherit", "normal"],
+  "word-spacing": ["inherit", "normal"],
+  "text-indent": ["inherit", "0px", "0"],
+  "text-transform": ["inherit", "none"],
+  "white-space": ["inherit"],
+  "word-break": ["inherit", "normal"],
+  "overflow-wrap": ["inherit", "normal"],
+  "tab-size": ["inherit"],
+  padding: ["0", "0 0", "0px", "0px 0px"],
+  "padding-left": ["0", "0px"],
+  "padding-right": ["0", "0px"],
+  "padding-top": ["0", "0px"],
+  "padding-bottom": ["0", "0px"],
+  margin: ["0", "0 0", "0px", "0px 0px"],
+  "margin-left": ["0", "0px"],
+  "margin-right": ["0", "0px"],
+  "margin-top": ["0", "0px"],
+  "margin-bottom": ["0", "0px"],
+  border: ["0", "none", "0px"],
+  "border-left": ["0", "none", "0px"],
+  "border-right": ["0", "none", "0px"],
+  "border-width": ["0", "0px"],
+  "border-left-width": ["0", "0px"],
+  "border-right-width": ["0", "0px"],
+};
+
+/** 这条声明是不是「交回继承 / 零偏移」的中性值：多值（padding: 0 0）要每一段都中性才算。 */
+function isNeutralMetric(decl: { prop: string; value: string }): boolean {
+  const allowed = NEUTRAL_METRIC_VALUES[decl.prop];
+  if (!allowed) return false;
+  const parts = decl.value.split(/\s+/).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => allowed.includes(part));
+}
+
+/** 一条规则里真正会让两层错位的声明：命中布局属性且不是中性值。 */
+function metricOffenders(rule: Rule): Array<{ prop: string; value: string; line: number }> {
+  return rule.decls.filter((decl) => METRIC_PROPS.includes(decl.prop) && !isNeutralMetric(decl));
+}
+
 const SHARED_GEOMETRY_PROPS = ["font-family", "font-size", "line-height", "padding", "tab-size", "white-space"];
 
 interface Rule {
@@ -171,10 +227,10 @@ const CSS = blankComments(readFileSync(CSS_PATH, "utf8"));
 const RULES = collectRules(CSS);
 
 /** 只命中字形层、没同时命中光标层的规则——它的布局属性只会被一层吃到。 */
-function glyphOnlyRules(): Rule[] {
+function glyphOnlyRules(rules: Rule[] = RULES): Rule[] {
   const hitGlyph = (rule: Rule) => rule.sels.some((sel) => GLYPH_LAYER_RE.test(sel));
   const hitCaret = (rule: Rule) => rule.sels.some((sel) => CARET_LAYER_RE.test(sel));
-  return RULES.filter((rule) => hitGlyph(rule) && !hitCaret(rule));
+  return rules.filter((rule) => hitGlyph(rule) && !hitCaret(rule));
 }
 
 function sharedRule(): Rule | undefined {
@@ -186,11 +242,40 @@ describe("编辑态字形层与光标层的度量对齐", () => {
     expect(glyphOnlyRules().length, "styles.css 里找不到任何字形层规则，选择器改名要连这份守卫一起改").toBeGreaterThan(5);
   });
 
-  it("只作用于字形层的规则不许声明参与布局的属性", () => {
+  it("自检：中性值表只放过去「交回继承」，轮107 那条 padding: 0 1px 必须照样判红", () => {
+    // 这份判据是这轮新加的，不加一条反向自证就等于没加：
+    // 把表写得松一点（比如 padding 允许任意值）今天照样全绿，明天又把人放过去。
+    const synthetic = `
+.code-editor-pre code {
+  font: inherit;
+  padding: 0;
+}
+.code-editor-pre .search-hit {
+  padding: 0 1px;
+}
+.code-editor-ta,
+.code-editor-pre {
+  white-space: pre;
+}
+.code-editor-pre code {
+  letter-spacing: 0.5px;
+}
+.code-editor-pre code {
+  display: block;
+}
+`;
+    const offenders = glyphOnlyRules(collectRules(synthetic)).flatMap((rule) =>
+      metricOffenders(rule).map((decl) => `${decl.prop}: ${decl.value}`)
+    );
+    // 中性值（font: inherit / padding: 0）与两层共用的那条规则都不该出现在这里
+    expect(offenders, "中性值表放行了不该放行的声明").toEqual(["padding: 0 1px", "letter-spacing: 0.5px", "display: block"]);
+    // 共用规则必须被排除在「只命中字形层」之外，否则这条守卫会把正确写法也打红
+    expect(glyphOnlyRules(collectRules(synthetic)).some((rule) => rule.sels.some((sel) => sel === ".code-editor-ta"))).toBe(false);
+  });
+
+  it("只作用于字形层的规则不许自选度量，只许把度量交回继承", () => {
     const offenders = glyphOnlyRules().flatMap((rule) =>
-      rule.decls
-        .filter((decl) => METRIC_PROPS.includes(decl.prop))
-        .map((decl) => `L${decl.line}: ${rule.sels.join(", ")} { ${decl.prop}: ${decl.value} }`)
+      metricOffenders(rule).map((decl) => `L${decl.line}: ${rule.sels.join(", ")} { ${decl.prop}: ${decl.value} }`)
     );
     expect(
       offenders,
