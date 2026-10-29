@@ -91,6 +91,8 @@ const dataLocMocks = vi.hoisted(() => ({
 // 这里把出口换成可断言的替身，其余导出保持真实实现。
 const revisionOutletMocks = vi.hoisted(() => ({
   resetConfigRevisionAccelerator: vi.fn(),
+  // 读体量与清除前都要等在途追加落地（真机 LH-04）：默认立刻放行，个别用例自己改成可控的闸。
+  flushPendingRevisionAppends: vi.fn(() => Promise.resolve()),
   // 轮99：配额编辑器与「按新上限清理」都走这一层出口，替身让它们各自可控。
   // 存在性探测默认「不可用」——jsdom 里根本没有 window.go，这就是真的降级环境；
   // 需要看到配额行的用例在自己的 beforeEach 里把它打开。
@@ -105,6 +107,7 @@ vi.mock("../lib/configRevisions", async (importOriginal) => {
   return {
     ...actual,
     resetConfigRevisionAccelerator: revisionOutletMocks.resetConfigRevisionAccelerator,
+    flushPendingRevisionAppends: revisionOutletMocks.flushPendingRevisionAppends,
     revisionPolicyStoreAvailable: revisionOutletMocks.revisionPolicyStoreAvailable,
     getConfigRevisionPolicy: revisionOutletMocks.getConfigRevisionPolicy,
     saveRevisionKeepPerKey: revisionOutletMocks.saveRevisionKeepPerKey,
@@ -325,6 +328,8 @@ describe("SettingsView", () => {
     dataLocMocks.ClearConfigRevisions.mockReset();
     dataLocMocks.ClearConfigRevisions.mockResolvedValue(undefined);
     revisionOutletMocks.resetConfigRevisionAccelerator.mockReset();
+    revisionOutletMocks.flushPendingRevisionAppends.mockReset();
+    revisionOutletMocks.flushPendingRevisionAppends.mockImplementation(() => Promise.resolve());
     revisionOutletMocks.revisionPolicyStoreAvailable.mockReset();
     revisionOutletMocks.revisionPolicyStoreAvailable.mockReturnValue(false);
     revisionOutletMocks.getConfigRevisionPolicy.mockReset();
@@ -1149,6 +1154,34 @@ describe("SettingsView", () => {
       expect(row).toHaveTextContent("每个配置最多留 50 版");
       // 文件位置那一行也在清单里（用户要能复制路径、在文件管理器里定位它）
       expect(screen.getByText(testRevisionEntry.path)).toBeInTheDocument();
+    });
+
+    it("在途的版本追加没落地就不读体量，落地后才把数说出来", async () => {
+      // 追加是 fire-and-forget 的：抢先读到的只是中途快照，而这一行只在挂载时读一次，
+      // 少的那几条永远不会自己补上——真机 LH-04 就是「桥内 3 版 / 界面 2 版」这样红的。
+      let releaseFlush: () => void = () => undefined;
+      revisionOutletMocks.flushPendingRevisionAppends.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFlush = resolve;
+          })
+      );
+      renderSettings("zh-CN");
+
+      // 其它数据面照常先出来，只有体量在等这道闸
+      expect(await screen.findByText(testRevisionEntry.path)).toBeInTheDocument();
+      expect(dataLocMocks.GetConfigRevisionFacts).not.toHaveBeenCalled();
+
+      releaseFlush();
+      expect(await screen.findByText("已记录 12 版")).toBeInTheDocument();
+      expect(revisionOutletMocks.flushPendingRevisionAppends).toHaveBeenCalledTimes(1);
+    });
+
+    it("在途追加等不动也要把体量读出来：整块缺席比可能偏小的数更糟", async () => {
+      revisionOutletMocks.flushPendingRevisionAppends.mockImplementationOnce(() => Promise.reject(new Error("binding gone")));
+      renderSettings("zh-CN");
+
+      expect(await screen.findByText("已记录 12 版")).toBeInTheDocument();
     });
 
     it("清除前先在应用内确认，取消就一个字节都不动", async () => {

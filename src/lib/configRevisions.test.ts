@@ -16,10 +16,12 @@ import {
   CONFIG_REVISION_KIND_OBSERVED,
   configRevisionAcceleratorSize,
   configRevisionKeyOf,
+  flushPendingRevisionAppends,
   getConfigRevisionPolicy,
   isRevisionPinned,
   listRevisionsForKey,
   observeLoadedDocument,
+  pendingRevisionAppendCount,
   pruneConfigRevisionsByPolicy,
   recordConfirmedWrite,
   resetConfigRevisionAccelerator,
@@ -311,5 +313,61 @@ describe("保留策略与钉住的读出口（轮99）", () => {
     const legacy = policyView({ pinnedCount: 0 });
     legacy.pinned = null as unknown as ConfigRevisionPinnedRef[];
     expect(isRevisionPinned(legacy, "conn-a", target, "sha256:x")).toBe(false);
+  });
+});
+
+describe("在途追加的落地等待（设置页体量与清除前的那道闸）", () => {
+  /** 让微任务与定时器都跑一轮。 */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("追加还在途时 flush 不返回，落地后待决归零", async () => {
+    let resolveAppend: (value: unknown) => void = () => undefined;
+    appendRevision.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAppend = resolve;
+        })
+    );
+
+    observeLoadedDocument(conn(), target, { content: "server.port: 8080\n", format: "yaml", md5: "in-flight" });
+    expect(pendingRevisionAppendCount()).toBe(1);
+
+    let done = false;
+    const waiting = flushPendingRevisionAppends().then(() => {
+      done = true;
+    });
+    await settle();
+    expect(done, "追加还在途，flush 就返回了——设置页据此读到的还是中途快照").toBe(false);
+
+    resolveAppend({ appended: true, reason: "appended", record: {} });
+    await waiting;
+    expect(done).toBe(true);
+    expect(pendingRevisionAppendCount()).toBe(0);
+  });
+
+  it("绑定 reject 也算落地：失败的一版不许把 flush 永远挂住", async () => {
+    appendRevision.mockImplementationOnce(() => Promise.reject(new Error("disk full")));
+
+    observeLoadedDocument(conn(), target, { content: "a\n", format: "yaml", md5: "bad" });
+    expect(pendingRevisionAppendCount()).toBe(1);
+    await flushPendingRevisionAppends();
+    expect(pendingRevisionAppendCount(), "失败没从待决里摘掉，之后每次读体量都要白等").toBe(0);
+  });
+
+  it("没有在途追加时 flush 立刻返回，且不碰绑定", async () => {
+    appendRevision.mockClear();
+    await flushPendingRevisionAppends();
+    expect(pendingRevisionAppendCount()).toBe(0);
+    expect(appendRevision).not.toHaveBeenCalled();
+  });
+
+  it("md5 没变被加速器吃掉的那次不待在途集合里", async () => {
+    observeLoadedDocument(conn(), target, { content: "a\n", format: "yaml", md5: "same" });
+    await settle();
+    expect(pendingRevisionAppendCount()).toBe(0);
+
+    observeLoadedDocument(conn(), target, { content: "a\n", format: "yaml", md5: "same" });
+    expect(pendingRevisionAppendCount(), "被加速器跳过的那次也该占一个待决位").toBe(0);
+    await flushPendingRevisionAppends();
   });
 });

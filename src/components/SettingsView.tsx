@@ -6,6 +6,7 @@ import {
   CONFIG_REVISION_KEEP_SOURCE_MISSING,
   CONFIG_REVISION_KEEP_SOURCE_OUT_OF_RANGE,
   CONFIG_REVISION_KEEP_SOURCE_UNREADABLE,
+  flushPendingRevisionAppends,
   getConfigRevisionPolicy,
   pruneConfigRevisionsByPolicy,
   resetConfigRevisionAccelerator,
@@ -380,11 +381,25 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     safeCall(CheckDataRootRollback, (status) => {
       setRollbackStatus(status);
     });
-    // 版本历史的体量事实：旧 Go 二进制没有这颗绑定就让它缺席（safeCall 已吞同步抛与 reject），
-    // 界面据此不摆一颗点了必然报错的「清除」键。
-    safeCall(GetConfigRevisionFacts, (facts) => {
-      setRevisionFacts(facts);
-    });
+    /*
+     * 版本历史的体量事实：旧 Go 二进制没有这颗绑定就让它缺席（safeCall 已吞同步抛与 reject），
+     * 界面据此不摆一颗点了必然报错的「清除」键。
+     *
+     * 读之前先等在途的版本追加落地（真机 LH-04 实测红过）：追加是 fire-and-forget 的，
+     * 挂载那一刻读到的可能是中途快照，而这一行只在挂载时读一次——落后的那几条永远不会自己补上，
+     * 用户看到的「已记录 N 版」就长期比文件里少几条。等不到（降级环境）也照常读：
+     * 整块数字缺席比一个可能偏小的数更糟。
+     */
+    void (async () => {
+      try {
+        await flushPendingRevisionAppends();
+      } catch {
+        /* 在途追加等不动也继续读，理由见上 */
+      }
+      safeCall(GetConfigRevisionFacts, (facts) => {
+        setRevisionFacts(facts);
+      });
+    })();
     // 策略与钉住清单（轮99）：绑定缺失或读不出来就整块不出现（safeCall 吞 reject，
     // apply 永不执行），界面绝不在读不到策略的事实上摆「保存成功」的按钮。
     if (revisionPolicyStoreAvailable()) {
@@ -585,6 +600,16 @@ export default function SettingsView({ onOpenAbout }: SettingsViewProps) {
     setRevisionResult("");
     setRevisionError("");
     try {
+      /*
+       * 清除是把那份文件删掉。若此刻还有版本追加在途，它会在新文件里留下一条，
+       * 用户刚点的「清除」就成了没清干净（现象：提示已清除，体量却回到 1 版）。
+       * 所以先等在途的追加落地，再删。等不到就照常删——清除不许被日志链路拖住。
+       */
+      try {
+        await flushPendingRevisionAppends();
+      } catch {
+        /* 在途追加等不动也继续清除 */
+      }
       await ClearConfigRevisions();
       resetConfigRevisionAccelerator();
       setRevisionResult("ok");

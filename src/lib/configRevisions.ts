@@ -79,6 +79,16 @@ const KEY_SEPARATOR = String.fromCharCode(0);
  */
 const lastSeenServerMD5 = new Map<string, string>();
 
+/**
+ * 在途的版本追加。
+ *
+ * 追加本身必须 fire-and-forget（记不上历史不许拖住读取与写入），但「文件里到底有几版」这类
+ * 体量事实是另一回事：谁要把这个数说给用户听，就得先保证此刻没有还没落地的追加，
+ * 否则说出口的是中途快照，而且界面上那一行不会自己再读一次，用户看到的数从此永远少几条。
+ * 每个在途 promise 都在自己落地时从这份集合里摘掉，flush 只等真的还没完的那些。
+ */
+const pendingAppends = new Set<Promise<void>>();
+
 /** 版本记录的归属键：连接 + 命名空间 + 分组 + dataId。 */
 export function configRevisionKeyOf(connectionId: string, target: ConfigRevisionTarget): string {
   return [connectionId, target.namespace, target.group, target.dataId].join(KEY_SEPARATOR);
@@ -98,6 +108,30 @@ export function resetConfigRevisionAccelerator(): void {
 /** 当前记住的 md5 条数，仅诊断与测试用。 */
 export function configRevisionAcceleratorSize(): number {
   return lastSeenServerMD5.size;
+}
+
+/** 还没落地的版本追加条数，仅诊断与测试用。 */
+export function pendingRevisionAppendCount(): number {
+  return pendingAppends.size;
+}
+
+/** flush 的轮数上限：一轮 allSettled 后回调里新冒出的追加还能再等，但不能无限等。 */
+const FLUSH_ROUNDS_LIMIT = 8;
+
+/**
+ * 等所有在途的版本追加落地。
+ *
+ * 用在两处：①设置页读「本机版本历史」的体量事实之前；②清除本机版本历史之前——清除是把那份
+ * 文件删掉，若还有追加在途，它会在新文件里留下一条，用户刚点的「清除」就变成了没清干净。
+ * 等待本身不许把调用方拖进失败：追加是尽力而为，超时或抛错都由调用方按「读到的数照常显示」降级，
+ * 所以这里吞掉所有结果（allSettled），并且设轮数上限，防止有人在回调里连环追加导致永不返回。
+ */
+export async function flushPendingRevisionAppends(): Promise<void> {
+  for (let round = 0; round < FLUSH_ROUNDS_LIMIT; round += 1) {
+    const inflight = [...pendingAppends];
+    if (inflight.length === 0) return;
+    await Promise.allSettled(inflight);
+  }
 }
 
 function buildInput(
@@ -131,7 +165,7 @@ function buildInput(
 /** 只发一次绑定调用，结果如何都不许打扰调用方；成功才记住 md5，失败要留着重来的机会。 */
 function appendRevision(input: ConfigRevisionInput, memoKey: string): void {
   try {
-    void AppendConfigRevision(input)
+    const task = AppendConfigRevision(input)
       .then((result) => {
         // appended / duplicate / promoted 三种结果都意味着「这一版已在文件里」，此时才可以记住 md5。
         if (!result || typeof result !== "object") return;
@@ -140,6 +174,13 @@ function appendRevision(input: ConfigRevisionInput, memoKey: string): void {
       .catch(() => {
         /* 记不上这一版不该影响任何功能 */
       });
+    pendingAppends.add(task);
+    // 用 then 而不是 finally 摘除：task 自己也要被这条链的返回值接住，
+    // 集合里只留真正还没落地的，flush 才可能在第一次 allSettled 后就返回。
+    void task.then(
+      () => pendingAppends.delete(task),
+      () => pendingAppends.delete(task)
+    );
   } catch {
     /* 纯浏览器 / web 模式下绑定不存在 */
   }
