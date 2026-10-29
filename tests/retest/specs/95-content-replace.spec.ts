@@ -44,10 +44,10 @@ async function startContentReplace(page: import("@playwright/test").Page) {
   await search.press("Enter");
   await expect(page.locator(".browser-item-id", { hasText: "svc-billing.yaml" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".browser-item-id", { hasText: "svc-search.yaml" })).toBeVisible({ timeout: 30_000 });
-  expect(await page.locator(".browser-item-id").count()).toBe(2);
+  await expect(page.locator(".browser-item-id")).toHaveCount(2, { timeout: 30_000 });
 
   const checks = page.locator(".browser-result-check input");
-  expect(await checks.count()).toBe(2);
+  await expect(checks).toHaveCount(2);
   await checks.first().check();
   await checks.last().check();
 

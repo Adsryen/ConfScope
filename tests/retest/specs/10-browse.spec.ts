@@ -21,15 +21,19 @@ test("T-BR-01/02 浏览: 命名空间与 dataId 搜索列出播种配置", async
   await expect(page.locator(".browser-item-id", { hasText: "svc-gateway.yaml" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".browser-item-id", { hasText: "svc-legacy-prod.yaml" }).first()).toBeVisible();
   await expect(page.locator(".browser-item-id", { hasText: "svc-pay.json" })).toBeVisible();
-  expect(await page.locator(".browser-item-id").count()).toBe(13);
+  await expect(page.locator(".browser-item-id")).toHaveCount(13);
 
   // dataId 搜索
   const search = page.locator(".browser-search-input, .search-input.wide").first();
   await search.fill("svc-pay");
   await search.press("Enter");
-  await expect(page.locator(".browser-item-id", { hasText: "svc-pay.json" })).toBeVisible({ timeout: 15_000 });
+  // 顺序与写法都要改：过滤是带 debounce 的异步重渲染，机器忙的时候这两条 hasText
+  // 会在**还没过滤的 13 条列表**上先双双成立（svc-pay.* 本来就在里面），
+  // 紧跟其后的一次性 count 读数就会撞上渲染窗口（轮123 实测读到 13）。
+  // toHaveCount 会重试到列表只剩 2 条，读不到才算失败——过滤没生效照样是红的。
+  await expect(page.locator(".browser-item-id")).toHaveCount(2, { timeout: 15_000 });
+  await expect(page.locator(".browser-item-id", { hasText: "svc-pay.json" })).toBeVisible();
   await expect(page.locator(".browser-item-id", { hasText: "svc-pay.properties" })).toBeVisible();
-  expect(await page.locator(".browser-item-id").count()).toBe(2);
   // 清空搜索, 恢复完整列表(否则后续分组切换会带着搜索词, 列表只有 2 项)
   await search.fill("");
   await search.press("Enter");
@@ -52,30 +56,30 @@ test("T-BR-01/02 浏览: 命名空间与 dataId 搜索列出播种配置", async
   await expect(page.locator(".browser-item-id", { hasText: "svc-common.env" })).toBeVisible({ timeout: 15_000 });
   // 全部分组下应包含 13 个 RETEST-PROD + svc-order.toml(RETEST-ORDER)
   // + svc-notify.yaml(RETEST-MESSENGE) + svc-monitor.properties(DEFAULT_GROUP) = 16
-  expect(await page.locator(".browser-item-id").count()).toBe(16);
+  await expect(page.locator(".browser-item-id")).toHaveCount(16);
   // 切到 RETEST-ORDER → 只剩 1 个（svc-order.toml）
   await pickGroup("RETEST-ORDER");
   await search.fill("");
   await search.press("Enter");
-  expect(await page.locator(".browser-item-id").count()).toBe(1);
+  await expect(page.locator(".browser-item-id")).toHaveCount(1);
   await expect(page.locator(".browser-item-id", { hasText: "svc-order.toml" })).toBeVisible();
   // 切到 RETEST-MESSENGE → 只剩 1 个（svc-notify.yaml）
   await pickGroup("RETEST-MESSENGE");
   await search.fill("");
   await search.press("Enter");
-  expect(await page.locator(".browser-item-id").count()).toBe(1);
+  await expect(page.locator(".browser-item-id")).toHaveCount(1);
   await expect(page.locator(".browser-item-id", { hasText: "svc-notify.yaml" })).toBeVisible();
   // 切到 DEFAULT_GROUP → 只剩 1 个（svc-monitor.properties）
   await pickGroup("DEFAULT_GROUP");
   await search.fill("");
   await search.press("Enter");
-  expect(await page.locator(".browser-item-id").count()).toBe(1);
+  await expect(page.locator(".browser-item-id")).toHaveCount(1);
   await expect(page.locator(".browser-item-id", { hasText: "svc-monitor.properties" })).toBeVisible();
   // 再切回 RETEST-PROD → 13
   await pickGroup("RETEST-PROD");
   await search.fill("");
   await search.press("Enter");
-  expect(await page.locator(".browser-item-id").count()).toBe(13);
+  await expect(page.locator(".browser-item-id")).toHaveCount(13);
   await page.screenshot({ path: "results/br01-list.png", fullPage: true });
 });
 
