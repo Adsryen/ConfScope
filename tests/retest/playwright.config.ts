@@ -10,6 +10,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
+  // 起批前先抢「同一套 nacos 只允许一批真机」的互斥锁，收尾释放（r129 事故后新增）。
+  // 抢不到锁时 globalSetup 直接抛错，整批不跑——比跑完 26 分钟才发现数据被对面重播种好得多。
+  globalSetup: "./globalSetup.ts",
+  globalTeardown: "./globalTeardown.ts",
   use: {
     baseURL: state.webServerUrl,
     // 动作/导航必须有显式上限。默认 actionTimeout=0 意味着「等不到可点」会一路等到 test 超时
