@@ -29,7 +29,13 @@ test("T-CONN-01/02 连接管理: 新建→测试→保存→删除", async ({ pa
   const projectField = page.locator("label.field").filter({ has: page.locator("span:has-text('项目')") });
   await projectField.locator("select").selectOption({ label: "新建项目…" });
   await projectField.locator("input").fill("ConnRetest");
-  await page.locator("label.field").filter({ has: page.locator("span:has-text('环境')") }).locator("select").selectOption("测试");
+  // 标题匹配必须精确到整词：r114 给连接表单加了「环境角色」，has-text('环境') 会同时命中
+  // 「环境」与「环境角色」两只 select，strict mode 当场报歧义。改成只认 field-label 下那只
+  // 正文恰好等于「环境」的标题 span（必填星号与帮助图标是同级兄弟节点，不在其内）。
+  const envField = page
+    .locator("label.field")
+    .filter({ has: page.locator("span.field-label > span:text-is('环境')") });
+  await envField.locator("select").selectOption("测试");
   await page.locator("label.field").filter({ has: page.locator("span:has-text('来源名称')") }).locator("input").fill("retest-tmp");
   await page.locator("label.field").filter({ has: page.locator("span:has-text('目标地址')") }).locator("input").fill(A.baseUrl);
   await page.locator("label.field").filter({ has: page.locator("span:has-text('默认命名空间')") }).locator("input").fill(A.namespace);
