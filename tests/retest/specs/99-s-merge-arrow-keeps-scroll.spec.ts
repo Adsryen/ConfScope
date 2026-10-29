@@ -7,10 +7,16 @@
 // 「同一份文件被合并改内容」，rightText 一变就把唯一滚动容器 .diff-body 的
 // scrollTop/scrollLeft 归零——左右两列同处这一个容器里，于是「两侧一起跳到顶端」。
 // 本文件把这条链真机钉死：
-//   MA-01 正文滚动位置在箭头点击后必须保住（当前实现预期红——红就是缺陷本身）；
-//   MA-02 已打开的「微调右侧」抽屉里的编辑框（真·受控 textarea）在箭头点击后
-//         滚动与草稿都不许动（工单「首要嫌疑」= 受控 textarea 被重新赋值归零；
-//         此条若绿，该嫌疑出局，归零只能是 .diff-body 那条 hook）。
+//   MA-01 正文滚动位置在箭头点击后必须保住；
+//   MA-02 微调弹层打开时箭头根本够不着（命中测试落在遮罩上）；
+//   MA-03 「打开微调弹层」这一下不许动正文滚动位置；
+//   MA-04 取消=收起：重开还是同一份字迹（逐字节）；
+//   MA-05 收起弹层后点箭头，滚动仍按 MA-01 的判据保住。
+//
+// r136 口径变更（本轮迁移，别照旧写回）：原先 MA-02 假设「微调抽屉内嵌在结果区上方，
+// 抽屉开着还能点到底下的箭头」。现在微调是全屏弹窗（EditorDialog），背后一切被遮罩挡住，
+// 那条假设整体作废——所以旧的「抽屉里 textarea 滚动不许动」拆成上面 MA-02~MA-05 四条，
+// 各自钉一件事：够不着 / 开弹窗不改滚动 / 收起不丢字 / 收起后箭头仍不改滚动。
 //
 // 点击一律走 DOM click（page.evaluate 内 el.click()）：Playwright 的 locator.click()
 // 会把元素滚进视口，先污染再测量就没法区分「谁动的手」。
@@ -130,6 +136,18 @@ async function bootstrap(page: import("@playwright/test").Page) {
   await dismissStartupDialog(page);
 }
 
+/** 打开批量结果区的「微调右侧」弹层，并确认编辑器真的可用（弹层 + textarea 同时可见）。 */
+async function openTuneDialog(page: import("@playwright/test").Page) {
+  await page.locator(".batch-diff-main .tune-toggle").first().click();
+  await expect(page.locator(".modal-editor")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".diff-tune-panel .code-editor-ta")).toBeVisible({ timeout: 10_000 });
+}
+
+/** 微调编辑框当前草稿长度（做「同一份字迹」的指纹）。 */
+async function readTuneValueLen(page: import("@playwright/test").Page): Promise<number> {
+  return page.evaluate(() => (document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement).value.length);
+}
+
 test("MA-01 点「拿左侧到右侧预览」后 .diff-body 滚动位置必须保住", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
@@ -183,71 +201,132 @@ test("MA-01 点「拿左侧到右侧预览」后 .diff-body 滚动位置必须�
   await page.screenshot({ path: "results/ma01-merge-arrow-scroll.png" });
 });
 
-test("MA-02 已打开的微调抽屉：箭头点击不许动它的滚动与草稿（受控 textarea 嫌疑的对照测量）", async ({ page, retest }) => {
+test("MA-02 微调弹层打开时，箭头被遮罩挡住（旧「抽屉里点箭头」场景已不存在）", async ({ page, retest }) => {
   test.setTimeout(300_000);
   await installRetestBridge(page, retest);
   await republishRetestData();
   await bootstrap(page);
   await enterBatchGatewayDiff(page);
 
-  // 打开「微调右侧」抽屉（批量结果头部的 tune-toggle）
-  await page.locator(".batch-diff-main .tune-toggle").first().click();
-  const tuneTa = page.locator(".diff-tune-panel .code-editor-ta");
-  await expect(tuneTa).toBeVisible({ timeout: 10_000 });
+  await openTuneDialog(page);
 
-  const before = await page.evaluate(() => {
-    const ta = document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement;
-    const pre = document.querySelector(".diff-tune-panel .code-editor-pre") as HTMLElement;
-    if (!ta || !pre) throw new Error("微调抽屉里的编辑框不在");
-    const max = ta.scrollHeight - ta.clientHeight;
-    if (max < 100) throw new Error(`微调编辑框可滚空间太小（max=${max}），测量无意义`);
-    ta.scrollTop = Math.floor(max / 2);
+  // 命中测试：箭头几何中心那一点，最上层是谁。落在遮罩上 = 点不到箭头，
+  // 这正是「内嵌抽屉会被背后的箭头干扰」这类缺陷的结构性解法。
+  const hit = await page.evaluate((sel) => {
+    const btn = (Array.from(document.querySelectorAll(sel)) as HTMLButtonElement[]).find((b) => !b.disabled && b.offsetParent !== null);
+    if (!btn) throw new Error("箭头不在，测量无意义");
+    const r = btn.getBoundingClientRect();
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) as HTMLElement;
+    const chain: string[] = [];
+    // 一路走到根：遮罩在很外面，只数四层就断言「落在遮罩上」是自己把判据写窄了（首轮真机红在这）
+    for (let cur: HTMLElement | null = el; cur; cur = cur.parentElement) {
+      chain.push(cur.tagName.toLowerCase() + (cur.className ? "." + String(cur.className).split(" ")[0] : ""));
+    }
     return {
-      taTop: ta.scrollTop,
-      taLeft: ta.scrollLeft,
-      preTop: pre.scrollTop,
-      preLeft: pre.scrollLeft,
-      valueLen: ta.value.length,
-      valueHead: ta.value.slice(0, 40),
+      top: chain[0] ?? "",
+      chain,
+      // 命中点被弹层这一层接管 = 点不到箭头。至于是挡在遮罩上还是挡在弹窗正文上，不影响结论。
+      coveredByDialogLayer: el.closest(".modal-overlay") !== null,
+      hitIsArrow: el.closest(sel) !== null,
     };
+  }, ARROW_SEL);
+  console.log(
+    `[MA-02 命中留痕] 箭头中心最上层=${hit.top}；被弹层这一层接管=${hit.coveredByDialogLayer}；命中的就是箭头本身=${hit.hitIsArrow}` +
+      `；祖先链=${JSON.stringify(hit.chain.slice(0, 6))}`
+  );
+  expect(hit.coveredByDialogLayer, `弹层开着却还能命中箭头本身：最上层=${hit.top}`).toBe(true);
+  expect(hit.hitIsArrow, "elementFromPoint 直接命中箭头：遮罩没盖住它，用户还是能在微调途中点到底下的箭头").toBe(false);
+  await page.screenshot({ path: "results/ma02-tune-dialog-blocks-arrow.png" });
+});
+
+test("MA-03 打开微调弹层这一下不许动正文滚动位置", async ({ page, retest }) => {
+  test.setTimeout(300_000);
+  await installRetestBridge(page, retest);
+  await republishRetestData();
+  await bootstrap(page);
+  await enterBatchGatewayDiff(page);
+
+  await scrollToMidBody(page);
+  const before = await readBodyScroll(page);
+  expect(before.self.top, "前置：滚动没有落到 50% 位置，测量无效").toBeGreaterThan(100);
+
+  await openTuneDialog(page);
+  // 弹层挂载会带 focus trap / body 滚动锁一类的副作用，读正文滚动要等它们跑完一拍
+  await page.waitForTimeout(300);
+  const after = await readBodyScroll(page);
+  console.log(`[MA-03 滚动留痕] 打开弹层前后 scrollTop ${before.self.top} → ${after.self.top}（scrollLeft ${before.self.left} → ${after.self.left}）`);
+  expect(
+    Math.abs(after.self.top - before.self.top),
+    `打开微调弹层把正文从 ${before.self.top} 拽到 ${after.self.top}：弹层是盖在上面的层，不该动背后容器的滚动`
+  ).toBeLessThanOrEqual(SCROLL_TOLERANCE_PX);
+  await page.screenshot({ path: "results/ma03-open-dialog-keeps-scroll.png" });
+});
+
+test("MA-04 取消=收起：重开弹层字迹逐字节不变", async ({ page, retest }) => {
+  test.setTimeout(300_000);
+  await installRetestBridge(page, retest);
+  await republishRetestData();
+  await bootstrap(page);
+  await enterBatchGatewayDiff(page);
+
+  await openTuneDialog(page);
+  // 手写字迹：追加一行，作为「同一份草稿」的指纹
+  const typed = await page.evaluate(() => {
+    const ta = document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement;
+    if (!ta) throw new Error("微调编辑框不在");
+    const marker = `# retest-tune-draft-${Date.now()}`;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    setter.call(ta, `${ta.value}\n${marker}`);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return marker;
   });
-  // 给 onScroll→syncScroll 一拍，读 pre 的最终跟手值
   await page.waitForTimeout(200);
-  const beforeSync = await page.evaluate(() => {
-    const pre = document.querySelector(".diff-tune-panel .code-editor-pre") as HTMLElement;
-    return { preTop: pre.scrollTop, preLeft: pre.scrollLeft };
+  const draftLen = await readTuneValueLen(page);
+
+  await page.locator(".modal-editor .modal-footer").getByRole("button", { name: "取消" }).click();
+  await expect(page.locator(".modal-editor")).toHaveCount(0, { timeout: 10_000 });
+
+  await page.locator(".batch-diff-main .tune-toggle").first().click();
+  await expect(page.locator(".modal-editor")).toBeVisible({ timeout: 10_000 });
+  const reopened = await page.evaluate(() => {
+    const ta = document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement;
+    if (!ta) throw new Error("重开后编辑框不在");
+    return { len: ta.value.length, hasMarker: ta.value.includes("# retest-tune-draft-") };
   });
+  console.log(`[MA-04 草稿留痕] 手写字迹=${JSON.stringify(typed)}；长度 ${draftLen} → 重开 ${reopened.len}；标记仍在=${reopened.hasMarker}`);
+  expect(reopened.hasMarker, "取消后重开，手写的字迹不见了：收起被实现成了丢弃").toBe(true);
+  expect(reopened.len, `重开后草稿长度 ${draftLen} → ${reopened.len}，字迹不是逐字节同一份`).toBe(draftLen);
+  await page.screenshot({ path: "results/ma04-cancel-keeps-draft.png" });
+});
+
+test("MA-05 收起弹层后点箭头，正文滚动仍按 MA-01 判据保住", async ({ page, retest }) => {
+  test.setTimeout(300_000);
+  await installRetestBridge(page, retest);
+  await republishRetestData();
+  await bootstrap(page);
+  await enterBatchGatewayDiff(page);
+
+  // 先进一次弹层再退出，确保这条测的是「用过微调之后」的箭头，而不是干净页面
+  await openTuneDialog(page);
+  await page.locator(".modal-editor .modal-header .modal-x").click();
+  await expect(page.locator(".modal-editor")).toHaveCount(0, { timeout: 10_000 });
+
+  await scrollToMidBody(page);
+  const before = await readBodyScroll(page);
+  const rowsBefore = await readRowGeometry(page);
+  expect(before.self.top, "前置：滚动没有落到 50% 位置，测量无效").toBeGreaterThan(100);
 
   await domClickFirstArrow(page);
   await expect(page.locator(".merge-draft-summary")).toContainText(/待带入右侧 \d+ 个文件/, { timeout: 10_000 });
 
-  const after = await page.evaluate(() => {
-    const ta = document.querySelector(".diff-tune-panel .code-editor-ta") as HTMLTextAreaElement;
-    const pre = document.querySelector(".diff-tune-panel .code-editor-pre") as HTMLElement;
-    return {
-      taTop: ta.scrollTop,
-      taLeft: ta.scrollLeft,
-      preTop: pre.scrollTop,
-      preLeft: pre.scrollLeft,
-      valueLen: ta.value.length,
-      valueHead: ta.value.slice(0, 40),
-    };
-  });
+  const after = await readBodyScroll(page);
+  const rowsAfter = await readRowGeometry(page);
   console.log(
-    `[MA-02 微调抽屉留痕] ta.scrollTop ${before.taTop} → ${after.taTop}（pre 跟手 ${beforeSync.preTop} → ${after.preTop}）` +
-      `；草稿 value.length ${before.valueLen} → ${after.valueLen}` +
-      `；value 头 ${JSON.stringify(before.valueHead)} → ${JSON.stringify(after.valueHead)}`
+    `[MA-05 滚动留痕] scrollTop ${before.self.top} → ${after.self.top}；首个可见行 ${rowsBefore.firstVisibleIndex} → ${rowsAfter.firstVisibleIndex}`
   );
-
-  expect(
-    Math.abs(after.taTop - before.taTop),
-    `箭头点击把微调编辑框从 scrollTop=${before.taTop} 拽到 ${after.taTop}：抽屉里这份草稿的 value 没有变，` +
-      `受控 textarea 不该有任何理由动（工单首要嫌疑若成立，红的应该正是这里）`
-  ).toBeLessThanOrEqual(SCROLL_TOLERANCE_PX);
-  expect(
-    Math.abs(after.preTop - after.taTop),
-    `pre 层没跟上 textarea（ta=${after.taTop} pre=${after.preTop}），两层滚动分叉`
-  ).toBeLessThanOrEqual(SCROLL_TOLERANCE_PX);
-  expect(after.valueLen, "草稿被箭头点击动了长度：合并预览与微调草稿是两份状态，不许互串").toBe(before.valueLen);
-  await page.screenshot({ path: "results/ma02-tune-drawer-untouched.png" });
+  expect(rowsAfter.firstVisibleIndex, `收起弹层后点箭头把视口弹回开头：首个可见行 ${rowsBefore.firstVisibleIndex} → ${rowsAfter.firstVisibleIndex}`).toBe(
+    rowsBefore.firstVisibleIndex
+  );
+  expect(Math.abs(after.self.top - before.self.top), "滚动偏移超过一行行高").toBeLessThanOrEqual(ROW_HEIGHT_PX);
+  await page.screenshot({ path: "results/ma05-arrow-after-dialog.png" });
 });
