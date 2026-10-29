@@ -2,6 +2,7 @@ import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
 import { dismissStartupDialog } from "./ui";
+import { setRetestConfigSourceExportDir, setRetestConfigSourceExportFailure } from "../bridge/retestBinding";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -111,35 +112,89 @@ test("A10 导出当前列表: 产生真实 json 下载且任务中心出现成�
   await page.screenshot({ path: "results/a10-export-task.png", fullPage: true });
 });
 
-// A10-b: 浏览页「导出源文件到目录」→ 目录选择器为桌面端能力，浏览器环境不可用：
-//       预期优雅报错（toast 含「导出源文件到目录」+ 消息中心 error 条目），不崩溃、无下载
-test("A10 导出源文件到目录: 浏览器环境优雅报错并记录消息中心", async ({ page }) => {
+// A10-b「导出源文件到目录」拆成两条真实分支（上一版把它写成「浏览器环境不可用 ⇒ 优雅报错」，
+// 但 retest 桥早就替身了目录选择与写盘，那个前提在真机批里不成立，于是永远走成功分支、断不到错误）。
+// 现在钉的是产品自己的两条承诺：
+//   ① 用户在原生目录选择器里取消 → 全程静默（不报错、不建任务、不写操作历史、不产生下载）；
+//   ② 目录选好了但写盘失败 → 优雅报错并四处留痕（toast + 消息中心 error + 任务中心失败终态 + 操作历史 failure）。
+test("A10-b 导出源文件到目录: 取消目录选择全程静默", async ({ page }) => {
   await boot(page);
   await nav(page, "配置浏览");
   await expect(page.locator(".browser-item-id").first()).toBeVisible({ timeout: 30_000 });
 
-  const downloadSeen = page.waitForEvent("download", { timeout: 15_000 }).then(
+  setRetestConfigSourceExportDir(""); // 目录选择器返回空串 = 用户取消
+  const downloadSeen = page.waitForEvent("download", { timeout: 8_000 }).then(
     () => true,
     () => false
   );
 
+  await openMessageCenter(page);
+  const msgCountBefore = await page.locator(".message-panel .message-item").count();
+  await page.mouse.move(4, 4); // 收起浮层
+  await page.waitForTimeout(200);
+
+  await page.getByRole("button", { name: "导出源文件到目录" }).click();
+  await page.waitForTimeout(1_500);
+
+  // 一条提示都不该有（含错误提示）
+  await expect(page.locator(".toaster .toast")).toHaveCount(0);
+  // 消息中心一条都不多
+  await openMessageCenter(page);
+  expect(await page.locator(".message-panel .message-item").count(), "取消导出不该产生任何消息").toBe(msgCountBefore);
+  await page.mouse.move(4, 4);
+  await page.waitForTimeout(200);
+  // 任务中心没有导出任务
+  await nav(page, "任务中心");
+  await expect(page.locator(".task-center .task-item").filter({ hasText: "导出源文件目录" })).toHaveCount(0);
+  // 操作历史没有这次导出（取消不算一次操作）
+  await nav(page, "操作历史");
+  await expect(page.locator(".op-history-item").filter({ has: page.locator(".history-type.export") })).toHaveCount(0);
+  // 没有下载，页面也没崩
+  expect(await downloadSeen).toBe(false);
+  await nav(page, "配置浏览");
+  await expect(page.locator(".browser-item-id").first()).toBeVisible({ timeout: 5_000 });
+  await page.screenshot({ path: "results/a10-export-dir-cancel.png", fullPage: true });
+});
+
+test("A10-b2 导出源文件到目录: 写盘失败优雅报错并四处留痕", async ({ page }) => {
+  await boot(page);
+  await nav(page, "配置浏览");
+  await expect(page.locator(".browser-item-id").first()).toBeVisible({ timeout: 30_000 });
+
+  const DISK_FULL = "写入文件失败: no space left on device";
+  setRetestConfigSourceExportDir("/tmp/confscope-retest-exports");
+  setRetestConfigSourceExportFailure(DISK_FULL);
+
   await page.getByRole("button", { name: "导出源文件到目录" }).click();
 
-  // 优雅报错 toast（文案含来源标题「导出源文件到目录」）
-  await expect(
-    page.locator(".toaster .toast", { hasText: /导出源文件到目录/ }).first()
-  ).toBeVisible({ timeout: 10_000 });
+  // 优雅报错：toast 是 error 档、点名这次操作（产品口径把完整原因收进消息中心，不塞进浮层）
+  const errToast = page.locator(".toaster .toast-error", { hasText: /导出源文件到目录/ }).first();
+  await expect(errToast).toBeVisible({ timeout: 10_000 });
 
-  // 消息中心出现对应错误条目
+  // 消息中心出现 error 条目
   await openMessageCenter(page);
-  await expect(
-    page.locator(".message-item").filter({ hasText: "导出源文件到目录" }).first()
-  ).toBeVisible({ timeout: 10_000 });
+  const msg = page.locator(".message-item.message-error").filter({ hasText: "导出源文件到目录" }).first();
+  await expect(msg).toBeVisible({ timeout: 10_000 });
+  expect(await msg.locator(".message-text").innerText(), "消息中心必须把失败原因如实转出来").toContain(DISK_FULL);
+  await page.mouse.move(4, 4);
 
-  // 未产生下载
-  expect(await downloadSeen).toBe(false);
+  // 任务中心：这条导出任务以失败终态收场
+  await nav(page, "任务中心");
+  const failedTask = page.locator(".task-center .task-item").filter({ hasText: "导出源文件目录" }).first();
+  await expect(failedTask).toBeVisible({ timeout: 20_000 });
+  await expect(failedTask.locator(".task-status-failed")).toBeVisible({ timeout: 10_000 });
 
-  // 页面未崩溃：浏览列表仍在
+  // 操作历史：失败也要留痕，且明确标为失败（回滚类入口对它不该出现）
+  await nav(page, "操作历史");
+  const failedRecord = page
+    .locator(".op-history-item")
+    .filter({ has: page.locator(".history-type.export") })
+    .filter({ has: page.locator(".history-result.failure") })
+    .first();
+  await expect(failedRecord).toBeVisible({ timeout: 15_000 });
+
+  // 页面未崩溃：回到浏览页列表仍在
+  await nav(page, "配置浏览");
   await expect(page.locator(".browser-item-id").first()).toBeVisible({ timeout: 5_000 });
-  await page.screenshot({ path: "results/a10-export-dir-graceful.png", fullPage: true });
+  await page.screenshot({ path: "results/a10-export-dir-failure.png", fullPage: true });
 });

@@ -196,6 +196,7 @@ async function resolvePoint(page: Page, probe: Probe): Promise<ProbePoint> {
  * - 兜底（native=false）：必须 defaultPrevented=true，且 expect 里至少一块的位移 == min(120, 余量)；
  * - 原生（native=true）：必须 defaultPrevented=false，且 expect 里那块自己滚起来了；
  * - expect 为空：谁都不许动 + 不取消默认动作（`.page-header`、黑名单子树都是这一支）；
+ *   「不许动」的尺子是 offenders（expect/allow 之外动了的），allow 里的容器自己原生滚起来算合规；
  * - expect/allow 之外的容器一律不许动 —— 「不跨列」与「抢外层面板」都由这条抓住。
  */
 async function runProbe(page: Page, probe: Probe, failures: string[]): Promise<void> {
@@ -233,15 +234,21 @@ async function runProbe(page: Page, probe: Probe, failures: string[]): Promise<v
 
   const problems: string[] = [];
   if (expect.length === 0) {
-    if (moved.length > 0) problems.push(`谁都不许动，却动了 ${offenders.map(([n, d]) => `${n}:${d}`).join(",")}`);
     if (spy?.prevented) problems.push("不该取消默认动作却取消了（原生被抢）");
   } else if (!hitExpected) {
     problems.push(
       `expect=${expect.join("/")} 没按预期滚动，位移=${expect.map((n) => `${n}:${deltas[n] ?? 0}`).join(",")}（应为 ${wantDelta}）`
     );
   }
-  if (offenders.length > 0 && expect.length > 0) {
-    problems.push(`动到了不该动的 ${offenders.map(([n, d]) => `${n}:${d}`).join(",")}`);
+  // 「谁都不许动」与「不许动到别处」共用一把尺子： offenders。
+  // 上一版空 expect 分支比的是 moved.length，于是 allow 里的列原生滚起来也被判违规
+  // （计划页 .apply-detail 自 r113 起自己是可滚列，正偏移会落到它身上 → 报错文案冒号后面是空的）。
+  if (offenders.length > 0) {
+    problems.push(
+      `${expect.length === 0 ? "谁都不许动，却动了" : "动到了不该动的"} ${offenders
+        .map(([n, d]) => `${n}:${d}`)
+        .join(",")}`
+    );
   }
   if (spy && spy.deltaMode !== 0) problems.push(`deltaMode=${spy.deltaMode}：探针发的应该是像素档`);
   if (probe.native && spy?.prevented) problems.push("这一格必须整个交还原生，但 defaultPrevented=true");

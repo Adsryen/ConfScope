@@ -1134,13 +1134,16 @@ export function resetRetestUpdateHandoff() {
 //   · 读不回报 secret not found，删除幂等（securestore_windows.go:119 not-found → nil）；
 //   · 快照文件列表/恢复对齐便携快照目录，恢复拒绝空路径与穿越路径（app.go:879 同构检查）；
 //   · 导出的两种失败（空目录 / 无配置）文案对齐 provider.WriteConfigSourceDirectory，
-//     目录选择返回空串 = 用户取消（ConfigBrowser.tsx:997 靠这个短路，不能当成错误）。
+//     目录选择返回空串 = 用户取消（runExportSourceFilesToDirectory 靠它短路，不能当成错误）；
+//     「目录选好但写盘失败」这条分支由 setRetestConfigSourceExportFailure 驱动，
+//     用例才能把「取消要静默 / 失败要留痕」两种承诺分别钉住（见 96-export A10-b）。
 const RETEST_SECRET_BLOB_LIMIT = 5 * 512;
 const RETEST_SECRET_TARGET_PREFIX = "ConfScope";
 const RETEST_EXPORT_DIR = "/tmp/confscope-retest-exports";
 
 let secureStoreUnsupported = false;
 let pendingConfigSourceExportDir: string | null = null;
+let configSourceExportFailure: string | null = null;
 
 /** 驱动「本机不支持系统凭据库」分支（Linux/WSL 上 Go 侧就是这个形态）。 */
 export function setRetestSecureStoreUnsupported(unsupported: boolean): void {
@@ -1152,10 +1155,16 @@ export function setRetestConfigSourceExportDir(target: string | null): void {
   pendingConfigSourceExportDir = target;
 }
 
+/** 让「导出源文件到目录」在写盘那一步失败（模拟磁盘满/只读目录等真机故障）；传 null 恢复成功分支。 */
+export function setRetestConfigSourceExportFailure(message: string | null): void {
+  configSourceExportFailure = message;
+}
+
 /** 桥内每用例重置，避免上一个用例写进的凭据/快照泄漏到下一个用例的断言里。 */
 export function resetRetestSecureSecrets(): void {
   secureStoreUnsupported = false;
   pendingConfigSourceExportDir = null;
+  configSourceExportFailure = null;
 }
 
 /**
@@ -2140,6 +2149,7 @@ export function createRetestInvoke(): RetestInvoke {
         const configs = (args[2] ?? []) as unknown[];
         if (targetDir === "") throw new Error("导出目录不能为空");
         if (configs.length === 0) throw new Error("没有可导出的配置");
+        if (configSourceExportFailure) throw new Error(configSourceExportFailure);
         return { path: targetDir, configCount: configs.length, manifest: `${targetDir}/metadata.json` };
       }
       case "AppendAuditEvent": {

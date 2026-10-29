@@ -105,7 +105,8 @@ test("S-HK-03 指纹已变更：硬阻断，只一个「确定」，不提供任
   expect(all).toMatch(/记录指纹: SHA256:1{20,}/);
   expect(all).toContain("服务端现在出示的指纹");
   expect(all).toContain(`记录文件: ${KNOWN_HOSTS_PATH}`);
-  expect(all).toContain(`要删除的记录: ${HOST_CHANGED}:${PORT}`);
+  // recordID 对齐 OpenSSH known_hosts：非 22 端口写成 [host]:port（internal/ssh/knownhosts.go recordID）
+  expect(all).toContain(`要删除的记录: [${HOST_CHANGED}]:${PORT}`);
   // 放行入口一个都不许有：footer 只一颗按钮，全弹层找不到「仍然连接」类字样
   const footerButtons = modal.locator(".modal-footer button");
   await expect(footerButtons).toHaveCount(1);
