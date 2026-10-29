@@ -356,6 +356,22 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   await expect(page.locator(".audit-matrix-body .audit-matrix-row").first()).toBeVisible({ timeout: 60_000 });
   await page.locator(".audit-matrix-body .audit-matrix-row").first().click();
   await expect(page.locator(".audit-detail").first()).toBeVisible({ timeout: 10_000 });
+  // 重复配置清单改成默认收起 + 每页 10 组之后，这一档不展开就少扫约 340 个文本节点
+  // （实测 165 < 下限 505）。下限不许压低：塌下来的这 340 个节点正是清单里最可能出现
+  // 对比度缺口的地方（chip、徽标、忽略项都是新加的次要色）。普查的做法是把它展开并翻完分页，
+  // 让扫描范围回到原来的宽度。
+  const dupToggle = page.locator(".dup-check-toggle").first();
+  await expect(dupToggle).toBeVisible({ timeout: 10_000 });
+  if ((await dupToggle.getAttribute("aria-expanded")) !== "true") {
+    await dupToggle.click();
+  }
+  await expect(page.locator(".dup-check-group").first()).toBeVisible({ timeout: 10_000 });
+  for (let i = 0; i < 20; i += 1) {
+    const more = page.locator(".dup-check-more");
+    if ((await more.count()) === 0) break;
+    await more.click();
+    await page.waitForTimeout(120);
+  }
   await page.waitForTimeout(500);
   await take("配置矩阵+详情");
 
