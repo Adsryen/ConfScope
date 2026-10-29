@@ -59,7 +59,8 @@ describe("半截写入的跳过出口", () => {
     const decl = plan.slice(plan.indexOf("const skipDisabled"), plan.indexOf("const skipDisabled") + 200);
     expect(decl).toContain("!ready");
     expect(decl).toContain("anyRunning");
-    expect(decl).toContain("executionSucceeded");
+    // 第二趟的门槛按项算（轮134）：整版都写完了才灭，不再是「成功过一次就永久锁死这一页」
+    expect(decl).toContain("remainingWork === 0");
     expect(plan).toMatch(/disabled=\{skipDisabled\}/);
     // 灰按钮自己得说清缺哪一步（R19）
     const block = plan.slice(plan.indexOf('className="apply-skip-exit"'), plan.indexOf("apply-skip-exit-hint"));
@@ -74,7 +75,10 @@ describe("半截写入的跳过出口", () => {
     // setState 之后这一趟 runPlan 读到的还是旧勾选，失败项会被再写一遍
     expect(handler).toMatch(/void runPlan\(false, remaining\)/);
     expect(plan).toMatch(/const runPlan = async \(dryRun: boolean, selectedOverride\?: string\[\]\)/);
-    expect(plan).toMatch(/const selectedItemIds = \(selectedOverride \?\? Array\.from\(selectedIds\)\)/);
+    // 落笔对象的唯一来源（轮134）：显式覆盖 > 只读预演走 resolveDryRunItemIds > 执行走当前勾选，
+    // 两条按钮都从这一份出发，否则守卫显示的数与实际写的数会各说各话。
+    expect(plan).toContain("const requestedIds = selectedOverride ?? (dryRun ? dryRunItemIds : Array.from(selectedIds));");
+    expect(plan).toContain("const selectedItemIds = requestedIds.filter(");
     expect(plan.match(/await executeApplyPlan\(/g) ?? [], "跳过出口不许自己再调一次执行器").toHaveLength(1);
   });
 
@@ -86,7 +90,9 @@ describe("半截写入的跳过出口", () => {
     expect(at, "全部已达成的分支被删了？").toBeGreaterThan(-1);
     const branch = plan.slice(at, plan.indexOf("} else {", at));
     expect(branch).toMatch(/setNothingToWrite\(true\)/);
-    expect(branch, "什么都没写却点亮成功态，晋级面板与工作流都会跟着说谎").not.toMatch(/setExecutionSucceeded\(true\)/);
+    expect(branch, "什么都没写却点亮成功态，工作流与执行按钮都会跟着说谎").not.toMatch(/setExecutionCompleted\(/);
+    // 项级的「已应用」账本同一条红线：没落笔就不许有项被记成写过（执行按钮据此灭）
+    expect(branch).not.toMatch(/setAppliedItemIds\(/);
 
     const css = readScannedSource("src/styles.css");
     // 可选中名单是整条选择器列表，只有真列在里面才算数（它自己的规则块不等于可选中）
@@ -104,7 +110,7 @@ describe("半截写入的跳过出口", () => {
 
   it("成功横幅的「已应用 N 项」跟着执行器那份落笔清单，不许按勾选数重算", () => {
     const plan = readScannedSource(PLAN);
-    const at = plan.indexOf("setExecutionSucceeded(true)");
+    const at = plan.indexOf("setExecutionCompleted(!sandboxTarget)");
     expect(at, "成功分支不见了？").toBeGreaterThan(-1);
     const branch = plan.slice(at, plan.indexOf("auditSessionEvent(session", at));
     // 回读结论的 total 就是这一轮真写了几条；勾了却没写（已是这一版）不能算进横幅

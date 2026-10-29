@@ -204,6 +204,7 @@ function PlanItemList({
   plan,
   selectedId,
   selectedIds,
+  appliedIds,
   onSelect,
   onToggleSelected,
   onSelectAll,
@@ -212,6 +213,8 @@ function PlanItemList({
   plan: ApplyPlan;
   selectedId: string;
   selectedIds: Set<string>;
+  /** 本计划里已经真写进目标的项（轮134）：勾不回来，也再不许被写第二遍。 */
+  appliedIds: Set<string>;
   onSelect: (id: string) => void;
   onToggleSelected: (id: string) => void;
   onSelectAll: () => void;
@@ -232,12 +235,13 @@ function PlanItemList({
         </div>
       </div>
       {plan.items.map((item) => {
-        const selectable = isSelectableApplyItem(item);
+        const applied = appliedIds.has(item.id);
+        const selectable = isSelectableApplyItem(item) && !applied;
         const checked = selectedIds.has(item.id);
         return (
           <label
             key={item.id}
-            className={`apply-item-row${item.id === selectedId ? " selected" : ""}${item.blocked ? " blocked" : ""}${checked ? " checked" : ""}`}
+            className={`apply-item-row${item.id === selectedId ? " selected" : ""}${item.blocked ? " blocked" : ""}${checked ? " checked" : ""}${applied ? " applied" : ""}`}
             onClick={() => onSelect(item.id)}
           >
             <input
@@ -261,6 +265,11 @@ function PlanItemList({
             {item.manualTuned && (
               <span className="tune-badge" title={t("apply.manualTunedHint")}>
                 {t("apply.manualTuned")}
+              </span>
+            )}
+            {applied && (
+              <span className="tune-badge is-applied" title={t("apply.itemAppliedHint")}>
+                {t("apply.itemApplied")}
               </span>
             )}
           </label>
@@ -476,6 +485,20 @@ function PostWriteVerificationPanel({ verification }: { verification: ApplyWrite
   );
 }
 
+/**
+ * 只读预演这一轮到底覆盖哪几项（轮134）。
+ * 勾选出来的可执行项优先；勾选被「写完自动摘掉」清空、而整版又都写过了，回落到刚写过的那批——
+ * 写完再干跑一次核对目标现状是执行后最自然的下一步，把预演一起灰掉等于逼用户重新生成计划（R55-D3）。
+ * 用户自己点「全不选」不触发回落：那时还剩没写的项，清空是有意为之，预演确实没有对象。
+ */
+function resolveDryRunItemIds(plan: ApplyPlan, selectedIds: Set<string>, appliedItemIds: Set<string>): string[] {
+  const previewable = plan.items.filter((item) => isSelectableApplyItem(item)).map((item) => item.id);
+  const chosen = previewable.filter((id) => selectedIds.has(id));
+  if (chosen.length > 0) return chosen;
+  if (previewable.length === 0) return [];
+  return previewable.every((id) => appliedItemIds.has(id)) ? previewable : [];
+}
+
 function ConfirmationPanel({
   plan,
   selectedCount,
@@ -489,7 +512,9 @@ function ConfirmationPanel({
   executeProgress,
   executeNotice,
   executionTask,
-  executionSucceeded,
+  remainingWork,
+  appliedCount,
+  dryRunCount,
   writeVerification,
   executeHistoryId,
   alreadyAppliedRefs,
@@ -516,7 +541,12 @@ function ConfirmationPanel({
   executeProgress: ApplyExecutionProgress | null;
   executeNotice: string | null;
   executionTask: Task | null;
-  executionSucceeded: boolean;
+  /** 本计划里还没真写进目标的可执行项数（轮134）。 */
+  remainingWork: number;
+  /** 本计划已经真写进目标的项数。 */
+  appliedCount: number;
+  /** 这一轮只读预演实际覆盖到的项数（轮134）：勾选为空但整版已写完时回落到刚写过的那批。 */
+  dryRunCount: number;
   /** 写后回读结论（R55-B2）：dry-run 与没落笔的失败都是 null——没验证过就别装作验证过。 */
   writeVerification: ApplyWriteVerification | null;
   /** 本次执行写进操作历史的记录 id；拿不到就没有回退入口可指。 */
@@ -546,13 +576,15 @@ function ConfirmationPanel({
   const typedText = confirmationText.trim();
   const ready = manualConfirmRequired ? typedText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
-  // 只读预演不受「这个计划已经成功执行过一次」的限制：写完想再干跑一次核对目标现状，
+  // 只读预演不受「这一批已经写过了」的限制：写完想再干跑一次核对目标现状，
   // 是执行之后最自然的下一步，把它灰掉等于逼用户重新生成一份计划（R55-D3）。
-  const dryRunDisabled = anyRunning || selectedCount === 0;
+  // 判据看 dryRunCount（预演实际覆盖到的项数）而不是勾选数——写过的项会自动退出勾选，
+  // 这时预演对象回落到刚写过的那批，按钮不能跟着一起灭（轮134）。
+  const dryRunDisabled = anyRunning || dryRunCount === 0;
   // 执行守卫基于「已勾选且可执行」的项：存在 blocked 项本身不再全局禁用按钮，
   // 用户可取消勾选阻断项后执行其余项（执行层 runPlan 仍会兜底过滤 blocked/parse_error/skip）。
   const selectedHasBlocked = plan.items.some((item) => selectedIds.has(item.id) && !isSelectableApplyItem(item));
-  const executeDisabled = !ready || anyRunning || executionSucceeded || selectedCount === 0 || selectedHasBlocked;
+  const executeDisabled = !ready || anyRunning || remainingWork === 0 || selectedCount === 0 || selectedHasBlocked;
   // 半截失败的第二条出口（轮98）：摘掉失败项后还有得写才给这颗按钮，
   // 「跳过最后一项」变成空跑没有意义。守卫沿用执行按钮那一份（确认文本/执行中/已成功一次），
   // 只是把"勾选项里含失败项"这条摘掉——少选一项不可能是新的风险动作。
@@ -562,14 +594,20 @@ function ConfirmationPanel({
     ? plan.items.filter((item) => selectedIds.has(item.id) && item.id !== skipCandidateId && isSelectableApplyItem(item))
     : [];
   const canSkipFailedItem = Boolean(skipCandidateId) && remainingAfterSkip.length > 0;
-  const skipDisabled = !ready || anyRunning || executionSucceeded;
+  const skipDisabled = !ready || anyRunning || remainingWork === 0;
   // 灰按钮必须自己说清缺哪一步（R19）：五个原因并成一个 disabled，用户只能一个个开关去试。
   // title 挂在包裹按钮的 .btn-guard 上而不是按钮本身——disabled 的元素收不到 pointer 事件，
   // 浏览器根本不出 tooltip（与 ConnectionManager 的端口守卫同一写法）。
   const blockers: Array<{ id: string; label: string; alsoDryRun: boolean }> = [];
   if (anyRunning) blockers.push({ id: "running", label: t("apply.blockRunning"), alsoDryRun: true });
-  if (executionSucceeded) blockers.push({ id: "succeeded", label: t("apply.blockSucceeded"), alsoDryRun: false });
-  if (selectedCount === 0) blockers.push({ id: "noSelection", label: t("apply.blockNoSelection"), alsoDryRun: true });
+  // 「这一版没有剩下要写的项」与「一项都没勾」是两条独立原因，必须分开说：
+  // 前者该重新生成计划，后者只需要勾上（轮134 之前它们被同一颗整计划锁混成了一条）。
+  if (remainingWork === 0 && appliedCount > 0) blockers.push({ id: "allApplied", label: t("apply.blockAllApplied"), alsoDryRun: false });
+  // 「整版都写完了」自己就给出了出口（重新生成计划），别再补一句「请勾选至少一项」——
+  // 这时勾选框是灭的，让人去勾选等于指错路（轮134）。
+  if (selectedCount === 0 && !(remainingWork === 0 && appliedCount > 0)) {
+    blockers.push({ id: "noSelection", label: t("apply.blockNoSelection"), alsoDryRun: true });
+  }
   if (selectedHasBlocked) blockers.push({ id: "hasBlocked", label: t("apply.blockHasBlocked"), alsoDryRun: false });
   if (!ready) {
     blockers.push({
@@ -597,9 +635,9 @@ function ConfirmationPanel({
   const dryRunLabel =
     executionMode === "dry-run"
       ? t("apply.dryRunExecuting")
-      : selectedCount === plan.items.length
+      : dryRunCount === plan.items.length
         ? t("apply.dryRun")
-        : t("apply.dryRunSelected", { count: selectedCount });
+        : t("apply.dryRunSelected", { count: dryRunCount });
 
   return (
     <div className="apply-confirmation" aria-label={t("apply.confirmationLabel")}>
@@ -795,7 +833,15 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const [executionMode, setExecutionMode] = useState<ExecutionMode | null>(null);
   const [lastExecutionMode, setLastExecutionMode] = useState<ExecutionMode | null>(null);
   const [executionCompleted, setExecutionCompleted] = useState(false);
-  const [executionSucceeded, setExecutionSucceeded] = useState(false);
+  /**
+   * 本计划已经真写进目标的项（轮134）。
+   *
+   * 为什么按项而不是一个「已成功执行过一次」的总闸：一份计划里多条变更是分次执行是常态
+   * （第 1 条写完想接着写第 2 条），旧口径把整颗执行按钮永久灰到「重新生成计划」，
+   * 用户看到的是按钮坏了。清单来源只有一个——执行器逐项回调里 result==="success" 的那些项，
+   * 与「已应用 N 项」用的是同一份落笔事实，不许拿勾选数重算。
+   */
+  const [appliedItemIds, setAppliedItemIds] = useState<Set<string>>(new Set());
   const [executionTask, setExecutionTask] = useState<Task | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
   // 失败时的「已写入几项 / 第几项断的」（R55-A2）：跟着 executeError 一起清，避免留旧数
@@ -939,7 +985,6 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setExecutionMode(null);
     setLastExecutionMode(null);
     setExecutionCompleted(false);
-    setExecutionSucceeded(false);
     setExecutionTask(null);
     trackedTaskIdRef.current = null;
     setExecuteError(null);
@@ -950,6 +995,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setWriteVerification(null);
     setAlreadyAppliedRefs([]);
     setNothingToWrite(false);
+    setAppliedItemIds(new Set());
     buildDraft();
   }, [buildDraft]);
 
@@ -987,6 +1033,10 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const manualConfirmRequired = plan ? requiresManualApplyConfirm(targetConnection, plan.target) : false;
   const sandboxTarget = plan ? isSandboxTarget(targetConnection, plan) : false;
   const selectedCount = selectedIds.size;
+  // 还没真写进目标的可执行项：执行按钮的唯一「还有活儿」判据（轮134，替掉整计划一次性锁死）
+  const remainingWork = plan ? plan.items.filter((item) => isSelectableApplyItem(item) && !appliedItemIds.has(item.id)).length : 0;
+  // 只读预演这一轮实际覆盖哪几项（轮134），按钮文案/守卫与 runPlan 共用这一份结论。
+  const dryRunItemIds = plan ? resolveDryRunItemIds(plan, selectedIds, appliedItemIds) : [];
   const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
 
   const updateTargetEdit = useCallback((itemId: string, next: TargetEdit | null) => {
@@ -1034,7 +1084,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const candidate of plan.items) {
-        if (isSelectableApplyItem(candidate)) next.add(candidate.id);
+        if (isSelectableApplyItem(candidate) && !appliedItemIds.has(candidate.id)) next.add(candidate.id);
       }
       return next;
     });
@@ -1085,7 +1135,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const toggleSelectedItem = (id: string) => {
     if (!plan) return;
     const item = plan.items.find((candidate) => candidate.id === id);
-    if (!item || !isSelectableApplyItem(item)) return;
+    if (!item || !isSelectableApplyItem(item) || appliedItemIds.has(item.id)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1103,7 +1153,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const skipFailedItemAndContinue = (itemId: string) => {
     if (!plan) return;
     const remaining = plan.items
-      .filter((item) => selectedIds.has(item.id) && item.id !== itemId && isSelectableApplyItem(item))
+      .filter((item) => selectedIds.has(item.id) && item.id !== itemId && isSelectableApplyItem(item) && !appliedItemIds.has(item.id))
       .map((item) => item.id);
     // 勾选与执行用同一份清单：界面上那颗复选框必须跟着灭掉，否则用户看到的还是"这几项待写"
     setSelectedIds(new Set(remaining));
@@ -1114,9 +1164,14 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     if (!plan || executionMode) return;
     // 始终过滤 blocked/parse_error/skip 项：勾选框禁用只是 UI 层守卫，
     // 这里是执行层兜底，避免任何来源（含旧计划数据）把阻断项写入目标。
-    const selectedItemIds = (selectedOverride ?? Array.from(selectedIds)).filter((id) => {
+    // 落笔的对象与只读预演的对象不是同一份（轮134）：预演走 resolveDryRunItemIds 的回落口径。
+    const requestedIds = selectedOverride ?? (dryRun ? dryRunItemIds : Array.from(selectedIds));
+    const selectedItemIds = requestedIds.filter((id) => {
       const item = plan.items.find((candidate) => candidate.id === id);
-      return item ? isSelectableApplyItem(item) : false;
+      if (!item || !isSelectableApplyItem(item)) return false;
+      // 执行层兜底第二条：已经真写进目标的项不再进第二趟（重试/跳过都只写没写过的那几条）。
+      // 这一条只挡真正要落笔的执行——预演什么都不写，不该被它挡住。
+      return dryRun || !appliedItemIds.has(item.id);
     });
     if (selectedItemIds.length === 0) {
       setExecuteNotice(null);
@@ -1131,7 +1186,6 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setLastExecutionMode(dryRun ? "dry-run" : "apply");
     if (!dryRun) {
       setExecutionCompleted(false);
-      setExecutionSucceeded(false);
     }
     setExecutionTask(null);
     trackedTaskIdRef.current = null;
@@ -1171,6 +1225,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       },
     });
     try {
+      // 这一批真正落笔成功的项（执行器逐项回调给的事实，成功与半截失败两条出口都要吃它）
+      const writtenItemIds: string[] = [];
       const result = await executeApplyPlan(
         plan,
         {
@@ -1210,6 +1266,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
           },
           ...(dryRun ? { dryRun: true } : {}),
           onItemResult: (r) => {
+            if (!dryRun && r.result === "success") writtenItemIds.push(r.item.id);
             sessionEventSafe(session, {
               kind: "apply_item_result",
               scope: "apply",
@@ -1233,6 +1290,13 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
           },
         }
       );
+      // 落笔即记账（轮134）：半截失败也一样——前面真写成的那几条已经改了目标，
+      // 不记进已应用清单，下一趟会把它们再写一遍，而「跳过这一项」承诺的恰恰是不重复写。
+      if (writtenItemIds.length > 0) {
+        const justApplied = new Set(writtenItemIds);
+        setAppliedItemIds((prev) => new Set([...prev, ...justApplied]));
+        setSelectedIds((prev) => new Set(Array.from(prev).filter((id) => !justApplied.has(id))));
+      }
       const resultHistoryId = "historyId" in result ? result.historyId : undefined;
       // 写后回读结论：成功与「半截写入」两条出口都可能有（dry-run 恒无，没写就不验）
       const writeVerificationResult = "verification" in result ? result.verification : undefined;
@@ -1266,13 +1330,12 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       if ("dryRun" in result && result.dryRun) {
         setExecuteNotice(t("apply.dryRunCompleted", { count: result.plannedWrites }));
       } else if ("alreadyAppliedOnly" in result && result.alreadyAppliedOnly) {
-        // 没写就不许记成功：executionSucceeded / executionCompleted 都留在原值——
-        // 工作流「已完成」那条线靠它们点亮，这里点亮了就是假话。
+        // 没写就不许记成功：executionCompleted 留在原值、这一轮也不进「已应用」账本——
+        // 工作流「已完成」那条线与执行按钮都靠它们点亮，这里点亮了就是假话。
         setNothingToWrite(true);
         setExecuteNotice(t("apply.alreadyAppliedOnly"));
       } else {
         setExecutionCompleted(!sandboxTarget);
-        setExecutionSucceeded(true);
         // 「已应用 N 项」的 N 取执行器那份落笔清单：verification.total 与操作历史的 appliedLocations
         // 是写入循环里同一个 `if (!itemError)` 攒出来的两份视图，天生同源。
         // 界面不许拿勾选数重算——轮98 的跳过出口让「勾了 2 条、只写 1 条」成为常态，
@@ -1421,6 +1484,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
                 plan={plan}
                 selectedId={selectedItem?.id ?? ""}
                 selectedIds={selectedIds}
+                appliedIds={appliedItemIds}
                 onSelect={setSelectedId}
                 onToggleSelected={toggleSelectedItem}
                 onSelectAll={selectAllItems}
@@ -1450,7 +1514,9 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
               executeProgress={executeProgress}
               executeNotice={executeNotice}
               executionTask={executionTask}
-              executionSucceeded={executionSucceeded}
+              remainingWork={remainingWork}
+              appliedCount={appliedItemIds.size}
+              dryRunCount={dryRunItemIds.length}
               writeVerification={writeVerification}
               executeHistoryId={executeHistoryId}
               executeRecord={executeRecord}

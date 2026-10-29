@@ -1132,13 +1132,20 @@ describe("ApplyPlanView", () => {
       sourceConnection: sourceConn,
       targetConnection: safeTargetConn,
     });
-    // 手动收尾的执行，用来把组件停在「任务进行中」这一帧
+    // 手动收尾的执行，用来把组件停在「任务进行中」这一帧。
+    // 落笔项照实从 onItemResult 里出来（轮134）：界面认的是执行器那份清单，不是勾选数。
     let finishExecution: ((result: { ok: true; taskId: string; historyId: string }) => void) | undefined;
+    let reportItem: ((result: { item: ApplyPlan["items"][number]; kind: string; result: string }) => void) | undefined;
     executionMocks.executeApplyPlan.mockImplementationOnce(
-      () =>
-        new Promise<{ ok: true; taskId: string; historyId: string }>((resolve) => {
-          finishExecution = resolve;
-        })
+      (_plan: ApplyPlan, _deps: unknown, options: { onItemResult?: typeof reportItem }) => {
+        reportItem = options.onItemResult;
+        return new Promise<{ ok: true; taskId: string; historyId: string }>((resolve) => {
+          finishExecution = (result) => {
+            reportItem?.({ item: plan.items[0], kind: "publish", result: "success" });
+            resolve(result);
+          };
+        });
+      }
     );
 
     renderView(entryPayload, [sourceConn, safeTargetConn]);
@@ -1157,14 +1164,18 @@ describe("ApplyPlanView", () => {
 
     finishExecution?.({ ok: true, taskId: "task-blocker-1", historyId: "history-blocker-1" });
 
-    const succeededReason = "This plan already ran successfully; generate a new plan to run again.";
-    expect(await screen.findByText(succeededReason)).toBeInTheDocument();
+    const allAppliedReason = "Every item in this plan has been applied. To change them again, generate a new plan.";
+    expect(await screen.findByText(allAppliedReason)).toBeInTheDocument();
     // 执行成功后只读预演照样能跑（R55-D3）：dry-run 按钮可用且守卫不带原因，
-    // 「已执行过」只挡真正会落笔的执行按钮。
+    // 「都写完了」只挡真正会落笔的执行按钮。
     const dryRunButton = screen.getByRole("button", { name: "Dry-run check" });
     expect(dryRunButton).toBeEnabled();
     expect(dryRunButton.closest(".btn-guard")).not.toHaveAttribute("title");
-    expect(screen.getByRole("button", { name: "Execute change" }).closest(".btn-guard")).toHaveAttribute("title", succeededReason);
+    // 整版写完后只剩一条原因：勾选项是「写完自动摘掉」的，再挂一句「请勾选至少一项」
+    // 会把人指到一颗本来就灭着的勾选框上（轮134）。
+    const executeGuard = screen.getByRole("button", { name: "Execute selected (0)" }).closest(".btn-guard");
+    expect(executeGuard).toHaveAttribute("title", allAppliedReason);
+    expect(screen.queryByText("Select at least one item.")).not.toBeInTheDocument();
   });
 
   // ── 波16：执行安全网三条（R55-A5 关窗/离开、R55-A6 失败重试、R55-A2 部分写入进度） ──
@@ -1205,7 +1216,7 @@ describe("ApplyPlanView", () => {
 
     // 任务收尾后守卫必须摘掉：留在 body 上会拦掉之后每一次正常关窗
     finishExecution();
-    await screen.findByText(/This plan already ran successfully/);
+    await screen.findByText(/Change executed\. Applied items: 1/);
     const closingAgain = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(closingAgain);
     expect(closingAgain.defaultPrevented).toBe(false);
@@ -1650,6 +1661,37 @@ describe("ApplyPlanView", () => {
     expect(document.querySelector(".apply-partial-write")).toBeNull();
   });
 
+  it("目标已经是这一版的那一轮不进「已应用」账本：项不灭、执行按钮也不锁", async () => {
+    const plan = partialWritePlan();
+    // 执行器逐条回报的是 alreadyApplied 而不是 success：一个字节都没写，就不许有项被记成写过
+    executionMocks.executeApplyPlan.mockImplementationOnce(
+      (
+        _p: ApplyPlan,
+        _d: unknown,
+        options: { onItemResult?: (r: { item: ApplyPlan["items"][number]; kind: string; result: string }) => void }
+      ) => {
+        plan.items.forEach((item) => options.onItemResult?.({ item, kind: "publish", result: "alreadyApplied" }));
+        return Promise.resolve({
+          ok: true,
+          taskId: "task-skip-6b",
+          alreadyAppliedOnly: true,
+          alreadyApplied: ["public/DEFAULT_GROUP/app.properties (first.key)"],
+        });
+      }
+    );
+
+    await executeOnce(plan);
+    await waitFor(() => expect(document.querySelector(".apply-already-applied")).toBeTruthy());
+
+    expect(document.querySelectorAll(".apply-item-row.applied")).toHaveLength(0);
+    expect(screen.queryByText("Applied")).toBeNull();
+    // 空跑不该把执行按钮锁成「都写完了」：还剩 3 项没真写进目标
+    const execute = screen.getByRole("button", { name: "Execute change" });
+    expect(execute).toBeEnabled();
+    expect(execute.closest(".btn-guard")).not.toHaveAttribute("title");
+    expect(screen.queryByText("Every item in this plan has been applied. To change them again, generate a new plan.")).toBeNull();
+  });
+
   it("混合成功时绿横幅与信息行各说各的：写了的说写了，没写的说没写", async () => {
     const plan = partialWritePlan();
     executionMocks.executeApplyPlan.mockResolvedValueOnce({
@@ -2048,6 +2090,187 @@ describe("ApplyPlanView", () => {
       expect(steps[2].querySelector("button")).toBeInTheDocument();
       expect(steps[0]).toHaveAttribute("title", expect.stringContaining("Back to"));
       cleanup();
+    });
+  });
+
+  // ── 轮134：一条计划里的多项变更要能分次执行（用户报的「执行选中点第二次就灰了」） ──
+  describe("同一份计划里的多条变更项分次执行", () => {
+    type WriteReport = { item: ApplyPlan["items"][number]; kind: string; result: string };
+
+    function twoItemPlan(): ApplyPlan {
+      return makePlan(
+        [
+          item("first.key", value("server.port=8080"), value("server.port=9090")),
+          item("second.key", value("log.level=info"), value("log.level=warn")),
+        ],
+        { targetId: "conn-stage", targetLabel: "Staging / public" }
+      );
+    }
+
+    /**
+     * 执行器按「这一批勾了哪几项」如实回报落笔结果。
+     * 界面必须从 onItemResult 认已应用项，而不是从勾选数或整计划成功位猜。
+     */
+    function stagePlan(plan: ApplyPlan) {
+      draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+        ok: true,
+        plan,
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+      executionMocks.executeApplyPlan.mockImplementation(
+        (_p: ApplyPlan, _d: unknown, options: { selectedItemIds: string[]; dryRun?: boolean; onItemResult?: (r: WriteReport) => void }) => {
+          // 只读预演那趟什么都不写，一条落笔结果都不许报（轮134）
+          if (options.dryRun) {
+            return Promise.resolve({ ok: true, dryRun: true, taskId: "task-multi-dry", plannedWrites: options.selectedItemIds.length });
+          }
+          options.selectedItemIds.forEach((id) => {
+            const found = plan.items.find((candidate) => candidate.id === id);
+            if (found) options.onItemResult?.({ item: found, kind: "publish", result: "success" });
+          });
+          return Promise.resolve({ ok: true, taskId: "task-multi", historyId: "history-multi" });
+        }
+      );
+      return renderView(entryPayload, [sourceConn, safeTargetConn]);
+    }
+
+    function checks(): NodeListOf<Element> {
+      return document.querySelectorAll(".apply-item-check");
+    }
+
+    it("第一批只写一项：写过的标成已应用并灭掉勾选，没写过的那项还能继续执行", async () => {
+      const plan = twoItemPlan();
+      stagePlan(plan);
+
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+      // 默认全选，先摘掉第 1 项，这一批只写第 2 项
+      fireEvent.click(checks()[0]);
+      await waitFor(() => expect(checks()[0]).not.toBeChecked());
+      fireEvent.click(screen.getByRole("button", { name: "Execute selected (1)" }));
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+
+      // 写过的那项：勾选框禁用 + 「已应用」标记，并且自动退出勾选（不然计数会说谎）
+      await waitFor(() => expect(checks()[1]).toBeDisabled());
+      expect(checks()[1]).not.toBeChecked();
+      expect(document.querySelectorAll(".apply-item-row")[1]).toHaveClass("applied");
+      expect(screen.getByText("Applied")).toBeInTheDocument();
+      // 没写过的那项必须还能选、还能执行——这正是用户点不下去的那颗按钮
+      expect(checks()[0]).toBeEnabled();
+      fireEvent.click(checks()[0]);
+      const second = await screen.findByRole("button", { name: "Execute selected (1)" });
+      expect(second).toBeEnabled();
+      fireEvent.click(second);
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
+      expect(executionMocks.executeApplyPlan).toHaveBeenLastCalledWith(
+        plan,
+        expect.any(Object),
+        expect.objectContaining({ selectedItemIds: [plan.items[0].id] })
+      );
+    });
+
+    it("两项都写完才收口：执行按钮灰掉，原因点名「这一版没有剩下要写的项」而不是让用户猜", async () => {
+      const plan = twoItemPlan();
+      stagePlan(plan);
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+
+      await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[0]).toHaveClass("applied"));
+      expect(document.querySelectorAll(".apply-item-row")[1]).toHaveClass("applied");
+      expect(screen.getByText("Every item in this plan has been applied. To change them again, generate a new plan.")).toBeInTheDocument();
+      // 全选按钮不能把已写过的项再塞回勾选，否则「执行选中」又会亮起来骗人
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      await waitFor(() => expect(checks()[0]).toBeDisabled());
+      // 两处计数（清单工具条 / 确认区）必须同时归零，不许一处说 0 一处说 2
+      expect(screen.getAllByText("Selected change items: 0")).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Execute selected (0)" })).toBeDisabled();
+      // 只读预演不挡（R55-D3 同一口径）
+      expect(screen.getByRole("button", { name: "Dry-run check" })).toBeEnabled();
+    });
+
+    it("写完一部分后只读预演照样能跑，整版写完后预演回落到刚写过的那批（R55-D3）", async () => {
+      const plan = twoItemPlan();
+      stagePlan(plan);
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+      // 第一批摘掉第 1 项，只写第 2 项
+      fireEvent.click(checks()[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Execute selected (1)" }));
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[1]).toHaveClass("applied"));
+
+      // 这一批只写第 2 项，第 1 项从来没被勾过：勾选归零时预演不回落（清空是用户自己的选择，
+      // 不是写完摘掉的副作用），所以此刻要说「请勾选至少一项」，而不是假装能预演
+      expect(screen.getByText("Select at least one item.")).toBeInTheDocument();
+      fireEvent.click(checks()[0]);
+      await waitFor(() => expect(checks()[0]).toBeChecked());
+      expect(screen.queryByText("Select at least one item.")).not.toBeInTheDocument();
+
+      // 还没写过的那项进了勾选：预演按钮按「选中 1 项」的口径亮着，且只覆盖这一项
+      fireEvent.click(screen.getByRole("button", { name: "Dry-run selected (1)" }));
+      expect(await screen.findByText(/Dry-run passed/)).toBeInTheDocument();
+      expect(executionMocks.executeApplyPlan).toHaveBeenLastCalledWith(
+        plan,
+        expect.any(Object),
+        expect.objectContaining({ selectedItemIds: [plan.items[0].id] })
+      );
+
+      // 再写掉最后一项：整版写完、勾选归零，预演不能跟着一起灭——
+      // 「写完再干跑一次核对目标现状」是执行之后最自然的下一步（R55-D3）。
+      fireEvent.click(screen.getByRole("button", { name: "Execute selected (1)" }));
+      await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[0]).toHaveClass("applied"));
+
+      const dryRunButton = screen.getByRole("button", { name: "Dry-run check" });
+      expect(dryRunButton).toBeEnabled();
+      expect(dryRunButton.closest(".btn-guard")).not.toHaveAttribute("title");
+      fireEvent.click(dryRunButton);
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(4));
+      expect(executionMocks.executeApplyPlan).toHaveBeenLastCalledWith(
+        plan,
+        expect.any(Object),
+        expect.objectContaining({ selectedItemIds: plan.items.map((candidate) => candidate.id) })
+      );
+    });
+
+    it("半截失败：已经写成功的项不再进入第二趟，重试清单只剩没写过的", async () => {
+      const plan = twoItemPlan();
+      draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
+        ok: true,
+        plan,
+        sourceConnection: sourceConn,
+        targetConnection: safeTargetConn,
+      });
+      let call = 0;
+      executionMocks.executeApplyPlan.mockImplementation(
+        (_p: ApplyPlan, _d: unknown, options: { selectedItemIds: string[]; onItemResult?: (r: WriteReport) => void }) => {
+          call += 1;
+          options.onItemResult?.({ item: plan.items[0], kind: "publish", result: "success" });
+          if (call === 1) {
+            return Promise.resolve({
+              ok: false,
+              taskId: "task-multi-fail",
+              error: "Nacos 返回 403",
+              progress: { completedWrites: 1, totalWrites: 2, failedIndex: 2, failedItemId: plan.items[1].id },
+            });
+          }
+          options.onItemResult?.({ item: plan.items[1], kind: "publish", result: "success" });
+          return Promise.resolve({ ok: true, taskId: "task-multi-retry", historyId: "history-multi-retry" });
+        }
+      );
+      renderView(entryPayload, [sourceConn, safeTargetConn]);
+      fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
+      fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(1));
+
+      // 第 1 项真写进去了 ⇒ 它必须被标成已应用；失败的第 2 项仍然可选可重试
+      await waitFor(() => expect(document.querySelectorAll(".apply-item-row")[0]).toHaveClass("applied"));
+      expect(checks()[1]).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Execute selected (1)" }));
+      await waitFor(() => expect(executionMocks.executeApplyPlan).toHaveBeenCalledTimes(2));
+      expect(executionMocks.executeApplyPlan).toHaveBeenLastCalledWith(
+        plan,
+        expect.any(Object),
+        expect.objectContaining({ selectedItemIds: [plan.items[1].id] })
+      );
     });
   });
 });

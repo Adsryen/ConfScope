@@ -13,6 +13,9 @@
  * PS-01 三项计划 → 第 2 项注入拒绝 → 失败屏出现「跳过这一项，继续剩下的」（与回退入口并存）
  *       → 点它 → 第 3 项落库、第 1 项 publish 计数仍是 1（本轮最硬的一条证据）、
  *         第 2 项一次都没被尝试；操作历史里成功记录的「本次改动」只有第 3 项。
+ *         这一条从轮134 起有两层保障：界面按项记住「已应用」，重试/跳过那一趟不再把写成的那条
+ *         发给执行器（那条瞬时提示因此改由行级徽章承担）；执行器自己「目标已经是这一版就不写」
+ *         的豁免继续兜住重进页面、拿旧计划再执行的场合。
  * PS-02 计划生成后由「另一个人」把目标写成我们要的那一版（外部 publish A 内容到 B）
  *       → dry-run 报「计划写入 0 项」并说明 2 项已达成 → 执行 → 屏上如实说没有写入、
  *         没有绿色成功横幅、桥侧 0 条 publish、操作历史 0 条 apply 记录。
@@ -195,8 +198,16 @@ test("PS-01 半截失败后「跳过这一项继续剩下的」: 已写成的不
   await expect(skipBtn, "跳过出口被守卫锁死（确认勾选没延到这一步？）").toBeEnabled();
   const exits = await view.locator(".apply-skip-exit, .apply-rollback-entry").evaluateAll((nodes) => nodes.map((node) => node.className));
   expect(exits, "两条出口少了一条或顺序反了").toEqual(["apply-skip-exit", "apply-rollback-entry"]);
+  // 轮134 起这个数从 2 变成 1：第 1 条已经真写进目标，项级账本当场把它从勾选中摘掉，
+  // 「跳过失败项后还剩几条要写」从此只数没写过的那条。旧口径的 2 会把已经写成的那条也算进
+  // 「要再执行一次」的清单里，与同一时刻行上的「已应用」徽章自相矛盾。
   const hint = await skipExit.locator(".apply-skip-exit-hint").innerText();
-  expect(hint.replace(/\s+/g, ""), "跳过出口没说清剩下几条").toContain("剩下的2项");
+  expect(hint.replace(/\s+/g, ""), "跳过出口把已写成那条还算进待执行清单").toContain("剩下的1项");
+  // 同一屏上账本已经生效：第 1 条标成已应用、勾不回来，剩下要写的只有第 3 条
+  const firstRowAfterFail = page.locator(".apply-item-row").filter({ visible: true }).first();
+  await expect(firstRowAfterFail, "第 1 条写成了却没按项记账").toHaveClass(/applied/, { timeout: T });
+  await expect(firstRowAfterFail.locator(".apply-item-check"), "已写成那条的勾选框还没灭").toBeDisabled();
+  await expect(view.locator(".apply-item-row.applied"), "半截失败屏上按项记账的条数不对").toHaveCount(1);
 
   // ⑤ 服务端真值（点跳过之前）：第 1 条 = A 基线，第 2/3 条还是原样
   const firstOnB = await fetchNacosContentUntil(BASE_B, NS_B, writtenId, GROUP, (c) => c.trim() === baselines[writtenId].a.trim());
@@ -204,7 +215,7 @@ test("PS-01 半截失败后「跳过这一项继续剩下的」: 已写成的不
   const thirdOnBBefore = await fetchNacosContentUntil(BASE_B, NS_B, pendingId, GROUP, () => true);
   expect(thirdOnBBefore.trim(), "没轮到的第 3 条被写了").toBe(baselines[pendingId].b.trim());
 
-  // ⑥ 点「跳过这一项」：摘掉失败项，用剩下的 2 条（含已写成那条）再执行一次
+  // ⑥ 点「跳过这一项」：摘掉失败项，只把剩下的 1 条（第 3 条）再执行一次
   await skipBtn.click({ force: true }).catch(() => undefined);
   await expect
     .poll(() => view.locator(".apply-task-progress .task-status-success").count(), {
@@ -222,9 +233,13 @@ test("PS-01 半截失败后「跳过这一项继续剩下的」: 已写成的不
   // ⑧ 屏上的事实跟着变了：失败屏消失，已达成项如实说明，成功横幅仍在（这一轮真写过一条）
   await expect(view.locator(".apply-partial-write"), "第二轮成功后还挂着上一轮的半截写入提示").toHaveCount(0);
   await expect(view.locator(".apply-skip-exit"), "第二轮成功后还留着跳过出口").toHaveCount(0);
-  const note = view.locator(".apply-already-applied");
-  await expect(note, "第二轮没说明有一条已经是这一版").toBeVisible({ timeout: T });
-  expect((await note.innerText()).replace(/\s+/g, ""), "已达成条数报错").toContain("另有1项");
+  // 轮134 起这一句换了位置：已经写成的那条不再被第二批发给执行器（项级账本挡在界面这一层），
+  // 所以「另有一项已是这一版」这条瞬时提示不再出现，改由那一行的「已应用」徽章长期说明。
+  await expect(view.locator(".apply-already-applied"), "没发给执行器的项不该被报成本轮的已达成项").toHaveCount(0);
+  const writtenRow = page.locator(".apply-item-row").filter({ visible: true }).first();
+  await expect(writtenRow, "已写成那条没按项记账").toHaveClass(/applied/, { timeout: T });
+  await expect(writtenRow.locator(".tune-badge.is-applied"), "已写成那条没标「已应用」").toHaveCount(1);
+  await expect(writtenRow.locator(".apply-item-check"), "已写成那条还能被再勾一遍").toBeDisabled();
   const banner = await view.locator(".apply-execution-notice").innerText();
   expect(banner, "真写过一条却不许报执行完成").toContain("变更执行完成");
   // 横幅那个数必须与同一轮历史里的「本次写入 1 项」对上：勾了 2 条（含已写成那条）不等于写了 2 条
