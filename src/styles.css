@@ -4942,6 +4942,40 @@ button.diff-workflow-step-btn:hover {
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
 }
+
+/* ── r136：长文本编辑弹层（第三步「人工微调」与第四步「编辑目标内容」共用外壳）────────
+ * 为什么写成 (0,2,0) 的 .modal.modal-editor 而不是单类 .modal-editor：
+ * 基础块 .modal 自带 width:720px / max-height:88vh，两者同特异度时胜负落到文档顺序上——
+ * 那正是 R78 的坑（.modal-md 整条失效），overlaysDontDependOnRuleOrder 与
+ * classOverridesResolveBySpecificity 直接把这种写法钉红。
+ * 编辑区从此起不再写死像素高：弹层负责占满视口，正文吃掉剩余空间（本轮「看到更多内容」的全部诉求）。 */
+.modal.modal-editor {
+  width: min(1280px, calc(100vw - 32px));
+  height: min(900px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
+}
+/* 正文区是这一列里唯一该长高的孩子：头部与底部按内容高，min-height:0 让它真的能收缩。 */
+.modal.modal-editor .modal-body.editor-dialog-body {
+  flex: 1;
+  min-height: 0;
+}
+/* 面板自带的边框、底色、外距是内嵌抽屉时代的产物：弹层本身已经是容器，不该再套第二圈框。
+   (0,3,0) 压过基础块的 (0,1,0)，与 .diff-tune-panel 那条 (0,2,0) 之间也不靠先后决胜。 */
+.modal.modal-editor .apply-edit-panel {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+/* 压过 .apply-edit-editor 的 height:360px / max-height:420px 与 .diff-tune-panel 那条 300px。 */
+.modal.modal-editor .apply-edit-editor {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
 .modal-overlay.error-overlay {
   z-index: 420;
 }

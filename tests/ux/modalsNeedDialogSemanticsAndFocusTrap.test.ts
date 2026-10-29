@@ -39,6 +39,9 @@ const REGISTERED: string[] = [
   "src/components/ConnectionManager.tsx#modal",
   "src/components/DeleteConfirm.tsx#modal modal-sm",
   "src/components/ErrorDialog.tsx#modal modal-error",
+  // r136：第三步「人工微调」与第四步「编辑目标内容」共用的长文本弹层外壳。
+  // 它自己不含 CodeEditor，正文由宿主经 children 传进来，所以陷阱与 dialog 语义必须在壳上过一次。
+  "src/components/EditorDialog.tsx#modal modal-editor",
   "src/components/StartupDialog.tsx#startup-dialog",
 ];
 

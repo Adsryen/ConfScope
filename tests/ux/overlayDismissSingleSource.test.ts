@@ -39,9 +39,10 @@ const SITES: Record<string, number> = {
   "src/components/ConfirmModal.tsx": 1,
   "src/components/ConnectionManager.tsx": 1,
   "src/components/DeleteConfirm.tsx": 1,
+  "src/components/EditorDialog.tsx": 1,
   "src/components/ErrorDialog.tsx": 1,
 };
-const EXPECTED_TOTAL = 9;
+const EXPECTED_TOTAL = 10; // r136 起含长文本编辑弹层外壳 EditorDialog
 
 /** 从 `<div` 的尖括号起取到开标签结束（带括号深度与引号状态，别被 JSX 表达式里的 `>` 截断）。 */
 function openingTagAt(source: string, start: number): string | null {
