@@ -11,7 +11,12 @@ import { useTranslation } from "../i18n";
 import {
   DOCUMENT_KEY,
   withEditedAfterValue,
-  type ApplyPlan, type ApplyPlanAction, type ApplyPlanItem, type ApplyPlanSummary, type ApplyPlanValueSnapshot } from "../lib/applyPlan";
+  type ApplyPlan,
+  type ApplyPlanAction,
+  type ApplyPlanItem,
+  type ApplyPlanSummary,
+  type ApplyPlanValueSnapshot,
+} from "../lib/applyPlan";
 import { busyProps } from "../lib/busyRegion";
 import { formatDateTime } from "../lib/formatDateTime";
 import CodeEditor from "./CodeEditor";
@@ -36,7 +41,6 @@ import ConfirmModal from "./ConfirmModal";
 import CopyButton from "./CopyButton";
 import InlineError from "./InlineError";
 import DiffPanel from "./DiffPanel";
-import PostApplyPromotionPanel from "./PostApplyPromotionPanel";
 import DiffWorkflowCard, { WORKFLOW_STEP_IDS, type WorkflowStepId } from "./DiffWorkflowCard";
 import { errorText } from "../lib/errorText";
 import { statusMessageProps } from "../lib/statusSemantics";
@@ -52,8 +56,9 @@ interface Props {
    */
   onOpenHistory?: (recordId: string) => void;
   /**
-   * 换一份入口负载回到第1步（轮76：第5步的晋级入口要用它把沙箱→生产的新计划交给 App）。
-   * 它不写任何东西，产出的仍是变更计划入口，五步 + dry-run 一道不少。
+   * 换一份入口负载回到第1步。
+   * 第5步的晋级入口本批已撤、「以本次范围新建变更计划」尚未排期，组件内暂时没有页面在用它；
+   * App 仍会传入，这里保留为预留接口。它不写任何东西，产出的仍是变更计划入口，五步 + dry-run 一道不少。
    */
   onStartApply?: (payload: ApplyEntryPayload) => void;
 }
@@ -101,7 +106,9 @@ function planItemFullRecord(item: ApplyPlanItem): Record<string, unknown> {
     blocked: item.blocked,
     blockReason: item.blockReason ?? null,
     ref: { provider: item.ref.provider, namespace: item.ref.namespace, group: item.ref.group, dataId: item.ref.dataId, key: item.ref.key },
-    sourceRef: item.sourceRef ? { namespace: item.sourceRef.namespace, group: item.sourceRef.group, dataId: item.sourceRef.dataId, key: item.sourceRef.key } : null,
+    sourceRef: item.sourceRef
+      ? { namespace: item.sourceRef.namespace, group: item.sourceRef.group, dataId: item.sourceRef.dataId, key: item.sourceRef.key }
+      : null,
     sourceValue: pick(item.sourceValue),
     targetValue: pick(item.targetValue),
     afterValue: pick(item.afterValue),
@@ -250,7 +257,11 @@ function PlanItemList({
             </span>
             <span className={`apply-action apply-action-${item.action}`}>{actionLabel(t, item.action)}</span>
             {item.blocked && <span className="apply-blocked">{t("apply.blocked")}</span>}
-            {item.manualTuned && <span className="tune-badge" title={t("apply.manualTunedHint")}>{t("apply.manualTuned")}</span>}
+            {item.manualTuned && (
+              <span className="tune-badge" title={t("apply.manualTunedHint")}>
+                {t("apply.manualTuned")}
+              </span>
+            )}
           </label>
         );
       })}
@@ -300,16 +311,15 @@ function ItemDetail({
     }
     onCommitEdit(item.id, edit.content);
   };
-  const hasFatalParseError =
-    item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
+  const hasFatalParseError = item.sourceValue.parseStatus === "error" || item.targetValue.parseStatus === "error";
   // parseError 现在兼作 warning（如 YAML duplicate key）：fatal 解析失败红色展示；
   // 非 fatal 的 warning（后值覆盖类）用黄色提示，不再完全隐藏。
   // create / overwrite 时 afterValue 与 sourceValue 是同一份快照（applyPlan.ts 的 afterValueFor），
   // 三个槽位里会拿到两条一模一样的串——按内容去重，不同来源各自的提示仍然逐条保留。
   const parseIssues = [
     ...new Set(
-      [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter(
-        (error): error is string => Boolean(error)
+      [item.sourceValue.parseError, item.targetValue.parseError, item.afterValue.parseError].filter((error): error is string =>
+        Boolean(error)
       )
     ),
   ];
@@ -419,21 +429,16 @@ function blockReasonLabel(t: (key: string) => string, reason: string): string {
  *
  * 「服务端返回成功」和「目标上真的是这份值」是两件事：真机取证单节点 loopback 也有
  * 54–145ms 的可见窗口，多节点更宽。这一版把回读结论摆在执行结果旁边，
- * 没确认的项点名到人读标签，用户不至于拿着半生效的目标去标记验证通过、晋级生产。
+ * 没确认的项点名到人读标签，用户不至于拿着半生效的目标去标记验证通过。
  */
 function PostWriteVerificationPanel({ verification }: { verification: ApplyWriteVerification }) {
   const { t } = useTranslation();
   const warning = verification.unconfirmedCount > 0;
   return (
-    <div
-      className={`apply-post-write-verification${warning ? " is-warning" : ""}`}
-      {...statusMessageProps(warning ? "info" : "success")}
-    >
+    <div className={`apply-post-write-verification${warning ? " is-warning" : ""}`} {...statusMessageProps(warning ? "info" : "success")}>
       <div className="apply-post-write-verification-head">
         <strong>{t("apply.postWriteVerificationTitle")}</strong>
-        <span>
-          {t("apply.postWriteVerificationHeadline", { confirmed: verification.confirmedCount, total: verification.total })}
-        </span>
+        <span>{t("apply.postWriteVerificationHeadline", { confirmed: verification.confirmedCount, total: verification.total })}</span>
       </div>
       {verification.drifted.length > 0 && (
         <div className="apply-post-write-verification-group">
@@ -485,12 +490,9 @@ function ConfirmationPanel({
   executionSucceeded,
   writeVerification,
   executeHistoryId,
-  executeRecord,
   alreadyAppliedRefs,
   nothingToWrite,
-  connections,
   onOpenHistory,
-  onStartApply,
   onConfirmedChange,
   onConfirmationTextChange,
   onExecute,
@@ -514,14 +516,16 @@ function ConfirmationPanel({
   writeVerification: ApplyWriteVerification | null;
   /** 本次执行写进操作历史的记录 id；拿不到就没有回退入口可指。 */
   executeHistoryId: string | null;
-  /** 本次执行留下的那条记录（成功分支才有）：晋级面板要从它读验证状态与执行范围。 */
+  /** 本次执行留下的那条记录（成功分支才有）：成功分支一次性解析好；晋级入口本批已撤，当前页面无消费者，作预留字段。 */
   executeRecord: OperationRecord | null;
   /** 本轮判定「目标已经是这一版」而没有落笔的项（人读标签，轮98）。 */
   alreadyAppliedRefs: string[];
   /** 勾选项全部已达成：这一轮一个字节都没写，屏上不许出现「变更执行完成」。 */
   nothingToWrite: boolean;
+  /** 预留：晋级入口本批已撤，生产目标候选的读取随面板走了；替代入口排期后恢复消费。 */
   connections: Connection[];
   onOpenHistory?: (recordId: string) => void;
+  /** 预留：晋级入口本批已撤，「以本次范围新建变更计划」未排期，组件内暂无调用方（App 仍传入）。 */
   onStartApply?: (payload: ApplyEntryPayload) => void;
   onConfirmedChange: (value: boolean) => void;
   onConfirmationTextChange: (value: string) => void;
@@ -547,7 +551,8 @@ function ConfirmationPanel({
   // 半截失败的第二条出口（轮98）：摘掉失败项后还有得写才给这颗按钮，
   // 「跳过最后一项」变成空跑没有意义。守卫沿用执行按钮那一份（确认文本/执行中/已成功一次），
   // 只是把"勾选项里含失败项"这条摘掉——少选一项不可能是新的风险动作。
-  const skipCandidateId = executeError && executeProgress?.failedItemId && selectedIds.has(executeProgress.failedItemId) ? executeProgress.failedItemId : "";
+  const skipCandidateId =
+    executeError && executeProgress?.failedItemId && selectedIds.has(executeProgress.failedItemId) ? executeProgress.failedItemId : "";
   const remainingAfterSkip = skipCandidateId
     ? plan.items.filter((item) => selectedIds.has(item.id) && item.id !== skipCandidateId && isSelectableApplyItem(item))
     : [];
@@ -567,11 +572,7 @@ function ConfirmationPanel({
       // 「一个字都没敲」与「敲了但差一个字符」必须分开说（轮67 / R67-WP10）：
       // 真机量过，敲错时旧文案仍然回「还没输入上方要求的确认文本。」，
       // 用户对着已经填满的输入框看不出哪里错，只能整串重来。
-      label: !protectedTarget
-        ? t("apply.blockNotConfirmed")
-        : typedText
-          ? t("apply.blockConfirmMismatch")
-          : t("apply.blockConfirmText"),
+      label: !protectedTarget ? t("apply.blockNotConfirmed") : typedText ? t("apply.blockConfirmMismatch") : t("apply.blockConfirmText"),
       alsoDryRun: false,
     });
   }
@@ -673,9 +674,7 @@ function ConfirmationPanel({
         <div className="apply-task-progress" aria-label={t("apply.taskProgressLabel")}>
           <div className="apply-task-progress-head">
             <strong>{t("apply.taskProgressTitle")}</strong>
-            <span className={`task-status task-status-${executionTask.status}`}>
-              {taskStatusLabel(t, executionTask.status)}
-            </span>
+            <span className={`task-status task-status-${executionTask.status}`}>{taskStatusLabel(t, executionTask.status)}</span>
           </div>
           <div
             className="progress-bar large"
@@ -692,7 +691,9 @@ function ConfirmationPanel({
             <span>{t("apply.taskProgressPercent", { progress: executionTask.progress })}</span>
           </div>
           <div className="apply-task-progress-id">
-            <span>{t("tasks.taskId")}: <span className="mono">{executionTask.id}</span></span>
+            <span>
+              {t("tasks.taskId")}: <span className="mono">{executionTask.id}</span>
+            </span>
             <CopyButton text={executionTask.id} label={t("apply.copyTaskId")} />
           </div>
           {/*
@@ -766,20 +767,6 @@ function ConfirmationPanel({
           <span className="apply-rollback-entry-hint">{t("apply.openHistoryToRollbackHint")}</span>
         </div>
       )}
-      {/*
-       * 晋级的正规入口（轮76）：只在「真实写入 + 执行成功 + 拿得到本次记录」时出现。
-       * dry-run 什么都不写、失败记录连写前现场都没收口，这两种形态下「沙箱验证通过」是假话，
-       * 所以不给面板；半截写入同理，出口仍是上面那颗「到操作历史回退本次改动」。
-       */}
-      {executionSucceeded && executeRecord && onStartApply && (
-        <PostApplyPromotionPanel
-          record={executeRecord}
-          connections={connections}
-          readbackConfirmed={Boolean(writeVerification) && (writeVerification?.unconfirmedCount ?? 0) === 0}
-          readbackUnconfirmedCount={writeVerification?.unconfirmedCount ?? writeVerification?.total ?? 0}
-          onStartApply={onStartApply}
-        />
-      )}
     </div>
   );
 }
@@ -806,8 +793,8 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const [executeProgress, setExecuteProgress] = useState<ApplyExecutionProgress | null>(null);
   // 本次执行落到操作历史的记录 id（轮66 WP-2）：回退入口要指着这条记录，同样跟着 executeError 一起清
   const [executeHistoryId, setExecuteHistoryId] = useState<string | null>(null);
-  // 本次执行那条记录本身（轮76）：晋级面板要按它读沙箱验证状态和本次执行范围，
-  // 在成功分支一次性解析好，不在渲染期读 localStorage（判据见 tests/ux/renderTimeStorageReads.test.ts）。
+  // 本次执行那条记录本身：晋级入口本批已撤，当前页面无消费者，作预留字段；
+  // 仍在成功分支一次性解析好，不在渲染期读 localStorage（判据见 tests/ux/renderTimeStorageReads.test.ts）。
   const [executeRecord, setExecuteRecord] = useState<OperationRecord | null>(null);
   const [executeNotice, setExecuteNotice] = useState<string | null>(null);
   // 写后回读结论（R55-B2）：跟着执行态一起重置，换一次执行不能留着上一轮的结论
@@ -907,8 +894,16 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
             blocked: result.plan.summary?.blocked ?? 0,
           },
           payload: JSON.stringify({
-            source: { label: result.plan.source?.label, connectionId: result.plan.source?.connectionId, namespace: result.plan.source?.namespace },
-            target: { label: result.plan.target?.label, connectionId: result.plan.target?.connectionId, namespace: result.plan.target?.namespace },
+            source: {
+              label: result.plan.source?.label,
+              connectionId: result.plan.source?.connectionId,
+              namespace: result.plan.source?.namespace,
+            },
+            target: {
+              label: result.plan.target?.label,
+              connectionId: result.plan.target?.connectionId,
+              namespace: result.plan.target?.namespace,
+            },
             scope: result.plan.scope,
             items: planItemsFullRecord(result.plan),
           }),
@@ -1131,7 +1126,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
     setExecuteError(null);
     setExecuteProgress(null);
     // dry-run 什么都不写，不该把上一次真实执行留下的记录引用一起抹掉：
-    // 写完再干跑一次核对现状是最自然的动作，抹掉就等于把晋级/回退入口藏起来（轮76）。
+    // 写完再干跑一次核对现状是最自然的动作，抹掉就等于把回退入口藏起来。
     if (!dryRun) {
       setExecuteHistoryId(null);
       setExecuteRecord(null);
@@ -1237,7 +1232,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
       // 成功也要记住本次记录（F4）：轮66 只在失败分支设过，成功屏因此指不回自己的现场。
       // 记录由执行器同步写进本地历史，这里当场读回来一次，不放进渲染期。
       setExecuteHistoryId(resultHistoryId ?? null);
-      setExecuteRecord(resultHistoryId ? loadOperationHistory().find((item) => item.id === resultHistoryId) ?? null : null);
+      setExecuteRecord(resultHistoryId ? (loadOperationHistory().find((item) => item.id === resultHistoryId) ?? null) : null);
       // 已达成的项在成功与失败两条出口里都要如实报出来（轮98）：失败屏上那句
       // 「另有 N 项已经是这一版」正是用户判断"这一次重试到底有没有意义"的依据。
       setAlreadyAppliedRefs(result.alreadyApplied ?? []);
@@ -1260,7 +1255,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
         setExecuteNotice(t("apply.dryRunCompleted", { count: result.plannedWrites }));
       } else if ("alreadyAppliedOnly" in result && result.alreadyAppliedOnly) {
         // 没写就不许记成功：executionSucceeded / executionCompleted 都留在原值——
-        // 晋级面板和工作流「已完成」那条线靠它们点亮，这里点亮了就是假话。
+        // 工作流「已完成」那条线靠它们点亮，这里点亮了就是假话。
         setNothingToWrite(true);
         setExecuteNotice(t("apply.alreadyAppliedOnly"));
       } else {
@@ -1358,7 +1353,11 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
 
       {!entry && <div className="data-empty-state page-empty">{t("apply.missingEntry")}</div>}
 
-      {entry && draftState.status === "loading" && <div className="pad-msg big apply-draft-loading" role="status">{t("apply.generating")}</div>}
+      {entry && draftState.status === "loading" && (
+        <div className="pad-msg big apply-draft-loading" role="status">
+          {t("apply.generating")}
+        </div>
+      )}
 
       {entry && draftState.status === "error" && (
         /* 构建逻辑从 effect 提到 buildDraft 后，「生成失败」也有了第二条出路：

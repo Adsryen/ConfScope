@@ -160,7 +160,7 @@ describe("DiffView", () => {
     expect(direction).toHaveTextContent("→");
     expect(screen.getByText("Confirm direction")).toBeInTheDocument();
     expect(screen.getByText("Select changes")).toBeInTheDocument();
-    expect(screen.getByText("Execute, verify, and promote")).toBeInTheDocument();
+    expect(screen.getByText("Execute & verify")).toBeInTheDocument();
     const currentStep = document.querySelector(".diff-workflow-step.current");
     expect(currentStep).toHaveAttribute("aria-current", "step");
     expect(currentStep).toHaveTextContent("Confirm direction");
@@ -1850,7 +1850,11 @@ describe("DiffView 写后失效", () => {
 
     await act(async () => {
       publishConfigChange({ connectionId: "unrelated-conn", namespace: "shared", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
-      publishConfigChange({ connectionId: "left-nacos", namespace: "other-tenant", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+      publishConfigChange({
+        connectionId: "left-nacos",
+        namespace: "other-tenant",
+        refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }],
+      });
     });
     expect(staleBanner()).toBeNull();
   });
@@ -2033,14 +2037,26 @@ describe("DiffView 保活可见性闸门（轮44 AC3：看不见 ≠ 没挂载�
     await settle();
     expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
 
-    view.rerender(<I18nProvider><DiffView active={false} connections={[editedConn]} /></I18nProvider>);
+    view.rerender(
+      <I18nProvider>
+        <DiffView active={false} connections={[editedConn]} />
+      </I18nProvider>
+    );
     await settle();
-    view.rerender(<I18nProvider><DiffView active={false} connections={[editedAgain]} /></I18nProvider>);
+    view.rerender(
+      <I18nProvider>
+        <DiffView active={false} connections={[editedAgain]} />
+      </I18nProvider>
+    );
     await settle();
     expect(apiMocks.listNamespaces).not.toHaveBeenCalled();
     expect(apiMocks.listAllConfigs).not.toHaveBeenCalled();
 
-    view.rerender(<I18nProvider><DiffView active connections={[editedAgain]} /></I18nProvider>);
+    view.rerender(
+      <I18nProvider>
+        <DiffView active connections={[editedAgain]} />
+      </I18nProvider>
+    );
     await waitFor(() => expect(apiMocks.listNamespaces).toHaveBeenCalledWith(editedAgain));
     await settle();
     await settle();
@@ -2170,10 +2186,7 @@ describe("DiffView 重启恢复即比（轮46 R01/R02：来源只有一个事实
   });
 
   it("prefs 少一侧 dataId：宁可不比，也不在启动时替用户按下智能匹配", async () => {
-    localStorage.setItem(
-      "cs.diffViewPreferences",
-      JSON.stringify({ ...completePrefs, right: { ...completePrefs.right, dataId: "" } })
-    );
+    localStorage.setItem("cs.diffViewPreferences", JSON.stringify({ ...completePrefs, right: { ...completePrefs.right, dataId: "" } }));
     renderRestored(true);
 
     // dataId 为空的 loadBoth 走的是整命名空间扫描的智能匹配：白付一趟全量列表 + 多份审计，
@@ -2303,7 +2316,11 @@ describe("DiffView 批量对比的跨项内容搜索（轮55 C线）", () => {
     expect(hitSnippets()).toHaveLength(2);
     // 没命中的配置不给徽标、不给片段，但也留在列表里（默认不过滤）
     expect(navItems()).toHaveLength(3);
-    expect(within(nav).getByRole("button", { name: /cache\.yaml/ }).querySelector(".batch-diff-nav-snippet")).toBeNull();
+    expect(
+      within(nav)
+        .getByRole("button", { name: /cache\.yaml/ })
+        .querySelector(".batch-diff-nav-snippet")
+    ).toBeNull();
   });
 
   it("只看命中项只是看列表的方式，不改动将要应用的东西", async () => {
@@ -2342,9 +2359,7 @@ describe("DiffView 批量对比的跨项内容搜索（轮55 C线）", () => {
     fireEvent.keyDown(box, { key: "Enter" });
 
     await waitFor(() =>
-      expect((document.querySelector(".batch-diff-nav-item.active .batch-diff-nav-title") as HTMLElement).textContent).toBe(
-        "gateway.yaml"
-      )
+      expect((document.querySelector(".batch-diff-nav-item.active .batch-diff-nav-title") as HTMLElement).textContent).toBe("gateway.yaml")
     );
     expect(searchBox().value).toBe("name");
   });
@@ -2449,9 +2464,7 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
   /** 确认弹层与抽屉都有「Cancel」，取按钮时按 .modal-footer 限定。 */
   function modalButton(name: string): HTMLButtonElement | null {
     return (
-      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-footer button")).find(
-        (button) => button.textContent === name,
-      ) ?? null
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".modal-footer button")).find((button) => button.textContent === name) ?? null
     );
   }
 
@@ -2495,10 +2508,7 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     (onStartApply.mock.calls[0][0] as { items: Record<string, unknown>[] }).items;
 
   it("carries the hand-tuned right body into the plan and marks it as manual", async () => {
-    const { onStartApply } = renderBatchTune(
-      "server:\n  port: 8080\nname: demo",
-      "server:\n  port: 9090\nname: demo"
-    );
+    const { onStartApply } = renderBatchTune("server:\n  port: 8080\nname: demo", "server:\n  port: 9090\nname: demo");
     fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
     expect(await screen.findByText("Generated 1 file comparisons")).toBeInTheDocument();
 
@@ -2561,10 +2571,7 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
   });
 
   it("does not count a tune that lands back on the original right content as a change", async () => {
-    const { onStartApply } = renderBatchTune(
-      "server:\n  port: 8080\nname: demo",
-      "server:\n  port: 9090\nname: demo"
-    );
+    const { onStartApply } = renderBatchTune("server:\n  port: 8080\nname: demo", "server:\n  port: 9090\nname: demo");
     fireEvent.click(await screen.findByRole("button", { name: "Compare Selected (1)" }));
     await screen.findByText("Generated 1 file comparisons");
 

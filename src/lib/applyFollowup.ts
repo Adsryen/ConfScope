@@ -384,8 +384,8 @@ export async function buildPromotionEntryFromVerification(
 /**
  * 这条执行记录对应的沙箱验证结果（轮76 F3）。
  *
- * 历史页的「沙箱验证」状态行和第5步的晋级面板读的是同一份事实，
- * 判据留在页面里就会长成两份，将来谁改了 key 语义另一份不会跟着动。
+ * 历史页的「沙箱验证」状态行读这份事实（r113 撤掉第5步晋级面板后机制仍保留，
+ * 留给旧 promote 记录与后续替代入口），判据留在页面里就会长成两份，将来谁改了 key 语义另一份不会跟着动。
  */
 export function findVerificationForRecord(
   verifications: ApplyVerification[],
@@ -404,7 +404,7 @@ export function promotionTargetNamespace(record: OperationRecord, verification: 
  * 这条连接的名字里有没有「生产」这一档的标记（轮76）。
  *
  * 判据不另起一套：直接复用执行层用来要求手敲确认的那组标记词，
- * 否则「第五步要手敲确认的目标」和「晋级面板默认指向的目标」会各认各的。
+ * 否则「执行要强确认的目标」和「晋级目标」会各认各的（r113 晋级面板已撤，判定仍随机制保留）。
  */
 export function isProductionMarkedConnection(connection: Connection, namespace: string): boolean {
   return isProtectedApplyTarget(connection, {

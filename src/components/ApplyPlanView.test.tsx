@@ -47,7 +47,7 @@ const snapshotMocks = vi.hoisted(() => ({
 
 const historyMocks = vi.hoisted(() => ({
   recordOperation: vi.fn(),
-  // 轮76：成功分支当场把本次记录读回来喂给晋级面板，缺这个导出整条成功路径都会炸在 try 里。
+  // 成功分支当场读回本次记录（当前为预留字段，见 executeRecord 注释）；缺这个导出整条成功路径都会炸在 try 里。
   loadOperationHistory: vi.fn((): OperationRecord[] => []),
 }));
 
@@ -103,7 +103,7 @@ vi.mock("../store/operationHistory", () => ({
   loadOperationHistory: historyMocks.loadOperationHistory,
 }));
 
-// 晋级面板标记验证成功后会 toast 一句；真 toast 往 body 挂节点，用例之间会互相看见。
+// toast 全局 mock：真 toast 往 body 挂节点，用例之间会互相看见。
 vi.mock("../lib/toast", () => ({
   toast: vi.fn(),
 }));
@@ -295,8 +295,8 @@ function renderView(
 }
 
 /**
- * 本次执行落到操作历史的那条记录（晋级面板按 id 从 loadOperationHistory 的返回值里认它）。
- * 只给面板读数需要的字段：验证状态戳与生产目标候选都从这些字段出发。
+ * 本次执行落到操作历史的那条记录（成功分支按 id 从 loadOperationHistory 的返回值里认它）。
+ * 只给读数需要的字段：验证状态戳与生产目标候选都从这些字段出发。
  */
 function appliedHistoryRecord(overrides: Partial<OperationRecord> = {}): OperationRecord {
   return {
@@ -366,7 +366,7 @@ describe("ApplyPlanView", () => {
     expect(await screen.findByRole("heading", { name: "Configuration change plan" })).toBeInTheDocument();
     const planStepLabel = await screen.findByText("Generate & review plan (dry-run, no writes)");
     expect(planStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
-    expect(screen.getByText("Execute, verify, and promote")).toBeInTheDocument();
+    expect(screen.getByText("Execute & verify")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Execute change" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Execute apply" })).not.toBeInTheDocument();
   });
@@ -457,7 +457,11 @@ describe("ApplyPlanView", () => {
     const plan = makePlan([
       item(
         "broken.json",
-        { ...value('{\"a\" 1}'), parseStatus: "error", parseError: "JSON:Expected ':' after property name in JSON at position 5 (line 1 column 6)" },
+        {
+          ...value('{\"a\" 1}'),
+          parseStatus: "error",
+          parseError: "JSON:Expected ':' after property name in JSON at position 5 (line 1 column 6)",
+        },
         value("old")
       ),
       item(
@@ -913,7 +917,7 @@ describe("ApplyPlanView", () => {
     fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
     fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
 
-    const verifyStepLabel = await screen.findByText("Execute, verify, and promote");
+    const verifyStepLabel = await screen.findByText("Execute & verify");
     expect(verifyStepLabel.closest("li")).toHaveAttribute("aria-current", "step");
     // 当前步的 hover 气泡含步骤说明（安全语义保留在气泡内）
     expect(verifyStepLabel.closest("li")).toHaveAttribute("title", expect.stringContaining("mark the sandbox verified"));
@@ -1463,7 +1467,6 @@ describe("ApplyPlanView", () => {
     expect(document.querySelector(".apply-partial-write")).toBeNull();
   });
 
-
   // ── 轮98：半截写入的第二条出口（prd A6/A8） ──
   /** 两份可执行项的计划：失败停在第 2 项时，第 1 项已写成、还有第 3 项没碰。 */
   function partialWritePlan() {
@@ -1642,7 +1645,7 @@ describe("ApplyPlanView", () => {
     expect(document.querySelector(".apply-already-applied-refs")?.textContent).toContain("Already at this version (2)");
     expect(screen.queryByText(/Change executed/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Dry-run passed/)).not.toBeInTheDocument();
-    // 什么都没写就不该有回退入口，也不该有晋级面板
+    // 什么都没写就不该有回退入口
     expect(document.querySelector(".apply-rollback-entry")).toBeNull();
     expect(document.querySelector(".apply-partial-write")).toBeNull();
   });
@@ -1905,11 +1908,11 @@ describe("ApplyPlanView", () => {
       expect(await screen.findByText("Read-back: 1/3 items match what was written")).toBeInTheDocument();
       expect(screen.getByText("public/DEFAULT_GROUP/app.properties")).toBeInTheDocument();
       expect(screen.getByText("public/DEFAULT_GROUP/order.yaml (timeout)")).toBeInTheDocument();
-      expect(screen.getByText(/Do not promote unconfirmed items/)).toBeInTheDocument();
+      expect(screen.getByText(/then decide to mark verified, retry or roll back/)).toBeInTheDocument();
       expect(document.querySelector(".apply-post-write-verification.is-warning")).toBeInTheDocument();
     });
 
-    it("全部回读一致时给确认档结论与「可以去标记验证通过」的提示", async () => {
+    it("全部回读一致时给确认档结论与指向操作历史的提示", async () => {
       stubStagedPlan();
       executionMocks.executeApplyPlan.mockResolvedValue({
         ok: true,
@@ -1921,7 +1924,7 @@ describe("ApplyPlanView", () => {
       fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
 
       expect(await screen.findByText("Read-back: 2/2 items match what was written")).toBeInTheDocument();
-      expect(screen.getByText(/You can mark the sandbox verified here/)).toBeInTheDocument();
+      expect(screen.getByText(/use this run's record in the operation history/)).toBeInTheDocument();
       expect(document.querySelector(".apply-post-write-verification.is-warning")).not.toBeInTheDocument();
     });
 
@@ -1952,9 +1955,8 @@ describe("ApplyPlanView", () => {
     });
   });
 
-  describe("第5步的晋级面板挂载条件（轮76）", () => {
-    // 目标端选 Staging：isSandboxTarget 认不出它，执行才会走「成功完成」这条档，
-    // 晋级面板挂的就是一条在沙箱写完了的执行记录。
+  describe("第5步不再有晋级入口（r113）", () => {
+    // 目标端选 Staging：isSandboxTarget 认不出它，执行走「成功完成」这条档。
     function stubSandboxPlan() {
       draftMocks.buildApplyPlanFromEntry.mockResolvedValue({
         ok: true,
@@ -1967,23 +1969,22 @@ describe("ApplyPlanView", () => {
       });
     }
 
-    // 面板只在「真实写入 + 成功 + 拿得到本次记录」时出现：dry-run 什么也没写，
-    // 在它上面挂一颗「标记沙箱验证通过」等于让用户对一份不存在的现场盖章。
-    it("真实写入成功后给出晋级面板", async () => {
+    it("真实写入成功后也没有晋级入口", async () => {
       stubSandboxPlan();
+      // 最强条件：旧挂载三条件（真实写入 + 成功 + 拿得到本次记录）全成立，入口仍必须缺席。
       historyMocks.loadOperationHistory.mockReturnValue([appliedHistoryRecord()]);
       renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
       fireEvent.click(await screen.findByLabelText("I reviewed this dry-run plan and understand it will write to the target."));
       fireEvent.click(screen.getByRole("button", { name: "Execute change" }));
 
-      expect(await screen.findByText("Promote to production")).toBeInTheDocument();
-      // 没标记验证之前晋级按钮必须灰着，且灰的原因要能读出来。
-      const promote = screen.getByRole("button", { name: "Promote using this verification" }) as HTMLButtonElement;
-      expect(promote.disabled).toBe(true);
-      expect(promote.closest(".btn-guard")?.getAttribute("title")).toContain("Mark the sandbox verified before promoting.");
+      expect(await screen.findByText(/Change executed/)).toBeInTheDocument();
+      expect(screen.queryByText("Promote to production")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Mark sandbox verified" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Promote using this verification" })).toBeNull();
+      expect(document.querySelector(".apply-promote-panel")).toBeNull();
     });
 
-    it("只跑 dry-run 时不给晋级面板", async () => {
+    it("只跑 dry-run 时同样没有晋级入口", async () => {
       stubSandboxPlan();
       historyMocks.loadOperationHistory.mockReturnValue([appliedHistoryRecord()]);
       renderView(stagedEntryPayload(), [sourceConn, safeTargetConn]);
@@ -1994,6 +1995,8 @@ describe("ApplyPlanView", () => {
 
       expect(screen.queryByText("Promote to production")).toBeNull();
       expect(screen.queryByRole("button", { name: "Mark sandbox verified" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Promote using this verification" })).toBeNull();
+      expect(document.querySelector(".apply-promote-panel")).toBeNull();
     });
   });
 

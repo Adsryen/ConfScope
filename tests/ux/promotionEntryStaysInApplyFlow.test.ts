@@ -1,48 +1,98 @@
 /**
- * 晋级入口只准长在变更计划第5步（轮76）。
+ * 晋级入口必须是零：变更计划第5步不再有晋级入口（r113）。
  *
- * 起因是用户一句话：「操作历史页面不应该有晋级的功能吧！」——成立。
- * 操作历史是审计面，晋级是写路径的起点。把它摆在历史页，等于给写入开第二个入口，
- * 而且那个入口离执行现场最远：用户真正需要它的时刻是刚在沙箱写完、正盯着回读结论的那一秒。
- * 迁移之后风险反过来：第5步的面板一旦能自己落笔，全站唯一的写出口（计划 + dry-run + 手敲确认）就漏了。
- * 所以这里守六件事：
- *   1. 历史页里晋级的四件套（生产目标选择器 / 晋级按钮 / 构造调用 / 行容器）一个都不许回来，
- *      但「标记沙箱验证」与只读的验证状态、本次改动面板必须还在；
- *   2. 第5步面板的挂载条件四项同时成立：执行成功 + 有本次记录 + 调用方给了 onStartApply（dry-run 走不到成功档）；
- *   3. 面板只产入口不写目标：不许碰 publish/delete，也不许引执行器；
- *   4. 未验证 / 回读有未确认项时按钮真灰，原因挂在 .btn-guard 上而不是只靠 title；
- *   5. 标记验证与查找验证各只有一份实现（lib/applyFollowup），两个页面都走 import；
- *   6. 中英 key 齐平、占位符不偏科，迁走的旧键不许留在 locale 里当孤儿；
- *   7. 晋级落进哪一套租户由用户点明（命名空间口径单点在 lib/applyFollowup），历史页不许长出这一栏；
- *   8. 步骤条的「回到某一步」只在返回落点真的是对比页时给出——晋级/回退/审计/备份的计划
- *      没有对比现场可回，可点按钮 + 「进度保留」的气泡就是一句假话（落点判据全站一份）。
- * 变异自检（改坏任一条，本文件必须变红）：① 历史页把晋级块加回来；② 第5步去掉 executionSucceeded 条件；
- * ③ 面板里直接调 publishConfigFromApplyPlan；④ 历史页本地重写一份 findVerification；⑤ 晋级按钮去掉 !verification 守卫；
- * ⑥ App 与计划页各算一份返回落点；⑦ 步骤条无条件收下 onStepClick；⑧ 面板不再把命名空间交给 lib（回到「沿用沙箱 id」这个洞）；
- * ⑨ 候选没过写资格线（只读连接重新挂回生产目标）。
+ * 轮76 把晋级入口从操作历史搬进第5步之后，用户真机反馈：第5步多出「晋级到生产」区块且整列滚不动。
+ * r113 的结论是把入口整个撤掉——变更计划页只留「执行 + 写后回读 + 到操作历史回退 + 跳过」，
+ * 晋级不再有任何页面入口（「以本次范围新建变更计划」未排期，接口按预留保留）。
+ * 这个文件守「零」本身，而不是「入口搬到别处」：
+ *   1. 面板文件本身已删，组件层任何文件不许再引用它；apply-promote-panel 容器不许留在计划页；
+ *   2. 历史页不许再长出晋级的四件套与指路句——历史页是记录级读数面，不是写路径起点；
+ *   3. 记录级面一个不少：标记沙箱验证、验证状态行、本次改动面板、旧 promote 记录的筛选与回退；
+ *   4. 27 个 apply.promote* 文案键与 operationHistory.promoteEntryLocation 中英全删，
+ *      第5步标题改「执行与验证」，写后回读提示改指操作历史、不再说「在本步验证」；
+ *   5. isSandboxTarget 保留（r114 环境角色显式化接手，别提前删）；
+ *   6. 预留接线不动：成功分支仍一次性读回本次记录、dry-run 不抹记录引用、App 仍传 startApply；
+ *   7. 步骤条「回到某一步」只在返回落点真的是对比页时给出（落点判据全站一份）；
+ *   8. lib 机制层保留在树里（晋级构造 / 写资格线 / 生产目标候选）：
+ *      旧 promote 记录的回退计划仍会经这条路进来，数据形状与 lib 单点不许跟着删。
+ * 变异自检（改坏任一条，本文件必须变红）：① 把 PostApplyPromotionPanel 文件复活或在组件层引用回来；
+ * ② ApplyPlanView 里加回 apply-promote-panel 容器或挂载条件；③ 历史页长出晋级四件套或指路句；
+ * ④ 删掉验证状态行或记录级读数键；⑤ 第5步标题加回「晋级」；⑥ 写后回读提示加回「在本步标记验证」；
+ * ⑦ locale 里留一个 apply.promote* 孤儿键；⑧ 删掉 isSandboxTarget；⑨ App 不再传 onStartApply；
+ * ⑩ lib 候选丢写资格线（只读连接重新挂回生产目标）。
  */
 import { describe, expect, it } from "vitest";
-import { loadLocale, readScannedSource } from "./scanUtils";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { PROJECT_ROOT, loadLocale, readScannedSource, sourceFiles } from "./scanUtils";
 
 const HISTORY = "src/components/OperationHistoryView.tsx";
-const PANEL = "src/components/PostApplyPromotionPanel.tsx";
 const APPLY_VIEW = "src/components/ApplyPlanView.tsx";
 const APP = "src/App.tsx";
 const FOLLOWUP = "src/lib/applyFollowup.ts";
 const CSS = "src/styles.css";
 const APPLY_ENTRY = "src/lib/applyEntry.ts";
+const PANEL = "src/components/PostApplyPromotionPanel.tsx";
 
 const zh = loadLocale("zh-CN.json");
 const en = loadLocale("en-US.json");
 
+const componentFiles = sourceFiles().filter((rel) => rel.startsWith("src/components/"));
+
+describe("晋级入口是零（r113）", () => {
+  it("面板文件已删，组件层没有文件再引用它", () => {
+    expect(existsSync(join(PROJECT_ROOT, PANEL)), "PostApplyPromotionPanel 文件必须删掉").toBe(false);
+    for (const rel of componentFiles) {
+      const src = readScannedSource(rel);
+      expect(src, `${rel} 还在引用已删的面板组件`).not.toContain("PostApplyPromotionPanel");
+      expect(src, `${rel} 还在直接调晋级构造（树里只剩 lib 的定义）`).not.toContain("buildPromotionEntryFromVerification");
+    }
+    expect(readScannedSource(APPLY_VIEW), "计划页还留着面板容器类名").not.toContain("apply-promote-panel");
+  });
+
+  it("预留接线原样保留：成功分支读回本次记录、dry-run 不抹、App 仍传 startApply", () => {
+    const applyView = readScannedSource(APPLY_VIEW);
+    expect(applyView, "executeRecord 必须在执行结果回来时赋值一次（成功屏也要认得自己的现场）").toMatch(
+      /setExecuteRecord\(resultHistoryId \? \(loadOperationHistory\(\)\.find\(\(item\) => item\.id === resultHistoryId\) \?\? null\) : null\);/
+    );
+    expect(applyView, "写完再干跑一次核对现状是自然动作，把记录引用抹掉等于把回退入口藏起来").toMatch(
+      /if \(!dryRun\) \{\s*setExecuteHistoryId\(null\);\s*setExecuteRecord\(null\);\s*\}/
+    );
+    const renderBody = applyView.slice(
+      applyView.indexOf("function ConfirmationPanel"),
+      applyView.indexOf("export default function ApplyPlanView")
+    );
+    expect(renderBody, "渲染期读 store 会让每次重渲染都重新解析历史记录").not.toMatch(/loadOperationHistory\(\)/);
+    expect(applyView).toMatch(
+      /import \{ loadOperationHistory, recordOperation, type OperationRecord \} from "\.\.\/store\/operationHistory"/
+    );
+    expect(readScannedSource(APP), "App 保留把 startApply 传给计划页（预留接口，替代方案未排期）").toMatch(/onStartApply=\{startApply\}/);
+    expect(applyView, "预留的 onStartApply 接口不许顺手删").toMatch(/onStartApply\?: \(payload: ApplyEntryPayload\) => void/);
+  });
+
+  it("isSandboxTarget 保留：环境角色判定由下一批显式化接手，别提前删", () => {
+    expect(readScannedSource(APPLY_VIEW), "isSandboxTarget 被删了：执行「全部完成」的判定还在用它").toMatch(/function isSandboxTarget\(/);
+  });
+});
+
 describe("历史页不许再长出写操作入口", () => {
-  it("晋级的四件套整块撤出历史页", () => {
+  it("晋级的四件套与指路句不许回历史页", () => {
     const history = readScannedSource(HISTORY);
-    for (const banned of ["history-promote-row", "startPromotionDryRun", "buildPromotionEntryFromVerification", "productionTargetsFor", "selectedPromotionTargetId"]) {
-      expect(history, `历史页又出现了 ${banned}：晋级只有一个正规入口，就是变更计划第5步`).not.toContain(banned);
+    for (const banned of [
+      "history-promote-row",
+      "startPromotionDryRun",
+      "buildPromotionEntryFromVerification",
+      "productionTargetsFor",
+      "selectedPromotionTargetId",
+      "promoteEntryLocation",
+    ]) {
+      expect(history, `历史页又出现了 ${banned}：晋级没有入口了，历史页只是记录级读数面`).not.toContain(banned);
     }
     // 生产目标选择器（原生 select + label）也不许回来：它是晋级的一半，留着就能被再拼一次。
     expect(history, "历史页又有了生产目标选择器").not.toMatch(/operationHistory\.productionTarget/);
+    for (const banned of ["listNamespaces", "targetNamespace", "promoteNamespace"]) {
+      expect(history, `历史页又出现了 ${banned}：晋级现场不在历史页`).not.toContain(banned);
+    }
   });
 
   it("记录级事实与只读出口一个不少", () => {
@@ -54,122 +104,28 @@ describe("历史页不许再长出写操作入口", () => {
       "HistoryChangeDetailPanel",
       "opPromote",
       "verificationState",
-      "promoteEntryLocation",
     ]) {
       expect(history, `历史页少了 ${kept}：撤晋级入口不该顺手删掉状态读数与只读标签`).toContain(kept);
     }
+    expect(history, "历史页不许留第二份查找实现：key 语义一改另一份就悄悄失真").not.toMatch(
+      /const findVerification = |function findVerification\(/
+    );
   });
 
   it("验证状态是一行只读读数，不是按钮的另一种写法", () => {
     const history = readScannedSource(HISTORY);
-    const row = /followupRecord && followupSucceeded && \(\s*<div className="info-row">\s*<span className="info-label">\{t\("operationHistory\.verificationState"\)/;
+    const row =
+      /followupRecord && followupSucceeded && \(\s*<div className="info-row">\s*<span className="info-label">\{t\("operationHistory\.verificationState"\)/;
     expect(row.test(history), "沙箱验证状态行必须挂在「有本次执行记录 + 执行成功」上，失败记录不配被标记").toBe(true);
     const css = readScannedSource(CSS);
     expect(css).toMatch(/\.history-verification-state\.verified/);
     expect(css).toMatch(/\.history-verification-state\.unverified/);
     expect(css, "旧的晋级行样式没跟着删掉，会留下无人认领的 CSS").not.toMatch(/\.history-promote-row/);
+    expect(css, ".apply-promote-* 样式必须随面板一起删").not.toMatch(/\.apply-promote-/);
   });
 });
 
-describe("第5步的晋级面板挂载条件", () => {
-  it("执行成功 + 有本次记录 + 有 onStartApply 三者同时成立才渲染", () => {
-    const applyView = readScannedSource(APPLY_VIEW);
-    const mounted = /executionSucceeded && executeRecord && onStartApply && \(\s*<PostApplyPromotionPanel/.test(applyView);
-    expect(mounted, "面板条件被削弱：dry-run 与失败/半截写入都拿不到 executionSucceeded && executeRecord").toBe(true);
-    expect(applyView).toMatch(/import PostApplyPromotionPanel from "\.\/PostApplyPromotionPanel"/);
-    // 回读结论直接决定能不能盖章：必须是它，而不是「看起来执行完了」。
-    expect(applyView).toMatch(/readbackConfirmed=\{Boolean\(writeVerification\) && \(writeVerification\?\.unconfirmedCount \?\? 0\) === 0\}/);
-  });
-
-  it("成功后当场读回本次记录，不在渲染期读 localStorage", () => {
-    const applyView = readScannedSource(APPLY_VIEW);
-    expect(applyView, "executeRecord 必须在执行结果回来时赋值一次（F4：成功屏也要认得自己的现场）").toMatch(
-      /setExecuteRecord\(resultHistoryId \? loadOperationHistory\(\)\.find\(\(item\) => item\.id === resultHistoryId\) \?\? null : null\)/
-    );
-    const renderBody = applyView.slice(applyView.indexOf("function ConfirmationPanel"), applyView.indexOf("export default function ApplyPlanView"));
-    expect(renderBody, "渲染期读 store 会让每次重渲染都重新解析历史记录").not.toMatch(/loadOperationHistory\(\)/);
-    expect(applyView).toMatch(/import \{ loadOperationHistory, recordOperation, type OperationRecord \} from "\.\.\/store\/operationHistory"/);
-  });
-
-  it("入口由调用方注入，App 负责换 entry 重跑完整五步", () => {
-    expect(readScannedSource(APP), "App 没把 startApply 传给计划页，面板点了也没地方去").toMatch(/onStartApply=\{startApply\}/);
-    const applyView = readScannedSource(APPLY_VIEW);
-    expect(applyView).toMatch(/onStartApply\?: \(payload: ApplyEntryPayload\) => void/);
-  });
-
-  it("真实执行后 dry-run 不再抹掉本次记录引用", () => {
-    const applyView = readScannedSource(APPLY_VIEW);
-    expect(applyView, "写完再干跑一次核对现状是自然动作，把 executeRecord 抹掉等于把面板藏起来").toMatch(
-      /if \(!dryRun\) \{\s*setExecuteHistoryId\(null\);\s*setExecuteRecord\(null\);\s*\}/
-    );
-  });
-});
-
-describe("晋级面板只产入口不写目标", () => {
-  it("面板不碰任何写接口与执行器", () => {
-    const panel = readScannedSource(PANEL);
-    for (const banned of ["publishConfig", "deleteConfig", "executeApplyPlan", "applyPlanExecution"]) {
-      expect(panel, `面板里出现了 ${banned}：写路径的唯一出口仍然是计划页第5步那条 dry-run 链路`).not.toContain(banned);
-    }
-    // 只允许读现值与命名空间清单这两件只读的事（算指纹 + 漂移复检 + 生产租户候选）。
-    expect(panel).toMatch(/import \{ getConfigDocument, listNamespaces, type Namespace \} from "\.\.\/api\/nacos"/);
-  });
-
-  it("晋级的构造、查找与标记都走 lib 里那份唯一实现", () => {
-    const panel = readScannedSource(PANEL);
-    for (const shared of ["buildPromotionEntryFromVerification", "findVerificationForRecord", "promotionTargetCandidates", "recordSandboxVerification"]) {
-      expect(panel, `面板没有 import lib/applyFollowup 的 ${shared}，八成是就地又抄了一份`).toContain(shared);
-    }
-    expect(panel, "面板不许自己算指纹：范围与指纹口径只有一份（executableItemsForRecord）").not.toMatch(/fingerprintApplyPlanValue|verifiedTargetFingerprints/);
-    const history = readScannedSource(HISTORY);
-    expect(history, "历史页不许留第二份查找实现：key 语义一改另一份就悄悄失真").not.toMatch(/const findVerification = |function findVerification\(/);
-    expect(history).toMatch(/findVerificationForRecord/);
-    expect(readScannedSource(FOLLOWUP)).toMatch(/export function promotionTargetCandidates/);
-  });
-
-  it("沙箱自己不在候选里，且默认指向带生产标记的那条", () => {
-    const followup = readScannedSource(FOLLOWUP);
-    const candidates = followup.slice(followup.indexOf("export function promotionTargetCandidates"));
-    expect(candidates).toMatch(/conn\.id !== sandboxConnectionId/);
-    expect(candidates, "候选顺序被改回连接表原序：下拉默认就可能停在 Dev 上").toMatch(/isProductionMarkedConnection\(conn, namespace\)/);
-    expect(followup, "生产标记的判据另起了一套，必须复用执行层那组要求手敲确认的标记词").toMatch(/isProtectedApplyTarget\(connection, \{/);
-  });
-});
-
-describe("灰态与原因必须是真的", () => {
-  it("未验证与回读未确认都进 promoteReasons，按钮按长度灰", () => {
-    const panel = readScannedSource(PANEL);
-    expect(panel).toMatch(/const canVerify = readbackConfirmed && busy === null/);
-    expect(panel, "去掉 !verification 这一条就是允许对没核对过的沙箱晋级").toMatch(/if \(!verification\) promoteReasons\.push\(t\("apply\.promoteRequiresVerification"\)\)/);
-    expect(panel).toMatch(/if \(!selectedTarget\) promoteReasons\.push\(t\("apply\.promoteNoTarget"\)\)/);
-    expect(panel).toMatch(/disabled=\{promoteReasons\.length > 0\}\s*aria-disabled=\{promoteReasons\.length > 0\}/);
-    expect(panel, "标记按钮不能只灰不解释：原因写在 .btn-guard 的 title 上").toMatch(/<span className="btn-guard" title=\{canVerify \? undefined : blockedReason \|\| promoteReasons\.join\("\\n"\)\}>/);
-  });
-
-  it("选中目标没有生产标记时要说出来，而不是让栏目替它背书", () => {
-    const panel = readScannedSource(PANEL);
-    expect(panel).toMatch(/const sandboxNamespace = promotionTargetNamespace\(record, verification\)/);
-    expect(panel, "沿用还是点明只能有一份值：两处各算一份就会指错租户").toMatch(/const effectiveNamespace =\s*namespaceChoice === INHERIT_SANDBOX_NAMESPACE \? sandboxNamespace : namespaceChoice/);
-    expect(panel).toMatch(/isProductionMarkedConnection\(selectedTarget, effectiveNamespace\)/);
-    expect(panel).toMatch(/apply-promote-target-note/);
-    expect(zh["apply.promoteTargetNoProductionMarker"]).toContain("{target}");
-    expect(en["apply.promoteTargetNoProductionMarker"]).toContain("{target}");
-  });
-
-  it("样式收在自己的容器里，警告色不被字段标题的灰阶吃掉", () => {
-    const css = readScannedSource(CSS);
-    for (const selector of [".apply-promote-panel", ".apply-promote-steps", ".apply-promote-actions", ".apply-promote-target", ".btn-guard"]) {
-      expect(css, `缺少 ${selector} 规则`).toContain(selector);
-    }
-    const noteRule = /\.apply-promote-target > \.apply-promote-target-note,\s*\.apply-promote-namespace > \.apply-promote-namespace-note \{([^}]*)\}/.exec(css);
-    expect(noteRule, "缺少生产目标/命名空间纠偏提示的样式（两块必须共用一份规则，别复制两遍）").not.toBeNull();
-    expect(noteRule![1], "提示是警告级，不是灰字说明").toContain("var(--amber)");
-    const panel = readScannedSource(PANEL);
-    expect(panel, ".field > span 按位置给标题上灰阶（0,1,1），单类写 color 会被吃掉——别把警告挂上 .field-hint").not.toMatch(/className="field-hint apply-promote-target-note"/);
-  });
-});
-
-describe("文案随迁移走干净", () => {
+describe("文案随撤除走干净", () => {
   const panelKeys = [
     "promotePanelTitle",
     "promotePanelIntro",
@@ -200,52 +156,34 @@ describe("文案随迁移走干净", () => {
     "promoteFailed",
   ];
 
-  it("apply.promote* 中英齐、占位符不偏科", () => {
+  it("apply.promote* 整块与指路键中英全删", () => {
     for (const key of panelKeys) {
-      expect(zh[`apply.${key}`], `zh 缺 apply.${key}`).toBeTruthy();
-      expect(en[`apply.${key}`], `en 缺 apply.${key}`).toBeTruthy();
+      expect(zh[`apply.${key}`], `apply.${key} 没从 zh 删掉：没有人再引用它`).toBeUndefined();
+      expect(en[`apply.${key}`], `apply.${key} 没从 en 删掉：没有人再引用它`).toBeUndefined();
     }
-    for (const key of ["promoteReadbackUnconfirmed", "promoteBlockedByUnconfirmed"]) {
-      expect(zh[`apply.${key}`], `${key} 的 zh 少了 {count}`).toContain("{count}");
-      expect(en[`apply.${key}`], `${key} 的 en 少了 {count}`).toContain("{count}");
-    }
-    for (const key of ["promoteVerificationVerified"]) {
-      for (const placeholder of ["{target}", "{namespace}", "{time}"]) {
-        expect(zh[`apply.${key}`], `${key} 的 zh 少了 ${placeholder}`).toContain(placeholder);
-        expect(en[`apply.${key}`], `${key} 的 en 少了 ${placeholder}`).toContain(placeholder);
-      }
-    }
-    for (const [key, placeholders] of [
-      ["promoteNamespaceInherit", ["{namespace}"]],
-      ["promoteNamespaceLoadFailed", ["{target}"]],
-      ["promoteNamespaceMissing", ["{namespace}", "{target}"]],
-    ] as [string, string[]][]) {
-      for (const placeholder of placeholders) {
-        expect(zh[`apply.${key}`], `${key} 的 zh 少了 ${placeholder}`).toContain(placeholder);
-        expect(en[`apply.${key}`], `${key} 的 en 少了 ${placeholder}`).toContain(placeholder);
-      }
+    expect(zh["operationHistory.promoteEntryLocation"], "zh 还留着指路句").toBeUndefined();
+    expect(en["operationHistory.promoteEntryLocation"], "en 还留着指路句").toBeUndefined();
+  });
+
+  it("早先迁走的旧键不许在 locale 里当孤儿", () => {
+    for (const orphan of [
+      "operationHistory.productionTarget",
+      "operationHistory.promoteToTarget",
+      "operationHistory.promoteRequiresVerification",
+      "operationHistory.noProductionTarget",
+    ]) {
+      expect(zh[orphan], `${orphan} 已经没人引用了，别留在 zh 里`).toBeUndefined();
+      expect(en[orphan], `${orphan} 已经没人引用了，别留在 en 里`).toBeUndefined();
     }
   });
 
-  it("生产目标为空时要把「为什么没有」说出来，而不是留一个空下拉", () => {
-    // 本地快照与只读连接被剔出候选之后，这一栏完全可能真的为空：用户得知道是连接不给力，不是没配连接。
-    expect(zh["apply.promoteNoTarget"], "没说清「本地快照与只读连接不能当目标」").toContain("只读");
-    expect(en["apply.promoteNoTarget"], "same as zh").toMatch(/read-only/i);
-  });
-
-  it("面板引用的键都真存在，历史页新加的读数键也是", () => {
-    for (const match of readScannedSource(PANEL).matchAll(/t\("(apply\.[A-Za-z]+)"/g)) {
-      const key = match[1];
-      expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
-      expect(en[key], `en 缺 ${key}`).toBeTruthy();
-    }
+  it("记录级读数键中英都在，占位符不偏科", () => {
     for (const key of [
       "operationHistory.markSandboxVerified",
       "operationHistory.remarkSandboxVerified",
       "operationHistory.verificationState",
       "operationHistory.verificationVerified",
       "operationHistory.verificationUnverified",
-      "operationHistory.promoteEntryLocation",
     ]) {
       expect(zh[key], `zh 缺 ${key}`).toBeTruthy();
       expect(en[key], `en 缺 ${key}`).toBeTruthy();
@@ -254,17 +192,20 @@ describe("文案随迁移走干净", () => {
     expect(en["operationHistory.verificationVerified"]).toContain("{target}");
   });
 
-  it("晋级搬走后，指路的句子跟着改口径，不留旧路线", () => {
-    expect(en["apply.postWriteVerificationHintConfirmed"]).toMatch(/mark the sandbox verified here/);
-    expect(zh["apply.postWriteVerificationHintConfirmed"]).toContain("在这一步");
-    // 工作流说明里那句「去操作历史标记验证并晋级」现在是假话：第5步就地标记，历史页没有晋级。
-    expect(en["diff.workflowStep5Detail"], "还在把用户支去操作历史找晋级按钮").not.toMatch(/Operation History/);
-    expect(zh["diff.workflowStep5Detail"], "还在把用户支去操作历史找晋级按钮").not.toContain("操作历史");
-    // 迁走的旧键不许在 locale 里当孤儿（历史页只剩读数与提示，没有目标选择器与晋级按钮）。
-    for (const orphan of ["operationHistory.productionTarget", "operationHistory.promoteToTarget", "operationHistory.promoteRequiresVerification", "operationHistory.noProductionTarget"]) {
-      expect(zh[orphan], `${orphan} 已经没人引用了，别留在 zh 里`).toBeUndefined();
-      expect(en[orphan], `${orphan} 已经没人引用了，别留在 en 里`).toBeUndefined();
-    }
+  it("第5步标题是「执行与验证」，中英都不留晋级", () => {
+    expect(zh["diff.workflowStep5"], "zh 标题加回了晋级").toBe("执行与验证");
+    expect(en["diff.workflowStep5"], "en 标题还带着晋级").not.toMatch(/promot/i);
+    expect(en["diff.workflowStep5"]).toBeTruthy();
+  });
+
+  it("写后回读提示改指操作历史，不再说「在本步标记验证」", () => {
+    expect(zh["diff.workflowStep5Detail"], "步骤说明加回了晋级").not.toContain("晋级");
+    expect(en["diff.workflowStep5Detail"], "步骤说明加回了晋级").not.toMatch(/promot/i);
+    // 旧版断言「说明不许提操作历史」已倒过来：新文案指去操作历史是真实去处，必须指得到。
+    expect(zh["apply.postWriteVerificationHintConfirmed"], "还在叫用户在本步标记验证").not.toContain("在这一步");
+    expect(zh["apply.postWriteVerificationHintConfirmed"], "没指去操作历史").toContain("操作历史");
+    expect(en["apply.postWriteVerificationHintConfirmed"], "还在说 verified here").not.toMatch(/verified here/i);
+    expect(en["apply.postWriteVerificationHintConfirmed"], "没指去操作历史").toMatch(/operation history/i);
   });
 });
 
@@ -291,84 +232,44 @@ describe("步骤条的回退点击跟着返回落点走（轮76）", () => {
     expect(app, "App 别再自己写一遍 returnMode ?? mode：两处判据迟早分家").toContain("applyEntryReturnMode(payload)");
     expect(app).not.toMatch(/const mode = payload\.origin\.returnMode \?\? payload\.origin\.mode;/);
     expect(readScannedSource(APPLY_VIEW), "计划页必须从 lib 引判据，不许复制一份比较").toContain(
-      "import { applyEntryStepsAreNavigable, type ApplyEntryPayload } from \"../lib/applyEntry\";"
+      'import { applyEntryStepsAreNavigable, type ApplyEntryPayload } from "../lib/applyEntry";'
     );
   });
-
-  it("晋级的 dry-run 承诺不把用户支到不存在的第5步", () => {
-    // 点完晋级落在新计划的第4步（生成并审核变更计划）：勾选与 dry-run 都在那儿做。
-    expect(zh["apply.promoteDryRunPromise"], "还在叫用户回第5步勾选，页面上第5步是执行完之后才到的").not.toContain("第5步");
-    expect(en["apply.promoteDryRunPromise"], "same as zh: that step number was wrong").not.toMatch(/step 5/i);
-    expect(zh["apply.promoteDryRunPromise"]).toContain("新计划");
-    expect(en["apply.promoteDryRunPromise"]).toMatch(/new change plan/i);
-  });
-
 });
+
 /**
  * 晋级落进哪一套租户，只在 lib 收口（轮76 S31 真机量出来的洞）。
  *
- * Nacos/MSE 的 namespace id 每套集群各发各的（MSE 是 36 位 UUID）。第5步的面板以前没有这一栏，
- * 晋级把沙箱的 id 原样盖到生产集群上，计划把「这里没有这个租户」报成新建，
- * 用户以为在覆盖生产配置，其实写进没人读的租户。所以这里守四件事：
- * 命名空间只有一份变量、面板只交给 lib 不自己算、历史页不许长出这一栏、
- * 以及当不了目标的连接根本不进候选（本地快照/只读）。
+ * r113 之后这条机制暂时没有页面调用方，但保留在树里：旧 promote 记录的回退计划仍会经
+ * 「回退→变更计划」这条路进来，lib 的命名空间口径与写资格线是数据形状的一部分，不许跟着面板删。
  */
-describe("晋级落进哪一套租户只在 lib 收口", () => {
+describe("晋级机制的租户口径只在 lib 收口", () => {
   it("命名空间只有一份变量，计划项与入口端点共用", () => {
     const followup = readScannedSource(FOLLOWUP);
     const builder = followup.slice(followup.indexOf("export async function buildPromotionEntryFromVerification"));
     expect(builder).toMatch(/options\?: \{ targetNamespace\?: string \}/);
-    expect(
-      builder,
-      "只有 undefined（面板没点）才允许退回计划的目标命名空间"
-    ).toMatch(/options\?\.targetNamespace === undefined \? plan\.target\.namespace/);
+    expect(builder, "只有 undefined（调用方没点）才允许退回计划的目标命名空间").toMatch(
+      /options\?\.targetNamespace === undefined \? plan\.target\.namespace/
+    );
     // 传进来的空串是 Nacos 的公共空间本身（接口里 public 写作空 tenant），不是「没选」。
-    expect(
-      builder,
-      "空串被当假值退回沙箱那个 id：用户点了 public，写的却是别的租户"
-    ).toMatch(/: options\.targetNamespace\.trim\(\);/);
+    expect(builder, "空串被当假值退回沙箱那个 id：用户点了 public，写的却是别的租户").toMatch(/: options\.targetNamespace\.trim\(\);/);
     expect(builder, "计划项的目标命名空间没跟着换：dry-run 报的位置和真正落笔的位置会各说一套").toMatch(
       /namespace: targetNamespace,\s*\};/
     );
-    expect(builder, "入口端点还是沙箱那个 namespace id：用户在第4步看到的「目标」就是假的").toMatch(
+    expect(builder, "入口端点还是沙箱那个 namespace id：新计划第4步看到的「目标」就是假的").toMatch(
       /target: endpointFromConnection\(productionTarget, targetNamespace\)/
     );
-    expect(
-      builder,
-      "沙箱侧的位置不能被生产命名空间带跑：漂移复检与 source 读的都是 targetRef 之前那份现场"
-    ).toMatch(/const sourceRef = toEntryRef\(item\.targetRef \?\? item\.ref\);/);
+    expect(builder, "沙箱侧的位置不能被生产命名空间带跑：漂移复检与 source 读的都是 targetRef 之前那份现场").toMatch(
+      /const sourceRef = toEntryRef\(item\.targetRef \?\? item\.ref\);/
+    );
   });
 
-  it("面板把用户点出来的命名空间交给 lib，自己不算 id", () => {
-    const panel = readScannedSource(PANEL);
-    expect(panel, "面板不再传命名空间就等于回到「顺手沿用沙箱那个 id」这个洞").toMatch(
-      /\{ targetNamespace: effectiveNamespace \}/
-    );
-    expect(panel, "public 既写作空串也写作 public，比对口径必须用全站那一份").toMatch(
-      /import \{ normalizeNamespace \} from "\.\.\/lib\/configChangeBus";/
-    );
-    expect(panel).toMatch(/normalizeNamespace\(item\.namespace\) === normalizeNamespace\(effectiveNamespace\)/);
-    expect(panel, "换目标连接不清空所选命名空间：上一套集群的 id 在这一套里毫无意义").toMatch(
-      /setNamespaceChoice\(INHERIT_SANDBOX_NAMESPACE\);/
-    );
-    // 「沿用」必须有属于自己的哨兵值：拿空串当哨兵，public 这一档就永远选不中。
-    expect(panel, "沿用沙箱的哨兵值不能是空串：那是 Nacos 公共空间的真实 id").toMatch(
-      /const INHERIT_SANDBOX_NAMESPACE = "__inherit-sandbox-namespace__";/
-    );
-    expect(panel, "命名空间的有效值只许有一份").toMatch(
-      /namespaceChoice === INHERIT_SANDBOX_NAMESPACE \? sandboxNamespace : namespaceChoice/
-    );
-    expect(panel, "公共空间的 id 是空串，括注出来就是「public ()」这种脏读数").toMatch(
-      /label: item\.namespace && item\.namespaceShowName && item\.namespaceShowName !== item\.namespace/
-    );
-    expect(panel, "这一栏只读命名空间清单，不许多碰别的集群接口").not.toMatch(/configCenter[A-Z]/);
-  });
-
-  it("历史页不许长出命名空间这一栏", () => {
-    const history = readScannedSource(HISTORY);
-    for (const banned of ["listNamespaces", "targetNamespace", "promoteNamespace"]) {
-      expect(history, `历史页又出现了 ${banned}：晋级的现场在第5步，历史页只是审计面`).not.toContain(banned);
-    }
+  it("沙箱自己不在候选里，且默认指向带生产标记的那条", () => {
+    const followup = readScannedSource(FOLLOWUP);
+    const candidates = followup.slice(followup.indexOf("export function promotionTargetCandidates"));
+    expect(candidates).toMatch(/conn\.id !== sandboxConnectionId/);
+    expect(candidates, "候选顺序被改回连接表原序：下拉默认就可能停在 Dev 上").toMatch(/isProductionMarkedConnection\(conn, namespace\)/);
+    expect(followup, "生产标记的判据另起了一套，必须复用执行层那组要求手敲确认的标记词").toMatch(/isProtectedApplyTarget\(connection, \{/);
   });
 
   it("写不进去的连接不进生产目标，apollo/consul 留在候选里", () => {

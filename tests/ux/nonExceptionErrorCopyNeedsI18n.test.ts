@@ -228,10 +228,8 @@ describe("非异常出口的报错必须走 i18n（波30 R50）", () => {
     ];
     const producer = readScannedSource("src/lib/applyFollowup.ts");
     SHARED_KEYS.forEach((key) => expect(producer, `lib 没复用 ${key}`).toContain(`"${key}"`));
-    [
-      "src/components/OperationHistoryView.tsx",
-      "src/components/PostApplyPromotionPanel.tsx",
-    ].forEach((file) => {
+    // r113 撤「晋级到生产」入口后晋级面板组件已删，UI 侧只剩历史页这一处透传。
+    ["src/components/OperationHistoryView.tsx"].forEach((file) => {
       const ui = readScannedSource(file);
       SHARED_KEYS.forEach((key) => expect(ui, `${file} 不该自己再翻译 ${key}`).not.toContain(`"${key}"`));
     });

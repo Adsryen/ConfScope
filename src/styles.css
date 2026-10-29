@@ -7585,8 +7585,8 @@ button.diff-workflow-step-btn:hover {
   border-top: 1px solid var(--border);
 }
 
-/* 沙箱验证状态（轮76）：历史页只陈述「验过没有」，晋级入口在变更计划第5步。
-   与上面 .history-rollback-state 同一读法，未验证不该看起来像出错，所以用次要文本而非红色。 */
+/* 沙箱验证状态（轮76）：历史页只陈述「验过没有」。r113 撤掉第5步的晋级入口后，
+   这个状态行不再指路任何入口。与上面 .history-rollback-state 同一读法，未验证不该看起来像出错，所以用次要文本而非红色。 */
 .history-verification-state.verified {
   color: var(--green);
 }
@@ -8600,7 +8600,11 @@ button.diff-workflow-step-btn:hover {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* 整列是变更计划页唯一滚动面（r113）：执行回执 / 写后回读 / 回退 / 跳过在矮窗口下仍会溢出，
+     overflow: hidden 会把下半截切掉且滚不到；overscroll-behavior 钉住滚动链，滚到底不带动外层页面。 */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
@@ -8672,7 +8676,8 @@ button.diff-workflow-step-btn:hover {
 
 .apply-workbench {
   flex: 1;
-  min-height: 0;
+  /* 整列改滚动后 workbench 不能再被压到 0：矮窗口下差异面板至少要留 320px，超出部分由整列滚动承接。 */
+  min-height: 320px;
   display: grid;
   grid-template-columns: minmax(216px, 252px) minmax(0, 1fr);
 }
@@ -9150,98 +9155,6 @@ button.diff-workflow-step-btn:hover {
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.6;
-}
-
-/* 变更计划第5步「晋级到生产」（轮76）：写后回读 → 标记沙箱验证 → 选生产目标 → 生成新计划，
-   四步一屏读完。命中高度沿用轮44 R88 的 24px 口径；灰按钮的原因挂在包裹的 .btn-guard 上
-   （disabled 元素收不到 pointer 事件，title 直接写在按钮上等于没写）。 */
-.apply-promote-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg2);
-}
-
-.apply-promote-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.apply-promote-head strong {
-  font-size: 13px;
-  color: var(--text-hi);
-}
-
-.apply-promote-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.apply-promote-steps li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.apply-promote-step-label {
-  min-width: 96px;
-  color: var(--text-dim);
-}
-
-.apply-promote-step-value {
-  color: var(--text);
-}
-
-.apply-promote-step-value.is-ok {
-  color: var(--green);
-}
-
-.apply-promote-step-value.is-warn {
-  color: var(--amber);
-}
-
-.apply-promote-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.apply-promote-actions .btn {
-  min-height: 28px;
-}
-
-/* R83：元素是 `field apply-promote-target` 两个类，裸类名和 .field{flex:1} 同为 (0,1,0)，
-   此前只是恰好写在后面才赢——把选择器提复合，靠特异度决胜，别再赌文档顺序。 */
-.apply-promote-actions .apply-promote-target {
-  /* .field 默认 flex:1，会把这一列撑满整行；这里要的是够用宽度，别把按钮挤出可视区 */
-  flex: 0 1 220px;
-}
-
-.apply-promote-target .sel {
-  display: block;
-  min-width: 0;
-}
-
-/* 选中的目标没有生产标记时的纠偏提示（第二条：命名空间在这套集群上根本不存在）。
-   不自带 .field-hint：那是灰色辅助说明语义，
-   而且 .field > span 按位置给字段标题上灰阶（特异度 0,1,1），单类写 color 会被它吃掉——
-   和轮72B 那条 .field-error 静默失效同一个坑，所以这里提特异度并把颜色/字号自己写全。 */
-.apply-promote-target > .apply-promote-target-note,
-.apply-promote-namespace > .apply-promote-namespace-note {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--amber);
 }
 
 .apply-execution-notice {

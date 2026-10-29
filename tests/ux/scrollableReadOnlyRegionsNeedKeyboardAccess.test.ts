@@ -135,6 +135,9 @@ const LEGACY_NON_PRE_CLASSES = new Set([
   "about-page",
   "apply-detail",
   "apply-item-list",
+  // 变更计划整列滚动面（r113 撤「晋级到生产」后整列改唯一滚动面）：列内含执行 / Dry-run 按钮、
+  // 确认 checkbox、手敲输入框与差异详情编辑器，Tab 经子孙本来就到得了，容器不另挂 tabIndex。
+  "apply-main-column",
   "apply-workspace",
   "audit-matrix-body",
   "audit-page",
@@ -288,10 +291,9 @@ describe("只读滚动区必须能被键盘到达", () => {
     const stale = [...LEGACY_NON_PRE_CLASSES].filter((cls) => !unregisteredKeys.some((key) => classOf(key) === cls));
     expect(stale, `这些遗留类已经扫不到站点，从 LEGACY_NON_PRE_CLASSES 删掉，别留僵尸把守卫拖空：\n${stale.join("\n")}`).toEqual([]);
     // 自检：补空洞后这条路径必须真的扫到东西（轮48 之前 unregisteredKeys 恒为空，守卫是空转的）
-    expect(
-      unregisteredKeys.length,
-      "未登记的非 pre 滚动站点一条都没扫到，说明扫描又退回了「静默丢弃」"
-    ).toBeGreaterThanOrEqual(LEGACY_NON_PRE_CLASSES.size);
+    expect(unregisteredKeys.length, "未登记的非 pre 滚动站点一条都没扫到，说明扫描又退回了「静默丢弃」").toBeGreaterThanOrEqual(
+      LEGACY_NON_PRE_CLASSES.size
+    );
   });
 
   it("地标命名的滚动容器必须自己可聚焦且画得出焦点环", () => {

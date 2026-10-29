@@ -402,7 +402,11 @@ describe("OperationHistoryView", () => {
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
 
     expect(screen.getByText("Not rollbackable")).toBeDefined();
-    expect(screen.getByText("The target of this record is a non-writable source (local snapshot or read-only connection); rollback only goes through a change plan, so no entry is offered.")).toBeDefined();
+    expect(
+      screen.getByText(
+        "The target of this record is a non-writable source (local snapshot or read-only connection); rollback only goes through a change plan, so no entry is offered."
+      )
+    ).toBeDefined();
     expect(screen.queryByRole("button", { name: /rollback plan/i })).toBeNull();
   });
 
@@ -444,10 +448,7 @@ describe("OperationHistoryView", () => {
     expect(within(panel).getByText(/2 item\(s\) written, 2 actually changed/)).toBeDefined();
     // 只列本次执行范围内的项，且每条都带位置与变化结论
     const rows = within(panel).getAllByRole("button", { name: /DEFAULT_GROUP/ });
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("app.yaml"),
-      expect.stringContaining("gateway.yaml"),
-    ]);
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining("app.yaml"), expect.stringContaining("gateway.yaml")]);
 
     fireEvent.click(rows[0]);
     const diff = panel.querySelector(".udiff") as HTMLElement;
@@ -558,10 +559,7 @@ describe("OperationHistoryView", () => {
 
   it("keeps centre-history rows on the single-content view instead of an empty change list", async () => {
     localStorage.setItem("locale", "en-US");
-    localStorage.setItem(
-      "cs.operationHistory",
-      JSON.stringify([{ ...rollbackablePublishRecord, content: "server:\n  port: 8080" }])
-    );
+    localStorage.setItem("cs.operationHistory", JSON.stringify([{ ...rollbackablePublishRecord, content: "server:\n  port: 8080" }]));
     renderHistory([conn]);
     fireEvent.click(await screen.findByRole("button", { name: /app.yaml/ }));
     // 没有计划的行（配置中心历史 / 遗留单条）不硬凑一节空的「本次改动」
@@ -576,7 +574,14 @@ describe("OperationHistoryView", () => {
       JSON.stringify([
         followupApplyRecord(),
         { ...rollbackablePublishRecord, id: "legacy-publish-1" },
-        { ...rollbackablePublishRecord, id: "snapshot-1", type: "snapshot", dataId: "*", group: "*", rollbackReason: "operationHistory.rollbackSnapshotOnly" },
+        {
+          ...rollbackablePublishRecord,
+          id: "snapshot-1",
+          type: "snapshot",
+          dataId: "*",
+          group: "*",
+          rollbackReason: "operationHistory.rollbackSnapshotOnly",
+        },
       ])
     );
     renderHistory([devConn, sandboxConn, prodConn, conn]);
@@ -717,7 +722,9 @@ describe("OperationHistoryView", () => {
     snapshotMocks.getSnapshot.mockResolvedValue(beforeApplySnapshot([snapshotConfig("app.yaml"), snapshotConfig("gateway.yaml")]));
     localStorage.setItem(
       "cs.operationHistory",
-      JSON.stringify([followupApplyRecord({ appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }] })])
+      JSON.stringify([
+        followupApplyRecord({ appliedLocations: [{ namespace: "public", group: "DEFAULT_GROUP", dataId: "app.yaml", key: "__document" }] }),
+      ])
     );
     const { onStartApply } = renderHistory([devConn, sandboxConn, prodConn]);
 
@@ -822,10 +829,9 @@ describe("OperationHistoryView", () => {
     // 历史页只剩「验过没有」这一行只读读数，没标记时是不带目标名的未验证。
     expect(screen.getByText("Sandbox verification:")).toBeDefined();
     expect(screen.getByText("Not verified")).toBeDefined();
-    // 选目标 + 晋级整块搬去变更计划第5步：这里连按钮带选择器都不该有，只留一句去处提示。
+    // 晋级入口已撤，历史页只留记录级读数：这里连按钮带选择器都不该有。
     expect(screen.queryByRole("button", { name: /Promote/ })).toBeNull();
     expect(screen.queryByText("Production target")).toBeNull();
-    expect(screen.getByText(/Promotion lives in step 5/)).toBeDefined();
     expect(onStartApply).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Mark sandbox verified" }));
@@ -994,11 +1000,7 @@ describe("OperationHistoryView", () => {
     const onFocusConsumed = vi.fn();
     render(
       <I18nProvider>
-        <OperationHistoryView
-          connections={[devConn, sandboxConn]}
-          focusRecordId="apply-fail-1"
-          onFocusConsumed={onFocusConsumed}
-        />
+        <OperationHistoryView connections={[devConn, sandboxConn]} focusRecordId="apply-fail-1" onFocusConsumed={onFocusConsumed} />
       </I18nProvider>
     );
 
