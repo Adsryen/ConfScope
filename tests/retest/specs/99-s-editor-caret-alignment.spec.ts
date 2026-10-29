@@ -54,6 +54,44 @@ async function measureLayer(page: import("@playwright/test").Page, term?: string
     const padTop = parseFloat(st.paddingTop);
     const rowH = parseFloat(st.lineHeight);
 
+    // 两层的字体必须是同一份**计算值**。字形层画看得见的字，输入层画光标与选区：
+    // 只要 family / size / letter-spacing / 连字开关有一个不同，每字符 advance 就不同，
+    // 光标与选区整体滑到别的字符上。最阴的是这类错位换机器才显形——通用 monospace
+    // 在 Windows 解析到 Consolas、在 Linux 解析到 DejaVu Sans Mono，本机永远量不出差。
+    // 所以这里不比渲染像素，直接比两层的字体声明，再用 canvas 把 advance 差换算成数字留档。
+    const glyphSt = getComputedStyle(code);
+    const taFont = {
+      fontFamily: st.fontFamily,
+      fontSize: st.fontSize,
+      fontWeight: st.fontWeight,
+      fontStyle: st.fontStyle,
+      fontVariantLigatures: st.fontVariantLigatures,
+      fontKerning: st.fontKerning,
+      letterSpacing: st.letterSpacing,
+      wordSpacing: st.wordSpacing,
+      tabSize: st.tabSize,
+      lineHeight: st.lineHeight,
+    };
+    const glyphFont = {
+      fontFamily: glyphSt.fontFamily,
+      fontSize: glyphSt.fontSize,
+      fontWeight: glyphSt.fontWeight,
+      fontStyle: glyphSt.fontStyle,
+      fontVariantLigatures: glyphSt.fontVariantLigatures,
+      fontKerning: glyphSt.fontKerning,
+      letterSpacing: glyphSt.letterSpacing,
+      wordSpacing: glyphSt.wordSpacing,
+      tabSize: glyphSt.tabSize,
+      lineHeight: glyphSt.lineHeight,
+    };
+    const fontMismatch = (Object.keys(taFont) as (keyof typeof taFont)[]).filter((k) => taFont[k] !== glyphFont[k]);
+    const sample = (el.value.replace(/\n/g, "").slice(0, 60) || "abcdefghijklmnopqrstuvwxyz").split("");
+    const ctx2 = document.createElement("canvas").getContext("2d")!;
+    ctx2.font = `${taFont.fontSize} ${taFont.fontFamily}`;
+    const advTa = ctx2.measureText(sample.join("")).width / sample.length;
+    ctx2.font = `${glyphFont.fontSize} ${glyphFont.fontFamily}`;
+    const advGlyph = ctx2.measureText(sample.join("")).width / sample.length;
+
     const nodes: Text[] = [];
     const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) nodes.push(walker.currentNode as Text);
@@ -163,6 +201,13 @@ async function measureLayer(page: import("@playwright/test").Page, term?: string
       worstPitchLine,
       rowH,
       padTop,
+      taFont,
+      glyphFont,
+      fontMismatch,
+      sampleChars: sample.length,
+      advTa: +advTa.toFixed(3),
+      advGlyph: +advGlyph.toFixed(3),
+      advDeltaPerChar: +(advGlyph - advTa).toFixed(3),
       charW: +ctx.measureText("m").width.toFixed(2),
       italicSpanCount: italicSpans.length,
       italicAdvanceDelta,
@@ -186,9 +231,20 @@ function assertAligned(r: Layer, label: string) {
       `worstDx=${r.worstX}(L${r.worstXLine}, ${r.hitsOnWorstLine} 处命中, "${r.worstXText}") ` +
       `dySpread=${r.dySpread}(基线 ${r.dyBase}, 最大 L${r.maxDyLine}) pitchΔ=${r.worstPitchDelta}(L${r.worstPitchLine}) ` +
       `rowH=${r.rowH} padTop=${r.padTop} hitPadding=${r.hitPaddingLeft}/${r.hitPaddingRight} ` +
-      `hitBg=${r.hitBackground} hitShadow=${r.hitBoxShadow}`
+      `hitBg=${r.hitBackground} hitShadow=${r.hitBoxShadow} ` +
+      `两层字体=${r.fontMismatch.length ? `不一致[${r.fontMismatch.join(",")}] ta=${r.taFont.fontFamily} glyph=${r.glyphFont.fontFamily}` : r.taFont.fontFamily} ` +
+      `每字符 advance ta=${r.advTa} glyph=${r.advGlyph}（差 ${r.advDeltaPerChar}px/字符，第 60 列偏 ${(r.advDeltaPerChar * 60).toFixed(1)}px）`
   );
   expect(r.measuredLines, "编辑区没量到行，前置条件就不成立").toBeGreaterThan(10);
+  // 字体同源排在像素判据之前：本机像素永远绿，只有这条能抓住「换台机器就错位」的那一层。
+  expect(
+    r.fontMismatch,
+    `${label}：字形层与光标层的计算字体不一致（${r.fontMismatch.join("/")}）—— ta=${r.taFont.fontFamily} vs code=${r.glyphFont.fontFamily}，光标与选区会整体滑到别的字符上`
+  ).toEqual([]);
+  expect(
+    Math.abs(r.advDeltaPerChar),
+    `${label}：同一串字两层每字符 advance 差 ${r.advDeltaPerChar}px（ta=${r.advTa} / glyph=${r.advGlyph}），第 60 列就偏 ${(r.advDeltaPerChar * 60).toFixed(1)}px`
+  ).toBeLessThanOrEqual(MAX_DRIFT_PX);
   expect(Math.abs(r.worstX), `${label}：字形层比光标层宽 ${r.worstX}px（L${r.worstXLine}），光标会指错字`).toBeLessThanOrEqual(
     MAX_DRIFT_PX
   );

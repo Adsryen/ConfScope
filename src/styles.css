@@ -2856,7 +2856,17 @@ textarea {
   outline: 1px solid var(--accent-h);
   outline-offset: 1px;
 }
-.code-area code {
+/* 字形层的 <code> 必须整份继承所在 pre 的字体（轮107 只补了浏览态，轮132 补编辑态）。
+   UA 样式表给 code 写着 font-family: monospace，作者样式不覆盖它就吃这条：
+   浏览态的正文本来就只由这一层画，错了也只是「字体不是我选的那款」；
+   编辑态是透明 textarea 叠在这层之上，光标与选区由 textarea 画、字形由这层画，
+   两层字体不同 ⇒ 每字符 advance 不同 ⇒ 光标整体滑到别的字符上，选区缘压在别的字下面。
+   通用 monospace 按系统解析（Windows/WebView2 走系统固定宽度默认字体，Linux 走 DejaVu Sans Mono），
+   所以这台机器量不出来的错位，换一台就能差出半个字符到几个字符——真机判据见
+   tests/retest/specs/99-s-editor-caret-alignment.spec.ts 的字体同源那条，静态守卫见
+   tests/ux/codeEditorGlyphLayerFont.test.ts。 */
+.code-area code,
+.code-editor-pre code {
   font: inherit;
   background: none;
   padding: 0;
