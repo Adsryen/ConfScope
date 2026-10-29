@@ -113,6 +113,97 @@ describe("connection store", () => {
     expect(list[0].defaultGroup).toBe("RETEST-PROD");
   });
 
+  it("persists explicit environment role and write confirm policy", () => {
+    const created = upsertConnection({
+      name: "hz-core-01",
+      envRole: "production",
+      writeConfirmPolicy: "always",
+      baseUrl: "http://hz-core.example.com/nacos",
+      username: "nacos",
+      password: "nacos",
+      defaultNamespace: "",
+    });
+
+    expect(created.envRole).toBe("production");
+    expect(created.writeConfirmPolicy).toBe("always");
+    expect(loadConnections()).toEqual([created]);
+    const stored = localStorage.getItem("cs.connections")!;
+    expect(stored).toContain('"envRole":"production"');
+    expect(stored).toContain('"writeConfirmPolicy":"always"');
+  });
+
+  it("keeps undeclared connections without the new keys in storage", () => {
+    upsertConnection({
+      name: "plain-dev",
+      baseUrl: "http://plain.example.com/nacos",
+      username: "nacos",
+      password: "nacos",
+      defaultNamespace: "",
+    });
+
+    const stored = JSON.parse(localStorage.getItem("cs.connections")!) as Array<Record<string, unknown>>;
+    expect(stored[0]).not.toHaveProperty("envRole");
+    expect(stored[0]).not.toHaveProperty("writeConfirmPolicy");
+    expect(loadConnections()[0].envRole).toBeUndefined();
+    expect(loadConnections()[0].writeConfirmPolicy).toBeUndefined();
+  });
+
+  it("loads legacy records without the new fields and re-saves them without a backfill diff", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "legacy-a",
+          name: "Retest A",
+          sourceType: "nacos",
+          provider: "nacos",
+          baseUrl: "http://127.0.0.1:19848/nacos",
+          username: "",
+          password: "",
+          defaultNamespace: "retest-dev",
+          defaultGroup: "RETEST-PROD",
+        },
+      ])
+    );
+
+    const list = loadConnections();
+    expect(list).toHaveLength(1);
+    expect(list[0].envRole).toBeUndefined();
+    expect(list[0].writeConfirmPolicy).toBeUndefined();
+    expect(list[0].defaultGroup).toBe("RETEST-PROD");
+
+    const reSaved = upsertConnection({ ...list[0], name: "Retest A" });
+    expect(reSaved.envRole).toBeUndefined();
+    const stored = JSON.parse(localStorage.getItem("cs.connections")!) as Array<Record<string, unknown>>;
+    expect(stored[0]).not.toHaveProperty("envRole");
+    expect(stored[0]).not.toHaveProperty("writeConfirmPolicy");
+  });
+
+  it("treats invalid role or policy values as undeclared", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "bad-values",
+          name: "Bad Values",
+          sourceType: "nacos",
+          provider: "nacos",
+          baseUrl: "http://bad.example.com/nacos",
+          username: "",
+          password: "",
+          defaultNamespace: "",
+          envRole: "banana",
+          writeConfirmPolicy: 42,
+        },
+      ])
+    );
+
+    const list = loadConnections();
+    expect(list).toHaveLength(1);
+    expect(list[0].envRole).toBeUndefined();
+    expect(list[0].writeConfirmPolicy).toBeUndefined();
+  });
+
   it("deletes a connection by id", () => {
     vi.mocked(Math.random).mockReturnValueOnce(0.123456).mockReturnValueOnce(0.654321);
     const first = upsertConnection({

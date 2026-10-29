@@ -869,6 +869,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       name: connectionName,
       projectName: toSave.projectName?.trim() || DEFAULT_PROJECT_NAME,
       environmentName: toSave.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME,
+      envRole: toSave.envRole || undefined,
+      writeConfirmPolicy: toSave.writeConfirmPolicy || undefined,
       sourceName,
       sourceType: toSave.sourceType ?? "nacos",
       localPath: toSave.localPath?.trim() || "",
@@ -1348,6 +1350,39 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       {name}
                     </option>
                   ))}
+                </select>
+              </label>
+            </div>
+            <div className="field-row">
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.envRoleHelp")}>
+                  {t("connection.envRole")}
+                </FieldLabel>
+                <select
+                  className="search-input wide"
+                  value={draft.envRole ?? ""}
+                  onChange={(e) => set({ envRole: (e.target.value || undefined) as Draft["envRole"] })}
+                >
+                  <option value="">{t("connection.envRoleUndeclared")}</option>
+                  <option value="development">{t("connection.envRoleDevelopment")}</option>
+                  <option value="testing">{t("connection.envRoleTesting")}</option>
+                  <option value="staging">{t("connection.envRoleStaging")}</option>
+                  <option value="production">{t("connection.envRoleProduction")}</option>
+                </select>
+              </label>
+              <label className="field">
+                <FieldLabel {...fieldLabelProps} tip={t("connection.writeConfirmPolicyHelp")}>
+                  {t("connection.writeConfirmPolicy")}
+                </FieldLabel>
+                <select
+                  className="search-input wide"
+                  value={draft.writeConfirmPolicy ?? ""}
+                  onChange={(e) => set({ writeConfirmPolicy: (e.target.value || undefined) as Draft["writeConfirmPolicy"] })}
+                >
+                  <option value="">{t("connection.writeConfirmPolicyUndeclared")}</option>
+                  <option value="always">{t("connection.writeConfirmPolicyAlways")}</option>
+                  <option value="protected-only">{t("connection.writeConfirmPolicyProtectedOnly")}</option>
+                  <option value="never">{t("connection.writeConfirmPolicyNever")}</option>
                 </select>
               </label>
             </div>

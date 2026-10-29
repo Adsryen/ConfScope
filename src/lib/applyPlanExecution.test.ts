@@ -4,7 +4,7 @@ import type { ConfigDocument } from "../api/nacos";
 import type { OperationRecord } from "../store/operationHistory";
 import type { Task, TaskManager } from "./taskmanager";
 import { buildApplyPlan, fingerprintApplyPlanValue, type ApplyPlan, type ApplyPlanEndpoint, type ApplyPlanRef, type BuildApplyPlanInput } from "./applyPlan";
-import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget } from "./applyPlanExecution";
+import { applyConfirmationText, executeApplyPlan, isProtectedApplyTarget, requiresManualApplyConfirm } from "./applyPlanExecution";
 import { translate } from "../locales";
 
 const baseConnection: Connection = {
@@ -2018,5 +2018,49 @@ describe("目标已经是这一版的项不重复写入（轮98）", () => {
 
     expect(result).toMatchObject({ ok: true });
     expect((result as { alreadyApplied?: string[] }).alreadyApplied, "没有已达成项时不该冒出空数组之外的东西").toBeUndefined();
+  });
+});
+describe("显式环境角色与写入确认策略（r114）", () => {
+  const plainEndpoint = endpoint(); // label "Staging / public"，名称无任何保护标记
+
+  it("显式生产：名称无标记也判受保护", () => {
+    const conn: Connection = {
+      ...baseConnection,
+      id: "conn-hz",
+      name: "hz-core-01",
+      environmentName: "core",
+      sourceName: "intranet",
+      envRole: "production",
+    };
+    expect(isProtectedApplyTarget(conn, plainEndpoint)).toBe(true);
+  });
+
+  it.each(["development", "testing", "staging"] as const)("显式%：名称带生产标记也判不受保护", (role) => {
+    const conn: Connection = {
+      ...baseConnection,
+      name: "prod-mirror",
+      environmentName: "生产",
+      sourceName: "真实环境",
+      envRole: role,
+    };
+    expect(isProtectedApplyTarget(conn, plainEndpoint)).toBe(false);
+  });
+
+  it("未声明：原样走名称推断，判据与今天一致", () => {
+    expect(isProtectedApplyTarget({ ...baseConnection, name: "prod-vpc" }, plainEndpoint)).toBe(true);
+    expect(isProtectedApplyTarget({ ...baseConnection, name: "线上公网" }, plainEndpoint)).toBe(true);
+    expect(isProtectedApplyTarget(baseConnection, plainEndpoint)).toBe(false);
+  });
+
+  it("写入确认策略：always 一律手敲、never 一律不手敲、protected-only 与未声明落到受保护判定", () => {
+    const safe: Connection = { ...baseConnection }; // staging，无标记
+    const prod: Connection = { ...baseConnection, name: "Prod", environmentName: "Production" };
+
+    expect(requiresManualApplyConfirm({ ...safe, writeConfirmPolicy: "always" }, plainEndpoint)).toBe(true);
+    expect(requiresManualApplyConfirm({ ...prod, writeConfirmPolicy: "never" }, plainEndpoint)).toBe(false);
+    expect(requiresManualApplyConfirm({ ...safe, writeConfirmPolicy: "protected-only" }, plainEndpoint)).toBe(false);
+    expect(requiresManualApplyConfirm({ ...prod, writeConfirmPolicy: "protected-only" }, plainEndpoint)).toBe(true);
+    expect(requiresManualApplyConfirm(safe, plainEndpoint)).toBe(false);
+    expect(requiresManualApplyConfirm(prod, plainEndpoint)).toBe(true);
   });
 });

@@ -28,6 +28,7 @@ import {
   applyConfirmationText,
   executeApplyPlan,
   isProtectedApplyTarget,
+  requiresManualApplyConfirm,
   type ApplyExecutionProgress,
   type ApplyWriteVerification,
 } from "../lib/applyPlanExecution";
@@ -480,6 +481,7 @@ function ConfirmationPanel({
   selectedCount,
   selectedIds,
   protectedTarget,
+  manualConfirmRequired,
   confirmed,
   confirmationText,
   executionMode,
@@ -502,7 +504,10 @@ function ConfirmationPanel({
   plan: ApplyPlan;
   selectedCount: number;
   selectedIds: Set<string>;
+  /** 目标是否受保护（决定头部通知：受保护目标 / 普通目标）。 */
   protectedTarget: boolean;
+  /** 第 5 步要不要手敲确认文本（r114：连接显式写入确认策略优先，未声明落到受保护判定）。 */
+  manualConfirmRequired: boolean;
   confirmed: boolean;
   confirmationText: string;
   executionMode: ExecutionMode | null;
@@ -539,7 +544,7 @@ function ConfirmationPanel({
   // 手敲 26 个字符很容易带进一个尾空格，而空格看不见——差一个字符就永远灰着，
   // 用户只会以为「这按钮坏了」。比较前 trim，多敲的空格不算错（轮67 / R67-WP10）。
   const typedText = confirmationText.trim();
-  const ready = protectedTarget ? typedText === requiredText : confirmed;
+  const ready = manualConfirmRequired ? typedText === requiredText : confirmed;
   const anyRunning = executionMode !== null;
   // 只读预演不受「这个计划已经成功执行过一次」的限制：写完想再干跑一次核对目标现状，
   // 是执行之后最自然的下一步，把它灰掉等于逼用户重新生成一份计划（R55-D3）。
@@ -572,7 +577,11 @@ function ConfirmationPanel({
       // 「一个字都没敲」与「敲了但差一个字符」必须分开说（轮67 / R67-WP10）：
       // 真机量过，敲错时旧文案仍然回「还没输入上方要求的确认文本。」，
       // 用户对着已经填满的输入框看不出哪里错，只能整串重来。
-      label: !protectedTarget ? t("apply.blockNotConfirmed") : typedText ? t("apply.blockConfirmMismatch") : t("apply.blockConfirmText"),
+      label: !manualConfirmRequired
+        ? t("apply.blockNotConfirmed")
+        : typedText
+          ? t("apply.blockConfirmMismatch")
+          : t("apply.blockConfirmText"),
       alsoDryRun: false,
     });
   }
@@ -599,7 +608,7 @@ function ConfirmationPanel({
         <span>{protectedTarget ? t("apply.protectedNotice") : t("apply.normalNotice")}</span>
       </div>
       <div className="apply-selection-note">{t("apply.selectionCount", { count: selectedCount })}</div>
-      {protectedTarget ? (
+      {manualConfirmRequired ? (
         <div className="field">
           <label className="field-label" htmlFor="apply-confirmation-text">
             {t("apply.confirmationTextLabel")}
@@ -973,6 +982,9 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
   const targetConnection = draftState.status === "ready" ? draftState.targetConnection : null;
   const selectedItem = plan?.items.find((item) => item.id === selectedId) ?? plan?.items[0] ?? null;
   const protectedTarget = plan ? isProtectedApplyTarget(targetConnection, plan.target) : false;
+  // 手敲与否是连接上显式写入确认策略与受保护判定的合成结论（r114）：
+  // 策略声明 always/never 直接定档，protected-only 与未声明落到受保护判定。
+  const manualConfirmRequired = plan ? requiresManualApplyConfirm(targetConnection, plan.target) : false;
   const sandboxTarget = plan ? isSandboxTarget(targetConnection, plan) : false;
   const selectedCount = selectedIds.size;
   const workflowCurrentStep: WorkflowStepId = lastExecutionMode === "apply" ? "verify" : "execute";
@@ -1430,6 +1442,7 @@ export default function ApplyPlanView({ entry, connections, onBack, onOpenHistor
               selectedCount={selectedCount}
               selectedIds={selectedIds}
               protectedTarget={protectedTarget}
+              manualConfirmRequired={manualConfirmRequired}
               confirmed={confirmed}
               confirmationText={confirmationText}
               executionMode={executionMode}

@@ -381,6 +381,72 @@ describe("ConfigBrowser", () => {
     expect(apiMocks.publishConfig).not.toHaveBeenCalled();
   });
 
+  async function openTargetPicker() {
+    fireEvent.click(screen.getByRole("button", { name: "内容" }));
+    const searchInput = document.querySelector(".browser-search input") as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: "8080" } });
+    // 输入即搜：400ms 防抖后自动发起内容搜索（无需 Enter）
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    // 搜索结果回来后「批量替换」才会出现
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "批量替换" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "批量替换" }));
+    fireEvent.change(screen.getByLabelText("替换为"), { target: { value: "8081" } });
+    fireEvent.click(screen.getByRole("button", { name: "选择应用目标" }));
+  }
+
+  function appliedTargetLabel(): string {
+    const scope = screen.getAllByText("目标环境")[0].closest(".browser-target-scope") as HTMLElement;
+    return scope.querySelector("strong")!.textContent ?? "";
+  }
+
+  it("prefers an explicitly declared development target over the sandbox heuristic", async () => {
+    const explicitDev: Connection = {
+      ...conn,
+      id: "explicit-dev",
+      name: "order-core-01",
+      sourceName: "公司内网",
+      envRole: "development",
+    };
+    const sandboxConn: Connection = {
+      ...conn,
+      id: "sandbox",
+      name: "sandbox",
+      environmentName: "Sandbox",
+      sourceName: "云上",
+    };
+    const prodLikeConn: Connection = {
+      ...conn,
+      id: "prod-like",
+      name: "prod-core-01",
+      sourceName: "云上公网",
+    };
+    renderBrowser("zh-CN", explicitDev, "public", { connections: [explicitDev, sandboxConn, prodLikeConn], onStartApply: vi.fn() });
+
+    await openTargetPicker();
+    // 默认目标必须是显式声明开发的那条，而不是名称带 sandbox 的
+    expect(appliedTargetLabel()).toBe("默认项目 / 未分组 / 公司内网");
+  });
+
+  it("keeps today's default target (sandbox name, then first) when no role is declared", async () => {
+    const sourceConn: Connection = { ...conn, id: "plain-src", name: "plain-src", sourceName: "公司内网" };
+    const sandboxConn: Connection = {
+      ...conn,
+      id: "sandbox",
+      name: "sandbox",
+      environmentName: "Sandbox",
+      sourceName: "云上",
+    };
+    renderBrowser("zh-CN", sourceConn, "public", { connections: [sourceConn, sandboxConn], onStartApply: vi.fn() });
+
+    await openTargetPicker();
+    // 都没声明角色：行为与改前一致（沙箱名称正则命中）
+    expect(appliedTargetLabel()).toBe("默认项目 / Sandbox / 云上");
+  });
+
   it("allows the source connection itself as an apply target (in-place batch replace)", async () => {
     const sourceConn: Connection = { ...conn, projectName: "订单", environmentName: "Development", sourceName: "云上" };
     const onStartApply = vi.fn();

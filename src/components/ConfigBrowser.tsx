@@ -694,7 +694,12 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
   }, [conn.id, tenant]);
 
   useEffect(() => {
-    const preferred = targetConnections.find(isSandboxEnvironment) ?? targetConnections[0];
+    // 显式环境角色优先（r114）：声明了开发/测试的连接直接当默认目标；
+    // 都没声明时保持今天的行为：沙箱名称正则 → 列表第 0 条。
+    const preferred =
+      targetConnections.find((candidate) => candidate.envRole === "development" || candidate.envRole === "testing") ??
+      targetConnections.find(isSandboxEnvironment) ??
+      targetConnections[0];
     setTargetConnectionId(preferred?.id ?? "");
     setTargetNamespace(tenant);
   }, [targetConnections, tenant]);

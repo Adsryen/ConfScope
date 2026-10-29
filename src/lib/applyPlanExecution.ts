@@ -183,9 +183,27 @@ function targetSearchText(connection: Connection | null | undefined, endpoint: A
     .toLowerCase();
 }
 
+/**
+ * 显式环境角色优先（r114）：连接上声明过角色就以声明为准——生产受保护，
+ * 开发/测试/预发不受保护；未声明时原样走名称推断，判据与词表一个字都不动。
+ */
 export function isProtectedApplyTarget(connection: Connection | null | undefined, endpoint: ApplyPlanEndpoint): boolean {
+  const role = connection?.envRole;
+  if (role === "production") return true;
+  if (role === "development" || role === "testing" || role === "staging") return false;
   const text = targetSearchText(connection, endpoint);
   return PROTECTED_TARGET_MARKERS.some((marker) => text.includes(marker));
+}
+
+/**
+ * 第 5 步要不要手敲确认文本（r114）：显式写入确认策略优先——
+ * always 一律手敲、never 一律不手敲；protected-only 与未声明都落到受保护判定。
+ */
+export function requiresManualApplyConfirm(connection: Connection | null | undefined, endpoint: ApplyPlanEndpoint): boolean {
+  const policy = connection?.writeConfirmPolicy;
+  if (policy === "always") return true;
+  if (policy === "never") return false;
+  return isProtectedApplyTarget(connection, endpoint);
 }
 
 /**

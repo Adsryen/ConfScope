@@ -31,6 +31,20 @@ export type NacosDistribution = "opensource" | "aliyun-mse";
 export type ConnectionAuthType = "none" | "nacos-password" | "aliyun-aksk";
 export type ConfigSourceType = "nacos" | "local-snapshot";
 
+/**
+ * 连接的显式环境角色（r114）。
+ * 留空 = 未声明：受保护判定回退到按名称/环境名/来源名推断（行为与未引入该字段前一致）。
+ * 显式声明后判定以声明为准：production ⇒ 受保护；development / testing / staging ⇒ 不受保护。
+ */
+export type ConnectionEnvRole = "development" | "testing" | "staging" | "production";
+
+/**
+ * 写入确认策略（r114）：变更计划第 5 步要不要手敲确认文本。
+ * 留空 = 未声明，行为同 protected-only。
+ * always ⇒ 每次写入都要手敲；protected-only ⇒ 仅受保护目标要手敲；never ⇒ 不需要手敲。
+ */
+export type ConnectionWriteConfirmPolicy = "always" | "protected-only" | "never";
+
 export const DEFAULT_PROJECT_NAME = "默认项目";
 export const DEFAULT_ENVIRONMENT_NAME = "未分组";
 export const DEFAULT_SOURCE_NAME = "默认来源";
@@ -42,6 +56,10 @@ export interface Connection {
   projectName?: string;
   environmentId?: string;
   environmentName?: string;
+  /** 显式环境角色。留空 = 未声明（判定回退到名称推断）。 */
+  envRole?: ConnectionEnvRole;
+  /** 写入确认策略。留空 = 未声明（同 protected-only）。 */
+  writeConfirmPolicy?: ConnectionWriteConfirmPolicy;
   sourceName?: string;
   sourceType?: ConfigSourceType;
   localPath?: string;
@@ -356,6 +374,20 @@ function normalizeConnectionSSHSecretRefs(value: unknown): Partial<Record<SSHSec
   return Object.keys(refs).length > 0 ? refs : undefined;
 }
 
+const CONNECTION_ENV_ROLES: readonly ConnectionEnvRole[] = ["development", "testing", "staging", "production"];
+const CONNECTION_WRITE_CONFIRM_POLICIES: readonly ConnectionWriteConfirmPolicy[] = ["always", "protected-only", "never"];
+
+/** 非法值一律收敛成 undefined（= 未声明），不报错：老数据与手改数据都按未声明对待。 */
+function normalizeConnectionEnvRole(value: unknown): ConnectionEnvRole | undefined {
+  return typeof value === "string" && CONNECTION_ENV_ROLES.includes(value as ConnectionEnvRole) ? (value as ConnectionEnvRole) : undefined;
+}
+
+function normalizeConnectionWriteConfirmPolicy(value: unknown): ConnectionWriteConfirmPolicy | undefined {
+  return typeof value === "string" && CONNECTION_WRITE_CONFIRM_POLICIES.includes(value as ConnectionWriteConfirmPolicy)
+    ? (value as ConnectionWriteConfirmPolicy)
+    : undefined;
+}
+
 function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connection {
   const provider = raw.provider ?? "nacos";
   const distribution = raw.distribution ?? "opensource";
@@ -370,6 +402,8 @@ function normalizeConnection(raw: Partial<Connection> & { id?: string }): Connec
     projectName: raw.projectName?.trim() || DEFAULT_PROJECT_NAME,
     environmentId: raw.environmentId ?? "",
     environmentName: raw.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME,
+    envRole: normalizeConnectionEnvRole(raw.envRole),
+    writeConfirmPolicy: normalizeConnectionWriteConfirmPolicy(raw.writeConfirmPolicy),
     sourceName: raw.sourceName?.trim() || raw.name || "",
     sourceType: raw.sourceType ?? "nacos",
     localPath: raw.localPath?.trim() || "",

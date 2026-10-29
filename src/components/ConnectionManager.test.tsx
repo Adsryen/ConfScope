@@ -157,6 +157,67 @@ describe("ConnectionManager", () => {
     ]);
   });
 
+  it("saves explicit environment role and write confirm policy", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "hz-core-01" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上公网" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "https://hz-core.example.com/nacos" } });
+    fireEvent.change(controlByLabel("环境角色"), { target: { value: "production" } });
+    fireEvent.change(controlByLabel("写入确认策略"), { target: { value: "always" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const saved = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(saved[0]).toEqual(expect.objectContaining({ name: "hz-core-01", envRole: "production", writeConfirmPolicy: "always" }));
+  });
+
+  it("keeps the new fields absent when left undeclared", () => {
+    const onChange = vi.fn();
+    renderManager(onChange);
+
+    fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "plain-dev" } });
+    fireEvent.change(fieldByLabel("来源名称"), { target: { value: "云上内网" } });
+    fireEvent.change(fieldByLabel("目标地址"), { target: { value: "http://plain.example.com/nacos" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const saved = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(saved[0]).not.toHaveProperty("envRole");
+    expect(saved[0]).not.toHaveProperty("writeConfirmPolicy");
+  });
+
+  it("reflects saved explicit fields into the edit form", () => {
+    localStorage.setItem(
+      "cs.connections",
+      JSON.stringify([
+        {
+          id: "seed-prod",
+          name: "hz-core-01",
+          projectName: "订单系统",
+          environmentName: "生产",
+          sourceName: "云上公网",
+          sourceType: "nacos",
+          provider: "nacos",
+          baseUrl: "https://hz-core.example.com/nacos",
+          username: "nacos",
+          password: "secret",
+          defaultNamespace: "",
+          envRole: "production",
+          writeConfirmPolicy: "always",
+        },
+      ])
+    );
+    renderManager(vi.fn());
+
+    const item = within(connectionList()).getByText("云上公网").closest(".conn-item") as HTMLElement;
+    fireEvent.click(item);
+
+    expect(controlByLabel("环境角色")).toHaveValue("production");
+    expect(controlByLabel("写入确认策略")).toHaveValue("always");
+  });
+
   it("loads namespaces in the connection form and saves the selected default namespace", async () => {
     const onChange = vi.fn();
     renderManager(onChange);
