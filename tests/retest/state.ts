@@ -40,7 +40,9 @@ const DEFAULT_STATE: RetestState = {
     password: "ret-test",
     privateKeyPath: "ssh-keys/id_ed25519",
   },
-  webServerUrl: "http://127.0.0.1:1420",
+  // 默认打本机 dev server；worktree 里验证发版提交时另起一台（1430 等），
+  // 用 CONFSCOPE_RETEST_BASE_URL 指过去，避免两套真机批共用 1420 抢同一份数据目录。
+  webServerUrl: process.env.CONFSCOPE_RETEST_BASE_URL ?? "http://127.0.0.1:1420",
 };
 
 export function loadRetestState(): RetestState {
