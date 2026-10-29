@@ -720,6 +720,17 @@ describe("AuditView", () => {
 
   const dupDupSettings = () => JSON.parse(localStorage.getItem("cs.settings") as string).duplicateCheck;
 
+  // 面板默认收起（展开态那份清单会把 sticky;bottom:0 的详情条顶出视口，见 AuditView 里的位置注释），
+  // 断言组内容前先展开——把「默认收起」显式写进用例，而不是靠组件恰好摊开。
+  const openDupPanel = async (): Promise<HTMLElement> => {
+    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    fireEvent.click(dupButton(panel, "dupCheck.expand"));
+    return panel;
+  };
+
+  // 只取面板、不展开（断言收起态本身的行为用这个）
+  const findDupPanel = (): Promise<HTMLElement> => screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+
   it("审计后渲染重复检查面板：三档分列、位置带取值、跨配置数可解释（R1/R3）", async () => {
     const conns = dupConns();
     dupFixture();
@@ -727,7 +738,7 @@ describe("AuditView", () => {
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
 
-    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const panel = await openDupPanel();
     expect(panel.className).toBe("dup-check");
 
     // 三档各出一组，按「值不同 → 值相同 → 正文全等」排序
@@ -769,7 +780,7 @@ describe("AuditView", () => {
     render(<AuditView connections={conns} onNavigateToDiff={onNavigate} />);
     fireEvent.click(screen.getByText("Run Audit"));
 
-    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const panel = await openDupPanel();
     const group = panel.querySelector("li.dup-check-group") as HTMLElement; // 值不同档在前
     const compareBtn = dupButton(group, "dupCheck.compare");
     expect(compareBtn.disabled).toBe(true);
@@ -801,7 +812,7 @@ describe("AuditView", () => {
     render(<AuditView connections={conns} onStartApply={onStartApply} />);
     fireEvent.click(screen.getByText("Run Audit"));
 
-    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const panel = await openDupPanel();
     const group = panel.querySelector("li.dup-check-group") as HTMLElement; // 值不同档在前
 
     fireEvent.click(dupLocation(panel, "Development / dev / public", "a.yaml").querySelector("input") as HTMLInputElement);
@@ -873,7 +884,7 @@ describe("AuditView", () => {
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
 
-    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const panel = await openDupPanel();
     expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
 
     const keyDupToggle = panel.querySelector(".dup-check-bar label.check-row input") as HTMLInputElement;
@@ -894,7 +905,7 @@ describe("AuditView", () => {
     render(<AuditView connections={conns} />);
     fireEvent.click(screen.getByText("Run Audit"));
 
-    const panel = await screen.findByText("dupCheck.title").then((el) => el.closest("section") as HTMLElement);
+    const panel = await openDupPanel();
     expect(screen.getByText("dupCheck.ignoreEmpty")).toBeTruthy();
     expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
 
@@ -916,5 +927,84 @@ describe("AuditView", () => {
     expect(screen.getByText("dupCheck.badgeKeyDupDiffValue")).toBeTruthy();
     expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
     expect(dupDupSettings().ignoredKeyPatterns).toEqual([]);
+  });
+
+  it("重复检查面板默认收起、组数常显；无论清单长短都排在 sticky 详情条之前（1.10.0 回归）", async () => {
+    const conns = dupConns();
+    dupFixture();
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await findDupPanel();
+    // 收起态：组数还在——它是用户决定「要不要点开」的唯一依据；清单与忽略清单都不摊开
+    expect(panel.querySelector(".dup-check-count")?.textContent).toBe("dupCheck.groupCount");
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(0);
+    expect(panel.querySelector(".dup-check-ignores")).toBeNull();
+    // 判据开关与统计留在面板头上：关掉某条判据不必先展开面板
+    expect(panel.querySelector(".dup-check-bar")).toBeTruthy();
+    expect(panel.querySelector(".dup-check-stat")?.textContent).toContain("dupCheck.checkedConfigs");
+    const toggle = panel.querySelector(".dup-check-toggle") as HTMLButtonElement;
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // 选中一行让详情条出现：它必须是 .audit-page 的最后一个元素，dup-check 在它之前
+    fireEvent.click(document.querySelector(".audit-matrix-body .audit-matrix-row") as HTMLElement);
+    const page = document.querySelector(".audit-page") as HTMLElement;
+    const detail = await waitFor(() => {
+      const el = page.querySelector(".audit-detail") as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(Array.from(page.children).indexOf(panel)).toBeLessThan(Array.from(page.children).indexOf(detail));
+
+    // 展开之后次序不变、详情条后面依然没有任何兄弟节点（sticky;bottom:0 靠这个成立）
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(3);
+    expect(detail.nextElementSibling).toBeNull();
+    expect(Array.from(page.children).slice(-1)[0]).toBe(detail);
+
+    // 再收起：清单消失但组数仍可见
+    fireEvent.click(dupButton(panel, "dupCheck.collapse"));
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(0);
+    expect(panel.querySelector(".dup-check-count")?.textContent).toBe("dupCheck.groupCount");
+  });
+
+  it("展开后每页只摊 10 组，「再显示」补足剩余组后按钮消失（清单再长也不把页面撑爆）", async () => {
+    const conns = dupConns();
+    // 12 个 shared.k* 在 4 份配置里同值复现 ⇒ 12 组「同 key · 值相同」；
+    // 另给每份配置一个只属于自己的 key（不构成跨配置重复），四条正文互不全等 ⇒
+    // 正文全等判据不会再加组，组数才是可断言的 12。
+    apiMocks.listConfigs.mockImplementation(() => ({
+      pageItems: [
+        { dataId: "a.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+        { dataId: "b.yaml", group: "DEFAULT_GROUP", configType: "yaml" },
+      ],
+      totalCount: 2,
+    }));
+    apiMocks.getConfig.mockImplementation((conn: Connection, _ns: string, dataId: string) =>
+      Promise.resolve(
+        [
+          `own.${conn.id.replace(/-/g, "")}-${dataId.replace(/\./g, "")}: marker`,
+          ...Array.from({ length: 12 }, (_, i) => `shared.k${i}: same`),
+        ].join("\n")
+      )
+    );
+
+    render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+
+    const panel = await openDupPanel();
+    expect(panel.querySelector(".dup-check-count")?.textContent).toBe("dupCheck.groupCount");
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(10);
+
+    fireEvent.click(dupButton(panel, "dupCheck.showMore"));
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(12);
+    expect(panel.querySelector(".dup-check-toggle")?.textContent).toBe("dupCheck.collapse");
+    // 全摊开后不再有「再显示」
+    expect(Array.from(panel.querySelectorAll("button")).some((b) => b.textContent?.trim() === "dupCheck.showMore")).toBe(false);
+    // 换一批检查结果（关掉同 key 判据）就回到第一页，不带着旧页码
+    fireEvent.click(panel.querySelector(".dup-check-bar label.check-row input") as HTMLInputElement);
+    expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(0);
   });
 });

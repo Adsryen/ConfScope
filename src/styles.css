@@ -7176,7 +7176,8 @@ button.diff-workflow-step-btn:hover {
    不新增滚动容器（列表短，整页滚动承载）。 */
 
 .dup-check {
-  margin-top: 12px;
+  /* 原本这里挂着 margin-top: 12px：那是在它排在详情条之后时自己挤出来的呼吸。
+     现在它由 .audit-page 的 flex gap 统一给间距，再留 margin 就是双重留白。 */
   padding: 12px 14px;
   background: var(--bg2);
   border: 1px solid var(--border);
@@ -7185,14 +7186,28 @@ button.diff-workflow-step-btn:hover {
 
 .dup-check-head {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.dup-check-head-main {
+  /* 展开/收起按钮恒定贴右缘：收起态和展开态按钮位置一样，用户连点两次不会扑空 */
+  display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 4px 10px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .dup-check-head h4 {
   margin: 0;
   font-size: 13px;
+}
+
+.dup-check-toggle {
+  flex: 0 0 auto;
 }
 
 .dup-check-hint {
@@ -7248,10 +7263,18 @@ button.diff-workflow-step-btn:hover {
 }
 
 .dup-check-count {
-  margin: 12px 0 6px;
+  /* 收起态下面板只剩这一行信息，组数必须一眼看见——它是「要不要点开」的唯一依据 */
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.dup-check-more {
+  margin-top: 8px;
 }
 
 .dup-check-groups {

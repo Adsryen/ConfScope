@@ -38,6 +38,13 @@ export type { DiffJumpParams, DiffJumpSideParams } from "../lib/diffJump";
 const MATRIX_ROW_HEIGHT = 48;
 const MATRIX_OVERSCAN = 10;
 
+/**
+ * 重复检查组展开后每页渲染多少组。
+ * 取 10 是实测值：单组（徽标 + key + 若干位置行 + 动作行）约 150–250px，10 组一屏半读完，
+ * 再长就要用户自己决定继续展开——页面钉死的详情条不能被这份清单顶出视口。
+ */
+const DUP_GROUP_PAGE = 10;
+
 interface Props {
   connections: Connection[];
   onNavigateToDiff?: (params: DiffJumpParams) => void;
@@ -318,6 +325,11 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const [baseline, setBaseline] = useState<string>("");
   const [showSettings, setShowSettings] = useRememberedState<boolean>("audit.showSettings", false);
 
+  // r110 重复检查面板：默认收起（展开态把整块清单摊在页面里，见下文 dup-check 的位置注释）。
+  const [dupPanelOpen, setDupPanelOpen] = useRememberedState<boolean>("audit.dupPanelOpen", false);
+  // 展开后分页渲染，一次只多给 DUP_GROUP_PAGE 组；换一批检查结果（判据/忽略清单/审计数据变了）就回到第一页。
+  const [dupVisibleGroups, setDupVisibleGroups] = useState(DUP_GROUP_PAGE);
+
   // r110：重复检查的判据开关与忽略清单走设置通道（cs.settings → appDataDoc 数据文件），
   // 重启后仍在；不新开 localStorage 键、不动 schemaVersion。
   const dupSettings = useSettings().duplicateCheck;
@@ -551,6 +563,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         .filter((loc): loc is DuplicateLocation => loc !== undefined),
     [dupSelection]
   );
+
+  useEffect(() => {
+    setDupVisibleGroups(DUP_GROUP_PAGE);
+  }, [dupResult]);
 
   // 出口一：送去对比（复用既有 DiffView 跳转，第 1 个勾选在左、第 2 个在右）。
   const handleDupCompare = useCallback(
@@ -1113,6 +1129,222 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
       {/* 状态摘要 */}
       {rows.length > 0 && summaryBar(rows, t)}
 
+      {/* r110 跨配置重复检查（只读）：与矩阵共用本次审计取回的结果，纯计算、不取数不写数。
+          它在页面流里的位置是硬约束，不是排版偏好：必须排在 .audit-detail 之前。
+          详情条靠 sticky;bottom:0 钉在底部，而 sticky 只在「它后面还有内容可滚」时才成立；
+          任何一块排在它后面，滚到底时它就被顶回文档流、跟着一起飞出视口
+          （1.9.20 之后实测：清单 5107px，滚到底详情条 top = -4463px，F35 的 AC3 因此红）。
+          放在矩阵之前还有一层好处：清单变高时矩阵的文档位置与可滚动距离同步变长，两相抵消，
+          矩阵的视口落点与清单长度无关（实测算式 493 + dupH − room(119 + dupH) = 374 恒定）。
+          清单本身默认收起 + 展开后每页 10 组：一次审计出几十组重复是常态，
+          全摊开等于把矩阵整个推出首屏。 */}
+      {dupResult && (
+        <section className="dup-check" aria-label={t("dupCheck.title")}>
+          <div className="dup-check-head">
+            <div className="dup-check-head-main">
+              <h4>{t("dupCheck.title")}</h4>
+              {/* 组数在收起态也必须可见：它是用户决定「要不要点开」的唯一依据。 */}
+              <span className="dup-check-count">
+                {t(dupResult.groups.length === 1 ? "dupCheck.groupCountOne" : "dupCheck.groupCount", {
+                  count: dupResult.groups.length,
+                })}
+              </span>
+              <p className="dup-check-hint">{t("dupCheck.hint")}</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm dup-check-toggle"
+              aria-expanded={dupPanelOpen}
+              onClick={() => setDupPanelOpen(!dupPanelOpen)}
+            >
+              {t(dupPanelOpen ? "dupCheck.collapse" : "dupCheck.expand")}
+            </button>
+          </div>
+          <div className="dup-check-bar">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={dupSettings.keyDupEnabled}
+                onChange={(e) => updateDuplicateCheckSettings({ keyDupEnabled: e.target.checked })}
+              />
+              <span>{t("dupCheck.criterionKeyDup")}</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={dupSettings.exactBodyEnabled}
+                onChange={(e) => updateDuplicateCheckSettings({ exactBodyEnabled: e.target.checked })}
+              />
+              <span>{t("dupCheck.criterionExactBody")}</span>
+            </label>
+            <span className="dup-check-stat">
+              {t("dupCheck.checkedConfigs", { count: dupResult.checkedSources })}
+              {dupSettings.keyDupEnabled ? ` · ${t("dupCheck.checkedKeys", { count: dupResult.checkedKeys })}` : ""}
+              {dupSettings.exactBodyEnabled && dupResult.parseSkippedSources > 0
+                ? ` · ${t("dupCheck.parseSkipped", { count: dupResult.parseSkippedSources })}`
+                : ""}
+            </span>
+          </div>
+          {dupPanelOpen && (
+            <>
+              <div className="dup-check-ignores">
+                <div className="dup-check-ignores-head">
+                  <span className="dup-check-ignores-label">{t("dupCheck.ignoreKeysLabel")}</span>
+                  {dupSettings.ignoredKeyPatterns.length === 0 && (
+                    <span className="dup-check-ignores-empty">{t("dupCheck.ignoreEmpty")}</span>
+                  )}
+                </div>
+                {dupSettings.ignoredKeyPatterns.length > 0 && (
+                  <div className="ignore-rules-list">
+                    {dupSettings.ignoredKeyPatterns.map((pattern) => (
+                      <div className="ignore-rule-item" key={pattern}>
+                        <span className="ignore-rule-text">
+                          <code>{pattern}</code>
+                        </span>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeDupIgnorePattern(pattern)}
+                          aria-label={t("dupCheck.ignoreRemoveAria", { pattern })}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="field-row">
+                  <input
+                    type="text"
+                    className="search-input mono"
+                    spellCheck={false}
+                    placeholder={t("dupCheck.ignoreKeyPlaceholder")}
+                    aria-label={t("dupCheck.ignoreKeyPlaceholder")}
+                    value={dupIgnoreInput}
+                    onChange={(e) => setDupIgnoreInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addDupIgnorePattern();
+                    }}
+                  />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={addDupIgnorePattern} disabled={!dupIgnoreInput.trim()}>
+                    {t("dupCheck.ignoreAdd")}
+                  </button>
+                </div>
+              </div>
+              {dupResult.groups.length === 0 ? (
+                <p className="dup-check-empty">
+                  {!dupSettings.keyDupEnabled && !dupSettings.exactBodyEnabled ? t("dupCheck.noResultsAllOff") : t("dupCheck.noResults")}
+                </p>
+              ) : (
+                <>
+                  <ul className="dup-check-groups">
+                    {dupResult.groups.slice(0, dupVisibleGroups).map((group) => {
+                      const groupKey = group.key;
+                      const picked = dupSelection.get(group.id) ?? [];
+                      return (
+                        <li className="dup-check-group" key={group.id}>
+                          <div className="dup-check-group-head">
+                            <span
+                              className={`dup-check-badge ${
+                                group.criterion === "exactBody"
+                                  ? "dup-check-badge-body"
+                                  : group.tier === "diffValue"
+                                    ? "dup-check-badge-diff"
+                                    : "dup-check-badge-same"
+                              }`}
+                            >
+                              {t(
+                                group.criterion === "exactBody"
+                                  ? "dupCheck.badgeExactBody"
+                                  : group.tier === "diffValue"
+                                    ? "dupCheck.badgeKeyDupDiffValue"
+                                    : "dupCheck.badgeKeyDupSameValue"
+                              )}
+                            </span>
+                            {groupKey && (
+                              <span className="dup-check-key">
+                                <code title={groupKey}>{groupKey}</code>
+                                <CopyButton text={groupKey} ariaLabel={t("dupCheck.copyKeyAria", { key: groupKey })} />
+                              </span>
+                            )}
+                            <span className="dup-check-scope">{t("dupCheck.scopeSummary", { count: group.configCount })}</span>
+                            {groupKey && (
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => addDupIgnorePatternFor(groupKey)}>
+                                {t("dupCheck.ignoreThisKey")}
+                              </button>
+                            )}
+                          </div>
+                          <ul className="dup-check-locations">
+                            {group.locations.map((loc) => {
+                              const pi = picked.indexOf(loc.locKey);
+                              return (
+                                <li key={loc.locKey}>
+                                  <label className="check-row dup-check-loc">
+                                    <input type="checkbox" checked={pi >= 0} onChange={() => toggleDupLocation(group.id, loc.locKey)} />
+                                    <span className="dup-check-loc-label">{loc.label}</span>
+                                    <code className="dup-check-loc-ref" title={`${loc.namespace}/${loc.group}/${loc.dataId}`}>
+                                      {loc.namespace}/{loc.group}/{loc.dataId}
+                                    </code>
+                                    {pi === 0 && <span className="dup-check-loc-role">{t("dupCheck.sourceRole")}</span>}
+                                    {pi === 1 && <span className="dup-check-loc-role">{t("dupCheck.targetRole")}</span>}
+                                    {group.criterion === "keyDup" && loc.value !== undefined && (
+                                      <code className="dup-check-loc-value" title={loc.value}>
+                                        {loc.value}
+                                      </code>
+                                    )}
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <div className="dup-check-actions">
+                            <span className="dup-check-actions-hint">
+                              {t(
+                                group.criterion === "keyDup" && group.tier === "diffValue"
+                                  ? "dupCheck.rollbackHint"
+                                  : "dupCheck.compareHint"
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              disabled={picked.length !== 2}
+                              onClick={() => handleDupCompare(group)}
+                            >
+                              {t("dupCheck.compare")}
+                            </button>
+                            {group.criterion === "keyDup" && group.tier === "diffValue" && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                disabled={picked.length !== 2}
+                                onClick={() => handleDupRollbackPlan(group)}
+                              >
+                                {t("dupCheck.rollbackPlan")}
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {dupResult.groups.length > dupVisibleGroups && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm dup-check-more"
+                      onClick={() => setDupVisibleGroups((n) => n + DUP_GROUP_PAGE)}
+                    >
+                      {t("dupCheck.showMore", {
+                        count: Math.min(DUP_GROUP_PAGE, dupResult.groups.length - dupVisibleGroups),
+                      })}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
       {/* 矩阵表格 */}
       {rows.length > 0 && (
         <div className="audit-matrix">
@@ -1185,177 +1417,6 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             })}
           </div>
         </div>
-      )}
-
-      {/* r110 跨配置重复检查（只读）：与矩阵共用本次审计取回的结果，纯计算、不取数不写数 */}
-      {dupResult && (
-        <section className="dup-check" aria-label={t("dupCheck.title")}>
-          <div className="dup-check-head">
-            <h4>{t("dupCheck.title")}</h4>
-            <p className="dup-check-hint">{t("dupCheck.hint")}</p>
-          </div>
-          <div className="dup-check-bar">
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={dupSettings.keyDupEnabled}
-                onChange={(e) => updateDuplicateCheckSettings({ keyDupEnabled: e.target.checked })}
-              />
-              <span>{t("dupCheck.criterionKeyDup")}</span>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={dupSettings.exactBodyEnabled}
-                onChange={(e) => updateDuplicateCheckSettings({ exactBodyEnabled: e.target.checked })}
-              />
-              <span>{t("dupCheck.criterionExactBody")}</span>
-            </label>
-            <span className="dup-check-stat">
-              {t("dupCheck.checkedConfigs", { count: dupResult.checkedSources })}
-              {dupSettings.keyDupEnabled ? ` · ${t("dupCheck.checkedKeys", { count: dupResult.checkedKeys })}` : ""}
-              {dupSettings.exactBodyEnabled && dupResult.parseSkippedSources > 0
-                ? ` · ${t("dupCheck.parseSkipped", { count: dupResult.parseSkippedSources })}`
-                : ""}
-            </span>
-          </div>
-          <div className="dup-check-ignores">
-            <div className="dup-check-ignores-head">
-              <span className="dup-check-ignores-label">{t("dupCheck.ignoreKeysLabel")}</span>
-              {dupSettings.ignoredKeyPatterns.length === 0 && <span className="dup-check-ignores-empty">{t("dupCheck.ignoreEmpty")}</span>}
-            </div>
-            {dupSettings.ignoredKeyPatterns.length > 0 && (
-              <div className="ignore-rules-list">
-                {dupSettings.ignoredKeyPatterns.map((pattern) => (
-                  <div className="ignore-rule-item" key={pattern}>
-                    <span className="ignore-rule-text">
-                      <code>{pattern}</code>
-                    </span>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => removeDupIgnorePattern(pattern)}
-                      aria-label={t("dupCheck.ignoreRemoveAria", { pattern })}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="field-row">
-              <input
-                type="text"
-                className="search-input mono"
-                spellCheck={false}
-                placeholder={t("dupCheck.ignoreKeyPlaceholder")}
-                aria-label={t("dupCheck.ignoreKeyPlaceholder")}
-                value={dupIgnoreInput}
-                onChange={(e) => setDupIgnoreInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addDupIgnorePattern();
-                }}
-              />
-              <button type="button" className="btn btn-ghost btn-sm" onClick={addDupIgnorePattern} disabled={!dupIgnoreInput.trim()}>
-                {t("dupCheck.ignoreAdd")}
-              </button>
-            </div>
-          </div>
-          {dupResult.groups.length === 0 ? (
-            <p className="dup-check-empty">
-              {!dupSettings.keyDupEnabled && !dupSettings.exactBodyEnabled ? t("dupCheck.noResultsAllOff") : t("dupCheck.noResults")}
-            </p>
-          ) : (
-            <>
-              <p className="dup-check-count">
-                {t(dupResult.groups.length === 1 ? "dupCheck.groupCountOne" : "dupCheck.groupCount", {
-                  count: dupResult.groups.length,
-                })}
-              </p>
-              <ul className="dup-check-groups">
-                {dupResult.groups.map((group) => {
-                  const groupKey = group.key;
-                  const picked = dupSelection.get(group.id) ?? [];
-                  return (
-                    <li className="dup-check-group" key={group.id}>
-                      <div className="dup-check-group-head">
-                        <span
-                          className={`dup-check-badge ${
-                            group.criterion === "exactBody"
-                              ? "dup-check-badge-body"
-                              : group.tier === "diffValue"
-                                ? "dup-check-badge-diff"
-                                : "dup-check-badge-same"
-                          }`}
-                        >
-                          {t(
-                            group.criterion === "exactBody"
-                              ? "dupCheck.badgeExactBody"
-                              : group.tier === "diffValue"
-                                ? "dupCheck.badgeKeyDupDiffValue"
-                                : "dupCheck.badgeKeyDupSameValue"
-                          )}
-                        </span>
-                        {groupKey && (
-                          <span className="dup-check-key">
-                            <code title={groupKey}>{groupKey}</code>
-                            <CopyButton text={groupKey} ariaLabel={t("dupCheck.copyKeyAria", { key: groupKey })} />
-                          </span>
-                        )}
-                        <span className="dup-check-scope">{t("dupCheck.scopeSummary", { count: group.configCount })}</span>
-                        {groupKey && (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => addDupIgnorePatternFor(groupKey)}>
-                            {t("dupCheck.ignoreThisKey")}
-                          </button>
-                        )}
-                      </div>
-                      <ul className="dup-check-locations">
-                        {group.locations.map((loc) => {
-                          const pi = picked.indexOf(loc.locKey);
-                          return (
-                            <li key={loc.locKey}>
-                              <label className="check-row dup-check-loc">
-                                <input type="checkbox" checked={pi >= 0} onChange={() => toggleDupLocation(group.id, loc.locKey)} />
-                                <span className="dup-check-loc-label">{loc.label}</span>
-                                <code className="dup-check-loc-ref" title={`${loc.namespace}/${loc.group}/${loc.dataId}`}>
-                                  {loc.namespace}/{loc.group}/{loc.dataId}
-                                </code>
-                                {pi === 0 && <span className="dup-check-loc-role">{t("dupCheck.sourceRole")}</span>}
-                                {pi === 1 && <span className="dup-check-loc-role">{t("dupCheck.targetRole")}</span>}
-                                {group.criterion === "keyDup" && loc.value !== undefined && (
-                                  <code className="dup-check-loc-value" title={loc.value}>
-                                    {loc.value}
-                                  </code>
-                                )}
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                      <div className="dup-check-actions">
-                        <span className="dup-check-actions-hint">
-                          {t(group.criterion === "keyDup" && group.tier === "diffValue" ? "dupCheck.rollbackHint" : "dupCheck.compareHint")}
-                        </span>
-                        <button type="button" className="btn btn-sm" disabled={picked.length !== 2} onClick={() => handleDupCompare(group)}>
-                          {t("dupCheck.compare")}
-                        </button>
-                        {group.criterion === "keyDup" && group.tier === "diffValue" && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            disabled={picked.length !== 2}
-                            onClick={() => handleDupRollbackPlan(group)}
-                          >
-                            {t("dupCheck.rollbackPlan")}
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
-        </section>
       )}
 
       {!rows.length && !loading && !error && <div className="pad-msg big">{t("audit.selectHint")}</div>}

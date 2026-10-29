@@ -1290,6 +1290,8 @@
   "dupCheck": {
     "title": "重复配置检查",
     "hint": "只读检查本次审计已加载的配置，不写入任何配置。",
+    "expand": "展开重复清单",
+    "collapse": "收起重复清单",
     "criterionKeyDup": "同 key 跨配置",
     "criterionExactBody": "正文归一化后全等",
     "ignoreKeysLabel": "忽略的 key",
@@ -1301,6 +1303,7 @@
     "noResultsAllOff": "两个判据都关着，打开任一判据才会检查。",
     "groupCount": "{count} 组疑似重复",
     "groupCountOne": "1 组疑似重复",
+    "showMore": "再显示 {count} 组",
     "badgeKeyDupSameValue": "同 key · 值相同",
     "badgeKeyDupDiffValue": "同 key · 值不同",
     "badgeExactBody": "正文全等",

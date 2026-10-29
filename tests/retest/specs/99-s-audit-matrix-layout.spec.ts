@@ -14,6 +14,8 @@
 //     「不滚动时视口内只剩 1~2 行」仍是正常几何（chrome 在那儿），所以可见行数一律先把 .audit-page 推到底
 //     再按 .audit-matrix-body 的框数（boxRows），要求 ≥ 7 行，且这些行的下缘要高于详情条上缘（clearRows）。
 //  2. sticky 只钉 .audit-detail（实测从 room-120 推到 room，条的 viewport top 位移 = 0）。
+//     钉得住有两个前提，1.10.0 起一起判：详情条是 .audit-page 流里的最后一个元素（后面再有块就被顶回文档流），
+//     以及滚到底时它真的贴在视口下缘（detailGap ∈ [-2,20]）。只量 room/scrollTop 抓不到「整条飞出视口」。
 //     .audit-matrix-header 不写钉住判据：它的包含块是非滚动的 flex 父 .audit-matrix，自己又是第一个子项
 //     ⇒ sticky 行程恒为 0（结构死），列头常驻靠的是 flex 布局而不是 sticky，实测它跟着内容走（dHeader=-120）。
 //     判据见 .trellis/spec/frontend/quality-guidelines.md。
@@ -58,6 +60,11 @@ interface Snap {
   clearRows: number;
   rows: number;
   rowH: number;
+  spacerRows: number;
+  /** 详情条下缘到视口下缘的距离：sticky 生效时它必须真的贴在视口底（负数 = 已经飞出视口）。 */
+  detailGap: number;
+  /** 详情条是不是页面流的最后一个元素——sticky;bottom:0 成立的前提。 */
+  detailIsLast: boolean;
 }
 
 interface Scrollers {
@@ -99,6 +106,20 @@ function readSnap(): Snap {
     clearRows: inBox.filter((r) => r.getBoundingClientRect().bottom <= barTop + 1).length,
     rows: rows.length,
     rowH: rows.length ? Math.round(rows[0].getBoundingClientRect().height) : 0,
+    // r111 起 body 只挂可见窗口（可见行 + 上下各 10 行 overscan），DOM 行数不等于数据量；
+    // 全量行数按 spacer 撑出的总高换算回来。
+    spacerRows: (() => {
+      const sp = q(".audit-matrix-spacer");
+      if (!sp || rows.length === 0) return 0;
+      const h = rows[0].getBoundingClientRect().height;
+      return h > 0 ? Math.round(sp.getBoundingClientRect().height / h) : 0;
+    })(),
+    // 视口维度。此前只量 scrollTop/room/bodyBottom，恰好漏掉「详情条被后面的块顶出视口」这种形态：
+    // 1.9.20 之后 dup-check 面板排在 .audit-detail 之后，实测清单 5107px，
+    // 滚到底 detailTop = -4463（整条已经在视口上方之外），而 AC3 只看 room 所以没红。
+    // 详情条没打开时 detailGap 没有意义（AC1 不判它）。
+    detailGap: detail ? Math.round(window.innerHeight - detail.getBoundingClientRect().bottom) : 0,
+    detailIsLast: detail ? !detail.nextElementSibling : false,
   };
 }
 
@@ -109,7 +130,11 @@ function readChrome(): { toolbarH: number; cardH: number; fieldTops: number[][] 
   return {
     toolbarH: tb ? Math.round(tb.getBoundingClientRect().height) : 0,
     cardH: cards.length ? Math.round(cards[0].getBoundingClientRect().height) : 0,
-    fieldTops: cards.map((c) => Array.from(new Set(Array.from(c.querySelectorAll(":scope > .field")).map((f) => Math.round((f as HTMLElement).getBoundingClientRect().top))))),
+    fieldTops: cards.map((c) =>
+      Array.from(
+        new Set(Array.from(c.querySelectorAll(":scope > .field")).map((f) => Math.round((f as HTMLElement).getBoundingClientRect().top)))
+      )
+    ),
   };
 }
 
@@ -225,7 +250,11 @@ test("F35 配置矩阵短窗口布局 + sticky + chrome 滚轮分区", async ({ 
   await runMatrixAudit(page);
 
   // ── AC0（F-36）：工具栏账单 + 环境卡字段并排，且窄宽度只回落到 2 行、不高于改前 398 ──
-  for (const [w, limit] of [[1280, TOOLBAR_MAX_H], [1100, TOOLBAR_MAX_H_NARROW], [980, TOOLBAR_MAX_H_NARROW]] as [number, number][]) {
+  for (const [w, limit] of [
+    [1280, TOOLBAR_MAX_H],
+    [1100, TOOLBAR_MAX_H_NARROW],
+    [980, TOOLBAR_MAX_H_NARROW],
+  ] as [number, number][]) {
     await page.setViewportSize({ width: w, height: 820 });
     await page.waitForTimeout(200);
     const c = await page.evaluate(readChrome);
@@ -244,7 +273,9 @@ test("F35 配置矩阵短窗口布局 + sticky + chrome 滚轮分区", async ({ 
   await page.evaluate(setPrime, false);
   const a = await page.evaluate(readSnap);
   console.log(`A 1280x820 详情未开 ${JSON.stringify(a)}`);
-  expect(a.rows, "审计应产出多行矩阵").toBeGreaterThanOrEqual(20);
+  expect(a.spacerRows, "审计应产出多行矩阵（按占位高度换算的全量行数）").toBeGreaterThanOrEqual(20);
+  expect(a.boxRows, `AC1 可见区真装下 ${MIN_ROWS} 整行`).toBeGreaterThanOrEqual(MIN_ROWS);
+  expect(a.rows, "窗口化不得漏渲染可见区里的行").toBeGreaterThanOrEqual(a.boxRows);
   expect(a.rowH, "行高实测 48px").toBeGreaterThanOrEqual(40);
   expect(a.matrixH, "AC1 .audit-matrix 不低于下限").toBeGreaterThanOrEqual(MATRIX_MIN_H);
   expect(a.bodyH, "AC1 列表体 ≥ 340px").toBeGreaterThanOrEqual(BODY_MIN_H);
@@ -271,6 +302,11 @@ test("F35 配置矩阵短窗口布局 + sticky + chrome 滚轮分区", async ({ 
     expect(top.detailH, `AC2 ${w}x${h} 详情条不被压扁`).toBeGreaterThanOrEqual(DETAIL_MIN_H);
     expect(top.hOver, `AC7 ${w}x${h} 无横向溢出`).toBe(0);
     expect(bottom.boxRows, `AC2 ${w}x${h} 滚到底框内整行 ≥ ${MIN_ROWS}`).toBeGreaterThanOrEqual(MIN_ROWS);
+    // 详情条必须是页面流里最后一个元素、且真的贴在视口下缘：sticky;bottom:0 只在「它后面没有东西」时成立，
+    // 任何一块排到它后面都会把它顶回文档流并飞出视口（1.10.0 修掉的 dup-check 回归就是这个形态）。
+    expect(bottom.detailIsLast, `AC3 ${w}x${h} 详情条必须是 .audit-page 的最后一个元素，否则 sticky;bottom:0 失效`).toBe(true);
+    expect(bottom.detailGap, `AC3 ${w}x${h} 详情条下缘要留在视口内（负值=已经滚出下缘）`).toBeGreaterThanOrEqual(-2);
+    expect(bottom.detailGap, `AC3 ${w}x${h} 详情条与视口下缘只留 padding-bottom:16 的呼吸`).toBeLessThanOrEqual(20);
     if (bottom.room > 0) {
       expect(Math.abs(bottom.scrollTop - bottom.room), `AC3 ${w}x${h} 页面真的滚得到底`).toBeLessThanOrEqual(1);
       // 整行都落在详情条上方：键盘走查（F-29/F-61）靠 scroll-padding-bottom 让位，肉眼不会再看到被盖住的行。
