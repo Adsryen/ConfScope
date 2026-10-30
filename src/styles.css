@@ -7377,18 +7377,26 @@ button.diff-workflow-step-btn:hover {
   color: #e57373;
 }
 
-/* 轮142 A2：行内的快速忽略。默认半透明、悬停/聚焦到全亮——不许用 opacity:0 或 display:none，
-   那样键盘聚焦过去读屏和眼睛都找不到它（hoverOnlyRevealNeedsFocusWithin 钉这条）。 */
-.audit-ignore-inline {
+/* 轮142 A2：行内的快速忽略。静息「弱一档」、悬停/聚焦到全亮——档差用字色表达，不用半透明。
+   原先写成 opacity:.6，真机 R94 普查实测 #cccccc 压 0.6 落在行底 #232323 上只剩 #888888
+   （4.47:1）、落在悬停行底 #1a2933 上 4.31:1，两处都不达 WCAG AA 的 4.5，11px 小字更难读。
+   --text-dim(#a8a8a8) 静息在这两种底上是 6.6:1 / 6.3:1，肉眼仍比 --text 淡一档。
+   也不许退回 opacity:0 或 display:none——那样键盘聚焦过去读屏和眼睛都找不到它
+   （hoverOnlyRevealNeedsFocusWithin 钉这条）。
+   特异度口径（R83 不许赌文档顺序）：静息档写成 .btn.btn-ghost.audit-ignore-inline 是 (0,3,0)，
+   严格高于 tone 的 .btn-ghost (0,1,0)；显形档 (0,4,0) 再压过静息档。
+   伪类是这条守卫的明写盲区，所以逐条人工核过：.btn-ghost:hover:not(:disabled) 只声明 background，
+   与这里的 color 不抢同一个面，抬特异度没有把 hover 关系掀反。 */
+.btn.btn-ghost.audit-ignore-inline {
   margin-left: auto;
   flex-shrink: 0;
-  opacity: 0.6;
+  color: var(--text-dim);
 }
 
 .audit-matrix-body .audit-matrix-row:hover .audit-ignore-inline,
 .audit-matrix-body .audit-matrix-row:focus-within .audit-ignore-inline,
-.audit-ignore-inline:focus-visible {
-  opacity: 1;
+.btn.btn-ghost.audit-ignore-inline:focus-visible {
+  color: var(--text);
 }
 
 /* 详情面板 */
