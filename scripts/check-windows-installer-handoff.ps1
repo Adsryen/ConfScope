@@ -11,6 +11,12 @@
 #   B2 进程已退出、但句柄仍被别处引用       -> 必须 0 （v1.9.9 在这里永久判忙 = 线上事故）
 #   C  没有 /PID（人工双击）且目标空闲      -> 必须 0
 #
+# 轮141 加了一条附赠红线：四个场景都走 /S，静默收尾**既不许弹框也不许把应用拉起来**
+# （「装完立刻打开」是给人看的，静默下收尾弹窗必须自动取「否」）。判定只看硬证据：
+# WorkRoot 下冒出一个「不是本轮人造占用进程」的 ConfScope 实例，就是它被拉起来了。
+# 进度页文字（码页不可靠）只当第二条佐证。不用「新 exe 被占用」当判据：杀软扫一眼
+# 刚落地文件就会短暂锁住，那是假失败。
+#
 # 用法（CI 的 windows 作业里直接调用）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows-installer-handoff.ps1
 #   可选 -Installer <安装包路径>；成功时最后一行打印 "HANDOFF-CI ok scenarios=4"。
@@ -48,6 +54,7 @@ New-Item -ItemType Directory -Force -Path $WorkRoot | Out-Null
 
 $script:results = @()
 $script:spawned = @()
+$script:launchFaults = @()
 
 # resolveInstallDir 会优先回读 HKCU 卸载项里的 InstallLocation，把传进去的 /D 覆盖掉。
 # 每个场景之前必须抹掉这一项，否则上一个场景装的目录会渗进下一个场景。
@@ -82,16 +89,76 @@ function Test-FileLocked {
     }
 }
 
+function Get-InstallerConsoleText {
+    # 静默安装的进度页文字会被 NSIS 写到 stdout（Invoke-Installer 把它重定向收下来）。
+    # 这一条只是佐证：两侧 makensis 在不同宿主码页下写出的字节不一样，中文可能读成乱码，
+    # 所以多试几种解码，读到才算证据，读不到绝不影响主判据（看进程）。
+    param([string]$StdoutFile)
+    if (-not (Test-Path -LiteralPath $StdoutFile)) { return "" }
+    $bytes = [System.IO.File]::ReadAllBytes($StdoutFile)
+    $encodings = @([System.Text.Encoding]::Unicode, [System.Text.Encoding]::UTF8, [System.Text.Encoding]::Default)
+    try { $encodings += [System.Text.Encoding]::GetEncoding(936) } catch { }
+    foreach ($enc in $encodings) {
+        $text = $enc.GetString($bytes)
+        if ($text -match "正在启动" -or $text -match "Starting ConfScope") { return $text }
+    }
+    return ""
+}
+
+function Get-LauncherSpawnedInstance {
+    # 「谁把新装的程序跑起来了」的唯一硬证据：WorkRoot 下有个 ConfScope 进程，
+    # 而它不是本轮用来制造占用的人造 blocker（那些 PID 都在 $script:spawned 里）。
+    try {
+        return @(Get-Process -Name "ConfScope" -ErrorAction SilentlyContinue | Where-Object {
+            ($_.Path -like "$WorkRoot\*") -and ($script:spawned -notcontains $_.Id)
+        })
+    } catch {
+        return @()
+    }
+}
+
+function Get-SilentLaunchFault {
+    param([string]$StdoutFile)
+    $problems = @()
+    if (Get-InstallerConsoleText -StdoutFile $StdoutFile) {
+        $problems += "进度页打了「正在启动 ConfScope」：/S 静默收尾不许走拉起出口"
+    }
+    # ExecShell 是异步的，给一点起步时间；问满 6 次 × 300ms 就放过。
+    for ($i = 0; $i -lt 6; $i++) {
+        $spawned = @(Get-LauncherSpawnedInstance)
+        if ($spawned.Count -gt 0) {
+            $ids = @($spawned | ForEach-Object { $_.Id }) -join ","
+            $problems += "静默收尾把新装的 ConfScope.exe 跑起来了（PID $ids）：装完开不开是给人选的，CI 不许弹框也不许开界面"
+            break
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    return $problems
+}
+
+function Stop-WorkRootConfScope {
+    # 判红的那种情况（真把应用拉起来了）不能留在 runner 上继续占文件，也不许误杀别的 ConfScope。
+    $victims = @()
+    try {
+        $victims = @(Get-Process -Name "ConfScope" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$WorkRoot\*" })
+    } catch {
+        $victims = @()
+    }
+    foreach ($v in $victims) {
+        Stop-Process -Id $v.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-Installer {
     # 静默升级：/S + /UPDATE（只留进度页，收尾提示走默认按钮）+ /PID=... + /D=...。
     # /D 必须是最后一个参数，NSIS 才把它当安装目录；/PID 带等号要整体加引号。
-    param([string]$TargetDir, [string]$PidArg)
+    param([string]$TargetDir, [string]$PidArg, [string]$StdoutFile)
     $argList = @("/S", "/UPDATE")
     if ($PidArg) {
         $argList += "/PID=$PidArg"
     }
     $argList += "/D=$TargetDir"
-    $proc = Start-Process -FilePath $Installer -ArgumentList $argList -PassThru -WindowStyle Hidden
+    $proc = Start-Process -FilePath $Installer -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $StdoutFile
     # 用 WaitForExit(毫秒) 而不是 Wait-Process：后者成功时不输出任何东西，
     # 「if (-not (Wait-Process ...))」恒为真，会把四个场景全判成超时（第一次 CI 跑就是这样误红的）。
     if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
@@ -112,10 +179,14 @@ function Invoke-Scenario {
     )
     Remove-UninstallEntry
     $targetDir = Join-Path $WorkRoot ("t-" + $Name)
+    $stdoutFile = Join-Path $WorkRoot ("stdout-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".txt")
     Write-Host ">> $Name（期望退出码 $Expect）目标：$targetDir"
     try {
         $pidArg = & $Prepare $targetDir
-        $code = Invoke-Installer -TargetDir $targetDir -PidArg $pidArg
+        $code = Invoke-Installer -TargetDir $targetDir -PidArg $pidArg -StdoutFile $stdoutFile
+        foreach ($fault in @(Get-SilentLaunchFault -StdoutFile $stdoutFile)) {
+            $script:launchFaults += "SCENARIO=$Name $fault"
+        }
         $exe = Join-Path $targetDir "ConfScope.exe"
         $marker = Join-Path $targetDir "install.json"
         if ($code -ne $Expect) {
@@ -155,6 +226,7 @@ function Invoke-Scenario {
         $script:results += "FAIL $Name : $_"
     }
     finally {
+        Stop-WorkRootConfScope
         foreach ($procId in $script:spawned) {
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
@@ -242,6 +314,19 @@ Invoke-Scenario -Name "A-占用必须让位覆盖" -Prepare $scenarioA -Expect 0
 Invoke-Scenario -Name "B1-无关进程不该挡路" -Prepare $scenarioB1 -Expect 0
 Invoke-Scenario -Name "B2-句柄残留不该挡路" -Prepare $scenarioB2 -Expect 0
 Invoke-Scenario -Name "C-无PID空闲目录" -Prepare $scenarioC -Expect 0
+
+# 静默收尾把应用拉起来了：改的是它所属场景那一行，不新增行 —— CI 钉的是 scenarios=4，
+# 多一行就多一个假失败（轮100 已经为这件事写过注释）。
+foreach ($fault in @($script:launchFaults)) {
+    if ($fault -notmatch "^SCENARIO=(\S+) ") { continue }
+    $who = $Matches[1]
+    for ($i = 0; $i -lt $script:results.Count; $i++) {
+        if ($script:results[$i] -like "ok   $who *") {
+            $script:results[$i] = "FAIL $who : 退出码与落盘都对，但 /S 静默收尾把应用拉起来了 —— $($fault.Substring(10 + $who.Length))"
+        }
+    }
+    Write-Output "LAUNCH-AUDIT $fault"
+}
 
 $script:results | ForEach-Object { Write-Output $_ }
 $failed = @($script:results | Where-Object { $_ -like "FAIL*" })

@@ -1630,7 +1630,7 @@
     "closeTunnelsFailed": "隧道没能关闭，仍是忙碌状态：{detail}",
     "busyDataFlush": "本地数据尚未写入磁盘，现在退出会丢掉最后一次变更",
     "handoff": {
-      "installer": "安装程序负责覆盖当前版本，退出应用后它会自行继续。",
+      "installer": "安装程序负责覆盖当前版本，退出应用后它会自行继续；装完会问一句要不要立刻打开 ConfScope。",
       "reveal": "下载的是便携产物，请在文件夹里替换当前程序后重新启动。",
       "command": "在终端执行下面的命令完成安装，装好后重新启动 ConfScope。",
       "image": "先挂载镜像，再把 ConfScope 拖进「应用程序」覆盖旧版本。",

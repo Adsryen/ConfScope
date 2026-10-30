@@ -58,6 +58,10 @@
 !define INSTALL_MARKER_NAME "install.json"
 
 !define DEFAULT_INSTALL_DIR "$LOCALAPPDATA\Programs\ConfScope"
+; 装完把程序打开之后的确认探针：新镜像重新被锁住 = 新实例真的在跑。
+; 最多 ${LAUNCH_PROBE_ROUNDS} × ${LAUNCH_PROBE_INTERVAL}ms，问不到也只是一句提示，不改任何判据。
+!define LAUNCH_PROBE_ROUNDS 8
+!define LAUNCH_PROBE_INTERVAL 250
 !define WAIT_TICKS 30
 !define WAIT_INTERVAL 500
 ; 一轮 ≈ ${WAIT_TICKS} × ${WAIT_INTERVAL}ms = 15s。用户点「重试」最多再来 ${WAIT_ROUNDS} 轮，
@@ -99,9 +103,14 @@ ManifestDPIAware true
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" # 164x314
 !define MUI_FINISHPAGE_NOAUTOCLOSE # 停在 INSTFILES 页让用户看得见明细
 !define MUI_ABORTWARNING           # 中途退出要警告
-; 首次安装收尾给一个「运行 ConfScope」勾选框（默认不勾）。
-; 注意：/UPDATE 路径整页跳过，升级完成不会自动拉起应用 —— 避免和刚退出的旧实例抢数据根。
+; 收尾给一个「运行 ConfScope」勾选框。MUI2 在没有定义 MUI_FINISHPAGE_RUN_NOTCHECKED 时
+; 把复选框置为**默认勾上**（Contrib/Modern UI 2/Pages/Finish.nsh 里 !ifndef ...NOTCHECKED →
+; BM_SETCHECK BST_CHECKED），文案走 MUI2 内置的 MUI_TEXT_FINISH_RUN，跟着界面语言自动中/英，
+; 所以这里不再自定义 RUN_TEXT —— 少一处要防码页乱码的中文字符串。
+; 勾选框的动作接到 csRelaunchApp（不是 MUI2 默认的 Exec）：让位覆盖之后旧窗口还在跑老版本，
+; 那时候必须拦下来，不然两个实例共用同一份本地数据。
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
+!define MUI_FINISHPAGE_RUN_FUNCTION csRelaunchApp
 
 Var UpdateMode   ; "1" = ConfScope 自动发起（命令行带 /UPDATE），向导只留进度页
 Var AppPid       ; /PID= 传进来的旧进程 PID；空串 = 人工双击，只能靠文件占用探测
@@ -113,6 +122,7 @@ Var ParkOk       ; parkLockedSlot 的出参："1" = 旧镜像已让位，正位�
 Var ParkErr      ; parkLockedSlot 的出参：让位失败的原因（只给进度页看，不参与判据）
 Var ParkAttempt  ; 让位目标名重名时的计数
 Var ParkTarget   ; 本次尝试的让位目标全路径（成功后打印出来，便于人工找回旧文件）
+Var RelaunchSafe ; canRelaunch 的出参："1" = 此刻拉起只会有一个实例（不会与旧窗口抢同一份本地数据）
 
 ; ---------------------------------------------------------------------------
 ; 运行形态标记：install.json 写在 exe 同级，声明「这一份是安装态」。
@@ -309,6 +319,87 @@ Function ensureSlotFree
 FunctionEnd
 
 ; ---------------------------------------------------------------------------
+; 装完到底能不能把程序打开？只回答一个问题：现在拉起会不会多出第二个实例。
+;
+; 与 slotBusy 的分工，别读串了：slotBusy 回答「能不能覆盖二进制」，那条判据全脚本只有一份；
+; 这里回答的是另一件事 —— 旧实例还在不在。
+;   · 没让位过：覆盖得以发生就说明那一刻正位是空的，旧镜像没人攥着 ⇒ 旧实例已经退了；
+;   · 让位过：旧镜像被改名搬走，正位空不空说明不了任何事，只能问 /PID 那个进程退了没有；
+;     人工双击不带 /PID，问不到就当它还活着 —— 宁可让用户自己去点图标，也不能开出两个实例
+;     共用同一份本地数据（程序没有单实例锁，主数据又是 debounce 落盘，后写会盖掉先写）。
+; ---------------------------------------------------------------------------
+Function canRelaunch
+    StrCpy $RelaunchSafe "1"
+    ${If} $ParkOk != "1"
+        Return
+    ${EndIf}
+    StrCpy $RelaunchSafe "0"
+    ${If} $AppPid == ""
+        DetailPrint "$(CS_LAUNCH_BLOCKED)"
+        Return
+    ${EndIf}
+    Call appPidAlive
+    ${If} $AppPidAlive = 0
+        StrCpy $RelaunchSafe "1"
+    ${Else}
+        DetailPrint "$(CS_LAUNCH_BLOCKED)"
+    ${EndIf}
+FunctionEnd
+
+; ---------------------------------------------------------------------------
+; 唯一的「打开程序」出口：人工收尾的勾选框与 /UPDATE 收尾的弹窗都只能经这里出去
+; （判据写两份必然漂，所以 MUI_FINISHPAGE_RUN_FUNCTION 也指向它）。
+;
+; 为什么是 ExecShell 而不是 Exec：B 组把裸 Exec 全文件判红（历史形态 = 安装程序里偷偷起
+; 看不见的 helper），而 $LOCALAPPDATA 完全可能带空格，ExecShell 把路径整个交给 ShellExecute，
+; 不经过命令行解析。拉起前那行 DetailPrint 留着：进度页至少看得见「说了要启动」。
+; 静默（/S，CI 与脚本）永不拉起 GUI —— 收尾弹窗的 /SD 默认按钮已经是「否」，这里再兜一道。
+; ---------------------------------------------------------------------------
+Function csRelaunchApp
+    ${If} ${Silent}
+        DetailPrint "$(CS_LAUNCH_SILENT)"
+        Return
+    ${EndIf}
+    Call canRelaunch
+    ${If} $RelaunchSafe != "1"
+        ; 用户是明确勾了「运行 ConfScope」才走到这里的，拦下来必须说清为什么，不许静默什么都不做。
+        MessageBox MB_OK|MB_ICONINFORMATION "$(CS_LAUNCH_BLOCKED_MSG)" /SD IDOK
+        Return
+    ${EndIf}
+    DetailPrint "$(CS_LAUNCH_OK)"
+    ExecShell "open" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    Call confirmLaunched
+FunctionEnd
+
+; ---------------------------------------------------------------------------
+; 「说了要启动」之后，得能看出它到底起来没有。ExecShell 在各版本 NSIS 里都不给可靠的错误位，
+; 所以这里不问它，只问一件看得见的事：正位那份新镜像有没有重新被进程锁住。
+;   · 锁住 = 新实例在跑（CreateProcess 返回时镜像必然已经映射，所以正常第一次就中）；
+;   · 问满 ${LAUNCH_PROBE_ROUNDS} × ${LAUNCH_PROBE_INTERVAL}ms 还是空的 = 大概率没起来
+;     （也可能只是这台机器此刻慢得离谱），如实告诉用户去哪儿自己打开，
+;     别让人对着毫无反应的桌面猜「我是不是已经装坏了」。
+; 这里复用了 slotBusy 这只探针，但问的不是「能不能覆盖」——那条判据仍然只在 ensureSlotFree 里出现一次。
+; 计数器用 $R5：$R7/$R8/$R9 是 ensureSlotFree 数等待轮次的，本函数不碰。
+; ---------------------------------------------------------------------------
+Function confirmLaunched
+    StrCpy $R5 0
+    cs_launch_probe:
+    Call slotBusy
+    ${If} $SlotBusy = 1
+        DetailPrint "$(CS_LAUNCH_CONFIRMED)"
+        Return
+    ${EndIf}
+    IntOp $R5 $R5 + 1
+    ${If} $R5 >= ${LAUNCH_PROBE_ROUNDS}
+        DetailPrint "$(CS_LAUNCH_UNCONFIRMED)"
+        MessageBox MB_OK|MB_ICONINFORMATION "$(CS_LAUNCH_UNCONFIRMED)" /SD IDOK
+        Return
+    ${EndIf}
+    Sleep ${LAUNCH_PROBE_INTERVAL}
+    Goto cs_launch_probe
+FunctionEnd
+
+; ---------------------------------------------------------------------------
 ; 安装位置回读：绝不能因为 /UPDATE 跳过了目录页，就把用户当初选过的路径重置成默认值。
 ; 自己读 HKCU 而不是用 InstallDirRegKey —— 卸载项是用 SetRegView 64 写的，
 ; InstallDirRegKey 在 .onInit 时跑在默认(32 位)视图上，读写视图不一致就等于读不到。
@@ -445,6 +536,30 @@ LangString CS_MARKER_FAIL ${LANG_ENGLISH} "Failed to write install.json; the app
 LangString CS_UPDATE_DONE ${LANG_SIMPCHINESE} "安装完成，请重新启动 ConfScope。$\r$\n配置与凭据数据不受影响。"
 LangString CS_UPDATE_DONE ${LANG_ENGLISH} "Installation complete. Please start ConfScope again.$\r$\nYour configuration and credential data are untouched."
 
+LangString CS_LAUNCH_ASK ${LANG_SIMPCHINESE} "安装完成，配置与凭据数据不受影响。$\r$\n$\r$\n是否现在启动 ConfScope？"
+LangString CS_LAUNCH_ASK ${LANG_ENGLISH} "Installation complete - your configuration and credential data are untouched.$\r$\n$\r$\nStart ConfScope now?"
+
+LangString CS_LAUNCH_OK ${LANG_SIMPCHINESE} "正在启动 ConfScope"
+LangString CS_LAUNCH_OK ${LANG_ENGLISH} "Starting ConfScope"
+
+LangString CS_LAUNCH_CONFIRMED ${LANG_SIMPCHINESE} "ConfScope 已经启动"
+LangString CS_LAUNCH_CONFIRMED ${LANG_ENGLISH} "ConfScope is running"
+
+LangString CS_LAUNCH_UNCONFIRMED ${LANG_SIMPCHINESE} "没能确认 ConfScope 已经启动。$\r$\n$\r$\n如果它没有打开，请从桌面或开始菜单的图标启动；安装本身已经完成，你的配置与凭据数据没有被动过。"
+LangString CS_LAUNCH_UNCONFIRMED ${LANG_ENGLISH} "Could not confirm that ConfScope started.$\r$\n$\r$\nIf no window appeared, open it from the desktop or the Start menu - the install itself finished, and your configuration and credential data were untouched."
+
+LangString CS_LAUNCH_SKIP ${LANG_SIMPCHINESE} "按你的选择没有启动，随时可以从桌面或开始菜单打开 ConfScope"
+LangString CS_LAUNCH_SKIP ${LANG_ENGLISH} "Not started, as you chose - open ConfScope from the desktop or the Start menu whenever you like"
+
+LangString CS_LAUNCH_SILENT ${LANG_SIMPCHINESE} "静默安装不自动启动应用"
+LangString CS_LAUNCH_SILENT ${LANG_ENGLISH} "Silent install does not start the app"
+
+LangString CS_LAUNCH_BLOCKED ${LANG_SIMPCHINESE} "仍有 ConfScope 窗口在运行，不自动启动新版本（两个实例会共用同一份本地数据）"
+LangString CS_LAUNCH_BLOCKED ${LANG_ENGLISH} "A ConfScope window is still running, so the new version is not started on its own (two instances would share one copy of the local data)"
+
+LangString CS_LAUNCH_BLOCKED_MSG ${LANG_SIMPCHINESE} "安装已经完成，但还有 ConfScope 窗口在运行。$\r$\n$\r$\n现在再开一个，两个实例会共用同一份本地数据，保存会互相覆盖。$\r$\n请先关闭还开着的窗口，再从桌面或开始菜单启动 ConfScope。"
+LangString CS_LAUNCH_BLOCKED_MSG ${LANG_ENGLISH} "The install finished, but a ConfScope window is still running.$\r$\n$\r$\nStarting another one now would put two instances on the same local data, and their saves would overwrite each other.$\r$\nClose the running windows first, then start ConfScope from the desktop or the Start menu."
+
 LangString CS_KEEP_DATA ${LANG_SIMPCHINESE} "保留数据目录 $INSTDIR\${APP_DATA_DIR_NAME}（卸载不删数据）"
 LangString CS_KEEP_DATA ${LANG_ENGLISH} "Keeping $INSTDIR\${APP_DATA_DIR_NAME} (uninstall never deletes data)"
 
@@ -502,11 +617,21 @@ Section
     Call writeUninstallEntry
 
     ${If} $UpdateMode == "1"
-        ; 让过位就得再说一遍：屏幕上还开着的窗口跑的是老版本，不重启用不上新版本。
-        ${If} $ParkOk == "1"
-            MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)$\r$\n$\r$\n$(CS_PARK_RESTART)" /SD IDOK
+        ; /UPDATE 整页跳过了 Finish，人工路径那个勾选框根本不会出现，所以升级收尾要自己给出口。
+        Call canRelaunch
+        ${If} $RelaunchSafe == "1"
+            ; 旧实例确实退了：一键打开，别让人去桌面找图标。
+            ; /SD IDNO —— 静默（CI 与脚本）取默认按钮，永远进不到 launcher。
+            MessageBox MB_YESNO|MB_ICONINFORMATION "$(CS_LAUNCH_ASK)" /SD IDNO IDYES cs_update_relaunch
+            DetailPrint "$(CS_LAUNCH_SKIP)"
+            Goto cs_update_end
+            cs_update_relaunch:
+            Call csRelaunchApp
+            cs_update_end:
         ${Else}
-            MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)" /SD IDOK
+            ; 让过位而旧窗口还活着：屏幕上跑的还是老版本，不重启用不上新版本；
+            ; 这时候问「要不要现在启动」是给一个按判据不能按的按钮，所以只给信息。
+            MessageBox MB_OK|MB_ICONINFORMATION "$(CS_UPDATE_DONE)$\r$\n$\r$\n$(CS_PARK_RESTART)" /SD IDOK
         ${EndIf}
     ${EndIf}
 SectionEnd

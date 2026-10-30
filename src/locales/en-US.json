@@ -1630,7 +1630,7 @@
     "closeTunnelsFailed": "The tunnels could not be closed, still busy: {detail}",
     "busyDataFlush": "Local data has not been written to disk yet; quitting now would drop the last change",
     "handoff": {
-      "installer": "The installer takes over replacing the current version once the app quits.",
+      "installer": "The installer takes over replacing the current version once the app quits, then asks whether to start ConfScope right away.",
       "reveal": "This is the portable artifact: replace the current program in the folder, then restart.",
       "command": "Run the command below in a terminal to install, then restart ConfScope.",
       "image": "Mount the image, then drag ConfScope into Applications to replace the old version.",

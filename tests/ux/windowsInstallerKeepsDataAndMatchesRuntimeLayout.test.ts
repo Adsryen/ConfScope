@@ -1,5 +1,5 @@
 /**
- * Windows 安装包脚本（build/windows/installer/project.nsi）的七组不变量，轮62 起钉在这里。
+ * Windows 安装包脚本（build/windows/installer/project.nsi）的 A–I 九组不变量，轮62 起钉在这里。
  *
  * 为什么要这么写：本机没有 Windows，wails build -nsis 出来的安装程序没法真跑；
  * CI 的 preflight 只能证明这脚本「编译得过」。而编译得过不等于行为对——下面每一条
@@ -22,6 +22,11 @@
  *     页看到的是「ConfScope å·²é€€å‡ºï¼Œç»§ç»­è¦†ç›–å®‰è£…」（v1.9.9 线上事故）。这道缺陷在
  *     Linux 侧原理上不可见——POSIX 的 makensis 恒按 UTF-8 读脚本，四种 locale 下产物 sha256
  *     全等，所以 F 组那道语法闸门全绿也拦不住它，只能验编译产物本身（G 组）。
+ *  H. 窗口关了进程必须真的退出去：进度页的「等待」只看正位镜像占不占用，而占不占用取决于应用
+ *     能不能自己退出。SSH 隧道拨号持锁会把退出拖死 = 用户看到的「一直退不出去」。
+ *  I. 装完能把程序打开，但不许开出第二个实例：程序没有单实例锁，主数据又是 debounce 落盘，
+ *     两个实例共用同一份数据根时后写盖掉先写。所以这条出口只许一个、静默永不拉起、
+ *     让过位之后必须先确认旧实例真的退了。
  *
  * NSIS 的注释有整行 #、整行 ; 和行尾 # 三种，解释历史的注释不算行为（project.nsi 头部
  * 就写着「默认 admin」），所以先剥注释再抽判据，否则守卫会在自己解释自己的注释上自红。
@@ -176,6 +181,7 @@ describe("A. 安装程序不得毁掉用户数据", () => {
 
 describe("B. 覆盖二进制之前必须确认正位可写（已退出或已让位），且绝不终止进程", () => {
   it("没有任何强杀/隐藏 helper 的形态", () => {
+    // 唯一允许的「看得见地起进程」是装完把程序打开，且只许 ExecShell "open" 一处，判据归 I 组。
     const code = nsisCode(NSI);
     for (const banned of [/taskkill/i, /nsExec/i, /Process::Kill/i, /\bExecWait\b/i, /\bExec\b/]) {
       expect(code, `安装程序不许起看不见的进程或强杀（判据归属：何时可覆盖是安装程序的责任，用有界等待）：命中 ${banned}`).not.toMatch(banned);
@@ -616,6 +622,97 @@ describe("H. 窗口关了进程必须真的退出去（否则安装永远等在�
   });
 });
 
+describe("I. 装完能把程序打开，但不许开出第二个实例", () => {
+  it("拉起这一脚的不变量：单一出口 + 静默永不拉起 + 让位后先问旧实例退没退", () => {
+    const code = nsisCode(NSI);
+    expect(relaunchProblems(code), "「装完打开程序」的不变量漂了").toEqual([]);
+  });
+
+  it("MUI 勾选框默认勾上、文案跟着界面语言、动作接到自己的函数", () => {
+    const code = nsisCode(NSI);
+    // MUI2 的 Finish.nsh：!ifndef MUI_FINISHPAGE_RUN_NOTCHECKED → BM_SETCHECK BST_CHECKED，
+    // 也就是「默认勾上」；定义了 RUN_FUNCTION 之后 MUI2 不再自己 Exec，只 Call 我们的函数。
+    expect(code).toMatch(/!define MUI_FINISHPAGE_RUN "\$INSTDIR\\\$\{PRODUCT_EXECUTABLE\}"/);
+    expect(code, "勾选框的动作必须接到唯一出口，否则两条出口各漂各的判据").toMatch(/!define MUI_FINISHPAGE_RUN_FUNCTION csRelaunchApp/);
+    expect(code, "默认不勾 = 用户装完不知道能立刻打开（这轮要修的正是这件事）").not.toMatch(/MUI_FINISHPAGE_RUN_NOTCHECKED/);
+    expect(code, "文案走 MUI2 内置串：自定义一条就得再过一次码页乱码那道关（G 组）").not.toMatch(/MUI_FINISHPAGE_RUN_TEXT/);
+  });
+
+  it("变异对照：删静默保险 / 删安全判定 / 默认按钮翻成「是」/ 加第二处拉起，都必须判红", () => {
+    const code = nsisCode(NSI);
+    expect(relaunchProblems(code)).toEqual([]);
+
+    const silentInsurance = '    ${If} ${Silent}\n        DetailPrint "$(CS_LAUNCH_SILENT)"\n        Return\n    ${EndIf}\n';
+    const noSilentGuard = code.replace(silentInsurance, "");
+    expect(noSilentGuard, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noSilentGuard).length, "静默安装把界面拉起来必须判红").toBeGreaterThan(0);
+
+    const noLauncherCheck = code.replace('    Call canRelaunch\n    ${If} $RelaunchSafe != "1"', '    ${If} $RelaunchSafe != "1"');
+    expect(noLauncherCheck, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noLauncherCheck).length, "出口里删掉安全判定必须判红").toBeGreaterThan(0);
+
+    const noSectionCheck = code.replace('        Call canRelaunch\n        ${If} $RelaunchSafe == "1"', '        ${If} $RelaunchSafe == "1"');
+    expect(noSectionCheck, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noSectionCheck).length, "升级收尾不问一句就弹「是否现在启动」必须判红").toBeGreaterThan(0);
+
+    const autoYes = code.replace('"$(CS_LAUNCH_ASK)" /SD IDNO IDYES', '"$(CS_LAUNCH_ASK)" /SD IDYES IDYES');
+    expect(autoYes, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(autoYes).length, "静默默认按钮翻成「是」= CI 每次装完自己开一个界面，必须判红").toBeGreaterThan(0);
+
+    const noPidProbe = code.replace("    Call appPidAlive\n    ${If} $AppPidAlive = 0\n", "    ${If} $AppPidAlive = 0\n");
+    expect(noPidProbe, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noPidProbe).length, "让过位却不问旧进程退没退就说安全，必须判红").toBeGreaterThan(0);
+
+    const noPidArg = code.replace('    ${If} $AppPid == ""\n        DetailPrint "$(CS_LAUNCH_BLOCKED)"\n        Return\n    ${EndIf}\n', "");
+    expect(noPidArg, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noPidArg).length, "人工双击没有 /PID 却当旧实例已退，必须判红").toBeGreaterThan(0);
+
+    const secondExit = code.replace("    Call writeUninstallEntry", '    ExecShell "open" "$INSTDIR\\${PRODUCT_EXECUTABLE}"\n    Call writeUninstallEntry');
+    expect(secondExit, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(secondExit).length, "多开一条拉起出口（判据写两份必然漂）必须判红").toBeGreaterThan(0);
+
+    const noProbe = code.replace('    ExecShell "open" "$INSTDIR\\${PRODUCT_EXECUTABLE}"\n    Call confirmLaunched', '    ExecShell "open" "$INSTDIR\\${PRODUCT_EXECUTABLE}"');
+    expect(noProbe, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(noProbe).length, "拉起之后不确认有没有真的起来必须判红").toBeGreaterThan(0);
+
+    const clobbers = code.replace("    Call slotBusy\n    ${If} $SlotBusy = 1", "    StrCpy $R9 0\n    Call slotBusy\n    ${If} $SlotBusy = 1");
+    expect(clobbers, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(clobbers).length, "确认探针越界改等待计数器必须判红").toBeGreaterThan(0);
+
+    const missingEnglish = code.replace(/LangString CS_LAUNCH_BLOCKED_MSG \$\{LANG_ENGLISH\}[^\n]*/, "");
+    expect(missingEnglish, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(missingEnglish).length, "拦截弹窗少一条英文文案，英文机器上会弹空串，必须判红").toBeGreaterThan(0);
+
+    const parkBlind = code.replace('${If} $ParkOk != "1"', '${If} $ParkOk == "0"');
+    expect(parkBlind, "变异没落到实处").not.toBe(code);
+    expect(relaunchProblems(parkBlind).length, "让位状态读反（把「没让位」当成「让过位」）必须判红").toBeGreaterThan(0);
+  });
+
+  it("CI 实测脚本盯得住静默收尾：真拉起来就判红，且不因杀软短暂占用误红", () => {
+    const ps1 = read(HANDOFF_PS1);
+    expect(ps1, "静默收尾要有审计这一脚").toMatch(/function Get-SilentLaunchFault \{/);
+    expect(ps1, "判据只看硬证据：WorkRoot 下冒出「不是本轮人造占用」的 ConfScope 实例").toMatch(/function Get-LauncherSpawnedInstance \{/);
+    expect(ps1, "ping 改名的人造占用进程也叫 ConfScope，必须从判据里排掉，否则场景 A 恒红").toMatch(/\$script:spawned -notcontains \$_\.Id/);
+    expect(ps1, "进度页文字要收下来当佐证（宿主码页不可信，所以它只是第二条腿）").toMatch(/-RedirectStandardOutput \$StdoutFile/);
+    const auditFn = ps1.slice(ps1.indexOf("function Get-SilentLaunchFault {"));
+    const auditBody = auditFn.slice(0, auditFn.indexOf("\n}\n"));
+    expect(auditBody.length, "找不到 Get-SilentLaunchFault 的函数体").toBeGreaterThan(0);
+    expect(auditBody, "不许用「新 exe 被占用」当静默判红依据：杀软扫一眼刚落地的文件就会短暂锁住，那是假失败").not.toMatch(/Test-FileLocked/);
+    expect(auditBody, "探针必须是有界的，且第一次问之前要给 ExecShell 一点起步时间").toMatch(/Start-Sleep -Milliseconds/);
+    const installAt = ps1.indexOf("Invoke-Installer -TargetDir $targetDir -PidArg $pidArg -StdoutFile $stdoutFile");
+    const auditAt = ps1.indexOf("Get-SilentLaunchFault -StdoutFile $stdoutFile");
+    expect(installAt, "找不到「带 stdout 的静默安装」那一步").toBeGreaterThanOrEqual(0);
+    expect(auditAt, "静默收尾审计必须排在安装进程退出之后").toBeGreaterThan(installAt);
+    expect(ps1, "真把应用拉起来了就得收掉，否则下一个场景被上一个的残留挡住").toMatch(/finally \{\n        Stop-WorkRootConfScope/);
+    // 判红要落在所属场景那一行：CI 钉的是 scenarios=4，多写一行结果就多一个假失败。
+    const audit = ps1.slice(ps1.indexOf("foreach ($fault in @($script:launchFaults))"));
+    expect(audit.length, "找不到把静默审计并进场景结果的这一段").toBeGreaterThan(0);
+    expect(audit).toMatch(/FAIL \$who :/);
+    expect(audit, "静默审计不许往 results 里追加行").not.toMatch(/\$script:results \+=/);
+    expect(audit).toMatch(/Write-Output "LAUNCH-AUDIT \$fault"/);
+  });
+});
+
 
 /**
  * 让位覆盖（轮100）的不变量。返回问题清单，方便变异对照在同一套判据上跑。
@@ -763,6 +860,100 @@ function functionBody(code: string, name: string): string {
   if (start < 0) throw new Error(`project.nsi 里找不到 Function ${name}`);
   const end = code.indexOf("FunctionEnd", start);
   return code.slice(start, end < 0 ? code.length : end);
+}
+
+/**
+ * 「装完把程序打开」（轮141）的不变量。返回问题清单，方便变异对照在同一套判据上跑。
+ *
+ * 为什么值得钉住：程序没有单实例锁，主数据是 debounce 落盘的——两个实例共用同一份数据根时
+ * 后写盖掉先写，症状是用户丢配置，而且要到下次升级才看得见。所以这条「打开」的出口必须同时
+ * 守住三件事：只许一个出口、静默永不拉起、让过位之后先确认旧实例真的退了。
+ */
+function relaunchProblems(code: string): string[] {
+  const problems: string[] = [];
+  let guard: string;
+  let launcher: string;
+  let probe: string;
+  try {
+    guard = functionBody(code, "canRelaunch");
+    launcher = functionBody(code, "csRelaunchApp");
+    probe = functionBody(code, "confirmLaunched");
+  } catch (err) {
+    return [(err as Error).message + "：「装完打开程序」这条出口整个没了"];
+  }
+
+  // 静默保险必须是 launcher 的第一道判定：后面任何一步漏判，静默都不该走到 GUI。
+  const firstIf = /\$\{If\}[^\n]*/.exec(launcher);
+  if (!firstIf || !firstIf[0].startsWith("${If} ${Silent}")) {
+    problems.push("csRelaunchApp 的第一道判定不是 ${If} ${Silent}：静默（CI 与脚本）可能把界面拉起来");
+  }
+  for (const needle of ["Call canRelaunch", '${If} $RelaunchSafe != "1"', '"$(CS_LAUNCH_BLOCKED_MSG)"', 'ExecShell "open" "$INSTDIR\\${PRODUCT_EXECUTABLE}"', "Call confirmLaunched"]) {
+    if (!launcher.includes(needle)) problems.push(`csRelaunchApp 里缺 ${needle}`);
+  }
+  const shellAt = launcher.indexOf('ExecShell "open"');
+  const blockedAt = launcher.indexOf("$(CS_LAUNCH_BLOCKED_MSG)");
+  if (shellAt >= 0 && blockedAt >= 0 && blockedAt > shellAt) {
+    problems.push("拦截解释排在拉起之后：用户先看见程序被打开，再被告知不许打开");
+  }
+
+  // canRelaunch 只回答「现在拉起会不会多出第二个实例」，三要素一条都不能少。
+  if (!guard.includes('StrCpy $RelaunchSafe "1"')) problems.push("canRelaunch 没有默认放行的一支");
+  if (!guard.includes('${If} $ParkOk != "1"')) {
+    problems.push("canRelaunch 没读让位状态：没让过位（正位覆盖成功 = 旧镜像没人攥着）也要能被放行");
+  } else if (!guard.includes('StrCpy $RelaunchSafe "0"')) {
+    problems.push("canRelaunch 让过位之后没有先判为不安全");
+  } else if (guard.indexOf('${If} $ParkOk != "1"') > guard.indexOf('StrCpy $RelaunchSafe "0"')) {
+    problems.push("canRelaunch 的让位判定排在改写安全性之后");
+  }
+  if (!guard.includes('${If} $AppPid == ""')) {
+    problems.push("canRelaunch 少了「人工双击没有 /PID」这一支：问不到就当旧实例还活着，宁可让用户自己点图标");
+  }
+  if (!guard.includes("Call appPidAlive")) problems.push("canRelaunch 没问 /PID 那个进程退了没有");
+  if (!guard.includes("${If} $AppPidAlive = 0")) problems.push("canRelaunch 没有「旧进程已退 ⇒ 可以拉起」这一支");
+
+  // 确认探针只借用 slotBusy 这只眼睛，问的是「新镜像有没有重新被锁住」。
+  if (!probe.includes("Call slotBusy")) problems.push("confirmLaunched 没有回探正位镜像有没有重新被占用");
+  for (const needle of ["StrCpy $R5 0", "IntOp $R5 $R5 + 1", "$R5 >= ${LAUNCH_PROBE_ROUNDS}", "Sleep ${LAUNCH_PROBE_INTERVAL}"]) {
+    if (!probe.includes(needle)) problems.push(`confirmLaunched 缺 ${needle}：探针必须是有界的`);
+  }
+  if (/\$R[789]/.test(probe)) problems.push("confirmLaunched 碰了 $R7/$R8/$R9：那是 ensureSlotFree 数等待轮次的计数器");
+  if (!code.includes("!define LAUNCH_PROBE_ROUNDS ") || !code.includes("!define LAUNCH_PROBE_INTERVAL ")) {
+    problems.push("确认探针的轮次与间隔没有 !define：写死的数字漂了没人看得见");
+  }
+
+  // 升级收尾：/UPDATE 整页跳过 Finish，人工路径那个勾选框根本不会出现，所以这一段就是它的出口。
+  const ins = installSection(code);
+  for (const needle of ["Call canRelaunch", '${If} $RelaunchSafe == "1"', '"$(CS_LAUNCH_ASK)" /SD IDNO IDYES', "Call csRelaunchApp", "$(CS_PARK_RESTART)"]) {
+    if (!ins.includes(needle)) problems.push(`安装 Section 的收尾缺 ${needle}`);
+  }
+  if (!ins.includes("$(CS_UPDATE_DONE)")) problems.push("让位没退那一支还得把「安装完成，请重新启动」说给用户");
+  if (ins.includes("Call canRelaunch") && ins.includes("!insertmacro wails.files") && ins.indexOf("Call canRelaunch") < ins.indexOf("!insertmacro wails.files")) {
+    problems.push("canRelaunch 排在覆盖文件之前：那一刻旧镜像多半还被攥着，判不出任何东西");
+  }
+
+  // 全脚本口径：拉起只许一处、只许 ExecShell，安全判定只许两条出口共用同一份。
+  if (countOccurrences(code, /ExecShell/g) !== 1) problems.push("ExecShell 的数量不是 1：拉起出口必须只有一条");
+  if (/\bExec\b/.test(code)) problems.push("出现了裸 Exec：B 组红线，且 $LOCALAPPDATA 完全可能带空格");
+  if (countOccurrences(code, /Call canRelaunch/g) !== 2) problems.push("Call canRelaunch 不是恰好 2 次（人工出口 + 升级出口各一次）");
+  if (countOccurrences(code, /Call csRelaunchApp/g) !== 1) problems.push("Call csRelaunchApp 不是恰好 1 次（勾选框经 MUI_FINISHPAGE_RUN_FUNCTION 进来）");
+  if (countOccurrences(code, /Function csRelaunchApp/g) !== 1) problems.push("Function csRelaunchApp 定义不唯一");
+  if (!code.includes("Var RelaunchSafe")) problems.push("Var RelaunchSafe 没了：canRelaunch 的出参没有落点");
+  for (const key of [
+    "CS_LAUNCH_ASK",
+    "CS_LAUNCH_OK",
+    "CS_LAUNCH_CONFIRMED",
+    "CS_LAUNCH_UNCONFIRMED",
+    "CS_LAUNCH_SKIP",
+    "CS_LAUNCH_SILENT",
+    "CS_LAUNCH_BLOCKED",
+    "CS_LAUNCH_BLOCKED_MSG",
+  ]) {
+    if (countOccurrences(code, new RegExp(String.raw`LangString ${key} \$\{LANG_`, "g")) !== 2) problems.push(`${key} 必须中英各一条`);
+  }
+  for (const body of [guard, launcher, probe]) {
+    if (/taskkill|Stop-Process|TerminateProcess|nsExec/i.test(body)) problems.push("拉起这条链上出现了终止进程或隐藏执行的形态");
+  }
+  return problems;
 }
 
 function countOccurrences(text: string, re: RegExp): number {
