@@ -69,8 +69,15 @@ const BRIDGE_FILES = [
   "tests/smoke/bridge/installWailsBridge.ts",
 ];
 
+/**
+ * 判据文本一律先统一换行符再比对。
+ *
+ * 教训（v1.11.1 出包断在这里）：`.gitattributes` 给 `*.ps1` 定了 `eol=crlf`（PowerShell 5.1
+ * 吃 LF-only 的亏），所以 **CI 检出的是 CRLF，WSL 工作区里却是 LF**，而 `git status` 两边都算干净。
+ * 按 `\n}\n` 切函数体、按 `\{\n\s+` 配对的判据在 CRLF 下会切出空串或整篇，守卫本地绿、CI 红。
+ */
 function read(rel: string): string {
-  return readFileSync(join(PROJECT_ROOT, rel), "utf8");
+  return readFileSync(join(PROJECT_ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 }
 
 /** 只留行为：整行 # / ; 注释与行尾 # 注释都剥掉。 */
@@ -710,6 +717,21 @@ describe("I. 装完能把程序打开，但不许开出第二个实例", () => {
     expect(audit).toMatch(/FAIL \$who :/);
     expect(audit, "静默审计不许往 results 里追加行").not.toMatch(/\$script:results \+=/);
     expect(audit).toMatch(/Write-Output "LAUNCH-AUDIT \$fault"/);
+  });
+
+  it("判据不随检出换行符变形：*.ps1 在 CI 是 CRLF，本地是 LF", () => {
+    // 这条钉的是 read() 本身：谁把它改回裸 readFileSync，上面那两条按 \n}\n 切函数体的判据
+    // 就会在 CI 上假红（本地永远看不见，因为 WSL 检出的是 LF）。
+    const raw = readFileSync(join(PROJECT_ROOT, HANDOFF_PS1), "utf8");
+    expect(read(HANDOFF_PS1), "判据文本里不许留 CR：CI 检出为 CRLF，切片会切空").not.toContain("\r");
+    // 模拟 CI 的检出形态，确认归一之后仍能切出函数体、且函数体里确实不引用 Test-FileLocked。
+    const crlf = raw.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+    const normalized = crlf.replace(/\r\n/g, "\n");
+    const start = normalized.indexOf("function Get-SilentLaunchFault {");
+    expect(start, "CRLF 形态下找不到静默收尾审计这一脚").toBeGreaterThan(-1);
+    const body = normalized.slice(start, normalized.indexOf("\n}\n", start));
+    expect(body.length, "CRLF 形态下切不出函数体：守卫会在 CI 里假红").toBeGreaterThan(0);
+    expect(body, "静默判红不许用「新 exe 被占用」").not.toMatch(/Test-FileLocked/);
   });
 });
 
