@@ -58,17 +58,64 @@ function fallbackText(value: DisplayableTime, options: DateTimeFormatOptions): s
   return "—";
 }
 
+/** 时刻部分：`21:40:07`（`seconds: false` 时 `21:40`）。三个显示口径共用，免得各自拼一遍。 */
+function clockPart(date: Date, seconds: boolean): string {
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}${seconds ? `:${pad(date.getSeconds())}` : ""}`;
+}
+
 /** `2026-10-17 21:40:07`（`seconds: false` 时到分钟）。 */
 export function formatDateTime(value: DisplayableTime, options: DateTimeFormatOptions = {}): string {
   const date = toDate(value);
   if (!date) return fallbackText(value, options);
-  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}${options.seconds === false ? "" : `:${pad(date.getSeconds())}`}`;
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clockPart(date, options.seconds !== false)}`;
 }
 
 /** 只要时刻：`21:40:07`（`seconds: false` 时 `21:40`）。列表里时间戳挤不下整天日期时用这个。 */
 export function formatClock(value: DisplayableTime, options: DateTimeFormatOptions = {}): string {
   const date = toDate(value);
   if (!date) return fallbackText(value, options);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}${options.seconds === false ? "" : `:${pad(date.getSeconds())}`}`;
+  return clockPart(date, options.seconds !== false);
+}
+
+export interface ListTimeOptions extends DateTimeFormatOptions {
+  /** 判定「是不是今天」的基准时刻。默认取当前时间；测试里传固定值，断言才不会随运行日期漂。 */
+  now?: DisplayableTime;
+}
+
+/** 同一个日历日（按本地时区的年月日比，不比时刻）。 */
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+/**
+ * 列表行的时间戳：今天只写时刻（`21:40:07`），不是今天补上日期（`10-17 21:40:07`）。
+ *
+ * 为什么要第三种口径：日志 / 历史这类列表按时间倒序排，一屏内绝大多数行都是今天，
+ * 每行都印满 `2026-10-30 21:40:07` 就把真正要看的内容挤没了；全用 `formatClock` 又不行——
+ * 隔夜那几条会读成「不知道哪天」。完整时间仍该由调用方挂在 `title` 上（详情区用 `formatDateTime`）。
+ */
+export function formatListTime(value: DisplayableTime, options: ListTimeOptions = {}): string {
+  const date = toDate(value);
+  if (!date) return fallbackText(value, options);
+  const clock = clockPart(date, options.seconds !== false);
+  const today = toDate(options.now ?? new Date());
+  if (today && isSameDay(date, today)) return clock;
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+}
+
+/**
+ * 时长：`800ms` / `9.5s` / `3m 12s` / `2h 13m`。
+ *
+ * 只接受毫秒数，不做日期差值——差值由调用方算（两处时间戳相减是同一回事，不该在事实源里猜语义）。
+ * 小于 1 分钟给到一位小数，否则一次两三秒的会话全被读成 `0s`，看着像没耗时。
+ */
+export function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${Number((ms / 1000).toFixed(1))}s`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  if (minutes < 60) return `${minutes}m ${pad(totalSeconds % 60)}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${pad(minutes % 60)}m`;
 }

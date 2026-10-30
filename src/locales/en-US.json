@@ -1679,6 +1679,14 @@
     "madeWithSuffix": "with care"
   },
   "logViewer": {
+    "timeline": "Event timeline",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "noDiff": "No differences",
+    "metricEnv": "{count} envs",
+    "metricItems": "{count} items",
+    "duration": "Duration {duration}",
+    "refreshing": "Refreshing...",
     "rawEvents": "Raw event stream",
     "eventPayload": "Event payload",
     "subtitle": "audit-trail.jsonl · full event stream of compare/audit/apply sessions",

@@ -25,9 +25,22 @@ const INTL_DISPLAY = /toLocale(?:String|TimeString|DateString)\(|Intl\.\w*DateTi
 /** 规则 2：手写日期时间必然用到的字段取值与补零。 */
 const DATE_FIELDS = /\.(getFullYear|getMonth|getDate|getDay|getHours|getMinutes|getSeconds)\(\)/g;
 const ZERO_PAD = /padStart\(\s*2\s*,\s*"0"\s*\)/g;
-/** 规则 4：事实源对外两个口径的调用点下限（实测 10 与 5，留出重构余量）。 */
+/**
+ * 规则 4：防永真的数量下限。
+ *
+ * 轮142 B 段的实测教训：下限原来只盯 formatClock 一个函数（下限 4），
+ * 而这次把日志列表行的时刻换成「今天只写时刻、跨天补日期」的 formatListTime 之后，
+ * formatClock 掉到 3 就判红了——那恰恰是这条守卫**鼓励**的动作（把散落的显示口径收进事实源）。
+ * 所以口径改成两条一起看：
+ *   - 单个口径各自有下限，保证每个口径都真的有人在用（新口径写完没人调用 = 死代码，一样抓）；
+ *   - 全家总量有下限，「换个口径」骗不过去，总量掉了才是真漏了手写时间。
+ */
 const MIN_DATE_TIME_CALLS = 8;
-const MIN_CLOCK_CALLS = 4;
+const MIN_CLOCK_CALLS = 3;
+const MIN_LIST_TIME_CALLS = 1;
+const MIN_ELAPSED_CALLS = 1;
+/** 四个口径的总量下限（实测 19 + 3 + 1 + 2 = 25，留出重构余量）。 */
+const MIN_TOTAL_DISPLAY_CALLS = 20;
 
 /** 某规则在事实源之外的命中位置，用于报错时直接指出文件行号。 */
 function hitsOutside(files: string[], pattern: RegExp): string[] {
@@ -46,17 +59,27 @@ const files = sourceFiles().filter((file) => file !== SINGLE_SOURCE);
 const callCount = (pattern: RegExp) => files.reduce((acc, file) => acc + Array.from(readScannedSource(file).matchAll(pattern)).length, 0);
 
 describe("显示型时间的单一事实源守卫", () => {
-  it("扫描口径不是空转：事实源确实导出了两个显示口径", () => {
+  it("扫描口径不是空转：事实源确实导出了四个显示口径", () => {
     const source = readScannedSource(SINGLE_SOURCE);
-    expect(source).toContain("export function formatDateTime(");
-    expect(source).toContain("export function formatClock(");
+    for (const name of ["formatDateTime", "formatClock", "formatListTime", "formatElapsed"]) {
+      expect(source, `事实源少了 ${name} 这个口径`).toContain(`export function ${name}(`);
+    }
     // 事实源自己必须不用 Intl，否则口径又跟着系统区域跑了
     expect(Array.from(source.matchAll(INTL_DISPLAY))).toEqual([]);
   });
 
   it("调用点数量下限：防止规则永真把违规吞掉", () => {
-    expect(callCount(/\bformatDateTime\(/g)).toBeGreaterThanOrEqual(MIN_DATE_TIME_CALLS);
-    expect(callCount(/\bformatClock\(/g)).toBeGreaterThanOrEqual(MIN_CLOCK_CALLS);
+    const counts = {
+      formatDateTime: callCount(/\bformatDateTime\(/g),
+      formatClock: callCount(/\bformatClock\(/g),
+      formatListTime: callCount(/\bformatListTime\(/g),
+      formatElapsed: callCount(/\bformatElapsed\(/g),
+    };
+    expect(counts.formatDateTime, "formatDateTime 调用点").toBeGreaterThanOrEqual(MIN_DATE_TIME_CALLS);
+    expect(counts.formatClock, "formatClock 调用点").toBeGreaterThanOrEqual(MIN_CLOCK_CALLS);
+    expect(counts.formatListTime, "formatListTime 调用点：新口径写完没人用就是死代码").toBeGreaterThanOrEqual(MIN_LIST_TIME_CALLS);
+    expect(counts.formatElapsed, "formatElapsed 调用点：新口径写完没人用就是死代码").toBeGreaterThanOrEqual(MIN_ELAPSED_CALLS);
+    expect(Object.values(counts).reduce((a, b) => a + b, 0), `全家总量 ${JSON.stringify(counts)}`).toBeGreaterThanOrEqual(MIN_TOTAL_DISPLAY_CALLS);
   });
 
   it("src 内不许再用 toLocale* 显示时间", () => {

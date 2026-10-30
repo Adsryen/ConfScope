@@ -94,13 +94,17 @@ describe("LogViewer", () => {
     // kind 按钮文案随 locale 变化，按当前 locale 解析
     const { currentLocale, getTranslation } = await import("../locales");
     const label = getTranslation(currentLocale(), "logViewer.kindCompare");
-    const compareBtn = screen.getAllByRole("button").find((el) => el.textContent?.trim() === label);
+    // 轮142 B3：筛选按钮从「对比」变成「对比 2」——计数才是要看的东西，
+    // 按钮文案因此只按前缀匹配，别再要求整串相等。
+    const compareBtn = screen.getAllByRole("button").find((el) => (el.textContent ?? "").trim().startsWith(label));
     expect(compareBtn).toBeTruthy();
     compareBtn?.click();
     // 点击后再点击取消过滤（toggle 行为），最终恢复全部
     compareBtn?.click();
     await waitFor(() => {
-      const items = container.querySelectorAll(".data-list .task-item-name");
+      // 轮142 B1：行的主标题换成人可读摘要，会话 id 退到 .log-item-id——
+      // 这条用例要钉的是「筛选后剩下的就是那两条会话」，认 id 才是稳定身份。
+      const items = container.querySelectorAll(".data-list .log-item-id");
       expect(Array.from(items).map((el) => el.textContent?.trim()).sort()).toEqual([aId, cId].sort());
     });
     expect(container).toBeTruthy();

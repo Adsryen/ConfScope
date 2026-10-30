@@ -4,7 +4,7 @@ import { useTaskManager, useTaskList, type Task, type TaskStatus } from "../lib/
 import { toast } from "../lib/toast";
 import CopyButton from "./CopyButton";
 import { clickableRowProps } from "../lib/clickableRow";
-import { formatClock, formatDateTime } from "../lib/formatDateTime";
+import { formatClock, formatDateTime, formatElapsed } from "../lib/formatDateTime";
 import { useScrollResetOnContentChange } from "../lib/useScrollResetOnContentChange";
 
 interface Props {
@@ -82,12 +82,6 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
     return labels[type] || type;
   };
 
-  const formatDuration = (ms: number): string => {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-  };
-
   return (
     <div className="page-surface data-page task-center">
       <div className="page-header">
@@ -160,7 +154,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
                 <div className="task-item-meta">
                   <span className="task-time">
                     {task.endTime
-                      ? t("tasks.elapsed", { time: formatDuration(task.elapsedTime) })
+                      ? t("tasks.elapsed", { time: formatElapsed(task.elapsedTime) })
                       : t("tasks.startedAt", { time: formatClock(task.startTime) })}
                   </span>
                   {task.failed > 0 && <span className="task-failed">{t("tasks.failedItems", { count: task.failed })}</span>}
@@ -249,7 +243,7 @@ export default function TaskCenter({ onNavigateToTask }: Props) {
               {selectedTask.elapsedTime > 0 && (
                 <div className="info-row">
                   <span className="info-label">{t("tasks.duration")}:</span>
-                  <span className="info-value">{formatDuration(selectedTask.elapsedTime)}</span>
+                  <span className="info-value">{formatElapsed(selectedTask.elapsedTime)}</span>
                 </div>
               )}
               {selectedTask.error && (

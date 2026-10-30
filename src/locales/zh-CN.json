@@ -1679,6 +1679,14 @@
     "madeWithSuffix": "用心打造"
   },
   "logViewer": {
+    "timeline": "事件时间轴",
+    "expandAll": "展开全部",
+    "collapseAll": "收起全部",
+    "noDiff": "无差异",
+    "metricEnv": "{count} 个环境",
+    "metricItems": "{count} 项",
+    "duration": "耗时 {duration}",
+    "refreshing": "刷新中...",
     "rawEvents": "原始事件流",
     "eventPayload": "事件内容",
     "subtitle": "audit-trail.jsonl · 对比/审计/应用会话的完整事件流",

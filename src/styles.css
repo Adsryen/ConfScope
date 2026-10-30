@@ -9947,6 +9947,15 @@ button.diff-workflow-step-btn:hover {
 }
 
 /* ── 审计日志（LogViewer） ── */
+/*
+ * 轮142 B 段：这一段原来只写了「详情区长什么样」，列表行完全借任务中心的类，
+ * 结果徽章三档（成功/失败/进行中）在 CSS 里根本没有对应规则，失败和成功的会话
+ * 在列表里长得一模一样。现在按两层收口：
+ *   行 = 状态徽章 + 类型 + 时间（顶右） + 人可读摘要 + 度量（事件数/差异/会话 id）
+ *   详情 = 顶栏（摘要 + 时间 + 复制） + 度量行 + 事件时间轴 + 末尾折叠的原始 JSONL
+ * 颜色一律走令牌：这块以前的 #101014 / #26262e / #232329 / #b8b8c2 / #9a9aa8
+ * 是抄 diff 区那段硬编码来的，换成 --bg2 / --border / --text / --text-dim 后与其余面板同源。
+ */
 .log-viewer .log-detail {
   display: flex;
   flex-direction: column;
@@ -9965,7 +9974,62 @@ button.diff-workflow-step-btn:hover {
   gap: 10px;
   min-width: 0;
 }
-.log-viewer .log-detail-meta .task-item-name {
+/* B1：顶栏标题换成「这次动了哪条配置」，会话 id 挪到度量行，所以这里截断的是摘要本身。
+   全文挂在 title 上，抄走靠祖先 .log-detail-meta 已放开选择（见「可复制正文」段）。 */
+.log-viewer .log-detail-meta .log-detail-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.log-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.log-detail-ts {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* 度量行：会话 id / 事件数 / 耗时。三项各自不换行，挤不下时整行折行。 */
+.log-detail-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.log-detail-count,
+.log-detail-duration {
+  white-space: nowrap;
+}
+.log-detail-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* 列表行：时间顶到最右，摘要与度量各占一行。 */
+.log-item-time {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.log-item-metrics {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.log-item-id {
+  color: var(--text-dim);
+  font-size: 11px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9973,8 +10037,8 @@ button.diff-workflow-step-btn:hover {
 .log-viewer .log-jsonl {
   margin: 0;
   padding: 10px 12px;
-  background: #101014;
-  border: 1px solid #26262e;
+  background: var(--bg2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.55;
@@ -9983,7 +10047,7 @@ button.diff-workflow-step-btn:hover {
   max-height: 220px;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #b8b8c2;
+  color: var(--text);
 }
 .log-viewer .log-detail-expanded {
   display: flex;
@@ -9994,8 +10058,20 @@ button.diff-workflow-step-btn:hover {
   flex: 1;
 }
 .log-viewer .log-event {
-  border: 1px solid #232329;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
   border-radius: 6px;
+}
+/* B2：按事件结果给左边框上色。只改边框色、不铺 tint 底——
+   日志正文的承托面是 --bg2，再叠一层半透明红会把 diff 区那组实测对比度配对带偏。 */
+.log-viewer .log-event-tone-error {
+  border-left-color: var(--red);
+}
+.log-viewer .log-event-tone-ok {
+  border-left-color: var(--green);
+}
+.log-viewer .log-event-tone-plain {
+  border-left-color: var(--border);
 }
 .log-viewer .log-event summary {
   display: flex;
@@ -10009,7 +10085,7 @@ button.diff-workflow-step-btn:hover {
 .log-viewer .log-event-kind {
   font-weight: 600;
 }
-.log-viewer .log-event-kind.danger {
+.log-viewer .log-event-tone-error .log-event-kind {
   color: var(--red-text);
 }
 .log-viewer .log-event-ts {
@@ -10019,10 +10095,31 @@ button.diff-workflow-step-btn:hover {
 .log-viewer .log-event-dir {
   color: var(--text-dim);
 }
+/* 定位（group/dataId）是最长也最容易被挤掉的一段：允许收缩，全文在 title 上。 */
+.log-viewer .log-event-loc {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-viewer .log-event-metric {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.log-viewer .log-event-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--red-text);
+}
 .log-viewer .log-event-payload {
   margin: 0;
   padding: 8px 12px;
-  border-top: 1px solid #232329;
+  border-top: 1px solid var(--border);
   font-size: 12px;
   line-height: 1.5;
   overflow: auto;
@@ -10030,7 +10127,18 @@ button.diff-workflow-step-btn:hover {
   max-height: 300px;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #b8b8c2;
+  color: var(--text);
+}
+/* B2：原始 JSONL 从「详情区的第一块正文」降成末尾一栏，默认折叠。 */
+.log-raw {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.log-raw summary {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .log-viewer .log-toggle {
   display: inline-flex;
@@ -10039,8 +10147,14 @@ button.diff-workflow-step-btn:hover {
   /* 轮37 R88：同 .check-row，实测 91x17 ⇒ 补到 24 高（inline-flex + align-items:center，文字仍垂直居中）。 */
   min-height: 24px;
   font-size: 12px;
-  color: #9a9aa8;
+  color: var(--text-dim);
   white-space: nowrap;
+}
+/* 色条默认 opacity:0、只有选中行显形：日志页的色条说的是「这次成没成」，
+   不是「你选中了哪一行」，所以整列都要看得见。选择器带两层限定，
+   不会把 revealRulesAreNotUnconditionallyOverridden 里那条 .data-item-accent 显形打哑。 */
+.log-viewer .data-list-item .data-item-accent {
+  opacity: 1;
 }
 
 .data-file-info {
@@ -10151,6 +10265,12 @@ button.diff-workflow-step-btn:hover {
 .dup-check-key,
 .dup-check-loc-ref,
 .dup-check-loc-value,
+
+/* 轮142 B1/B2：日志列表行的会话 id、事件行的定位与报错原文都单行截断。
+   id 要拿去对账、报错原文要能整段贴给别人，只给看不给拿等于让人重新敲一遍。 */
+.log-item-id,
+.log-event-loc,
+.log-event-error,
 
 /* 历史 / 备份 / 任务 / 日志：dataId、名称、范围、详情元信息 */
 .history-dataid,
