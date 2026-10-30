@@ -5,14 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
 <!--
 自 1.9.2 起本文件与 tag 同步维护：发版前必须先把该版本的段落写好（scripts/verify-release-version.sh
 会校验 tag / package.json / 本文件顶部三处版本一致）。本文件是发布说明的唯一事实源：
 GitHub Release 正文与应用内更新面板都从这里取（scripts/sync-github-release-notes.mjs 与
 scripts/extract-release-notes.mjs），1.0.0 起各段已按 tag 区间提交取证回填。
 -->
+
+## [Unreleased]
+
+### Added
+- **Windows 安装程序装完可以直接把 ConfScope 打开**。首次安装的收尾页默认勾上「运行 ConfScope」；
+  用应用内「退出并安装」升级的，装完会问一句「是否现在启动」，点「是」立刻打开，不必再去桌面找图标。
+- 升级时如果旧窗口一直关不掉（安装程序是把旧文件挪了位置才装上新的），它不会贸然再开一个窗口：
+  两个实例共用同一份本地数据，保存会互相覆盖。这时会把原因说清楚，让你先关掉还开着的窗口。
+- 装完会回头确认程序确实起来了。万一没起来，会告诉你从桌面或开始菜单打开就行，安装本身已经完成、
+  配置与凭据数据没有被动过，不再留一个毫无反应的桌面让人猜是不是装坏了。
+
+### Changed
+- 应用内「退出并安装」的说明跟上这个变化，写清装完之后会问一句要不要立刻打开。
 
 ## [1.11.0] - 2026-10-30
 
