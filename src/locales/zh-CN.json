@@ -597,7 +597,12 @@
     "writeVerifyFailed": "系统凭据库写入后未通过读回校验",
     "statusUnresolvable": "凭据 {ref} 当前状态为 {status}，无法从系统凭据库读取",
     "missingAfterMigration": "凭据已迁移到系统凭据库，但当前系统中找不到 {ref}，请重新输入密码或从应用数据备份恢复：{detail}",
-    "backupPasswordRefInvalid": "备份密码凭据引用无效，请重新设置密码"
+    "backupPasswordRefInvalid": "备份密码凭据引用无效，请重新设置密码",
+    "editLoaded": "已从系统凭据库读回 {fields}",
+    "editUnreadable": "{fields} 在系统凭据库里读不到，请重新填写后保存",
+    "editWriteFailed": "{fields} 未能写入系统凭据库，本次以明文保存在本地数据中",
+    "editDeleteFailed": "{fields} 已解除引用，但系统凭据库中的旧条目没能删除",
+    "vaultNote": "{fields} 保存在系统凭据库中，本地数据文件里不写明文"
   },
   "ssh": {
     "pageSubtitle": "统一管理可复用的 SSH 跳板机档案和引用关系。连接管理页只选择或引用这里的配置。",

@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CONNECTION_SECRET_FIELDS,
   deleteStoredSecret,
   formatStoredSecretRef,
+  connectionSecretPatch,
+  loadConnectionSecretsForEdit,
+  loadSSHSecretsForEdit,
+  sshSecretPatch,
+  settleConnectionSecrets,
+  settleSSHSecrets,
   countMigratableStoredCredentials,
   migrateStoredCredentials,
   resolveAppDataBackupPassword,
@@ -484,5 +491,265 @@ describe("credential secrets", () => {
       ownerId: "conn-1",
       field: "privateKey",
     });
+  });
+});
+
+const pointer = (namespace: string, ownerId: string, field: string): StoredSecretPointer => ({
+  ref: `${namespace}.${ownerId}.${field}`,
+  namespace: namespace as StoredSecretPointer["namespace"],
+  ownerId,
+  field,
+  migratedAt: "2026-07-08T00:00:00.000Z",
+  status: "stored",
+});
+
+const largePointer = (namespace: "connection-ssh" | "ssh-profile", ownerId: string, field: string): LargeSecretPointer => ({
+  ref: `${namespace}.${ownerId}.${field}`,
+  namespace,
+  ownerId,
+  field: field as LargeSecretPointer["field"],
+  migratedAt: "2026-07-08T00:00:00.000Z",
+  status: "stored",
+  storage: "dpapi-file",
+});
+
+describe("编辑回显与保存三路结算（轮142 C）", () => {
+  it("reads migrated connection fields back for the edit form and records them as baseline", async () => {
+    const client = makeClient();
+    const conn = {
+      password: "",
+      accessKeyId: "",
+      accessKeySecret: "",
+      securityToken: "",
+      apolloToken: "",
+      consulToken: "",
+      secretRefs: {
+        password: pointer("connection", "conn-1", "password"),
+        apolloToken: pointer("connection", "conn-1", "apolloToken"),
+      },
+    };
+
+    const snapshot = await loadConnectionSecretsForEdit(conn, { client });
+
+    expect(snapshot.values.password).toBe("secret-value");
+    expect(snapshot.values.apolloToken).toBe("secret-value");
+    expect(snapshot.baseline).toEqual(snapshot.values);
+    expect(snapshot.unavailable).toEqual([]);
+    // 没迁移过的字段不该多读一趟库
+    expect(client.read).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(snapshot)).not.toContain("secret-value-should-not-leak");
+  });
+
+  it("prefers inline plaintext over the pointer for records that were never migrated", async () => {
+    const client = makeClient();
+
+    const snapshot = await loadConnectionSecretsForEdit(
+      { password: "inline-value", accessKeyId: "", accessKeySecret: "", securityToken: "", apolloToken: "", consulToken: "", secretRefs: undefined },
+      { client }
+    );
+
+    expect(snapshot.values.password).toBe("inline-value");
+    expect(client.read).not.toHaveBeenCalled();
+  });
+
+  it("keeps the form usable when a pointer cannot be resolved, and says which field is stale", async () => {
+    const client = makeClient();
+    vi.mocked(client.read).mockRejectedValueOnce(new Error("secret not found"));
+
+    const snapshot = await loadConnectionSecretsForEdit(
+      {
+        password: "",
+        accessKeyId: "",
+        accessKeySecret: "",
+        securityToken: "",
+        apolloToken: "",
+        consulToken: "",
+        secretRefs: { password: pointer("connection", "conn-1", "password") },
+      },
+      { client }
+    );
+
+    expect(snapshot.values.password).toBe("");
+    expect(snapshot.unavailable).toHaveLength(1);
+    expect(snapshot.unavailable[0]).toMatchObject({ field: "password", ref: "connection.conn-1.password" });
+  });
+
+  it("writes nothing back to the vault for fields the user did not touch", async () => {
+    const client = makeClient();
+    const refs = { password: pointer("connection", "conn-1", "password") };
+    const baseline = { password: "secret-value", accessKeyId: "" };
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { ...baseline, username: "changed" } as never,
+      baseline,
+      refs,
+      deps: { client },
+    });
+
+    expect(settled.inline.password).toBe("");
+    expect(settled.pointers.password).toEqual(refs.password);
+    expect(client.write).not.toHaveBeenCalled();
+    expect(settled.notices).toEqual([]);
+  });
+
+  it("re-stores a field the user changed and clears the inline copy", async () => {
+    const client = makeClient();
+    const refs = { password: pointer("connection", "conn-1", "password") };
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { password: "brand-new-secret" },
+      baseline: { password: "secret-value" },
+      refs,
+      deps: { client, now: () => "2026-10-30T00:00:00.000Z" },
+    });
+
+    expect(client.write).toHaveBeenCalledWith({ namespace: "connection", ownerId: "conn-1", field: "password" }, "brand-new-secret");
+    expect(settled.inline.password).toBe("");
+    expect(settled.pointers.password).toMatchObject({ ref: "connection.conn-1.password", migratedAt: "2026-10-30T00:00:00.000Z" });
+    // 落盘的两块（内联值 / 指针）不许出现明文；baseline 只活在组件内存里，正是靠它记住草稿值。
+    expect(JSON.stringify({ inline: settled.inline, pointers: settled.pointers })).not.toContain("brand-new-secret");
+    expect(settled.baseline.password).toBe("brand-new-secret");
+  });
+
+  it("deletes the vault entry when the user clears a field", async () => {
+    const client = makeClient();
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { password: "" },
+      baseline: { password: "secret-value" },
+      refs: { password: pointer("connection", "conn-1", "password") },
+      deps: { client },
+    });
+
+    expect(client.delete).toHaveBeenCalledWith({ namespace: "connection", ownerId: "conn-1", field: "password" });
+    expect(settled.pointers.password).toBeUndefined();
+    expect(settled.inline.password).toBe("");
+  });
+
+  it("drops the pointer even when the vault entry could not be deleted", async () => {
+    const client = makeClient();
+    vi.mocked(client.delete).mockRejectedValueOnce(new Error("keyring locked"));
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { password: "" },
+      baseline: { password: "secret-value" },
+      refs: { password: pointer("connection", "conn-1", "password") },
+      deps: { client },
+    });
+
+    expect(settled.pointers.password).toBeUndefined();
+    expect(settled.notices).toHaveLength(1);
+  });
+
+  it("falls back to inline storage quietly when the secure store is unavailable", async () => {
+    const client = makeClient();
+    vi.mocked(client.write).mockRejectedValueOnce(new Error("secure storage unsupported on this platform"));
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { password: "typed-by-hand" },
+      baseline: { password: "" },
+      refs: {},
+      deps: { client },
+    });
+
+    expect(settled.inline.password).toBe("typed-by-hand");
+    expect(settled.pointers.password).toBeUndefined();
+    expect(settled.notices).toEqual([]);
+  });
+
+  it("reports a real write failure instead of pretending the secret is safe", async () => {
+    const client = makeClient();
+    vi.mocked(client.write).mockRejectedValueOnce(new Error("access denied"));
+
+    const settled = await settleConnectionSecrets({
+      ownerId: "conn-1",
+      draft: { password: "typed-by-hand" },
+      baseline: { password: "secret-value" },
+      refs: { password: pointer("connection", "conn-1", "password") },
+      deps: { client },
+    });
+
+    expect(settled.inline.password).toBe("typed-by-hand");
+    expect(settled.notices[0]).toMatchObject({ field: "password", ref: "connection.conn-1.password" });
+  });
+
+  it("hydrates SSH profile secrets through the large store and settles them the same way", async () => {
+    const client = makeClient();
+    const config = { host: "jump", port: 22, username: "ops", authType: "password" as const, password: "", privateKey: "", passphrase: "" };
+    const refs = { password: largePointer("ssh-profile", "ssh-1", "password") };
+
+    const snapshot = await loadSSHSecretsForEdit(config, refs, { client });
+    expect(snapshot.values.password).toBe("secret-value");
+    expect(client.readLarge).toHaveBeenCalledWith({ namespace: "ssh-profile", ownerId: "ssh-1", field: "password" });
+
+    const settled = await settleSSHSecrets({
+      namespace: "ssh-profile",
+      ownerId: "ssh-1",
+      draft: { ...config, password: "new-ssh-secret" },
+      baseline: snapshot.baseline,
+      refs,
+      deps: { client },
+    });
+
+    expect(client.writeLarge).toHaveBeenCalledWith({ namespace: "ssh-profile", ownerId: "ssh-1", field: "password" }, "new-ssh-secret");
+    expect(settled.inline.password).toBe("");
+    expect(settled.pointers.password).toMatchObject({ namespace: "ssh-profile", field: "password" });
+
+    const untouched = await settleSSHSecrets({
+      namespace: "ssh-profile",
+      ownerId: "ssh-1",
+      draft: { ...config, password: "secret-value" },
+      baseline: snapshot.baseline,
+      refs,
+      deps: { client },
+    });
+    expect(untouched.inline.password).toBe("");
+    expect(untouched.pointers.password).toEqual(refs.password);
+  });
+
+  it("covers every secret field on both stores so no field is silently skipped", async () => {
+    const client = makeClient();
+    const inline = {} as Record<(typeof CONNECTION_SECRET_FIELDS)[number], string>;
+    const refs = {} as Record<(typeof CONNECTION_SECRET_FIELDS)[number], StoredSecretPointer>;
+    for (const field of CONNECTION_SECRET_FIELDS) {
+      inline[field] = "";
+      refs[field] = pointer("connection", "conn-1", field);
+    }
+
+    const snapshot = await loadConnectionSecretsForEdit({ ...inline, secretRefs: refs }, { client });
+
+    expect(Object.keys(snapshot.values).sort()).toEqual([...CONNECTION_SECRET_FIELDS].sort());
+
+    const sshSnapshot = await loadSSHSecretsForEdit(
+      { host: "h", port: 22, username: "u", authType: "key", password: "", privateKey: "", passphrase: "" },
+      {
+        password: largePointer("connection-ssh", "conn-1", "password"),
+        privateKey: largePointer("connection-ssh", "conn-1", "privateKey"),
+        passphrase: largePointer("connection-ssh", "conn-1", "passphrase"),
+      },
+      { client }
+    );
+
+    expect(Object.keys(sshSnapshot.values).sort()).toEqual(["passphrase", "password", "privateKey"]);
+  });
+
+  it("铺回字段的映射覆盖全部声明的凭据字段（轮142 C）", () => {
+    // 页面靠这两个函数把 Record<string,string> 铺回具体字段：少一个键就是「看不见也存不上」的凭据。
+    expect(Object.keys(connectionSecretPatch({})).sort()).toEqual([...CONNECTION_SECRET_FIELDS].sort());
+    expect(Object.keys(sshSecretPatch({})).sort()).toEqual(["passphrase", "password", "privateKey"]);
+    expect(connectionSecretPatch({ password: "p" })).toEqual({
+      accessKeyId: "",
+      accessKeySecret: "",
+      apolloToken: "",
+      consulToken: "",
+      password: "p",
+      securityToken: "",
+    });
+    expect(sshSecretPatch({ privateKey: "pem" }).privateKey).toBe("pem");
   });
 });

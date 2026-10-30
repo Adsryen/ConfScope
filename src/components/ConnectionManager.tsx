@@ -14,6 +14,21 @@ import {
   upsertConnection,
 } from "../store/connections";
 import { loadSSHProfiles, normalizeSSHConfig, sshProfileLabel, upsertSSHProfile, type SSHProfile } from "../store/sshProfiles";
+import {
+  CONNECTION_SECRET_FIELDS,
+  CONNECTION_SECRET_LABEL_KEYS,
+  SSH_SECRET_FIELDS,
+  SSH_SECRET_LABEL_KEYS,
+  connectionSecretPatch,
+  loadConnectionSecretsForEdit,
+  loadSSHSecretsForEdit,
+  settleConnectionSecrets,
+  settleSSHSecrets,
+  sshSecretPatch,
+  type ConnectionSecretField,
+  type SecretEditNotice,
+  type SSHSecretField,
+} from "../lib/credentialSecrets";
 import { clearToken, listNamespaces, testConnection, type Namespace } from "../api/nacos";
 import { selectLocalSnapshotDirectory, validateLocalSnapshotDirectory, type LocalSnapshotValidation } from "../api/app";
 import { useTranslation } from "../i18n";
@@ -36,7 +51,16 @@ interface Props {
   embedded?: boolean;
 }
 
-type Draft = Omit<Connection, "id"> & { id?: string };
+type Draft = Omit<Connection, "id"> & {
+  id?: string;
+  /**
+   * 打开表单那一刻读回来的小凭据值＝保存时判定「用户动没动」的基线（轮142 C）。
+   * 只活在内存：Draft 整份 spread 进 upsertConnection，落盘前由 normalizeConnection 的白名单丢掉。
+   */
+  secretBaseline?: Record<string, string>;
+  /** 内联 SSH 大凭据的同一份基线（namespace connection-ssh）。 */
+  sshSecretBaseline?: Record<string, string>;
+};
 
 /**
  * 是否为「单行文本类输入框」——只有它值得把 Enter 当成提交表单。
@@ -459,6 +483,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   // 待确认删除的连接 id（点一次 × 进入确认态，再点才删）
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [showSSHConfig, setShowSSHConfig] = useState(false);
+  // 读库是异步的：用户在读回来之前切到别的连接/新建表单时，这一份过期结果必须丢掉（轮142 C）。
+  const openSeqRef = useRef(0);
   const currentTestKey = connectionTestKey(draft);
   const currentNamespaceKey = namespaceLoadKey(draft);
   const currentTestKeyRef = useRef(currentTestKey);
@@ -553,14 +579,34 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setShowSSHConfig(true);
   };
 
-  const copySSHProfileToInline = () => {
+  const copySSHProfileToInline = async () => {
     if (!selectedSSHProfile) return;
+    // 档案的凭据多半已在系统库里（config 里是空的）：不先读回来就复制，
+    // 内联草稿会带着一份缺口令的配置（轮142 C）。
+    const snapshot = await loadSSHSecretsForEdit(selectedSSHProfile.config, selectedSSHProfile.sshSecretRefs);
     setDraft((d) => ({
       ...d,
       sshProfileId: "",
-      sshConfig: { ...selectedSSHProfile.config },
+      sshConfig: { ...selectedSSHProfile.config, ...sshSecretPatch(snapshot.values) },
+      /*
+       * 连接自己原来那份大凭据指针一并摘掉：此刻语义是「改用这份档案的值内联」，
+       * 留着旧指针会在保存时把刚复制进来的值判成「没动」→ 内联清空 → 值哪儿都不在。
+       * 库里那条旧条目就此没人引用，同一个 (namespace, ownerId, field) 下次入库会直接覆盖。
+       */
+      sshSecretRefs: undefined,
+      sshSecretBaseline: snapshot.baseline,
     }));
     setShowSSHConfig(true);
+    const message = secretHydrationMessage([
+      {
+        fields: SSH_SECRET_FIELDS,
+        values: snapshot.values,
+        unavailable: snapshot.unavailable,
+        labelOf: sshSecretLabel,
+        inlineValueOf: (field) => selectedSSHProfile.config[field as SSHSecretField] ?? "",
+      },
+    ]);
+    if (message) setTestMsg(message);
   };
 
   const saveInlineSSHAsProfile = () => {
@@ -695,7 +741,56 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     onChange(next);
   };
 
+  // 凭据字段展示名（轮142 C）。两张表不能混用：小凭据的 password 是 Nacos 密码，大凭据的 password 是 SSH 口令。
+  const connectionSecretLabel = (field: string) => t(CONNECTION_SECRET_LABEL_KEYS[field as ConnectionSecretField]);
+  const sshSecretLabel = (field: string) => t(SSH_SECRET_LABEL_KEYS[field as SSHSecretField]);
+  const joinFieldNames = (names: string[]) => Array.from(new Set(names)).join(" / ");
+
+  /**
+   * 打开表单读回凭据后的就近说明（轮142 C）：
+   * 读不回来必须说——否则用户以为「这条连接的密码本来就是空的」，抄一遍别处的密码盖上；
+   * 读回来了也要说一句，免得有人把这些值当本地数据拷走（它其实只在内存里）。
+   */
+  const secretHydrationMessage = (
+    groups: {
+      fields: readonly string[];
+      values: Record<string, string>;
+      unavailable: { field: string }[];
+      labelOf: (field: string) => string;
+      inlineValueOf: (field: string) => string;
+    }[]
+  ): { ok: boolean; text: string } | null => {
+    const unreadable: string[] = [];
+    const loaded: string[] = [];
+    for (const group of groups) {
+      for (const field of group.fields) {
+        if ((group.values[field] ?? "") && !group.inlineValueOf(field)) loaded.push(group.labelOf(field));
+      }
+      for (const notice of group.unavailable) unreadable.push(group.labelOf(notice.field));
+    }
+    if (unreadable.length > 0) {
+      return { ok: false, text: t("credentials.editUnreadable", { fields: joinFieldNames(unreadable) }) };
+    }
+    if (loaded.length > 0) {
+      return { ok: true, text: t("credentials.editLoaded", { fields: joinFieldNames(loaded) }) };
+    }
+    return null;
+  };
+
+  // 凭据来源的就近说明（轮142 C）：值在系统凭据库里、本地数据只剩指针时，得说清「这里不是空的」。
+  const secretSourceNote = (labels: string[]) =>
+    labels.length === 0 ? null : (
+      <div className="settings-panel-note secret-source-note">
+        {t("credentials.vaultNote", { fields: joinFieldNames(labels) })}
+      </div>
+    );
+  const storedConnectionSecretLabels = (fields: readonly ConnectionSecretField[]) =>
+    fields.filter((field) => draft.secretRefs?.[field]?.status === "stored").map((field) => t(CONNECTION_SECRET_LABEL_KEYS[field]));
+  const storedSSHSecretLabels = (fields: readonly SSHSecretField[]) =>
+    fields.filter((field) => draft.sshSecretRefs?.[field]?.status === "stored").map((field) => t(SSH_SECRET_LABEL_KEYS[field]));
+
   const startNew = (projectName = activeProject, environmentName = activeEnvironment) => {
+    openSeqRef.current += 1;
     const next = {
       ...emptyDraft(defaultNewEnvironment),
       projectName: projectName || DEFAULT_PROJECT_NAME,
@@ -713,10 +808,27 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setShowSSHConfig(false);
   };
 
-  const edit = (c: Connection) => {
+  /**
+   * 打开一条连接的编辑表单（轮142 C）。凭据迁到系统库后本地只剩指针，必须先把值读回内存草稿，
+   * 否则点开一条迁过的连接看到的是空密码/空 AK-SK——和隧道档案同一个根因。
+   * 读库失败不阻断编辑：那一条留空 + 提示重新填写，其余字段照常可改可存。
+   */
+  const openConnection = async (c: Connection) => {
+    const seq = (openSeqRef.current += 1);
+    const [secrets, sshSecrets] = await Promise.all([
+      loadConnectionSecretsForEdit(c),
+      loadSSHSecretsForEdit(c.sshConfig, c.sshSecretRefs),
+    ]);
+    if (openSeqRef.current !== seq) return;
     setActiveProject(connectionProjectName(c));
     setActiveEnvironment(connectionEnvironmentName(c));
-    setDraft({ ...c });
+    setDraft({
+      ...c,
+      ...connectionSecretPatch(secrets.values),
+      sshConfig: c.sshConfig ? { ...c.sshConfig, ...sshSecretPatch(sshSecrets.values) } : c.sshConfig,
+      secretBaseline: secrets.baseline,
+      sshSecretBaseline: sshSecrets.baseline,
+    });
     setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
     setTestMsg(null);
     setNamespaceResultKey(null);
@@ -741,11 +853,38 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     );
     setConfirmDel(null);
     setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
+    const message = secretHydrationMessage([
+      {
+        fields: CONNECTION_SECRET_FIELDS,
+        values: secrets.values,
+        unavailable: secrets.unavailable,
+        labelOf: connectionSecretLabel,
+        inlineValueOf: (field) => (c as unknown as Record<string, string | undefined>)[field] ?? "",
+      },
+      {
+        fields: SSH_SECRET_FIELDS,
+        values: sshSecrets.values,
+        unavailable: sshSecrets.unavailable,
+        labelOf: sshSecretLabel,
+        inlineValueOf: (field) => c.sshConfig?.[field as SSHSecretField] ?? "",
+      },
+    ]);
+    if (message) setTestMsg(message);
   };
 
-  const duplicateConnection = (c: Connection) => {
+  const edit = (c: Connection) => {
+    void openConnection(c);
+  };
+
+  const duplicateConnection = async (c: Connection) => {
     const sourceName = copyLabel(connectionSourceName(c), t("connection.sourceName"), t("connection.copySuffix"));
     const label = copyLabel(c.name, sourceName, t("connection.copySuffix"));
+    const seq = (openSeqRef.current += 1);
+    const [secrets, sshSecrets] = await Promise.all([
+      loadConnectionSecretsForEdit(c),
+      loadSSHSecretsForEdit(c.sshConfig, c.sshSecretRefs),
+    ]);
+    if (openSeqRef.current !== seq) return;
     setActiveProject(connectionProjectName(c));
     setActiveEnvironment(connectionEnvironmentName(c));
     setDraft({
@@ -754,9 +893,19 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       name: label,
       sourceName,
       isDefaultSource: false,
+      ...connectionSecretPatch(secrets.values),
+      sshConfig: c.sshConfig ? { ...c.sshConfig, ...sshSecretPatch(sshSecrets.values) } : c.sshConfig,
+      /*
+       * 复制件不带源记录的指针（轮142 C 的第三种形状）：指针的 ownerId 是源连接，
+       * 新连接攥着它既读不到、normalize 也不报错，凭据等于凭空丢。
+       * 明文铺进内联草稿＝迁移前的老形状，保存时由「迁移凭据」按新 id 重新入库。
+       */
+      secretRefs: undefined,
+      sshSecretRefs: undefined,
+      secretBaseline: {},
+      sshSecretBaseline: {},
     });
     setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
-    setTestMsg({ ok: true, text: t("connection.copyReady") });
     setTestTrace(null);
     setTestResultKey(null);
     setTestingKey(null);
@@ -782,6 +931,23 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     );
     setConfirmDel(null);
     setShowSSHConfig(!!c.sshConfig?.host || !!c.sshProfileId);
+    const message = secretHydrationMessage([
+      {
+        fields: CONNECTION_SECRET_FIELDS,
+        values: secrets.values,
+        unavailable: secrets.unavailable,
+        labelOf: connectionSecretLabel,
+        inlineValueOf: (field) => (c as unknown as Record<string, string | undefined>)[field] ?? "",
+      },
+      {
+        fields: SSH_SECRET_FIELDS,
+        values: sshSecrets.values,
+        unavailable: sshSecrets.unavailable,
+        labelOf: sshSecretLabel,
+        inlineValueOf: (field) => c.sshConfig?.[field as SSHSecretField] ?? "",
+      },
+    ]);
+    setTestMsg(message ?? { ok: true, text: t("connection.copyReady") });
   };
 
   const selectContext = (projectName: string, environmentName?: string) => {
@@ -822,7 +988,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     localPort: t("connection.localPortShort"),
   })[0];
 
-  const save = () => {
+  const save = async () => {
     // 按钮 disabled 拦不住「单行输入框回车＝保存」那条路径，这里再兜一道；
     // 清掉旧测试结果，否则这条理由会被当成上一次测试的残留而看不见。
     if (portBlock) {
@@ -862,6 +1028,57 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       const { remoteHost: _remoteHost, remotePort: _remotePort, ...sshConfig } = toSave.sshConfig;
       toSave.sshConfig = sshConfig;
     }
+
+    /*
+     * 凭据结算（轮142 C）：编辑已有连接才走「没动/改过/清空」三路判定——表单里带着从系统库读回的
+     * 明文，直接整份落盘就等于把刚迁走的凭据又拉回本地文件，静默退回一次迁移。
+     * 新建连接此刻还没有 id、指针没有归属，沿用迁移前的老形状（明文内联，由设置页「迁移凭据」统一入库）。
+     */
+    let settleFailed: string | null = null;
+    if (draft.id) {
+      const noticeParts: string[] = [];
+      const collectNotices = (notices: SecretEditNotice[], labelOf: (field: string) => string) => {
+        for (const kind of ["write", "delete"] as const) {
+          const names = notices.filter((item) => item.kind === kind).map((item) => labelOf(item.field));
+          if (names.length === 0) continue;
+          noticeParts.push(
+            t(kind === "write" ? "credentials.editWriteFailed" : "credentials.editDeleteFailed", {
+              fields: joinFieldNames(names),
+            })
+          );
+        }
+      };
+      const settledConnection = await settleConnectionSecrets({
+        ownerId: draft.id,
+        draft: toSave,
+        baseline: draft.secretBaseline ?? {},
+        refs: toSave.secretRefs,
+      });
+      Object.assign(toSave, connectionSecretPatch(settledConnection.inline));
+      toSave.secretRefs = settledConnection.pointers;
+      collectNotices(settledConnection.notices, connectionSecretLabel);
+
+      if (toSave.sshConfig) {
+        const settledSSH = await settleSSHSecrets({
+          namespace: "connection-ssh",
+          ownerId: draft.id,
+          draft: toSave.sshConfig,
+          baseline: draft.sshSecretBaseline ?? {},
+          refs: toSave.sshSecretRefs,
+        });
+        toSave.sshConfig = { ...toSave.sshConfig, ...sshSecretPatch(settledSSH.inline) };
+        toSave.sshSecretRefs = settledSSH.pointers;
+        collectNotices(settledSSH.notices, sshSecretLabel);
+      } else {
+        // 改用档案、或 host 空到不存 SSH 配置：连接自己那份大凭据指针不再留着。
+        toSave.sshSecretRefs = undefined;
+      }
+      settleFailed = noticeParts.join("；") || null;
+    } else {
+      toSave.secretRefs = undefined;
+      toSave.sshSecretRefs = undefined;
+    }
+
     const sourceName = toSave.sourceName?.trim() || toSave.name.trim();
     const connectionName = toSave.name.trim() || sourceName;
     const saved = upsertConnection({
@@ -908,6 +1125,12 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     setShowSSHConfig(false);
     setLocalValidation(null);
     refresh();
+    if (settleFailed) {
+      // 连接存下了，但有几个字段没能进系统凭据库：说清「这次是明文存在本地」，别只报成功。
+      setTestTrace(null);
+      setTestResultKey(null);
+      setTestMsg({ ok: false, text: settleFailed });
+    }
   };
 
   // 第一次点 × 进入确认态，再次点击才真正删除。
@@ -1233,7 +1456,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           aria-label={t("connection.copy")}
                           onClick={(e) => {
                             e.stopPropagation();
-                            duplicateConnection(c);
+                            void duplicateConnection(c);
                           }}
                         >
                           ⧉
@@ -1282,7 +1505,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             // 按钮 / 链接 / 下拉 / 复选框自带 Enter 语义，容器都不该替它们吃掉这次按键。
             if (!isSingleLineTextField(e.target)) return;
             e.preventDefault();
-            save();
+            void save();
           }}
         >
           <div className="conn-form-title">{draft.id ? t("connection.edit") : t("connection.new")}</div>
@@ -1593,6 +1816,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           {draft.provider === "apollo" && (
             <section className="conn-form-section">
               <div className="conn-section-title">{t("connection.sectionAuth")}</div>
+              {secretSourceNote(storedConnectionSecretLabels(["apolloToken"]))}
               <label className="field">
                 <FieldLabel {...fieldLabelProps} required tip={t("connection.addressHelp")}>
                   {t("connection.address")}
@@ -1686,6 +1910,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           {draft.provider === "consul" && (
             <section className="conn-form-section">
               <div className="conn-section-title">{t("connection.sectionAuth")}</div>
+              {secretSourceNote(storedConnectionSecretLabels(["consulToken"]))}
               <label className="field">
                 <FieldLabel {...fieldLabelProps} required tip={t("connection.addressHelp")}>
                   {t("connection.address")}
@@ -1762,6 +1987,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           {draft.provider === "nacos" && (
             <section className="conn-form-section">
               <div className="conn-section-title">{t("connection.sectionAdvanced")}</div>
+              {secretSourceNote(storedConnectionSecretLabels(["password", "accessKeyId", "accessKeySecret", "securityToken"]))}
               {draft.authType !== "aliyun-aksk" && (
                 <div className="field-row">
                   <label className="field">
@@ -1952,7 +2178,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                         {selectedSSHProfile.config.authType === "key" ? t("connection.keyAuth") : t("connection.passwordAuth")}
                         {selectedSSHProfile.config.localPort ? ` / localhost:${selectedSSHProfile.config.localPort}` : ""}
                       </div>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={copySSHProfileToInline}>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copySSHProfileToInline()}>
                         {t("connection.sshProfileCopyInline")}
                       </button>
                     </div>
@@ -1960,6 +2186,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
                   {!selectedSSHProfile && (
                     <>
+                      {secretSourceNote(storedSSHSecretLabels(SSH_SECRET_FIELDS))}
                       <label className="field">
                         <FieldLabel {...fieldLabelProps} required tip={t("connection.sshHostHelp")}>
                           {t("connection.sshHost")}
@@ -2124,7 +2351,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               </button>
             )}
             <span className="btn-guard" title={portBlock}>
-              <button className="btn btn-primary" onClick={save} disabled={!!portBlock} aria-disabled={!!portBlock}>
+              <button className="btn btn-primary" onClick={() => void save()} disabled={!!portBlock} aria-disabled={!!portBlock}>
                 {t("common.save")}
               </button>
             </span>

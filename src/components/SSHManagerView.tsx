@@ -10,6 +10,14 @@ import {
   upsertSSHProfile,
   type SSHProfile,
 } from "../store/sshProfiles";
+import {
+  SSH_SECRET_FIELDS,
+  SSH_SECRET_LABEL_KEYS,
+  loadSSHSecretsForEdit,
+  settleSSHSecrets,
+  type LargeSecretPointer,
+  type SSHSecretField,
+} from "../lib/credentialSecrets";
 import NumberField from "./NumberField";
 import PasswordField from "./PasswordField";
 import ConfirmModal from "./ConfirmModal";
@@ -23,6 +31,13 @@ type Draft = {
   id?: string;
   name: string;
   config: SSHConfig;
+  /**
+   * 打开表单时档案上的凭据指针（轮142 C）。明文与指针一起留在内存里，
+   * 但只有指针会落盘——config 里的明文在 upsert 前会被 settleSSHSecrets 清掉。
+   */
+  secretRefs?: Partial<Record<SSHSecretField, LargeSecretPointer>>;
+  /** 打开表单那一刻读回来的值＝保存时判定「用户动没动」的基线（只活在内存，不落盘）。 */
+  secretBaseline?: Record<string, string>;
 };
 
 const emptyDraft = (): Draft => ({
@@ -79,6 +94,10 @@ export default function SSHManagerView({ connections }: Props) {
   const activeRefs = blockedRefs.length > 0 ? blockedRefs : selectedRefs;
   const currentProfile = draft.id ? profiles.find((profile) => profile.id === draft.id) : undefined;
   const draftTitle = draft.name.trim() || currentProfile?.name || t('settings.newSSHProfile');
+  // 指针在、状态 stored 的字段：值来自系统凭据库，本地数据文件里不存明文（轮142 C 就近说明）。
+  const storedSecretLabels = SSH_SECRET_FIELDS.filter((field) => draft.secretRefs?.[field]?.status === "stored").map(
+    (field) => t(SSH_SECRET_LABEL_KEYS[field])
+  );
   const currentTestKey = sshTestKey(draft.config);
   const testingCurrent = testingKey === currentTestKey;
 
@@ -102,13 +121,34 @@ export default function SSHManagerView({ connections }: Props) {
     clearTransient();
   };
 
-  const edit = (profile: SSHProfile) => {
+  /**
+   * 打开档案（轮142 C）：凭据迁到系统凭据库后本地只剩指针，表单必须先把值读回来，
+   * 否则用户点开一条隧道看到的是空密码——这正是用户报的「连密码也看不到」。
+   * 读库失败不阻断编辑：那一条留空 + 提示重新填写，其余字段照常可改可存。
+   */
+  const openProfile = async (profile: SSHProfile) => {
+    const snapshot = await loadSSHSecretsForEdit(profile.config, profile.sshSecretRefs);
     setDraft({
       id: profile.id,
       name: profile.name,
-      config: { ...profile.config },
+      config: normalizeSSHConfig({ ...profile.config, ...snapshot.values }),
+      secretRefs: profile.sshSecretRefs,
+      secretBaseline: snapshot.baseline,
     });
     clearTransient();
+    const secretFields = (names: string[]) => names.map((field) => t(SSH_SECRET_LABEL_KEYS[field as SSHSecretField])).join(" / ");
+    if (snapshot.unavailable.length > 0) {
+      setMessage({ ok: false, text: t("credentials.editUnreadable", { fields: secretFields(snapshot.unavailable.map((item) => item.field)) }) });
+      return;
+    }
+    const hydrated = SSH_SECRET_FIELDS.filter((field) => snapshot.values[field] && !(profile.config[field] ?? ""));
+    if (hydrated.length > 0) {
+      setMessage({ ok: true, text: t("credentials.editLoaded", { fields: secretFields([...hydrated]) }) });
+    }
+  };
+
+  const edit = (profile: SSHProfile) => {
+    void openProfile(profile);
   };
 
   // 端口非法的唯一判据（R24）：与输入框下的行内错误、保存按钮的禁用与 title 同源，不再各写一套
@@ -117,7 +157,7 @@ export default function SSHManagerView({ connections }: Props) {
     localPort: t("connection.localPortShort"),
   })[0];
 
-  const save = () => {
+  const save = async () => {
     if (portBlock) {
       setMessage({ ok: false, text: portBlock });
       return;
@@ -139,32 +179,59 @@ export default function SSHManagerView({ connections }: Props) {
         return;
       }
     }
+    // 凭据结算（轮142 C）：编辑已有档案才走三路判定。新建档案沿用迁移前的老形状
+    // （明文留在内联，由设置页「迁移凭据」统一入库）——此刻还没有档案 id，指针没有归属。
+    let inlineConfig = config;
+    let secretRefs = draft.secretRefs;
+    let secretBaseline = draft.secretBaseline ?? {};
+    let settleFailed: string | null = null;
+    if (draft.id) {
+      const settled = await settleSSHSecrets({
+        namespace: "ssh-profile",
+        ownerId: draft.id,
+        draft: config,
+        baseline: draft.secretBaseline ?? {},
+        refs: draft.secretRefs,
+      });
+      inlineConfig = normalizeSSHConfig({ ...config, ...settled.inline });
+      secretRefs = settled.pointers;
+      secretBaseline = settled.baseline;
+      const noticeText = (kind: "write" | "delete") => {
+        const names = settled.notices
+          .filter((item) => item.kind === kind)
+          .map((item) => t(SSH_SECRET_LABEL_KEYS[item.field as SSHSecretField]))
+          .join(" / ");
+        if (!names) return null;
+        return t(kind === "write" ? "credentials.editWriteFailed" : "credentials.editDeleteFailed", { fields: names });
+      };
+      settleFailed = [noticeText("write"), noticeText("delete")].filter((text): text is string => !!text).join("；");
+    }
     const saved = upsertSSHProfile({
       id: draft.id,
       name: draft.name.trim(),
-      config,
+      config: inlineConfig,
+      sshSecretRefs: secretRefs,
     });
-    setDraft({ id: saved.id, name: saved.name, config: { ...saved.config } });
+    // 表单继续显示用户刚填的值（明文只在内存这一份），落盘的那份该清的已经清了。
+    setDraft({ id: saved.id, name: saved.name, config, secretRefs, secretBaseline });
     refresh();
-    setMessage({ ok: true, text: t('settings.sshProfileSaved') });
+    const savedText = t("settings.sshProfileSaved");
+    setMessage({ ok: !settleFailed, text: settleFailed ? `${savedText}｜${settleFailed}` : savedText });
     setBlockedRefs([]);
     setPendingSaveImpact(false);
   };
 
-  const remove = (profile: SSHProfile) => {
+  const remove = async (profile: SSHProfile) => {
     const refs = listSSHProfileReferences(profile.id, t);
     if (refs.length > 0) {
-      setDraft({
-        id: profile.id,
-        name: profile.name,
-        config: { ...profile.config },
-      });
+      // 拦下来 = 把这条档案摊开给用户看（轮142 C：以前直接铺内联值，迁过凭据的档案一片空白）
+      await openProfile(profile);
       setBlockedRefs(refs);
       setMessage({ ok: false, text: t('settings.sshProfileDeleteBlocked').replace("{count}", String(refs.length)) });
       return;
     }
     deleteSSHProfile(profile.id);
-    if (draft.id === profile.id) setDraft(emptyDraft());
+    if (draft.id === profile.id) newProfile();
     refresh();
     setMessage({ ok: true, text: t('settings.sshProfileDeleted') });
     setBlockedRefs([]);
@@ -360,7 +427,7 @@ export default function SSHManagerView({ connections }: Props) {
                     className="conn-item-del"
                     title={t("common.delete")}
                     aria-label={t("common.delete")}
-                    onClick={() => remove(profile)}
+                    onClick={() => void remove(profile)}
                   >
                     x
                   </button>
@@ -444,6 +511,11 @@ export default function SSHManagerView({ connections }: Props) {
                   <h5>{t('ssh.authInfo')}</h5>
                   <p>{t('ssh.authInfoHint')}</p>
                 </div>
+                {storedSecretLabels.length > 0 && (
+                  <div className="settings-panel-note secret-source-note">
+                    {t("credentials.vaultNote", { fields: storedSecretLabels.join(" / ") })}
+                  </div>
+                )}
                 <div className="ssh-manager-form">
                   <label className="field">
                     <span>{t('connection.authType')}</span>

@@ -597,7 +597,12 @@
     "writeVerifyFailed": "The system credential store failed read-back verification after writing.",
     "statusUnresolvable": "Credential {ref} is currently {status} and cannot be read from the system credential store.",
     "missingAfterMigration": "The credential was migrated to the system credential store, but {ref} cannot be found on this machine. Re-enter the password or restore it from an app data backup: {detail}",
-    "backupPasswordRefInvalid": "The backup password credential reference is invalid. Set the password again."
+    "backupPasswordRefInvalid": "The backup password credential reference is invalid. Set the password again.",
+    "editLoaded": "Loaded {fields} from the system credential store",
+    "editUnreadable": "{fields} could not be read from the system credential store. Re-enter and save.",
+    "editWriteFailed": "{fields} could not be written to the system credential store and is kept as plaintext in local data",
+    "editDeleteFailed": "{fields} was unlinked, but the old entry could not be removed from the system credential store",
+    "vaultNote": "{fields} live in the system credential store; no plaintext is written to local data"
   },
   "ssh": {
     "pageSubtitle": "Manage reusable SSH jump-host profiles and references in one place. Connection Manager only selects or references these profiles.",

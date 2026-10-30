@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, within } from "../test/react";
+import { act, fireEvent, render, screen, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import SSHManagerView from "./SSHManagerView";
@@ -11,6 +11,10 @@ const goApp = vi.hoisted(() => ({
   TestSSHConnection: vi.fn(),
   ProbeSSHHostKey: vi.fn(),
   TrustSSHHostKey: vi.fn(),
+  // 大凭据库（轮142 C）：档案页读回显、保存入库、清空删除都走这三只绑定。
+  ReadLargeSecret: vi.fn(),
+  WriteLargeSecret: vi.fn(),
+  DeleteLargeSecret: vi.fn(),
 }));
 
 // 与复测桥（tests/retest/bridge/retestBinding.ts 的 ProbeSSHHostKey 向量）同一批读数：
@@ -108,22 +112,28 @@ describe("SSHManagerView", () => {
     });
   });
 
-  it("creates and edits reusable SSH profiles", () => {
+  it("creates and edits reusable SSH profiles", async () => {
     renderSSHManager();
 
     fireEvent.change(inputByLabel("档案名称"), { target: { value: "公司堡垒机" } });
     fireEvent.change(inputByLabel("SSH 服务器地址"), { target: { value: "jump.example.com" } });
     fireEvent.change(inputByLabel("SSH 用户名"), { target: { value: "ops" } });
     fireEvent.change(inputByLabel("SSH 密码"), { target: { value: "secret" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    });
 
     expect(screen.getByText("SSH 配置档案已保存")).toBeInTheDocument();
     expect(screen.getAllByText("公司堡垒机").length).toBeGreaterThan(0);
     expect(screen.getByText("ops@jump.example.com:22")).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByText("公司堡垒机")[0]);
+    await act(async () => {
+      fireEvent.click(screen.getAllByText("公司堡垒机")[0]);
+    });
     fireEvent.change(inputByLabel("档案名称"), { target: { value: "生产跳板机" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    });
 
     expect(JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]")).toEqual([
       expect.objectContaining({
@@ -166,7 +176,7 @@ describe("SSHManagerView", () => {
     expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled();
   });
 
-  it("blocks deleting SSH profiles referenced by connections", () => {
+  it("blocks deleting SSH profiles referenced by connections", async () => {
     localStorage.setItem("cs.sshProfiles", JSON.stringify([
       {
         id: "ssh-prod",
@@ -199,11 +209,135 @@ describe("SSHManagerView", () => {
     ]));
     renderSSHManager();
 
-    fireEvent.click(screen.getByTitle("删除"));
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("删除"));
+    });
 
     expect(screen.getByText("该 SSH 配置档案正在被 1 个连接引用，不能直接删除。")).toBeInTheDocument();
     expect(screen.getByText("订单系统 / 生产 / 云上内网")).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]")).toHaveLength(1);
+  });
+
+  // 轮142 C：用户原话「我在编辑现有的档案配置的时候，我看不到里面配置的数据，连密码也看不到」。
+  describe("迁过凭据的档案回显与保存", () => {
+    function seedMigratedProfile(password = "vault-secret") {
+      localStorage.setItem(
+        "cs.sshProfiles",
+        JSON.stringify([
+          {
+            id: "ssh-prod",
+            name: "生产跳板机",
+            config: { host: "jump.example.com", port: 22, username: "ops", authType: "password", password: "", privateKey: "", passphrase: "" },
+            sshSecretRefs: {
+              password: {
+                ref: "ssh-profile.ssh-prod.password",
+                namespace: "ssh-profile",
+                ownerId: "ssh-prod",
+                field: "password",
+                migratedAt: "2026-07-08T00:00:00.000Z",
+                status: "stored",
+                storage: "dpapi-file",
+              },
+            },
+            createdAt: "2026-06-29T00:00:00Z",
+            updatedAt: "2026-06-29T00:00:00Z",
+          },
+        ])
+      );
+      goApp.ReadLargeSecret.mockImplementation(async () => password);
+    }
+
+    function storedProfiles() {
+      return JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]");
+    }
+
+    it("reads the vault value back into the form and says where it came from", async () => {
+      seedMigratedProfile();
+      renderSSHManager();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("生产跳板机"));
+      });
+
+      expect(goApp.ReadLargeSecret).toHaveBeenCalledWith({ namespace: "ssh-profile", ownerId: "ssh-prod", field: "password" });
+      expect(inputByLabel("SSH 密码")).toHaveValue("vault-secret");
+      expect(screen.getByText("已从系统凭据库读回 SSH 密码")).toBeInTheDocument();
+      expect(screen.getByText(/保存在系统凭据库中，本地数据文件里不写明文/)).toBeInTheDocument();
+    });
+
+    it("keeps the plaintext out of local data when only the profile name was edited", async () => {
+      seedMigratedProfile();
+      renderSSHManager();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("生产跳板机"));
+      });
+      fireEvent.change(inputByLabel("档案名称"), { target: { value: "改名后的跳板机" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(goApp.WriteLargeSecret).not.toHaveBeenCalled();
+      const raw = localStorage.getItem("cs.sshProfiles") || "";
+      expect(raw).not.toContain("vault-secret");
+      expect(storedProfiles()[0]).toEqual(
+        expect.objectContaining({
+          name: "改名后的跳板机",
+          config: expect.objectContaining({ password: "" }),
+          sshSecretRefs: expect.objectContaining({ password: expect.objectContaining({ ref: "ssh-profile.ssh-prod.password" }) }),
+        })
+      );
+      // 表单里仍然看得见（值只在内存），否则用户以为刚填的密码被吞了
+      expect(inputByLabel("SSH 密码")).toHaveValue("vault-secret");
+    });
+
+    it("re-stores a rotated password and clears the inline copy", async () => {
+      seedMigratedProfile();
+      goApp.WriteLargeSecret.mockResolvedValue({ storage: "dpapi-file", valueSize: 14, verified: true });
+      renderSSHManager();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("生产跳板机"));
+      });
+      fireEvent.change(inputByLabel("SSH 密码"), { target: { value: "rotated-secret" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(goApp.WriteLargeSecret).toHaveBeenCalledWith({ namespace: "ssh-profile", ownerId: "ssh-prod", field: "password" }, "rotated-secret");
+      expect(localStorage.getItem("cs.sshProfiles") || "").not.toContain("rotated-secret");
+      expect(inputByLabel("SSH 密码")).toHaveValue("rotated-secret");
+    });
+
+    it("tells the user to re-enter when the vault entry is gone, and still lets the form be edited", async () => {
+      seedMigratedProfile();
+      goApp.ReadLargeSecret.mockRejectedValue(new Error("secret not found"));
+      renderSSHManager();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("生产跳板机"));
+      });
+
+      expect(inputByLabel("SSH 密码")).toHaveValue("");
+      expect(screen.getByRole("alert")).toHaveTextContent("SSH 密码 在系统凭据库里读不到，请重新填写后保存");
+      expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    });
+
+    it("purges the vault entry when the password is cleared", async () => {
+      seedMigratedProfile();
+      renderSSHManager();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("生产跳板机"));
+      });
+      fireEvent.change(inputByLabel("SSH 密码"), { target: { value: "" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(goApp.DeleteLargeSecret).toHaveBeenCalledWith({ namespace: "ssh-profile", ownerId: "ssh-prod", field: "password" });
+      expect(storedProfiles()[0].sshSecretRefs).toBeUndefined();
+    });
   });
 
   it("tests SSH profiles and shows latency", async () => {
@@ -260,7 +394,7 @@ describe("SSHManagerView", () => {
     resolveFirst({ latencyMs: 41 });
   });
 
-  it("requires confirmation before saving referenced SSH profile changes", () => {
+  it("requires confirmation before saving referenced SSH profile changes", async () => {
     localStorage.setItem("cs.sshProfiles", JSON.stringify([
       {
         id: "ssh-prod",
@@ -293,9 +427,14 @@ describe("SSHManagerView", () => {
     ]));
     renderSSHManager();
 
-    fireEvent.click(screen.getByText("生产跳板机"));
+    // 打开档案现在要等一次凭据库回读（轮142 C），不先冲刷就会拿旧闭包里的 draft.id 去保存。
+    await act(async () => {
+      fireEvent.click(screen.getByText("生产跳板机"));
+    });
     fireEvent.change(inputByLabel("SSH 服务器地址"), { target: { value: "jump-new.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    });
 
     expect(screen.getByText("该 SSH 配置档案正在被 1 个连接引用，保存后这些连接会立即使用新配置。请确认影响范围后再次保存。")).toBeInTheDocument();
     expect(screen.getByText("订单系统 / 生产 / 云上内网")).toBeInTheDocument();
@@ -303,7 +442,9 @@ describe("SSHManagerView", () => {
       config: expect.objectContaining({ host: "jump.example.com" }),
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "确认保存" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "确认保存" }));
+    });
 
     expect(screen.getByText("SSH 配置档案已保存")).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("cs.sshProfiles") || "[]")[0]).toEqual(expect.objectContaining({

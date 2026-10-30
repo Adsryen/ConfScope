@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor, within } from "../test/react";
+import { act, fireEvent, render, screen, waitFor, within } from "../test/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import ConnectionManager from "./ConnectionManager";
@@ -13,6 +13,22 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/nacos", () => apiMocks);
+
+/*
+ * 系统凭据库（轮142 C）：连接页的读回显、入库、清空删除都走这六只绑定。
+ * 默认全部 reject「unsupported」——绝大多数用例压根没有指针，碰不到库；
+ * 真要让库工作的那几条自己 mockResolvedValue 覆盖。
+ */
+const vaultMocks = vi.hoisted(() => ({
+  WriteSecureSecret: vi.fn(),
+  ReadSecureSecret: vi.fn(),
+  DeleteSecureSecret: vi.fn(),
+  WriteLargeSecret: vi.fn(),
+  ReadLargeSecret: vi.fn(),
+  DeleteLargeSecret: vi.fn(),
+}));
+
+vi.mock("../../wailsjs/go/app/App", () => vaultMocks);
 
 const clipboardMocks = vi.hoisted(() => ({
   copyText: vi.fn(),
@@ -89,6 +105,10 @@ describe("ConnectionManager", () => {
     clipboardMocks.copyText.mockReset();
     appApiMocks.selectLocalSnapshotDirectory.mockReset();
     appApiMocks.validateLocalSnapshotDirectory.mockReset();
+    // 默认「系统凭据库不可用」＝迁移前的老形状：绝大多数用例根本没有指针，碰不到库。
+    for (const fn of Object.values(vaultMocks)) {
+      fn.mockReset().mockRejectedValue(new Error("secure store unsupported"));
+    }
   });
 
   it("renders empty state and closes with Escape", () => {
@@ -188,7 +208,7 @@ describe("ConnectionManager", () => {
     expect(saved[0]).not.toHaveProperty("writeConfirmPolicy");
   });
 
-  it("reflects saved explicit fields into the edit form", () => {
+  it("reflects saved explicit fields into the edit form", async () => {
     localStorage.setItem(
       "cs.connections",
       JSON.stringify([
@@ -212,7 +232,10 @@ describe("ConnectionManager", () => {
     renderManager(vi.fn());
 
     const item = within(connectionList()).getByText("云上公网").closest(".conn-item") as HTMLElement;
-    fireEvent.click(item);
+    // 打开表单要先读一次凭据库（轮142 C），所以这一下点击不再是同步铺好草稿。
+    await act(async () => {
+      fireEvent.click(item);
+    });
 
     expect(controlByLabel("环境角色")).toHaveValue("production");
     expect(controlByLabel("写入确认策略")).toHaveValue("always");
@@ -532,7 +555,7 @@ describe("ConnectionManager", () => {
     expect(screen.queryByText("dev")).not.toBeInTheDocument();
   });
 
-  it("duplicates a saved connection as a new editable draft", () => {
+  it("duplicates a saved connection as a new editable draft", async () => {
     const onChange = vi.fn();
     renderManager(onChange);
 
@@ -545,7 +568,10 @@ describe("ConnectionManager", () => {
     });
 
     const item = within(connectionList()).getByText("云上内网").closest(".conn-item") as HTMLElement;
-    fireEvent.click(within(item).getByTitle("复制连接"));
+    // 复制件要先把源记录的凭据读回明文（轮142 C），点击是异步的。
+    await act(async () => {
+      fireEvent.click(within(item).getByTitle("复制连接"));
+    });
 
     expect(screen.getByText("新建连接")).toBeInTheDocument();
     expect(fieldByLabel("来源名称")).toHaveValue("云上内网 副本");
@@ -555,7 +581,9 @@ describe("ConnectionManager", () => {
     expect(fieldByLabel("目标地址")).toHaveValue("http://dev.example.com/nacos");
     expect(screen.getByText("已复制为新连接草稿，修改后保存即可生成新连接")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    });
 
     const savedList = onChange.mock.calls[onChange.mock.calls.length - 1][0];
     expect(savedList).toHaveLength(2);
@@ -1210,6 +1238,171 @@ describe("ConnectionManager", () => {
       expect(within(title).queryByDisplayValue("交易平台")).not.toBeInTheDocument();
       expect(within(connectionList()).getByText("订单系统")).toBeInTheDocument();
       expect(onChange).not.toHaveBeenCalledWith([expect.objectContaining({ projectName: "交易平台" })]);
+    });
+  });
+
+  /*
+   * 轮142 C：连接页与隧道档案页同一个根因——「迁移凭据」把值搬进系统库、本地只剩指针，
+   * 而编辑入口从没读回来过，点开一条迁过的连接看到的是空密码/空 AK-SK。
+   */
+  describe("迁过凭据的连接回显与保存", () => {
+    function pointer(field: string) {
+      return {
+        ref: `connection.seed-conn.${field}`,
+        namespace: "connection",
+        ownerId: "seed-conn",
+        field,
+        migratedAt: "2026-07-08T00:00:00.000Z",
+        status: "stored",
+        storage: "credential-manager",
+      };
+    }
+
+    function seedMigratedConnection() {
+      // authType 必须是 aliyun-aksk：AK/SK 两个输入框只在认证方式为 AK/SK 时渲染。
+      localStorage.setItem(
+        "cs.connections",
+        JSON.stringify([
+          {
+            id: "seed-conn",
+            name: "hz-core-01",
+            projectName: "订单系统",
+            environmentName: "生产",
+            sourceName: "云上公网",
+            provider: "nacos",
+            baseUrl: "https://hz-core.example.com/nacos",
+            username: "",
+            password: "",
+            authType: "aliyun-aksk",
+            accessKeyId: "",
+            accessKeySecret: "",
+            defaultNamespace: "",
+            secretRefs: { accessKeyId: pointer("accessKeyId"), accessKeySecret: pointer("accessKeySecret") },
+          },
+        ])
+      );
+      vaultMocks.ReadSecureSecret.mockImplementation(async (ref: { field: string }) =>
+        ref.field === "accessKeyId" ? "AKIA-example" : "vault-secret-key"
+      );
+    }
+
+    function storedConnections() {
+      return JSON.parse(localStorage.getItem("cs.connections") || "[]");
+    }
+
+    function openSeedConnection() {
+      const item = within(connectionList()).getByText("云上公网").closest(".conn-item") as HTMLElement;
+      fireEvent.click(item);
+    }
+
+    it("打开迁过的连接时从库里读回 AK/SK，并说清值来自哪里", async () => {
+      seedMigratedConnection();
+      renderManager(vi.fn());
+
+      await act(async () => {
+        openSeedConnection();
+      });
+
+      expect(vaultMocks.ReadSecureSecret).toHaveBeenCalledWith({ namespace: "connection", ownerId: "seed-conn", field: "accessKeySecret" });
+      expect(fieldByLabel("AccessKey Secret")).toHaveValue("vault-secret-key");
+      expect(screen.getByText(/已从系统凭据库读回/)).toBeInTheDocument();
+      expect(screen.getByText(/保存在系统凭据库中，本地数据文件里不写明文/)).toBeInTheDocument();
+    });
+
+    it("只改备注保存：本地数据里不出现明文，指针原样留着", async () => {
+      seedMigratedConnection();
+      renderManager(vi.fn());
+
+      await act(async () => {
+        openSeedConnection();
+      });
+      fireEvent.change(fieldByLabel("备注（可选）"), { target: { value: "换了个名字" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(vaultMocks.WriteSecureSecret).not.toHaveBeenCalled();
+      expect(localStorage.getItem("cs.connections") || "").not.toContain("vault-secret-key");
+      const saved = storedConnections()[0];
+      expect(saved.name).toBe("换了个名字");
+      expect(saved.accessKeySecret).toBe("");
+      expect(saved.secretRefs.accessKeySecret.ref).toBe("connection.seed-conn.accessKeySecret");
+    });
+
+    it("改过的 AK 写进库并把内联明文清掉", async () => {
+      seedMigratedConnection();
+      vaultMocks.WriteSecureSecret.mockResolvedValue({ storage: "credential-manager", valueSize: 14, verified: true });
+      renderManager(vi.fn());
+
+      await act(async () => {
+        openSeedConnection();
+      });
+      fireEvent.change(fieldByLabel("AccessKey ID"), { target: { value: "AKIA-rotated" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(vaultMocks.WriteSecureSecret).toHaveBeenCalledWith(
+        { namespace: "connection", ownerId: "seed-conn", field: "accessKeyId" },
+        "AKIA-rotated"
+      );
+      const saved = storedConnections()[0];
+      expect(saved.accessKeyId).toBe("");
+      expect(localStorage.getItem("cs.connections") || "").not.toContain("AKIA-rotated");
+    });
+
+    it("库里条目没了就直说读不到，表单照常能改能存", async () => {
+      seedMigratedConnection();
+      vaultMocks.ReadSecureSecret.mockRejectedValue(new Error("secret not found"));
+      renderManager(vi.fn());
+
+      await act(async () => {
+        openSeedConnection();
+      });
+
+      expect(fieldByLabel("AccessKey Secret")).toHaveValue("");
+      expect(screen.getByRole("alert")).toHaveTextContent("在系统凭据库里读不到，请重新填写后保存");
+      expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    });
+
+    it("清空 AK 会删掉库条目并摘掉指针", async () => {
+      seedMigratedConnection();
+      renderManager(vi.fn());
+
+      await act(async () => {
+        openSeedConnection();
+      });
+      fireEvent.change(fieldByLabel("AccessKey ID"), { target: { value: "" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      expect(vaultMocks.DeleteSecureSecret).toHaveBeenCalledWith({
+        namespace: "connection",
+        ownerId: "seed-conn",
+        field: "accessKeyId",
+      });
+      expect(storedConnections()[0].secretRefs.accessKeyId).toBeUndefined();
+    });
+
+    it("复制件不带源记录的指针，凭据以明文进新草稿", async () => {
+      seedMigratedConnection();
+      const onChange = renderManager(vi.fn()).onChange;
+      const item = within(connectionList()).getByText("云上公网").closest(".conn-item") as HTMLElement;
+
+      await act(async () => {
+        fireEvent.click(within(item).getByTitle("复制连接"));
+      });
+      expect(fieldByLabel("AccessKey Secret")).toHaveValue("vault-secret-key");
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      });
+
+      const savedList = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+      const copy = savedList.find((c: { id: string }) => c.id !== "seed-conn");
+      expect(copy.secretRefs).toBeUndefined();
+      expect(copy.accessKeySecret).toBe("vault-secret-key");
     });
   });
 });
