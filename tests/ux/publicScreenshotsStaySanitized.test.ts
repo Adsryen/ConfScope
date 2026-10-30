@@ -78,8 +78,9 @@ const REVIEWED_CAPTURES: Record<string, ReviewedCapture> = {
       + "「本次改动」展开后的写前写后差异；正文为合成配置（dev_pass_123 之类来自复测种子）",
   },
   "配置矩阵.png": {
-    md5: "f14cb3f576d6f845e46964257bf4cc98",
-    note: "retest-dev / retest-qa 一致性矩阵，命名空间为合成名",
+    md5: "ede267901e7663b80f1ab2a3b943c180",
+    note: "轮143 重拍：retest-dev / retest-qa 一致性矩阵，命名空间为合成名；"
+      + "审计后条件区已折叠成摘要行，动作条常驻置顶，行内带「忽略」快捷按钮与「单元格自动换行」开关",
   },
 };
 
