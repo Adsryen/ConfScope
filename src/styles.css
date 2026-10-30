@@ -1799,10 +1799,17 @@ textarea {
  * 档案页与连接页共用这一个类名——别留两个只写了一半的类。
  * 档案页把它夹在「认证信息」标题与 .ssh-manager-form 之间，得自己补左右边距；
  * 连接页那几处的父容器（.conn-form-section / .ssh-config）本身就是 flex + gap，
- * 再叠上 .settings-panel-note 自带的 margin-top 就多出一层，所以那里归零。
+ * 再叠上 .settings-panel-note 自带的 margin-top 就多出一层，所以那里整条归零。
+ *
+ * 轮142 复检：这里原本写的是 `margin: 12px 14px 0` 简写。它与上面
+ * `.settings-panel-note{margin-top:10px}` 同特异度、只靠文档顺序决胜（守卫
+ * classOverridesResolveBySpecificity 判红），而且谁在样式表里挪一条规则就会静默改渲染。
+ * 改成只声明自己新增的那两向（左右），上边距交回 .settings-panel-note 统一给；
+ * 父容器那条 (0,2,0) 天然压过它，归零靠特异度而不是顺序。
  */
 .secret-source-note {
-  margin: 12px 14px 0;
+  margin-right: 14px;
+  margin-left: 14px;
 }
 
 .conn-form-section .secret-source-note,
@@ -6777,8 +6784,58 @@ button.diff-workflow-step-btn:hover {
 }
 
 /* 设置区域 */
+/* 轮142 A1：类名从包裹 div 挪到按钮本身。旧规则 `.audit-settings-toggle{padding-top:0}` 是写给
+   包裹层的；挪到按钮上后 `.btn.btn-sm` 的特异度更高，padding-top 会直接变死码（classOverridesResolveBySpecificity
+   钉这条），而且 5px 的纵向内边距被抹掉就把命中区压回 20px 以下（target-size）。所以这里只留布局。 */
+.audit-cond-toggle,
 .audit-settings-toggle {
-  padding-top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 折叠指示箭头：CSS 画的，不用 ▶/▼ 字符——字符在两套字体下基线不一致，
+   且 aria-hidden 后读屏拿到的是空文本，按钮名全靠文案撑着。 */
+.audit-disclosure-icon {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
+}
+
+.audit-cond-toggle[aria-expanded="true"] .audit-disclosure-icon,
+.audit-settings-toggle[aria-expanded="true"] .audit-disclosure-icon {
+  transform: rotate(45deg);
+}
+
+/* 轮142 A4：折叠后条件区不在 DOM 里，摘要栏替它把关键条件留在视野。 */
+.audit-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audit-cond-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.audit-cond-chip {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim-raised);
+  background: var(--bg3);
 }
 
 .audit-settings {
@@ -6845,6 +6902,41 @@ button.diff-workflow-step-btn:hover {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* 轮142 A1：按钮文案在两档之间切换（Loading… / 执行审计）时不许把整条动作条顶来顶去，
+   给运行钮钉一条最小宽度兜住。 */
+.audit-run-button {
+  min-width: 104px;
+}
+
+/* 轮142 A1：扫描进度从按钮文案里搬出来单列一栏。常驻占位（空串也渲染），
+   于是进度出现/消失都不会让邻居左右跳；超长走省略号 + title。 */
+.audit-run-note {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 轮142 A2：快速忽略的回执 + 撤销。同样不许撑宽邻居。 */
+.audit-action-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.audit-action-note > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 导出区域 */
@@ -7082,6 +7174,38 @@ button.diff-workflow-step-btn:hover {
   transition: background 0.1s;
 }
 
+/* 轮142 A3：「单元格自动换行」档。窗口化渲染必须有确定行高才能算 translateY，所以这一档
+   仍然是固定值——48 的单行档换成 108，值格最多 4 行、dataId/key 最多 2 行，超出继续省略号。
+   108 = 边框1 + 上下内边距20 + 值格 4 行 * 17 行高（≈19）；两个常量与这里的 height 由
+   tests/ux/auditMatrixRowHeightStaysPaired.test.ts 成对钉住，改一处必须同时改另一处。 */
+.audit-matrix[data-wrap="1"] .audit-matrix-body .audit-matrix-row {
+  height: 108px;
+  align-items: flex-start;
+}
+
+.audit-matrix[data-wrap="1"] .audit-cell {
+  padding: 10px 12px;
+}
+
+.audit-matrix[data-wrap="1"] .audit-value {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  white-space: normal;
+  word-break: break-all;
+  text-overflow: ellipsis;
+}
+
+.audit-matrix[data-wrap="1"] .audit-dataid,
+.audit-matrix[data-wrap="1"] .audit-key {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  word-break: break-all;
+  text-overflow: ellipsis;
+}
+
 /* r111：窗口化后 DOM 里行的奇偶随滚动位置变化，nth-child 会闪动；斑马纹改显式类，
    行号按逻辑行序算（AuditView 按 matrixWindow.start + index 打标），滚动时条纹稳定。 */
 .audit-matrix-body .audit-matrix-row.zebra {
@@ -7251,6 +7375,20 @@ button.diff-workflow-step-btn:hover {
 .audit-parse-err {
   margin-left: 4px;
   color: #e57373;
+}
+
+/* 轮142 A2：行内的快速忽略。默认半透明、悬停/聚焦到全亮——不许用 opacity:0 或 display:none，
+   那样键盘聚焦过去读屏和眼睛都找不到它（hoverOnlyRevealNeedsFocusWithin 钉这条）。 */
+.audit-ignore-inline {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.audit-matrix-body .audit-matrix-row:hover .audit-ignore-inline,
+.audit-matrix-body .audit-matrix-row:focus-within .audit-ignore-inline,
+.audit-ignore-inline:focus-visible {
+  opacity: 1;
 }
 
 /* 详情面板 */
@@ -10002,6 +10140,12 @@ button.diff-workflow-step-btn:hover {
 .audit-dataid,
 .audit-key,
 .audit-value,
+
+/* 轮142 A1/A2/A4：动作条的扫描进度与忽略回执、折叠态的条件摘要 chips 都带省略号。
+   进度原文（含被忽略那条的 dataId）经常要抄去别处核对，只给看不给拿就等于让人重新敲。 */
+.audit-run-note,
+.audit-action-note > span,
+.audit-cond-chip,
 
 /* 跨配置重复检查（r110）：key / ns-group-dataId / 值都单行截断，原文必须抄得走（全文另挂 title） */
 .dup-check-key,

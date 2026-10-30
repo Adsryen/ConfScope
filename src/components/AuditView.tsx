@@ -50,6 +50,10 @@ export type { DiffJumpParams, DiffJumpSideParams } from "../lib/diffJump";
 /** r111 窗口化渲染：行高 48px（border-box 含 1px 底边框，与 styles.css `.audit-matrix-body .audit-matrix-row` 的 height 同一实测口径）；
  *  窗口两侧各留 10 行 overscan，快速滚动不露白。 */
 const MATRIX_ROW_HEIGHT = 48;
+/** 「单元格自动换行」档的行高：值格最多 4 行、key 格最多 2 行，超出仍然截断（见 styles.css
+ *  `.audit-matrix[data-wrap="1"]`）。窗口化渲染必须有确定行高才能算 offset，所以换行档也只能是
+ *  固定值——这两个常量与 CSS 的配对由 tests/ux/auditMatrixRowHeightStaysPaired.test.ts 钉住。 */
+const MATRIX_ROW_WRAP_HEIGHT = 108;
 const MATRIX_OVERSCAN = 10;
 
 /**
@@ -91,6 +95,18 @@ interface NormalizeRule {
   pattern: string;
   replacement: string;
   caseSensitive: boolean;
+}
+
+/*
+ * 轮142 A4：归一化规则的唯一文案口径。
+ * 折叠态那颗 chip 只剩「开/关」两个字，悬停要回答的是「现在到底按哪几条在归一」，
+ * 而展开面板的规则列表本来就在拼这句话——判据写两份必然漂，所以提到这里共用。
+ */
+function describeNormalizeRule(rule: NormalizeRule, t: (key: string) => string): string {
+  const typeLabel =
+    rule.type === "prefix" ? t("audit.normalizePrefix") : rule.type === "suffix" ? t("audit.normalizeSuffix") : t("audit.normalizeReplace");
+  const sensitive = rule.caseSensitive ? ` [${t("audit.caseSensitive")}]` : "";
+  return `${typeLabel}: ${rule.pattern} → ${rule.replacement || t("audit.normalizeDeleteHint")}${sensitive}`;
 }
 
 // r139 搜索口径三档的文案键：与 lib/auditSearch 的 AuditSearchScope 一一对应，
@@ -221,6 +237,10 @@ interface AuditMatrixListProps {
   /** 要求列表把这一行带进视口；nonce 不变 = 不再动滚动条。 */
   focusRowId: string | null;
   focusNonce: number;
+  /** 当前行的固定高度：48（单行档）或 108（换行档），必须与 CSS 一致，否则窗口化会算错 offset。 */
+  rowHeight: number;
+  /** 行内「忽略」快捷动作：只加规则 + 本地重算矩阵，绝不第二次取数。 */
+  onQuickIgnore: (row: AuditRow) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
 }
 
@@ -234,6 +254,8 @@ function AuditMatrixList({
   currentTarget,
   focusRowId,
   focusNonce,
+  rowHeight,
+  onQuickIgnore,
   t,
 }: AuditMatrixListProps) {
   // 矩阵滚动位置：审计结果要手动跑一次才有，挂载时列表是空的（真实浏览器会把偏移夹回 0），
@@ -246,11 +268,11 @@ function AuditMatrixList({
   const matrixWindow = useMemo(() => {
     const total = rows.length;
     if (total === 0) return { start: 0, rows: [] as AuditRow[] };
-    const visible = Math.max(matrixViewportH, MATRIX_ROW_HEIGHT);
-    const start = Math.max(0, Math.min(Math.floor(matrixScrollTop / MATRIX_ROW_HEIGHT) - MATRIX_OVERSCAN, total - 1));
-    const end = Math.max(start + 1, Math.min(Math.ceil((matrixScrollTop + visible) / MATRIX_ROW_HEIGHT) + MATRIX_OVERSCAN, total));
+    const visible = Math.max(matrixViewportH, rowHeight);
+    const start = Math.max(0, Math.min(Math.floor(matrixScrollTop / rowHeight) - MATRIX_OVERSCAN, total - 1));
+    const end = Math.max(start + 1, Math.min(Math.ceil((matrixScrollTop + visible) / rowHeight) + MATRIX_OVERSCAN, total));
     return { start, rows: rows.slice(start, end) };
-  }, [rows, matrixScrollTop, matrixViewportH]);
+  }, [rows, matrixScrollTop, matrixViewportH, rowHeight]);
 
   // 容器挂载 / 尺寸变化（窗口 resize、详情面板挤占）时把 scrollTop 与可视高度读回状态。
   // 同步走原生 scroll 监听：onScroll 属性直连 matrixScroll.onScroll（写 viewState），
@@ -282,13 +304,13 @@ function AuditMatrixList({
     const index = rows.findIndex((row) => row.id === focusRowId);
     if (index < 0) return;
     // 已经看得见就一动不动（PRD：命中导航不许把用户已读的那屏顶走）
-    revealIndex(index, MATRIX_ROW_HEIGHT);
-  }, [focusRowId, focusNonce, rows, revealIndex]);
+    revealIndex(index, rowHeight);
+  }, [focusRowId, focusNonce, rows, revealIndex, rowHeight]);
 
   return (
     <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
-      <div className="audit-matrix-spacer" style={{ height: rows.length * MATRIX_ROW_HEIGHT }}>
-        <div className="audit-matrix-window" style={{ transform: `translateY(${matrixWindow.start * MATRIX_ROW_HEIGHT}px)` }}>
+      <div className="audit-matrix-spacer" style={{ height: rows.length * rowHeight }}>
+        <div className="audit-matrix-window" style={{ transform: `translateY(${matrixWindow.start * rowHeight}px)` }}>
           {matrixWindow.rows.map((row, index) => {
             const hit = hits ? (hits.get(row.id) ?? null) : null;
             const isCurrentRow = currentTarget?.rowId === row.id;
@@ -302,7 +324,7 @@ function AuditMatrixList({
                   (matrixWindow.start + index) % 2 === 1 ? " zebra" : ""
                 }${hit ? " has-hit" : ""}${isCurrentRow ? " current-hit" : ""}`}
                 onClick={() => onSelectRow(row)}
-                {...clickableRowProps(() => onSelectRow(row), { selected: selectedRowId === row.id })}
+                {...clickableRowProps(() => onSelectRow(row), { role: "group", selected: selectedRowId === row.id })}
               >
                 <div className="audit-cell key">
                   <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>{t(STATUS_LABELS[row.status])}</span>
@@ -314,6 +336,19 @@ function AuditMatrixList({
                       {renderHighlighted(row.key, hit?.keyRanges ?? [], currentNameRange("key"), `${row.id}-k`)}
                     </span>
                   </div>
+                  {row.status !== "ignored" && (
+                    <button
+                      className="btn btn-ghost btn-sm audit-ignore-inline"
+                      title={t("audit.ignoreThisTitle")}
+                      aria-label={t("audit.ignoreThis")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onQuickIgnore(row);
+                      }}
+                    >
+                      {t("audit.ignoreThisShort")}
+                    </button>
+                  )}
                 </div>
                 {envIds.map((envId) => {
                   const cell = row.values[envId];
@@ -434,6 +469,16 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
   const resetRef = useScrollResetRef([selectedRow?.dataId ?? "", selectedRow?.key ?? ""]);
   const [baseline, setBaseline] = useState<string>("");
   const [showSettings, setShowSettings] = useRememberedState<boolean>("audit.showSettings", false);
+  // 轮142 A4：审计条件区（项目/环境/设置）默认在跑完一轮审计后自动收起——那一排环境卡片
+  // 竖着占掉大半个视口，用户真正要看的是矩阵。折叠态不销毁条件（只是不渲染），摘要栏
+  // 把关键几项带出来，改条件点一下就能展开。
+  const [condOpen, setCondOpen] = useRememberedState<boolean>("audit.conditionsOpen", true);
+  // 用户自己点过折叠钮之后，就不再替他自动收/展（否则每次重跑审计都把窗口按回去）。
+  const condTouchedByUser = useRef(false);
+  // 轮142 A3：矩阵单元格自动换行档（长值不再靠 title 悬停看全文）。
+  const [wrapCells, setWrapCells] = useRememberedState<boolean>("audit.wrapCells", false);
+  // 快速忽略的回执（含规则下标，供「撤销」精确摘掉这一条）。
+  const [quickIgnoreNotice, setQuickIgnoreNotice] = useState<{ index: number; text: string } | null>(null);
 
   // r110 重复检查面板：默认收起（展开态把整块清单摊在页面里，见下文 dup-check 的位置注释）。
   const [dupPanelOpen, setDupPanelOpen] = useRememberedState<boolean>("audit.dupPanelOpen", false);
@@ -616,6 +661,95 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     [normalizeEnabled, normalizeRules]
   );
 
+  // 轮142 A4：折叠态 chip 的悬停全文。关掉时解释「这个开关管什么」，打开时给出「现在按哪几条归一」，
+  // 否则摘要栏剩下的就只是两个没人敢忽略的状态字。
+  const normalizeHint = useMemo(() => {
+    if (!normalizeEnabled || normalizeRules.length === 0) return t("audit.normalizeEnabledLabel");
+    return normalizeRules.map((rule) => describeNormalizeRule(rule, t)).join("\n");
+  }, [normalizeEnabled, normalizeRules, t]);
+
+  // ── 轮142 A2：矩阵的唯一构建口径 + 改规则后的本地重算 ────────────────────────
+  // buildAuditMatrix 是纯函数（吃已取回的 sources + 规则），所以「加一条忽略规则」根本不需要
+  // 再跑一遍网络：取一次数、随时重算是这个面板能秒生效的前提。R6（审计只读、不重复取数）
+  // 和 tests/ux/auditMatrixLargeData 的调用次数判据都靠这份唯一出口守住。
+  const buildMatrix = useCallback(
+    (sources: AuditSource[], rules: IgnoreRule[]) =>
+      buildAuditMatrix(sources, {
+        ignoreRules: rules.length > 0 ? rules : undefined,
+        normalizeName: normalizeEnabled ? applyNormalize : (name: string) => name,
+      }),
+    [applyNormalize, normalizeEnabled]
+  );
+
+  const rebuildFromLocalRules = useCallback(
+    (rules: IgnoreRule[]) => {
+      if (auditSources.length === 0) return;
+      const next = buildMatrix(auditSources, rules);
+      setRows(next);
+      // 选中的那行可能刚好被过滤掉了，按 id 重新认领，认领不到就关掉详情（留着旧对象会显示过期值）。
+      setSelectedRow((prev) => (prev ? (next.find((row) => row.id === prev.id) ?? null) : null));
+    },
+    [auditSources, buildMatrix]
+  );
+
+  const addQuickIgnore = useCallback(
+    (row: AuditRow) => {
+      // 规则值必须用归一化后的 row.dataId：忽略匹配（lib/audit.ts matchingIgnoreRule）比对的是
+      // 归一化桶里的 dataId，写成 originalDataIds 的话归一化开着时这条规则永远命中不了。
+      const exists = ignoreRules.some((rule) => rule.dataId === row.dataId && rule.key === row.key);
+      if (exists) {
+        setQuickIgnoreNotice({ index: -1, text: t("audit.ignoredAlready") });
+        return;
+      }
+      const next = [
+        ...ignoreRules,
+        { dataId: row.dataId, key: row.key, reason: t("audit.ignoreReasonQuick") } as IgnoreRule,
+      ];
+      setIgnoreRules(next);
+      rebuildFromLocalRules(next);
+      setQuickIgnoreNotice({
+        index: next.length - 1,
+        text: t(hideIgnored ? "audit.ignoredAddedHidden" : "audit.ignoredAdded", { dataId: row.dataId, key: row.key }),
+      });
+    },
+    [hideIgnored, ignoreRules, rebuildFromLocalRules, setIgnoreRules, t]
+  );
+
+  const undoQuickIgnore = useCallback(() => {
+    if (!quickIgnoreNotice || quickIgnoreNotice.index < 0) {
+      setQuickIgnoreNotice(null);
+      return;
+    }
+    const next = ignoreRules.filter((_, i) => i !== quickIgnoreNotice.index);
+    setIgnoreRules(next);
+    rebuildFromLocalRules(next);
+    setQuickIgnoreNotice(null);
+  }, [ignoreRules, quickIgnoreNotice, rebuildFromLocalRules, setIgnoreRules]);
+
+  // A4 可见性判定：没跑过审计时条件区永远展开——此时条件本身就是页面主体，没有可让位的对象
+  // （既有测试与 retest 都在审计前读环境卡片，靠这条保持不变）。
+  const condVisible = rows.length === 0 || condOpen;
+  // 折叠后条件区不在 DOM 里，设置面板自然也不在：aria-expanded 必须说实话，不能读 showSettings。
+  const settingsVisible = condVisible && showSettings;
+  // 进度文案从按钮里搬出来：写进按钮会让按钮随文案变宽，整条动作条左右抖。
+  const runNote = loading && scanCount > 0 ? t("audit.scanning", { count: scanCount }) : "";
+
+  // 折叠交互：条件收起时点「忽略规则与执行审计设置」要顺手把条件区展开，
+  // 否则用户点完什么也不会出现，读起来像按钮坏了。
+  const toggleSettings = () => {
+    if (!condVisible) {
+      setCondOpen(true);
+      setShowSettings(true);
+      return;
+    }
+    setShowSettings(!showSettings);
+  };
+
+  const toggleConditions = () => {
+    condTouchedByUser.current = true;
+    setCondOpen((prev) => !prev);
+  };
+
   // ── r110 重复配置检查（只读）────────────────────────────────────────────
   // 对审计已取回 sources 的纯计算：判据与忽略清单来自设置，名称归一化复用矩阵同一口径。
   // R5 规模读数见 PRD「实测结论」——当前规模纯计算为毫秒级，直接同帧算；
@@ -768,6 +902,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     setSelectedRow(null);
     setRunGaps([]);
     setScanCount(0);
+    setQuickIgnoreNotice(null);
     // 请求序号守卫：重跑审计后旧聚合结果必须作废，不得覆盖新一轮结果
     const myReq = ++auditReqId.current;
     const session = createAuditSession("audit");
@@ -845,14 +980,14 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         return;
       }
 
-      const matrix = buildAuditMatrix(sources, {
-        ignoreRules: ignoreRules.length > 0 ? ignoreRules : undefined,
-        normalizeName: normalizeEnabled ? applyNormalize : (name: string) => name,
-      });
+      const matrix = buildMatrix(sources, ignoreRules);
       setRows(matrix);
       // 矩阵与重复检查共用这一份来源，不重复取数。
       setAuditSources(sources);
       setBaseline(envSources[0] ? envKey(envSources[0]) : "");
+      // A4：结果已经出来了，条件区不再有用武之地——自动收起把视口还给矩阵。
+      // 用户手动展开/收起过（condTouchedByUser）就尊重他的选择，不再替他按。
+      if (matrix.length > 0 && !condTouchedByUser.current) setCondOpen(false);
       const statusSummary: Record<string, number> = {};
       for (const row of matrix) {
         statusSummary[row.status] = (statusSummary[row.status] ?? 0) + 1;
@@ -880,7 +1015,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     } finally {
       setLoading(false);
     }
-  }, [applyNormalize, envSources, ignoreRules, normalizeEnabled, t]);
+  }, [buildMatrix, envSources, ignoreRules, setCondOpen, t]);
 
   // 过滤与排序后的行
   const filteredRows = useMemo(() => {
@@ -1061,233 +1196,49 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         </div>
       </div>
 
-      {/* 顶部审计条件 */}
+      {/* 轮142 A1/A4：动作条挪到最上面常驻。旧版把「执行审计」压在整排环境卡片下面，
+          跑完审计后条件已无用却仍占大半个视口，用户要滚动才能看到矩阵——现在跑完自动收起，
+          折叠态用摘要 chips 保留关键条件，点一下即可展开改条件。 */}
       <div className="audit-toolbar">
-        <div className="audit-project-row">
-          <label className="field">
-            <span>{t("connection.project")}</span>
-            <Select
-              className="wide"
-              value={selectedProject}
-              options={projectNames.map((n) => ({ value: n, label: localizeDefaultName(n, t) }))}
-              onChange={setSelectedProject}
-            />
-          </label>
-        </div>
-
-        <div className="audit-envs">
-          {envSources.map((env, index) => (
-            <div className="audit-env-card" key={`${env.conn.id}:${env.namespace}`}>
-              <div className="audit-env-head">
-                <span
-                  className={`env-badge env-${environmentTone(connectionEnvironmentName(env.conn))}`}
-                  title={localizeDefaultName(connectionEnvironmentName(env.conn), t)}
-                >
-                  {localizeDefaultName(connectionEnvironmentName(env.conn), t)}
-                </span>
-                <span className="audit-env-name">{env.conn.name || env.conn.sourceName}</span>
-                {envSources.length > 2 && (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => removeSource(index)}
-                    title={t("common.delete")}
-                    aria-label={t("common.delete")}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-              <label className="field">
-                <span>{t("app.namespace")}</span>
-                <input
-                  type="text"
-                  className="search-input mono"
-                  spellCheck={false}
-                  value={env.namespace}
-                  placeholder="public"
-                  onChange={(e) => updateSource(index, { namespace: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span>group</span>
-                <input
-                  type="text"
-                  className="search-input mono"
-                  spellCheck={false}
-                  value={env.group}
-                  placeholder={t("diff.groupPlaceholder")}
-                  onChange={(e) => updateSource(index, { group: e.target.value })}
-                />
-              </label>
-              <label className="field">
-                <span>dataId {t("audit.filter")}</span>
-                <input
-                  type="text"
-                  className="search-input mono"
-                  spellCheck={false}
-                  value={env.dataIdFilter}
-                  placeholder={t("audit.allConfigs")}
-                  onChange={(e) => updateSource(index, { dataIdFilter: e.target.value })}
-                />
-              </label>
-            </div>
-          ))}
-          {envSources.length < 6 && (
-            <button className="btn btn-ghost btn-sm audit-add-env" onClick={addSource}>
-              {t("audit.addEnv")}
+        <div className="audit-actions">
+          {rows.length > 0 && (
+            <button
+              className="btn btn-ghost btn-sm audit-cond-toggle"
+              onClick={toggleConditions}
+              aria-expanded={condVisible}
+              title={condVisible ? t("audit.condCollapse") : t("audit.condExpand")}
+            >
+              <span className="audit-disclosure-icon" aria-hidden="true" />
+              {condVisible ? t("audit.condCollapse") : t("audit.condExpand")}
             </button>
           )}
-        </div>
-
-        <div className="audit-settings-toggle">
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowSettings(!showSettings)} aria-expanded={showSettings}>
-            {showSettings ? "▼" : "▶"} {t("audit.settingsToggle")}
-          </button>
-        </div>
-
-        {showSettings && (
-          <div className="audit-settings">
-            {/* 忽略规则 */}
-            <div className="audit-settings-section">
-              <h4>{t("audit.ignoreRulesTitle")}</h4>
-              {ignoreRules.length > 0 && (
-                <div className="ignore-rules-list">
-                  {ignoreRules.map((rule, i) => (
-                    <div className="ignore-rule-item" key={i}>
-                      <span className="ignore-rule-text">
-                        {rule.dataId && <span className="ignore-rule-dataid">{rule.dataId}</span>}
-                        {rule.key && <span className="ignore-rule-key">{rule.key}</span>}
-                        {!rule.dataId && !rule.key && <span className="ignore-rule-dataid">{t("audit.ignoreRuleAll")}</span>}
-                        <span className="ignore-rule-reason"> — {rule.reason}</span>
-                      </span>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => removeIgnoreRule(i)}
-                        title={t("audit.removeRule")}
-                        aria-label={t("audit.removeRule")}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="field-row">
-                <input
-                  type="text"
-                  className="search-input"
-                  placeholder={t("audit.ignoreDataIdPlaceholder")}
-                  aria-label={t("audit.ignoreDataIdPlaceholder")}
-                  value={ignoreForm.dataId ?? ""}
-                  onChange={(e) => setIgnoreForm({ ...ignoreForm, dataId: e.target.value || undefined })}
-                />
-                <input
-                  type="text"
-                  className="search-input"
-                  placeholder={t("audit.ignoreKeyPlaceholder")}
-                  aria-label={t("audit.ignoreKeyPlaceholder")}
-                  value={ignoreForm.key ?? ""}
-                  onChange={(e) => setIgnoreForm({ ...ignoreForm, key: e.target.value || undefined })}
-                />
-                <input
-                  type="text"
-                  className="search-input"
-                  placeholder={t("audit.ignoreReasonPlaceholder")}
-                  aria-label={t("audit.ignoreReasonPlaceholder")}
-                  value={ignoreForm.reason}
-                  onChange={(e) => setIgnoreForm({ ...ignoreForm, reason: e.target.value })}
-                />
-                <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>
-                  {t("audit.addRule")}
-                </button>
-              </div>
+          {!condVisible && (
+            <div className="audit-cond-summary" role="group" aria-label={t("audit.condSummaryAria")}>
+              <span className="audit-cond-chip" title={localizeDefaultName(selectedProject, t)}>
+                {t("audit.condProject", { name: localizeDefaultName(selectedProject, t) })}
+              </span>
+              <span className="audit-cond-chip" title={envSources.map((env) => envLabel(env, t)).join(" | ")}>
+                {t("audit.condEnvs", { count: envSources.length })}
+              </span>
+              <span className="audit-cond-chip" title={ignoreRules.map((rule) => `${rule.dataId ?? "*"} / ${rule.key ?? "*"}`).join("\n")}>
+                {t("audit.condIgnores", { count: ignoreRules.length })}
+              </span>
+              <span className="audit-cond-chip" title={normalizeHint}>
+                {normalizeEnabled ? t("audit.condNormalizeOn") : t("audit.condNormalizeOff")}
+              </span>
             </div>
-
-            {/* 名称归一化 */}
-            <div className="audit-settings-section">
-              <h4>{t("audit.normalizeTitle")}</h4>
-              <label className="check-row">
-                <input type="checkbox" checked={normalizeEnabled} onChange={(e) => setNormalizeEnabled(e.target.checked)} />
-                <span>{t("audit.normalizeEnabledLabel")}</span>
-              </label>
-              {normalizeEnabled && (
-                <>
-                  {normalizeRules.length > 0 && (
-                    <div className="ignore-rules-list">
-                      {normalizeRules.map((rule, i) => (
-                        <div className="ignore-rule-item" key={rule.id}>
-                          <span className="ignore-rule-text">
-                            {rule.type === "prefix"
-                              ? t("audit.normalizePrefix")
-                              : rule.type === "suffix"
-                                ? t("audit.normalizeSuffix")
-                                : t("audit.normalizeReplace")}
-                            : {rule.pattern} → {rule.replacement || t("audit.normalizeDeleteHint")}
-                            {rule.caseSensitive ? ` [${t("audit.caseSensitive")}]` : ""}
-                          </span>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => removeNormalizeRule(i)}
-                            title={t("audit.removeRule")}
-                            aria-label={t("audit.removeRule")}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="field-row">
-                    <select
-                      className="search-input"
-                      aria-label={t("audit.ruleType")}
-                      value={normalizeForm.type}
-                      onChange={(e) => setNormalizeForm({ ...normalizeForm, type: e.target.value as NormalizeRule["type"] })}
-                    >
-                      <option value="prefix">{t("audit.normalizePrefix")}</option>
-                      <option value="suffix">{t("audit.normalizeSuffix")}</option>
-                      <option value="replace">{t("audit.normalizeReplace")}</option>
-                    </select>
-                    <input
-                      type="text"
-                      className="search-input mono"
-                      spellCheck={false}
-                      placeholder={t("audit.matchPattern")}
-                      aria-label={t("audit.matchPattern")}
-                      value={normalizeForm.pattern}
-                      onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
-                    />
-                    <input
-                      type="text"
-                      className="search-input mono"
-                      spellCheck={false}
-                      placeholder={t("audit.replaceTo")}
-                      aria-label={t("audit.replaceTo")}
-                      value={normalizeForm.replacement}
-                      onChange={(e) => setNormalizeForm({ ...normalizeForm, replacement: e.target.value })}
-                    />
-                  </div>
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={normalizeForm.caseSensitive}
-                      onChange={(e) => setNormalizeForm({ ...normalizeForm, caseSensitive: e.target.checked })}
-                    />
-                    <span>{t("audit.caseSensitive")}</span>
-                  </label>
-                  <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>
-                    {t("audit.addNormalizeRule")}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="audit-actions">
-          <button className="btn btn-primary" onClick={runAudit} disabled={loading}>
-            {loading ? (scanCount > 0 ? t("audit.scanning", { count: scanCount }) : t("common.loading")) : t("audit.runAudit")}
+          )}
+          <button className="btn btn-ghost btn-sm audit-settings-toggle" onClick={toggleSettings} aria-expanded={settingsVisible}>
+            <span className="audit-disclosure-icon" aria-hidden="true" />
+            {t("audit.settingsToggle")}
           </button>
+          <button className="btn btn-primary audit-run-button" onClick={runAudit} disabled={loading}>
+            {loading && scanCount === 0 ? t("common.loading") : t("audit.runAudit")}
+          </button>
+          {/* 进度写进按钮里会让按钮随文案变宽、整条动作条左右抖；单拆一栏常驻占位。 */}
+          <span className="audit-run-note" {...statusMessageProps("info")} title={runNote || undefined}>
+            {runNote}
+          </span>
           {rows.length > 0 && (
             <div className="audit-export">
               <button className="btn btn-ghost" onClick={handleExport}>
@@ -1325,7 +1276,225 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               </div>
             </div>
           )}
+          {quickIgnoreNotice && (
+            <div className="audit-action-note" {...statusMessageProps("info")}>
+              <span title={quickIgnoreNotice.text}>{quickIgnoreNotice.text}</span>
+              {quickIgnoreNotice.index >= 0 && (
+                <button className="btn btn-ghost btn-sm" onClick={undoQuickIgnore}>
+                  {t("audit.undo")}
+                </button>
+              )}
+            </div>
+          )}
         </div>
+        {condVisible && (
+          <div className="audit-conditions">
+          <div className="audit-project-row">
+            <label className="field">
+              <span>{t("connection.project")}</span>
+              <Select
+                className="wide"
+                value={selectedProject}
+                options={projectNames.map((n) => ({ value: n, label: localizeDefaultName(n, t) }))}
+                onChange={setSelectedProject}
+              />
+            </label>
+          </div>
+          <div className="audit-envs">
+            {envSources.map((env, index) => (
+              <div className="audit-env-card" key={`${env.conn.id}:${env.namespace}`}>
+                <div className="audit-env-head">
+                  <span
+                    className={`env-badge env-${environmentTone(connectionEnvironmentName(env.conn))}`}
+                    title={localizeDefaultName(connectionEnvironmentName(env.conn), t)}
+                  >
+                    {localizeDefaultName(connectionEnvironmentName(env.conn), t)}
+                  </span>
+                  <span className="audit-env-name">{env.conn.name || env.conn.sourceName}</span>
+                  {envSources.length > 2 && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => removeSource(index)}
+                      title={t("common.delete")}
+                      aria-label={t("common.delete")}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <label className="field">
+                  <span>{t("app.namespace")}</span>
+                  <input
+                    type="text"
+                    className="search-input mono"
+                    spellCheck={false}
+                    value={env.namespace}
+                    placeholder="public"
+                    onChange={(e) => updateSource(index, { namespace: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>group</span>
+                  <input
+                    type="text"
+                    className="search-input mono"
+                    spellCheck={false}
+                    value={env.group}
+                    placeholder={t("diff.groupPlaceholder")}
+                    onChange={(e) => updateSource(index, { group: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>dataId {t("audit.filter")}</span>
+                  <input
+                    type="text"
+                    className="search-input mono"
+                    spellCheck={false}
+                    value={env.dataIdFilter}
+                    placeholder={t("audit.allConfigs")}
+                    onChange={(e) => updateSource(index, { dataIdFilter: e.target.value })}
+                  />
+                </label>
+              </div>
+            ))}
+            {envSources.length < 6 && (
+              <button className="btn btn-ghost btn-sm audit-add-env" onClick={addSource}>
+                {t("audit.addEnv")}
+              </button>
+            )}
+          </div>
+          {settingsVisible && (
+            <div className="audit-settings">
+              {/* 忽略规则 */}
+              <div className="audit-settings-section">
+                <h4>{t("audit.ignoreRulesTitle")}</h4>
+                {ignoreRules.length > 0 && (
+                  <div className="ignore-rules-list">
+                    {ignoreRules.map((rule, i) => (
+                      <div className="ignore-rule-item" key={i}>
+                        <span className="ignore-rule-text">
+                          {rule.dataId && <span className="ignore-rule-dataid">{rule.dataId}</span>}
+                          {rule.key && <span className="ignore-rule-key">{rule.key}</span>}
+                          {!rule.dataId && !rule.key && <span className="ignore-rule-dataid">{t("audit.ignoreRuleAll")}</span>}
+                          <span className="ignore-rule-reason"> — {rule.reason}</span>
+                        </span>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeIgnoreRule(i)}
+                          title={t("audit.removeRule")}
+                          aria-label={t("audit.removeRule")}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="field-row">
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder={t("audit.ignoreDataIdPlaceholder")}
+                    aria-label={t("audit.ignoreDataIdPlaceholder")}
+                    value={ignoreForm.dataId ?? ""}
+                    onChange={(e) => setIgnoreForm({ ...ignoreForm, dataId: e.target.value || undefined })}
+                  />
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder={t("audit.ignoreKeyPlaceholder")}
+                    aria-label={t("audit.ignoreKeyPlaceholder")}
+                    value={ignoreForm.key ?? ""}
+                    onChange={(e) => setIgnoreForm({ ...ignoreForm, key: e.target.value || undefined })}
+                  />
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder={t("audit.ignoreReasonPlaceholder")}
+                    aria-label={t("audit.ignoreReasonPlaceholder")}
+                    value={ignoreForm.reason}
+                    onChange={(e) => setIgnoreForm({ ...ignoreForm, reason: e.target.value })}
+                  />
+                  <button className="btn btn-ghost btn-sm" onClick={addIgnoreRule}>
+                    {t("audit.addRule")}
+                  </button>
+                </div>
+              </div>
+
+              {/* 名称归一化 */}
+              <div className="audit-settings-section">
+                <h4>{t("audit.normalizeTitle")}</h4>
+                <label className="check-row">
+                  <input type="checkbox" checked={normalizeEnabled} onChange={(e) => setNormalizeEnabled(e.target.checked)} />
+                  <span>{t("audit.normalizeEnabledLabel")}</span>
+                </label>
+                {normalizeEnabled && (
+                  <>
+                    {normalizeRules.length > 0 && (
+                      <div className="ignore-rules-list">
+                        {normalizeRules.map((rule, i) => (
+                          <div className="ignore-rule-item" key={rule.id}>
+                            <span className="ignore-rule-text">{describeNormalizeRule(rule, t)}</span>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => removeNormalizeRule(i)}
+                              title={t("audit.removeRule")}
+                              aria-label={t("audit.removeRule")}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="field-row">
+                      <select
+                        className="search-input"
+                        aria-label={t("audit.ruleType")}
+                        value={normalizeForm.type}
+                        onChange={(e) => setNormalizeForm({ ...normalizeForm, type: e.target.value as NormalizeRule["type"] })}
+                      >
+                        <option value="prefix">{t("audit.normalizePrefix")}</option>
+                        <option value="suffix">{t("audit.normalizeSuffix")}</option>
+                        <option value="replace">{t("audit.normalizeReplace")}</option>
+                      </select>
+                      <input
+                        type="text"
+                        className="search-input mono"
+                        spellCheck={false}
+                        placeholder={t("audit.matchPattern")}
+                        aria-label={t("audit.matchPattern")}
+                        value={normalizeForm.pattern}
+                        onChange={(e) => setNormalizeForm({ ...normalizeForm, pattern: e.target.value })}
+                      />
+                      <input
+                        type="text"
+                        className="search-input mono"
+                        spellCheck={false}
+                        placeholder={t("audit.replaceTo")}
+                        aria-label={t("audit.replaceTo")}
+                        value={normalizeForm.replacement}
+                        onChange={(e) => setNormalizeForm({ ...normalizeForm, replacement: e.target.value })}
+                      />
+                    </div>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={normalizeForm.caseSensitive}
+                        onChange={(e) => setNormalizeForm({ ...normalizeForm, caseSensitive: e.target.checked })}
+                      />
+                      <span>{t("audit.caseSensitive")}</span>
+                    </label>
+                    <button className="btn btn-ghost btn-sm" onClick={addNormalizeRule}>
+                      {t("audit.addNormalizeRule")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          </div>
+        )}
       </div>
 
       {/* 过滤与排序 + r139 项目级跨环境内容搜索 */}
@@ -1417,6 +1586,10 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               <label className="check-row audit-filter-opt">
                 <input type="checkbox" checked={hideIgnored} onChange={(e) => setHideIgnored(e.target.checked)} />
                 <span>{t("audit.hideIgnored")}</span>
+              </label>
+              <label className="check-row audit-filter-opt">
+                <input type="checkbox" checked={wrapCells} onChange={(e) => setWrapCells(e.target.checked)} />
+                <span>{t("audit.wrapCells")}</span>
               </label>
               <span className="audit-filter-sort">
                 {(["dataId", "key", "status"] as const).map((key) => (
@@ -1701,7 +1874,7 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
 
       {/* 矩阵表格 */}
       {rows.length > 0 && (
-        <div className="audit-matrix">
+        <div className="audit-matrix" data-wrap={wrapCells ? "1" : "0"}>
           <div className="audit-matrix-header">
             <div className="audit-matrix-row">
               <div className="audit-cell key">{t("audit.configItem")}</div>
@@ -1752,6 +1925,8 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               focusNonce={focusTarget?.nonce ?? -1}
               selectedRowId={selectedRow?.id ?? null}
               onSelectRow={setSelectedRow}
+              rowHeight={wrapCells ? MATRIX_ROW_WRAP_HEIGHT : MATRIX_ROW_HEIGHT}
+              onQuickIgnore={addQuickIgnore}
               t={t}
             />
           )}
@@ -1775,6 +1950,11 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               {baseline && onStartApply && (
                 <button className="btn btn-primary btn-sm" onClick={handleStartApply}>
                   {t("audit.startApply")}
+                </button>
+              )}
+              {selectedRow.status !== "ignored" && (
+                <button className="btn btn-ghost btn-sm" onClick={() => addQuickIgnore(selectedRow)}>
+                  {t("audit.ignoreThis")}
                 </button>
               )}
               <button className="btn btn-ghost btn-sm" onClick={() => setSelectedRow(null)}>

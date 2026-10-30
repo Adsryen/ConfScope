@@ -17,7 +17,7 @@ import type { ElementHandle } from "@playwright/test";
 import { test, expect } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { ensureAuditConditionsExpanded, navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { loadRetestState } from "../state";
 
 const state = loadRetestState();
@@ -263,6 +263,9 @@ test("R88 可点击目标有效命中区全站 ≥24px（11 视图 + 9 个带数
   await page.waitForTimeout(300);
   await page.getByRole("button", { name: "执行审计" }).click();
   await expect(page.locator(".audit-matrix-body .audit-matrix-row").first()).toBeVisible({ timeout: 60_000 });
+  // 轮142 A4：审计跑完条件区自动收起。普查要覆盖的是「用户要改条件时看到的那一屏」，
+  // 所以先展开再量——否则环境卡里那些 select/输入框整批退出普查范围，绿得毫无意义。
+  await ensureAuditConditionsExpanded(page);
   await check("配置矩阵+结果");
   await page.locator(".audit-matrix-body .audit-matrix-row").first().click();
   await expect(page.locator(".audit-detail").first()).toBeVisible({ timeout: 10_000 });

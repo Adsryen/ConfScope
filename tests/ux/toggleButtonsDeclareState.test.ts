@@ -67,7 +67,10 @@ const STATE_ATTR = /aria-(?:pressed|expanded)=|role="switch"|aria-checked=/;
 
 /** 波43 修掉的 13 处站点：文件 + 必须出现的那条属性表达式（取值必须来自组件现有状态）。 */
 const FIXED_SITES: Array<[string, string]> = [
-  ["src/components/AuditView.tsx", "aria-expanded={showSettings}"],
+  // 轮142 A4：审计设置钮读的是派生的 settingsVisible（= 条件区展开 && showSettings），不是
+  // showSettings 本身——条件区折叠时设置面板根本不在 DOM 里，读旧值会让按钮说谎。
+
+  ["src/components/AuditView.tsx", "aria-expanded={settingsVisible}"],
   ["src/components/AuditView.tsx", "aria-pressed={statusFilter.has(status)}"],
   ["src/components/AuditView.tsx", "aria-pressed={sortKey === key}"],
   // 轮67 R67-WP6：连接管理那 3 颗口令开关（其中一颗同时管 4 个框）收进 PasswordField，
@@ -137,7 +140,7 @@ describe("布尔翻转按钮必须声明状态（R69 守卫）", () => {
 
   it("展开/收起一块内容的按钮用 aria-expanded，不许混用 aria-pressed", () => {
     const pairs: Array<[string, string]> = [
-      ["src/components/AuditView.tsx", "aria-expanded={showSettings}"],
+      ["src/components/AuditView.tsx", "aria-expanded={settingsVisible}"],
       ["src/components/ConnectionManager.tsx", "aria-expanded={showSSHConfig}"],
       ["src/components/DiffView.tsx", "aria-expanded={!sourcesCollapsed}"],
       ["src/components/MessageCenter.tsx", "aria-expanded={open}"],

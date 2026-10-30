@@ -18,7 +18,7 @@
 import { expect, test } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog, setDiffSource } from "./ui";
+import { ensureAuditConditionsExpanded, navigate, dismissStartupDialog, setDiffSource } from "./ui";
 import { loadRetestState } from "../state";
 import { MIN_TEXT_NODES, nodeFloorViolations } from "../contrastFloors";
 
@@ -356,6 +356,9 @@ test("轮38 R94 全站文字对比度普查：真不达 AA 必须为 0", async (
   await expect(page.locator(".audit-matrix-body .audit-matrix-row").first()).toBeVisible({ timeout: 60_000 });
   await page.locator(".audit-matrix-body .audit-matrix-row").first().click();
   await expect(page.locator(".audit-detail").first()).toBeVisible({ timeout: 10_000 });
+  // 轮142 A4：审计跑完条件区自动收起。和下面展开重复配置清单同一个道理——收起的那一块正是
+  // 最可能出现对比度缺口的次要色（环境卡字段标签、chip），普查要把它请回来，而不是让下限塌下去。
+  await ensureAuditConditionsExpanded(page);
   // 重复配置清单改成默认收起 + 每页 10 组之后，这一档不展开就少扫约 340 个文本节点
   // （实测 165 < 下限 505）。下限不许压低：塌下来的这 340 个节点正是清单里最可能出现
   // 对比度缺口的地方（chip、徽标、忽略项都是新加的次要色）。普查的做法是把它展开并翻完分页，

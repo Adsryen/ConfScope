@@ -61,6 +61,18 @@ vi.mock("../i18n", () => ({
         "audit.statusIgnored": "Ignored",
         "audit.addEnv": "+ Env",
         "audit.settingsToggle": "Ignore Rules · Name Normalization",
+        "audit.condExpand": "Show audit conditions",
+        "audit.condCollapse": "Hide audit conditions",
+        "audit.condSummaryAria": "Current audit conditions",
+        "audit.condProject": "Project: {name}",
+        "audit.condEnvs": "{count} environments",
+        "audit.condIgnores": "{count} ignore rules",
+        "audit.ignoreThis": "Ignore this item",
+        "audit.ignoreThisShort": "Ignore",
+        "audit.ignoredAdded": "Ignored {dataId} / {key}",
+        "audit.ignoredAlready": "Already ignored",
+        "audit.undo": "Undo",
+        "audit.wrapCells": "Wrap cell text",
         "audit.ignoreRulesTitle": "Ignore Rules",
         "audit.ignoreRuleAll": "All",
         "audit.ignoreReasonPlaceholder": "Ignore reason",
@@ -677,12 +689,120 @@ describe("AuditView", () => {
     fireEvent.click(sort);
     expect(sort).toHaveAttribute("aria-pressed", "true");
 
-    const disclosure = document.querySelector(".audit-settings-toggle button") as HTMLElement;
+    // 轮142 A1：类名原本挂在包裹的 div 上，现在直接挂按钮（包裹层只是为了摆位置，白拿一层 DOM）。
+    const disclosure = document.querySelector(".audit-settings-toggle") as HTMLElement;
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     // 折叠的那块内容真的出来了，aria-expanded 不是在骗人
     expect(document.querySelector(".audit-settings")).toBeInTheDocument();
+  });
+
+  // ── 轮142 A：条件区折叠 / 快速忽略 / 换行档 ────────────────────────────────
+  it("A4：跑完审计自动收起条件区，摘要栏替它把条件留在视野，点折叠钮可再展开", async () => {
+    oneRowMatrix();
+    const { container } = render(<AuditView connections={twoEnvs()} />);
+    // 审计前条件区必须展开（此时条件就是页面主体）
+    expect(container.querySelectorAll(".audit-env-card")).toHaveLength(2);
+    expect(container.querySelector(".audit-cond-toggle")).toBeNull();
+
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    // 收起后环境卡片整体不在 DOM 里，摘要 chips 顶上
+    expect(container.querySelector(".audit-env-card")).toBeNull();
+    const toggle = container.querySelector(".audit-cond-toggle") as HTMLElement;
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector(".audit-cond-summary")).toBeTruthy();
+    expect(container.querySelector(".audit-cond-chip")?.textContent).toBe("Project: test-proj");
+    // 折叠态里设置面板也不许留着（R69 那条用例读的就是这个说谎风险）
+    expect(container.querySelector(".audit-settings")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(container.querySelectorAll(".audit-env-card")).toHaveLength(2);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("A4：折叠态点「忽略规则与归一化」先把条件区展开，不让用户点了没反应", async () => {
+    oneRowMatrix();
+    const { container } = render(<AuditView connections={twoEnvs()} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    fireEvent.click(container.querySelector(".audit-settings-toggle") as HTMLElement);
+    expect(container.querySelector(".audit-env-card")).toBeTruthy();
+    expect(container.querySelector(".audit-settings")).toBeInTheDocument();
+  });
+
+  /** 矩阵第一行的状态徽标文本（状态筛选片也叫这个名字，所以必须限定在 body 里查）。 */
+  const firstRowBadge = (container: HTMLElement) =>
+    container.querySelector(".audit-matrix-body .audit-matrix-row .audit-status-badge")?.textContent;
+
+  it("A2：行内「忽略」秒生效、可撤销，且一次都不许多取数", async () => {
+    oneRowMatrix();
+    const { container } = render(<AuditView connections={twoEnvs()} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+    expect(firstRowBadge(container)).toBe("Consistent");
+
+    const listCalls = apiMocks.listAllConfigs.mock.calls.length;
+    const getCalls = apiMocks.getConfig.mock.calls.length;
+    expect(listCalls).toBeGreaterThan(0);
+
+    fireEvent.click(container.querySelector(".audit-ignore-inline") as HTMLElement);
+
+    // 同一批数据里那一行改判成「已忽略」，纯本地重算，不多打一次网络
+    await waitFor(() => expect(firstRowBadge(container)).toBe("Ignored"));
+    expect(apiMocks.listAllConfigs).toHaveBeenCalledTimes(listCalls);
+    expect(apiMocks.getConfig).toHaveBeenCalledTimes(getCalls);
+    // 行改成忽略态后那颗钮自己退场（对已忽略的行再点一次没有意义）
+    expect(container.querySelector(".audit-ignore-inline")).toBeNull();
+    // 回执把规则内容念出来，并给出撤销入口
+    expect(container.querySelector(".audit-action-note")?.textContent).toContain("Ignored app.yaml / server.port");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(firstRowBadge(container)).toBe("Consistent"));
+    expect(container.querySelector(".audit-action-note")).toBeNull();
+    expect(apiMocks.listAllConfigs).toHaveBeenCalledTimes(listCalls);
+    // 撤销只摘掉刚加的那一条，规则清单回到空
+    expect(readViewState<unknown[]>("audit.ignoreRules")).toHaveLength(0);
+  });
+
+  it("A2：忽略→撤销→再忽略只留一条规则，全程不重新取数", async () => {
+    oneRowMatrix();
+    const { container } = render(<AuditView connections={twoEnvs()} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    fireEvent.click(container.querySelector(".audit-ignore-inline") as HTMLElement);
+    await waitFor(() => expect(firstRowBadge(container)).toBe("Ignored"));
+    expect(readViewState<unknown[]>("audit.ignoreRules")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(firstRowBadge(container)).toBe("Consistent"));
+
+    fireEvent.click(container.querySelector(".audit-ignore-inline") as HTMLElement);
+    await waitFor(() => expect(firstRowBadge(container)).toBe("Ignored"));
+    expect(readViewState<unknown[]>("audit.ignoreRules")).toHaveLength(1);
+    // 一轮审计 = 2 环境 × 1 配置；忽略/撤销来回三次都不许再碰一次网络
+    expect(apiMocks.listAllConfigs).toHaveBeenCalledTimes(2);
+    expect(apiMocks.getConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("A3：换行档只改行高档位，窗口化的 spacer 跟着换到 108px/行", async () => {
+    oneRowMatrix();
+    const { container } = render(<AuditView connections={twoEnvs()} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText("server.port");
+
+    expect(container.querySelector(".audit-matrix")).toHaveAttribute("data-wrap", "0");
+    expect(container.querySelector(".audit-matrix-spacer")).toHaveStyle({ height: "48px" });
+
+    fireEvent.click(screen.getByLabelText("Wrap cell text"));
+    expect(container.querySelector(".audit-matrix")).toHaveAttribute("data-wrap", "1");
+    expect(container.querySelector(".audit-matrix-spacer")).toHaveStyle({ height: "108px" });
+    // 行高常量透传到位：revealIndex / 窗口切片都吃这个值，漏传就会在换行档下算错偏移
+    expect(container.querySelector(".audit-matrix-window")).toHaveStyle({ transform: "translateY(0px)" });
   });
 
   // ── r110 跨配置重复检查 ─────────────────────────────────────────────────
@@ -1066,6 +1186,12 @@ describe("AuditView · r139 项目级跨环境内容搜索", () => {
     return view;
   }
 
+  /** 轮142 A4：审计跑完后条件区自动收起；需要读环境卡片字段的用例先把它展开。 */
+  function expandConditions() {
+    const toggle = document.querySelector(".audit-cond-toggle") as HTMLElement | null;
+    if (toggle && toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
+  }
+
   /** 输入并回车提交（走 runNow，不等 400ms 防抖，也不让半截输入当已生效条件）。 */
   function typeAndSubmit(input: HTMLElement, value: string) {
     fireEvent.change(input, { target: { value } });
@@ -1138,6 +1264,8 @@ describe("AuditView · r139 项目级跨环境内容搜索", () => {
     expect(document.activeElement).toBe(search);
 
     // 焦点在环境卡片的 dataId 输入框里：Ctrl+F 归那个框（原生查找），不许抢
+    // 轮142 A4：跑完审计条件区自动收起，卡片不在 DOM 里 ⇒ 先展开（收起后也确实没有别人的输入框可抢）
+    expandConditions();
     const other = container.querySelector("input.search-input.mono") as HTMLInputElement;
     other.focus();
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });

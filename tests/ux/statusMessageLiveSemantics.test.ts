@@ -39,6 +39,7 @@ interface Site {
  * WP-15 本机版本历史面板再多一处「读不出来」的错误提示，共 25 处；
  * 轮73 R73-P3 设置页保存徽章拆成「节内就近」与「工作区兜底」两种容器，净增 1 处（共 26 处、20 条名单）；
  * 轮99 设置页保留配额那一节新增 3 处成功提示与 1 处「已回落默认值」的琥珀提示，共 30 处、名单仍是 20 条。
+ * 轮142 审计动作条加扫描进度与快速忽略回执两处站点，共 32 处、22 条名单。
  * 新宿主一律整族登记：只补 SITES 不补沉默/播报名单，等于给下一条裸提示留了空子。
  */
 const SITES: Site[] = [
@@ -46,6 +47,10 @@ const SITES: Site[] = [
   // 2 处：主错误提示 + 更新交接面板的错误提示（轮62），两处都展开 error 语义
   { file: "src/components/About.tsx", marker: 'className="test-msg err"', count: 2, spread: ERROR },
   { file: "src/components/AuditView.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
+  // 轮142 A1/A2：审计动作条新增两处常驻提示——扫描进度（从按钮文案里搬出来，免得按钮随文案变宽
+  // 把整条动作条顶得左右抖）与快速忽略的回执。两个都是新容器，整族登记，不许留裸 div。
+  { file: "src/components/AuditView.tsx", marker: 'className="audit-run-note"', count: 1, spread: INFO },
+  { file: "src/components/AuditView.tsx", marker: 'className="audit-action-note"', count: 1, spread: INFO },
   { file: "src/components/ConfigEditor.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
   { file: "src/components/DeleteConfirm.tsx", marker: 'className="test-msg err"', count: 1, spread: ERROR },
   { file: "src/components/HistoryView.tsx", marker: 'className="pad-msg err"', count: 1, spread: ERROR },
@@ -180,8 +185,8 @@ describe("状态提示的播报语义（波33 R54）", () => {
   });
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
-    expect(SITES).toHaveLength(20);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(30);
+    expect(SITES).toHaveLength(22);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(32);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {

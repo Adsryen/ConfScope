@@ -306,6 +306,23 @@ export async function readDiffGroupOptions(page: Page, side: "left" | "right"): 
   return texts;
 }
 
+/**
+ * 把审计条件区展开（轮142 A4 之后，凡「跑完审计还要读环境卡」的用例都必须先走这一步）。
+ *
+ * A4 的默认行为是「审计跑完自动收起条件区」——条件已无用，让位给矩阵本体，折叠态只剩摘要 chips。
+ * 于是旧写法「点执行审计 → 直接 .audit-env-card 里改筛选」会点到一个根本不存在的节点。
+ * 判状态一律读 aria-expanded，不靠按钮文案（zh/en 两套 label 会变）；展开后必须真的等到环境卡出现，
+ * 否则后续断言会在过渡帧里读到空集合，红成「布局问题」而不是「没展开」。
+ */
+export async function ensureAuditConditionsExpanded(page: Page): Promise<void> {
+  const toggle = page.locator(".audit-cond-toggle").first();
+  await expect(toggle, "轮142 A4：审计跑完条件区自动收起，折叠/展开的入口必须一直在").toBeVisible({ timeout: 15_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click();
+  }
+  await expect(page.locator(".audit-env-card").first()).toBeVisible({ timeout: 15_000 });
+}
+
 /** 读取 CodeView 渲染出的完整代码文本（含语法高亮 span 的文本）。 */
 export async function readCodeViewText(page: Page): Promise<string> {
   return page.locator(".code-area").first().innerText();

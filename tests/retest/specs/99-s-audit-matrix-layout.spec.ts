@@ -28,7 +28,7 @@ import { expect, type Page } from "@playwright/test";
 import { test } from "./retestTest";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { republishRetestData } from "../bridge/republishData";
-import { navigate, dismissStartupDialog } from "./ui";
+import { ensureAuditConditionsExpanded, navigate, dismissStartupDialog } from "./ui";
 
 /** 一格滚轮的像素量：Chromium 的 mouse.wheel 走 deltaMode=0，120 就是 120px。 */
 const WHEEL_STEP = 120;
@@ -248,6 +248,19 @@ test("F35 配置矩阵短窗口布局 + sticky + chrome 滚轮分区", async ({ 
   await page.setViewportSize({ width: 1280, height: 820 });
   await bootstrap(page);
   await runMatrixAudit(page);
+
+  // ── AC0-（轮142 A4）：跑完审计条件区必须自己让位 ──
+  // 这一档判的是 A4 的产品结论本身：旧版审计跑完，整排环境卡还占着大半个视口，矩阵要往下滚才看得见。
+  // 收起后摘要 chips 顶上、环境卡退出 DOM，工具栏必须严格矮一截（展开态在下面的 AC0 里量）。
+  const collapsedChrome = await page.evaluate(readChrome);
+  console.log(`C0- 折叠态 1280x820 ${JSON.stringify(collapsedChrome)}`);
+  await expect(page.locator(".audit-cond-toggle").first()).toHaveAttribute("aria-expanded", "false");
+  expect(collapsedChrome.cardH, "AC0- 折叠态不该还有环境卡").toBe(0);
+  expect(await page.locator(".audit-cond-summary .audit-cond-chip").count(), "AC0- 折叠态必须留下项目/环境/忽略/归一化摘要").toBeGreaterThanOrEqual(4);
+
+  await ensureAuditConditionsExpanded(page);
+  const expandedChrome = await page.evaluate(readChrome);
+  expect(collapsedChrome.toolbarH, `AC0- 折叠态工具栏（${collapsedChrome.toolbarH}）必须严格矮于展开态（${expandedChrome.toolbarH}）`).toBeLessThan(expandedChrome.toolbarH);
 
   // ── AC0（F-36）：工具栏账单 + 环境卡字段并排，且窄宽度只回落到 2 行、不高于改前 398 ──
   for (const [w, limit] of [

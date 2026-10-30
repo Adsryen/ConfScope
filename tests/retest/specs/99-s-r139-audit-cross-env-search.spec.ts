@@ -21,7 +21,7 @@ import { test, expect } from "./retestTest";
 import type { Page } from "@playwright/test";
 import { installRetestBridge } from "../bridge/installRetestBridge";
 import { publishNacosContent } from "../bridge/republishData";
-import { navigate, dismissStartupDialog } from "./ui";
+import { ensureAuditConditionsExpanded, navigate, dismissStartupDialog } from "./ui";
 import { loadRetestState, type RetestState } from "../state";
 
 const state = loadRetestState();
@@ -336,6 +336,8 @@ test.describe("r139 配置矩阵跨环境内容搜索", () => {
     expect(afterFirst.cls).toContain("audit-search-input");
 
     // ② 焦点在环境卡的 dataId 筛选框：那儿的 Ctrl+F 归浏览器原生查找，页面抢了就成了死键（轮39 取证 #7/#8）
+    // 轮142 A4：审计跑完条件区自动收起，要读环境卡得先把它展开（否则这里点到的是不存在的节点）。
+    await ensureAuditConditionsExpanded(page);
     const envFilter = page.locator(".audit-env-card label.field:has(> span:has-text('dataId')) input").first();
     const envFilterHandle = await envFilter.elementHandle();
     await envFilter.click();
