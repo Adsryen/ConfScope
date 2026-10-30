@@ -18,6 +18,8 @@
  *    且必须在 `if (!enableFind || !active) return` 之后——先打标记再退出，等于把
  *    「隐藏的视图会抢」这条假信息重新写回 DOM，就是本轮的根因；
  * 4. 全站只有这些监听点劫持 Ctrl+F/F3，别处再加一份所有权判定会被第一条判红。
+ *    r139 起键位本身也收进 lib（isFindShortcutKey）：矩阵页要用 Ctrl+F 聚焦页面级搜索框，
+ *    它消费谓词而不是抄键名，所以仍不算「多一处劫持点」——这条由下面第 6 个用例钉住形状。
  *    轮49 把监听点的名单从「三个宿主」改成「两个宿主 + 一个共享层」：量 DOM 那一派
  *    （DiffPanel / UnifiedDiff）改用 src/lib/useFindLayer.ts，宿主自己再挂一份就判红。
  */
@@ -38,6 +40,16 @@ const LAYER_HOSTS = ["src/components/DiffPanel.tsx", "src/components/UnifiedDiff
 const VIEWS = [CODE_VIEW, CODE_EDITOR];
 /** 「挂着查找监听」这段代码的全部合法出处。 */
 const LISTENERS = [...VIEWS, FIND_LAYER];
+/**
+ * r139 新增的第二类消费方：配置矩阵的跨环境内容搜索。
+ *
+ * 它与代码视图的区别只在「接管之后做什么」——代码视图打开正文上的查找层，
+ * 矩阵页把焦点送进页面级搜索框（虚拟列表量不到 DOM 矩形，用不了那一层）。
+ * 键位口径与「焦点在别人家文本框里就不许抢」这两条判定仍归 lib，所以它不进 LISTENERS
+ * （那一组要按接管形状、注册表属性、active 短路的字面量逐条核），但必须在这里登记：
+ * 少了登记，下一个加 Ctrl+F 的人就又有「自己抄一份 key === "f"」的借口。
+ */
+const PREDICATE_HOSTS = ["src/components/AuditView.tsx"];
 const ATTR = "FIND_KEY_OWNER_ATTR";
 
 /** 视图里唯一合法的接管形状：把事件源和本视图根交给共享判定，自己不再算条件。 */
@@ -176,6 +188,22 @@ describe("查找快捷键所有权单一出处（轮39 R39-3）", () => {
     expect(hijackers, "出现了多一处查找快捷键劫持点").toEqual([...LISTENERS].sort());
   });
 
+  it("键位谓词只有一份，非代码视图的消费方走谓词 + 共享焦点判定", () => {
+    const lib = readScannedSource(LIB);
+    expect(lib, "Ctrl+F 的键位判定不再在 lib 里了").toMatch(/export function isFindShortcutKey\(/);
+    // 键名字面量只许出现在 lib 与已登记的监听点，抄一份就是第二套键位
+    const literalUsers = sourceFiles()
+      .filter((file) => file !== LIB && !LISTENERS.includes(file))
+      .filter((file) => FIND_KEY_TEST.test(readScannedSource(file)));
+    expect(literalUsers, "除监听点外又有人自己判 Ctrl+F 的键名").toEqual([]);
+    for (const file of PREDICATE_HOSTS) {
+      const src = readScannedSource(file);
+      expect(src, `${file} 自己抄了键位判定`).toContain("isFindShortcutKey(");
+      expect(src, `${file} 的「焦点在文本框里就让位」不是共享判定`).toContain("holdsTextCaret(");
+      expect(src, `${file} 的查找快捷键不再先挡输入法组合态`).toMatch(/if \(isImeComposing\([^)]*\)\) return/);
+    }
+  });
+
   it("组合态（IME）先让位：每条监听都在所有权判定之前挡掉输入法候选", () => {
     for (const file of LISTENERS) {
       const block = findKeyEffect(readScannedSource(file));
@@ -199,6 +227,16 @@ describe("守卫自身不空转：三种退回必须判红", () => {
     );
     expect(regressed, "变异没落到接管点上，这条自检是空转").not.toBe(block);
     expect(LEGACY_TESTS.some(([, re]) => re.test(regressed))).toBe(true);
+  });
+
+  it("自检三：矩阵页退回自己抄键名字面量，普查必须判红", () => {
+    const host = readScannedSource(PREDICATE_HOSTS[0]);
+    const regressed = host.replace(
+      "if (!isFindShortcutKey(event)) return;",
+      'const key = event.key;\n      if (!((event.ctrlKey || event.metaKey) && (key === "f" || key === "F"))) return;'
+    );
+    expect(regressed, "变异没落到接管点上，这条自检是空转").not.toBe(host);
+    expect(FIND_KEY_TEST.test(regressed), "变异后的形状没被普查抓到，普查是空转的").toBe(true);
   });
 
   it("自检二：把 .code-view 存在性猜测加回来必须判红", () => {

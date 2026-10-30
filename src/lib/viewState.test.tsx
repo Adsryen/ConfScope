@@ -249,3 +249,100 @@ describe("视图状态存取", () => {
     expect(readViewState<number>("audit.scroll.matrix")).toBe(900);
   });
 });
+
+describe("revealIndex · 页面不碰 scrollTop 的定位出口", () => {
+  /**
+   * jsdom 没有布局引擎：可视高度与内容高度得自己喂，否则 max 恒为 0，
+   * 「居中」与「夹住」两种情形都退化成同一次写入，用例就成了空的。
+   */
+  type Reveal = (index: number, itemHeight: number) => void;
+
+  function RevealProbe({
+    name,
+    clientHeight,
+    scrollHeight,
+    api,
+  }: {
+    name: string;
+    clientHeight: number;
+    scrollHeight: number;
+    api: { current: Reveal | null };
+  }) {
+    const { ref, onScroll, revealIndex } = useScrollMemory(name, 0);
+    api.current = revealIndex;
+    return (
+      <div
+        data-testid="scroller"
+        ref={(node) => {
+          if (node) {
+            Object.defineProperty(node, "clientHeight", { configurable: true, value: clientHeight });
+            Object.defineProperty(node, "scrollHeight", { configurable: true, value: scrollHeight });
+            setScrollMax(node, scrollHeight - clientHeight);
+          }
+          ref.current = node;
+        }}
+        onScroll={onScroll}
+      />
+    );
+  }
+
+  function mountProbe(name: string, clientHeight = 200, scrollHeight = 2000) {
+    const api: { current: Reveal | null } = { current: null };
+    const view = render(<RevealProbe name={name} clientHeight={clientHeight} scrollHeight={scrollHeight} api={api} />);
+    const el = view.getByTestId("scroller");
+    return { el, reveal: (index: number, itemHeight: number) => api.current?.(index, itemHeight), view };
+  }
+
+  it("目标已经在可视区里就不动，也不写位置", () => {
+    const { el, reveal } = mountProbe("audit.scroll.matrix");
+    act(() => scrollTo(el, 960)); // 视口 960–1160
+
+    writes = [];
+    act(() => reveal(21, 48)); // 1008–1056：整条已经在这一屏里
+
+    expect(el.scrollTop).toBe(960);
+    expect(writes).toEqual([]);
+    expect(readViewState<number>("audit.scroll.matrix")).toBe(960);
+  });
+
+  it("走到可视区下方时把它居中，位置同步进记忆（页面自己写 scrollTop 会漏掉这一步）", () => {
+    const { el, reveal } = mountProbe("audit.scroll.matrix");
+    writes = [];
+
+    act(() => reveal(20, 48)); // top=960，(200-48)/2=76 ⇒ 884
+
+    expect(el.scrollTop).toBe(884);
+    expect(readViewState<number>("audit.scroll.matrix")).toBe(884);
+  });
+
+  it("往回走到第一条时贴顶，不减出负数", () => {
+    const { el, reveal } = mountProbe("audit.scroll.matrix");
+    act(() => scrollTo(el, 960));
+
+    act(() => reveal(0, 48)); // 0-76 ⇒ 夹到 0
+
+    expect(el.scrollTop).toBe(0);
+    expect(readViewState<number>("audit.scroll.matrix")).toBe(0);
+  });
+
+  it("接近末尾时夹在可滚动范围内，不把越界的值写进 DOM 和记忆", () => {
+    const { el, reveal } = mountProbe("history.scroll.list");
+
+    act(() => reveal(40, 48)); // top=1920 ⇒ 居中 1844，max=2000-200=1800
+
+    expect(el.scrollTop).toBe(1800);
+    expect(readViewState<number>("history.scroll.list")).toBe(1800);
+  });
+
+  it("空列表与非法入参都不动（列表还没数据时导航不该报错）", () => {
+    const { el, reveal } = mountProbe("backup.scroll.list", 0, 0);
+    writes = [];
+
+    act(() => reveal(0, 48));
+    act(() => reveal(-1, 48));
+    act(() => reveal(3, 0));
+
+    expect(el.scrollTop).toBe(0);
+    expect(writes).toEqual([]);
+  });
+});

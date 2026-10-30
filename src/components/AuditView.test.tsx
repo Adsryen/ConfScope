@@ -97,6 +97,27 @@ vi.mock("../i18n", () => ({
         "common.configListTruncated": "Scan cap reached: only the first {count} entries were fetched, results may be incomplete",
         "common.configListPartial": "Config list page(s) {pages} failed to load: only {count} entries fetched, results are incomplete",
         "audit.scanning": "Scanning... {count} loaded",
+        // r139 跨环境内容搜索
+        "audit.searchGroupAria": "Matrix content search",
+        "audit.searchScopeGroupAria": "Search scope",
+        "audit.searchScopeAll": "ScopeAll",
+        "audit.searchScopeName": "ScopeName",
+        "audit.searchScopeValue": "ScopeValue",
+        "audit.searchPlaceholder": "Search matrix (Ctrl+F)",
+        "audit.searchAriaLabel": "Search matrix content",
+        "audit.searchPrev": "Previous match",
+        "audit.searchNext": "Next match",
+        "audit.searchNoHit": "No matches",
+        "audit.searchRunAndSearch": "Run and search",
+        "audit.searchNeedsAudit": "No audit run yet",
+        "audit.searchHitsSummary": "{hits} hits in {total} rows across {envs} envs",
+        "audit.searchOnlyHits": "Matching rows only",
+        "audit.searchCapped": "capped at {max}, {rest} rows not searched",
+        "audit.searchRangesTruncated": "{count} cells over {max} marks",
+        "audit.searchScopeIncomplete": "scope incomplete",
+        "audit.searchEnvCount": "{env}: {count} hits",
+        "audit.searchHitSuffix": "{count} hits total",
+        "audit.searchNoHitInScope": 'No "{term}" in {total} rows across {envs} envs',
       };
       const text = map[key] ?? key;
       if (!params) return text;
@@ -1006,5 +1027,199 @@ describe("AuditView", () => {
     // 换一批检查结果（关掉同 key 判据）就回到第一页，不带着旧页码
     fireEvent.click(panel.querySelector(".dup-check-bar label.check-row input") as HTMLInputElement);
     expect(panel.querySelectorAll("li.dup-check-group")).toHaveLength(0);
+  });
+});
+
+describe("AuditView · r139 项目级跨环境内容搜索", () => {
+  /**
+   * 夹具：一份配置两个环境，server.token 在开发侧出现两次、生产侧一次。
+   * 于是搜 alpha 应当是「命中 3 处 · 1 行 · 涉及 2 个环境 · 列头徽标 2 / 1」——
+   * 徽标数、格内红底数、计数三处必须同源，这份夹具正好能把它们钉在一起。
+   */
+  const conns = [
+    makeConnection({ id: "c1", name: "dev", environmentName: "Development", sourceName: "lan" }),
+    makeConnection({ id: "c2", name: "prod", environmentName: "Production", sourceName: "cloud" }),
+  ];
+
+  beforeEach(() => {
+    clearViewState();
+    localStorage.removeItem("cs.settings");
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listConfigs.mockResolvedValue({
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", configType: "yaml" }],
+      totalCount: 1,
+    });
+    apiMocks.getConfig
+      .mockResolvedValueOnce("server:\n  port: 8080\n  token: alpha alpha")
+      .mockResolvedValueOnce("server:\n  port: 8080\n  token: alpha");
+  });
+
+  /** 跑完一轮审计并返回搜索框（两个环境都取完数才有矩阵行）。
+   *  anchor = 等待出现的那一行：子夹具只喂一份不同正文时，等的那行可能已经被换掉。 */
+  async function runAndMount(anchor = "server.port") {
+    const view = render(<AuditView connections={conns} />);
+    fireEvent.click(screen.getByText("Run Audit"));
+    await screen.findByText(anchor);
+    return view;
+  }
+
+  /** 输入并回车提交（走 runNow，不等 400ms 防抖，也不让半截输入当已生效条件）。 */
+  function typeAndSubmit(input: HTMLElement, value: string) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  }
+
+  it("默认只看命中行：未命中行折叠，取消勾选后回来", async () => {
+    const { container } = await runAndMount();
+    const search = screen.getByLabelText("Search matrix content");
+    expect(container.querySelector(".audit-search")).toBeTruthy();
+    typeAndSubmit(search, "alpha");
+
+    expect(screen.queryByText("server.port")).toBeNull();
+    expect(screen.getByText("server.token")).toBeTruthy();
+    expect(container.querySelector(".audit-search-summary-main")?.textContent).toBe("3 hits in 2 rows across 2 envs");
+
+    fireEvent.click(screen.getByLabelText("Matching rows only"));
+    expect(screen.getByText("server.port")).toBeTruthy();
+  });
+
+  it("列头徽标数 = 该列格子里能数出来的红底数，当前停靠处只有一个实心高亮", async () => {
+    const { container } = await runAndMount();
+    typeAndSubmit(screen.getByLabelText("Search matrix content"), "alpha");
+
+    const badges = Array.from(container.querySelectorAll(".audit-env-hit-badge")).map((el) => el.textContent);
+    expect(badges).toEqual(["2", "1"]);
+    const valueCells = container.querySelectorAll(".audit-matrix-body .audit-cell.value");
+    expect(valueCells).toHaveLength(2);
+    expect(valueCells[0].querySelectorAll("mark.search-hit")).toHaveLength(2);
+    expect(valueCells[1].querySelectorAll("mark.search-hit")).toHaveLength(1);
+    // 命中行只画左侧标记线，不铺整行背景：行背景被状态语义占用（矩阵的设计前提）
+    const row = container.querySelector(".audit-matrix-body .audit-matrix-row.has-hit") as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row.classList.contains("current-hit")).toBe(true);
+    expect(container.querySelectorAll("mark.search-hit-current")).toHaveLength(1);
+  });
+
+  it("Enter 与 ↑↓ 逐处前进/后退，走到末尾再 Enter 回绕到第一处", async () => {
+    const { container } = await runAndMount();
+    const search = screen.getByLabelText("Search matrix content");
+    typeAndSubmit(search, "alpha");
+    const count = () => container.querySelector(".audit-search-count")?.textContent;
+    expect(count()).toBe("1/3");
+
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(count()).toBe("2/3");
+    fireEvent.keyDown(search, { key: "F3" });
+    expect(count()).toBe("3/3");
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(count()).toBe("1/3");
+    fireEvent.keyDown(search, { key: "F3", shiftKey: true });
+    expect(count()).toBe("3/3");
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(count()).toBe("2/3");
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    expect(count()).toBe("3/3");
+  });
+
+  it("Ctrl+F：焦点没有光标时聚焦搜索框，落在别人的输入框里就让位", async () => {
+    const { container } = await runAndMount();
+    const search = screen.getByLabelText("Search matrix content") as HTMLInputElement;
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(document.activeElement).toBe(search);
+
+    // ⌘F 同一口径（macOS）
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    expect(document.activeElement).toBe(search);
+
+    // 焦点在环境卡片的 dataId 输入框里：Ctrl+F 归那个框（原生查找），不许抢
+    const other = container.querySelector("input.search-input.mono") as HTMLInputElement;
+    other.focus();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(document.activeElement).toBe(other);
+
+    // 输入法组合态期间不劫持
+    other.blur();
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true, isComposing: true });
+    expect(document.activeElement).not.toBe(search);
+
+    // Alt+F / 单独按 F 都不算
+    fireEvent.keyDown(window, { key: "f", altKey: true });
+    expect(document.activeElement).not.toBe(search);
+  });
+
+  it("0 命中把作用域念出来，不只说「没有结果」", async () => {
+    const { container } = await runAndMount();
+    typeAndSubmit(screen.getByLabelText("Search matrix content"), "zzz");
+    expect(container.querySelector(".audit-search-nohit")?.textContent).toBe('No "zzz" in 2 rows across 2 envs');
+    expect(container.querySelector(".audit-search-count")?.textContent).toBe("No matches");
+  });
+
+  it("仅名称 / 仅值 两档看到的集合必须能解释（互斥而不是值优先）", async () => {
+    const { container } = await runAndMount();
+    const search = screen.getByLabelText("Search matrix content");
+    const tabs = container.querySelectorAll<HTMLButtonElement>(".audit-search .view-mode button");
+    expect(Array.from(tabs).map((b) => b.textContent)).toEqual(["ScopeAll", "ScopeName", "ScopeValue"]);
+
+    // server 只出现在 key 名称里
+    typeAndSubmit(search, "server");
+    expect(container.querySelector(".audit-search-summary-main")?.textContent).toBe("2 hits in 2 rows across 2 envs");
+
+    fireEvent.click(tabs[2]);
+    expect(container.querySelector(".audit-search-nohit")?.textContent).toBe('No "server" in 2 rows across 2 envs');
+
+    fireEvent.click(tabs[1]);
+    expect(container.querySelector(".audit-search-summary-main")?.textContent).toBe("2 hits in 2 rows across 2 envs");
+  });
+
+  it("还没跑过审计时「执行并搜索」一次搞定：取完数直接带着原词命中", async () => {
+    const { container } = render(<AuditView connections={conns} />);
+    const search = screen.getByLabelText("Search matrix content");
+    fireEvent.change(search, { target: { value: "alpha" } });
+    // 没提交 = 不是一套新的已生效条件，所以命中层不出现；提示挂在框的 title 上，按钮负责一次搞定
+    expect(search).toHaveAttribute("title", "No audit run yet");
+    expect(screen.getByRole("button", { name: "Run and search" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run and search" }));
+    await waitFor(() => expect(container.querySelector(".audit-search-summary-main")?.textContent).toBe("3 hits in 2 rows across 2 envs"));
+    expect(apiMocks.listAllConfigs).toHaveBeenCalled();
+    expect(container.querySelectorAll("mark.search-hit")).toHaveLength(3);
+  });
+
+  it("Esc 清空搜索词并撤掉整个命中层", async () => {
+    const { container } = await runAndMount();
+    const search = screen.getByLabelText("Search matrix content") as HTMLInputElement;
+    typeAndSubmit(search, "alpha");
+    expect(container.querySelectorAll("mark.search-hit")).toHaveLength(3);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(search.value).toBe("");
+    expect(container.querySelectorAll("mark.search-hit")).toHaveLength(0);
+    expect(screen.queryByText("server.port")).toBeTruthy();
+  });
+
+  it("命中片段用 React 节点切分：正文里的尖括号不会被当 HTML 解析", async () => {
+    apiMocks.getConfig.mockReset();
+    apiMocks.getConfig.mockResolvedValueOnce("server:\n  token: <b>alpha</b>").mockResolvedValueOnce("server:\n  token: alpha");
+    const { container } = await runAndMount("server.token");
+    typeAndSubmit(screen.getByLabelText("Search matrix content"), "alpha");
+
+    const cell = container.querySelector(".audit-matrix-body .audit-cell.value") as HTMLElement;
+    expect(cell.querySelector("b")).toBeNull();
+    expect(cell.textContent).toContain("<b>alpha</b>");
+    expect(cell.querySelectorAll("mark.search-hit")).toHaveLength(1);
+  });
+
+  it("搜索词只进视图状态，不写主数据文件", async () => {
+    await runAndMount();
+    typeAndSubmit(screen.getByLabelText("Search matrix content"), "alpha");
+    expect(readViewState<string>("audit.searchTerm")).toBe("alpha");
+    expect(localStorage.getItem("cs.settings")).toBeNull();
   });
 });

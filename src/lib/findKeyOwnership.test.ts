@@ -6,7 +6,13 @@
  * 多视图会不会同时弹两条查找栏、焦点停在不可编辑控件上该谁接管）必须能脱离组件直接跑。
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { FIND_KEY_OWNER_ATTR, findKeyOwners, holdsTextCaret, takesFindKeyOwnership } from "./findKeyOwnership";
+import {
+  FIND_KEY_OWNER_ATTR,
+  findKeyOwners,
+  holdsTextCaret,
+  isFindShortcutKey,
+  takesFindKeyOwnership,
+} from "./findKeyOwnership";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -165,5 +171,19 @@ describe("注册表：属性与监听同生同灭，不看类名", () => {
 
   it("scope 缺失（SSR / 无 document）时退化成空表而不是抛错", () => {
     expect(findKeyOwners(null)).toEqual([]);
+  });
+});
+
+describe("isFindShortcutKey：Ctrl+F / ⌘F 的键位口径（r139 起全站唯一一份）", () => {
+  it("Ctrl+F 与 ⌘F 都算查找键", () => {
+    expect(isFindShortcutKey({ key: "f", ctrlKey: true })).toBe(true);
+    expect(isFindShortcutKey({ key: "F", ctrlKey: true })).toBe(true);
+    expect(isFindShortcutKey({ key: "f", metaKey: true })).toBe(true);
+  });
+
+  it("单独按 F、或带 Alt/Shift 的组合都不算", () => {
+    expect(isFindShortcutKey({ key: "f" })).toBe(false);
+    expect(isFindShortcutKey({ key: "F" })).toBe(false);
+    expect(isFindShortcutKey({ key: "g", ctrlKey: true })).toBe(false);
   });
 });

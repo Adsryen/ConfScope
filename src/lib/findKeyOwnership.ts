@@ -17,6 +17,26 @@
  */
 export const FIND_KEY_OWNER_ATTR = "data-find-key-owner";
 
+/** 查找快捷键的按键信号：Ctrl+F / ⌘F 需要的最小字段集，原生 KeyboardEvent 与 React 合成事件都满足。 */
+export interface FindShortcutSignal {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+}
+
+/**
+ * 「这次按键是不是查找快捷键」——代码视图的查找栏与 r139 矩阵页的搜索框共用同一份键位口径。
+ *
+ * 为什么现在才收成一份：轮39 拆掉的是**所有权**判定（这次按键该谁接管），键位本身当时在三处
+ * 逐字重复，没出事故只是因为没人动过它。r139 要加第四个消费方（配置矩阵的跨环境内容搜索），
+ * 再抄一遍 `key === "f" || key === "F"` 等于把「新增消费方要不要同步另外三处」重新留给下一个人。
+ * 组合态（IME）与焦点归属仍由各宿主自己决定——本视图优先、还是「焦点在别人家文本框里就让位」，
+ * 这两件事本来就该分开设，不在这一个谓词里。
+ */
+export function isFindShortcutKey(signal: FindShortcutSignal): boolean {
+  return (signal.ctrlKey === true || signal.metaKey === true) && (signal.key === "f" || signal.key === "F");
+}
+
 /**
  * 文本光标能落脚的 `<input>` 类型。
  *

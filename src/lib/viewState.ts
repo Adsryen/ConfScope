@@ -185,5 +185,32 @@ export function useScrollMemory(key: string, listVersion: number, externalRef?: 
     if (el) writeViewState(key, el.scrollTop);
   }, [key, ref]);
 
-  return { ref, onScroll };
+  /**
+   * 把等高条目里的第 index 条带进可视区（已经看得见就一动不动）。
+   *
+   * 为什么由这里而不是页面来写 scrollTop：视图状态的唯一实现负责「位置」这件事，
+   * 页面自己 `el.scrollTop = x` 会绕过 onScroll 的写回，记忆的位置和屏幕上的位置从此分家
+   * （守卫 tests/ux/viewStateSingleStore 直接禁页面赋值，就是这个原因）。
+   * 命中导航、跳转定位都走这一个口子：算完目标位置同时写 DOM 和记忆键。
+   *
+   * 只支持等高条目——窗口化列表的行高是常量，非等高的场景该用 scrollIntoView 而不是这个。
+   */
+  const revealIndex = useCallback(
+    (index: number, itemHeight: number) => {
+      const el = ref.current;
+      // clientHeight<=0 = 容器还没布局或被隐藏：此时算出来的目标位置全是 0，
+      // 写下去等于把用户的位置抹掉，宁可什么都不做。
+      if (!el || index < 0 || itemHeight <= 0 || el.clientHeight <= 0) return;
+      const top = index * itemHeight;
+      if (top >= el.scrollTop && top + itemHeight <= el.scrollTop + el.clientHeight) return;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      const centered = top - (el.clientHeight - itemHeight) / 2;
+      const next = Math.max(0, Math.min(centered, max));
+      el.scrollTop = next;
+      writeViewState(key, next);
+    },
+    [key, ref]
+  );
+
+  return { ref, onScroll, revealIndex };
 }

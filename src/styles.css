@@ -6868,6 +6868,84 @@ button.diff-workflow-step-btn:hover {
   gap: 4px;
 }
 
+/* r139 矩阵搜索块（过滤栏最左侧的一组）。
+   摆这里而不是新开一行工具条：搜索与筛选/排序是同一件事——「在当前审计结果里把范围收窄」，
+   拆两块会让人怀疑这两组条件是不是各管一摊。margin-right: auto 让它和状态筛选之间留出归属边界，
+   宽屏时状态/排序那组仍靠右（沿用 .audit-filter-sort 的 margin-left: auto）。 */
+.audit-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-right: auto;
+}
+
+.audit-search-input {
+  width: 260px;
+  min-width: 180px;
+}
+
+/* 命中计数：固定最小宽度，否则 9/10 → 10/10 时宽度跳动，按钮跟着抖。 */
+.audit-search-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: center;
+}
+
+.audit-search-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.audit-search-summary-main {
+  color: var(--text-hi);
+}
+
+.audit-search-opt {
+  font-size: 12px;
+}
+
+/* 触顶 / 区间截断 / 本轮取数有缺口：三条都是「结果比你想的少」，必须比正文更显眼，
+   但又不该抢错误条的红——用 --amber-h（与 .diff-warning 同族同档，不新造色）。 */
+.audit-search-warn {
+  color: var(--amber-h);
+  border: 1px solid rgba(215, 186, 125, 0.35);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.audit-search-nohit {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 列头命中徽标：数的是这一列的命中处数，与格子里的红底同源（同一个 searchResult.perEnvCounts），
+   所以「徽标数 = 能点到的处数」不是巧合而是同一个出处。放在基线按钮同一行，不撑高表头。 */
+.audit-env-hit-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--red-fill);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 状态摘要 */
 .audit-summary {
   display: flex;
@@ -7004,6 +7082,17 @@ button.diff-workflow-step-btn:hover {
   border-color: rgba(0, 122, 204, 0.25);
 }
 
+/* r139 命中行标记线：行背景已经被 一致/不一致/缺失/解析失败 四种语义色占满，
+   整行铺命中底等于废掉状态列，所以只在左侧画 2px 标记（inset box-shadow，不动布局、不改行高 48px）。
+   当前停靠处加粗到 4px：一眼看出 ↑↓ 停在哪一行，不必逐格找实心红底。 */
+.audit-matrix-body .audit-matrix-row.has-hit {
+  box-shadow: inset 2px 0 0 0 rgba(244, 71, 71, 0.7);
+}
+
+.audit-matrix-body .audit-matrix-row.current-hit {
+  box-shadow: inset 4px 0 0 0 var(--red-fill);
+}
+
 .audit-cell {
   padding: 8px 12px;
   font-size: 13px;
@@ -7030,6 +7119,8 @@ button.diff-workflow-step-btn:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+  /* r139：列头命中徽标要钉在格子右上角，父级得是可定位的。 */
+  position: relative;
 }
 
 .audit-cell.env.baseline {
@@ -7047,6 +7138,12 @@ button.diff-workflow-step-btn:hover {
 .audit-cell.value.differ {
   background: rgba(255, 152, 0, 0.08);
   color: var(--text-hi);
+}
+
+/* 命中格子：矩阵格 white-space: nowrap + ellipsis，命中词完全可能落在省略号之后，
+   只看红底会读成「这格没命中」。描边不参与布局（box-shadow），列宽与行高都不动。 */
+.audit-cell.value.hit {
+  box-shadow: inset 0 0 0 1px rgba(244, 71, 71, 0.4);
 }
 
 .audit-cell.missing {

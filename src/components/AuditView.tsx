@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Connection, connectionEnvironmentName, connectionProjectName } from "../store/connections";
 import { getConfig, listAllConfigs } from "../api/nacos";
 import { detectFormat } from "../lib/format";
@@ -29,6 +29,20 @@ import { errorText } from "../lib/errorText";
 import { useScrollResetRef } from "../lib/useScrollResetOnContentChange";
 import { statusMessageProps } from "../lib/statusSemantics";
 import type { DiffJumpParams } from "../lib/diffJump";
+import {
+  MAX_AUDIT_SEARCH_ROWS,
+  MAX_RANGES_PER_CELL,
+  buildAuditSearchTargets,
+  clampAuditHitIndex,
+  searchAuditRows,
+  type AuditRowHit,
+  type AuditSearchScope,
+  type AuditSearchTarget,
+} from "../lib/auditSearch";
+import { useDeferredSearchInput } from "../lib/deferredSearchInput";
+import { holdsTextCaret, isFindShortcutKey } from "../lib/findKeyOwnership";
+import type { MatchRange } from "../lib/textMatch";
+import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
 
 // 轮46 R04：跳转参数的契约收在 src/lib/diffJump.ts 一份，这里只转出给既有引用方（App 从这里导入）。
 export type { DiffJumpParams, DiffJumpSideParams } from "../lib/diffJump";
@@ -78,6 +92,14 @@ interface NormalizeRule {
   replacement: string;
   caseSensitive: boolean;
 }
+
+// r139 搜索口径三档的文案键：与 lib/auditSearch 的 AuditSearchScope 一一对应，
+// 分段控件按这个顺序渲染（全部 → 仅名称 → 仅值），互斥而非「值优先」，用户切档时看到的集合必须能解释。
+const AUDIT_SEARCH_SCOPE_LABELS: Record<AuditSearchScope, string> = {
+  all: "audit.searchScopeAll",
+  name: "audit.searchScopeName",
+  value: "audit.searchScopeValue",
+};
 
 const STATUS_LABELS: Record<AuditStatus, string> = {
   consistent: "audit.statusConsistent",
@@ -147,19 +169,77 @@ function summaryBar(rows: AuditRow[], t: (key: string, params?: Record<string, s
  * 不带动工具栏 / 环境卡片 / 详情面板；程序化滚动（恢复记忆位置）也经浏览器 scroll 事件从这里同步。
  * 行定位与斑马纹都按逻辑行序（matrixWindow.start + index）算，窗口滚动时条纹与选中态不漂移。
  */
+/**
+ * 命中片段渲染：矩阵格子里是任意正文，一律用 React 节点切分，**不走 innerHTML**——
+ * 浏览页摘要那边有 `escapeHtml` 兜着，这里少调一次就是注入面。
+ * `currentRangeIndex` 是导航停在的那一段在 ranges 里的下标（-1 = 没停在这里）：
+ * 只有那一段吃实心高亮，其余命中仍是普通红底。按「一处红底 = 一个可停靠位置」编号，
+ * 界面上的 1/N 才是可数的，不再出现同一页两套「处」。
+ */
+function renderHighlighted(text: string, ranges: MatchRange[], currentRangeIndex: number, keyPrefix: string): ReactNode {
+  if (!text || ranges.length === 0) return text;
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  ranges.forEach((range, index) => {
+    if (range.index > last) nodes.push(text.slice(last, range.index));
+    nodes.push(
+      <mark key={`${keyPrefix}-${index}`} className={index === currentRangeIndex ? "search-hit search-hit-current" : "search-hit"}>
+        {text.slice(range.index, range.index + range.length)}
+      </mark>
+    );
+    last = range.index + range.length;
+  });
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+/**
+ * 矩阵 body 的窗口化渲染（r111：2000×6 下全量行 DOM 节点 36021，超 C3 硬上限 16000，只挂可见窗口）：
+ * 全高 spacer 撑出滚动条，窗口按 translateY 平移。
+ * 滚动状态收在这个组件里——滚动事件只重渲染列表（可见窗口约几十行），
+ * 不带动工具栏 / 环境卡片 / 详情面板；程序化滚动（恢复记忆位置）也经浏览器 scroll 事件从这里同步。
+ * 行定位与斑马纹都按逻辑行序（matrixWindow.start + index）算，窗口滚动时条纹与选中态不漂移。
+ *
+ * r139 搜索态的三条约束：
+ * 1. **定位不能查 DOM**：未渲染的行根本不在 DOM 里，只能按行索引 × 行高定位，
+ *    所以动滚动条走视图状态实现提供的 revealIndex——位置由唯一实现写，
+ *    页面不自己碰 scrollTop（守卫 tests/ux/viewStateSingleStore 钉这条），原生 scroll 事件再回流一次同步视图。
+ * 2. **同一次命中只滚一趟**：nonce 不变就不许再动滚动条，否则用户自己拖走后会被反复拽回来。
+ * 3. **命中行不做整行背景**：行背景/徽标承载 一致·不一致·缺失·解析失败 四种语义，
+ *    盖掉就废了矩阵，所以只有左侧标记线（`.has-hit`）+ 格子里的红底。
+ */
 interface AuditMatrixListProps {
   rows: AuditRow[];
   envIds: string[];
   baseline: string;
   selectedRowId: string | null;
   onSelectRow: (row: AuditRow) => void;
+  /** 搜索态的命中索引；null = 没在搜（渲染与既有行为逐字节一致）。 */
+  hits: Map<string, AuditRowHit> | null;
+  /** 导航当前停在哪一处（行 + 列），只有它上面的红底吃 search-hit-current。 */
+  currentTarget: AuditSearchTarget | null;
+  /** 要求列表把这一行带进视口；nonce 不变 = 不再动滚动条。 */
+  focusRowId: string | null;
+  focusNonce: number;
   t: (key: string, params?: Record<string, string | number>) => string;
 }
 
-function AuditMatrixList({ rows, envIds, baseline, selectedRowId, onSelectRow, t }: AuditMatrixListProps) {
+function AuditMatrixList({
+  rows,
+  envIds,
+  baseline,
+  selectedRowId,
+  onSelectRow,
+  hits,
+  currentTarget,
+  focusRowId,
+  focusNonce,
+  t,
+}: AuditMatrixListProps) {
   // 矩阵滚动位置：审计结果要手动跑一次才有，挂载时列表是空的（真实浏览器会把偏移夹回 0），
   // 所以按条数作为列表版本，数据到达后再恢复一次（见 lib/viewState）。
   const matrixScroll = useScrollMemory("audit.scroll.matrix", rows.length);
+  const { revealIndex } = matrixScroll;
   const [matrixScrollTop, setMatrixScrollTop] = useState(0);
   const [matrixViewportH, setMatrixViewportH] = useState(0);
 
@@ -193,50 +273,80 @@ function AuditMatrixList({ rows, envIds, baseline, selectedRowId, onSelectRow, t
     };
   }, [rows.length > 0, matrixScroll.ref]);
 
+  // 命中导航的程序化定位（见头部约束 1/2）：只在 nonce 变化时动一次，且已经看得见就不动。
+  const appliedNonceRef = useRef(-1);
+  useLayoutEffect(() => {
+    if (appliedNonceRef.current === focusNonce) return;
+    appliedNonceRef.current = focusNonce;
+    if (!focusRowId) return;
+    const index = rows.findIndex((row) => row.id === focusRowId);
+    if (index < 0) return;
+    // 已经看得见就一动不动（PRD：命中导航不许把用户已读的那屏顶走）
+    revealIndex(index, MATRIX_ROW_HEIGHT);
+  }, [focusRowId, focusNonce, rows, revealIndex]);
+
   return (
     <div className="audit-matrix-body" ref={matrixScroll.ref} onScroll={matrixScroll.onScroll}>
       <div className="audit-matrix-spacer" style={{ height: rows.length * MATRIX_ROW_HEIGHT }}>
         <div className="audit-matrix-window" style={{ transform: `translateY(${matrixWindow.start * MATRIX_ROW_HEIGHT}px)` }}>
-          {matrixWindow.rows.map((row, index) => (
-            <div
-              key={row.id}
-              className={`audit-matrix-row ${selectedRowId === row.id ? "selected" : ""}${
-                (matrixWindow.start + index) % 2 === 1 ? " zebra" : ""
-              }`}
-              onClick={() => onSelectRow(row)}
-              {...clickableRowProps(() => onSelectRow(row), { selected: selectedRowId === row.id })}
-            >
-              <div className="audit-cell key">
-                <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>{t(STATUS_LABELS[row.status])}</span>
-                <div className="audit-key-path">
-                  <span className="audit-dataid" title={row.dataId}>
-                    {row.dataId}
-                  </span>
-                  <span className="audit-key" title={row.key}>
-                    {row.key}
-                  </span>
+          {matrixWindow.rows.map((row, index) => {
+            const hit = hits ? (hits.get(row.id) ?? null) : null;
+            const isCurrentRow = currentTarget?.rowId === row.id;
+            // 停靠处 → 该列 ranges 里的下标；不是同一列就是 -1（不亮）
+            const currentNameRange = (kind: "dataId" | "key") =>
+              isCurrentRow && currentTarget?.kind === kind ? currentTarget.rangeIndex : -1;
+            return (
+              <div
+                key={row.id}
+                className={`audit-matrix-row ${selectedRowId === row.id ? "selected" : ""}${
+                  (matrixWindow.start + index) % 2 === 1 ? " zebra" : ""
+                }${hit ? " has-hit" : ""}${isCurrentRow ? " current-hit" : ""}`}
+                onClick={() => onSelectRow(row)}
+                {...clickableRowProps(() => onSelectRow(row), { selected: selectedRowId === row.id })}
+              >
+                <div className="audit-cell key">
+                  <span className={`audit-status-badge ${STATUS_CLASS[row.status]}`}>{t(STATUS_LABELS[row.status])}</span>
+                  <div className="audit-key-path">
+                    <span className="audit-dataid" title={row.dataId}>
+                      {renderHighlighted(row.dataId, hit?.dataIdRanges ?? [], currentNameRange("dataId"), `${row.id}-d`)}
+                    </span>
+                    <span className="audit-key" title={row.key}>
+                      {renderHighlighted(row.key, hit?.keyRanges ?? [], currentNameRange("key"), `${row.id}-k`)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              {envIds.map((envId) => {
-                const cell = row.values[envId];
-                const isBaseline = envId === baseline;
-                if (!cell || !cell.exists) {
+                {envIds.map((envId) => {
+                  const cell = row.values[envId];
+                  const cellHit = hit?.cells.find((item) => item.envId === envId) ?? null;
+                  if (!cell || !cell.exists) {
+                    return (
+                      <div key={envId} className="audit-cell missing">
+                        —
+                      </div>
+                    );
+                  }
+                  const isBaselineCell = envId === baseline;
+                  const differ = !isBaselineCell && baseline && row.values[baseline]?.value !== cell.value;
+                  // 只有 kind/envId 都对上的那一处才亮，所以直接把 rangeIndex 当「是不是当前处」用
+                  const currentCellRange =
+                    isCurrentRow && currentTarget?.kind === "cell" && currentTarget.envId === envId ? currentTarget.rangeIndex : -1;
+                  const value = cell.value ?? "";
                   return (
-                    <div key={envId} className="audit-cell missing">
-                      —
+                    <div
+                      key={envId}
+                      className={`audit-cell value ${differ ? "differ" : ""}${cellHit ? " hit" : ""}`}
+                      title={cellHit && cellHit.count > 1 ? `${value}\n${t("audit.searchHitSuffix", { count: cellHit.count })}` : value}
+                    >
+                      <span className="audit-value">
+                        {renderHighlighted(value, cellHit?.ranges ?? [], currentCellRange, `${row.id}-${envId}`)}
+                      </span>
+                      {cell.parseStatus === "error" && <span className="audit-parse-err">⚠</span>}
                     </div>
                   );
-                }
-                const differ = !isBaseline && baseline && row.values[baseline]?.value !== cell.value;
-                return (
-                  <div key={envId} className={`audit-cell value ${differ ? "differ" : ""}`} title={cell.value ?? ""}>
-                    <span className="audit-value">{cell.value ?? ""}</span>
-                    {cell.parseStatus === "error" && <span className="audit-parse-err">⚠</span>}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -793,6 +903,131 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
     });
   }, [rows, statusFilter, hideIgnored, sortKey, sortDir]);
 
+  // ---- r139 项目级跨环境内容搜索：状态与派生 ----
+  // 顺序口径（design §6）：rows → 状态筛选/隐藏忽略 → 排序（= filteredRows）→ 搜索 → 「只看命中行」折叠。
+  // 搜索吃的是「已排序的集合」，于是下一处的导航序就是屏幕上的视觉序，用户不会来回横跳。
+  const [searchInput, setSearchInput] = useRememberedState<string>("audit.searchTerm", "");
+  const [appliedTerm, setAppliedTerm] = useState(searchInput);
+  const [searchScope, setSearchScope] = useRememberedState<AuditSearchScope>("audit.searchScope", "all");
+  const [onlyHits, setOnlyHits] = useRememberedState<boolean>("audit.onlyHits", true);
+  const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
+  const [focusTarget, setFocusTarget] = useState<{ rowId: string; nonce: number } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const hasRows = rows.length > 0;
+
+  // 回显永远即时、扫描等上屏：矩阵是纯内存全扫，2000 行 × 6 列每敲一个字母重扫一遍会掉帧，
+  // 半截拼音更会把命中数显示成 0（轮66 同一课的第二次应用）。
+  const deferredSearch = useDeferredSearchInput((value) => setAppliedTerm(value.trim()));
+
+  const searchResult = useMemo(
+    () => searchAuditRows(filteredRows, envIds, appliedTerm, searchScope),
+    [filteredRows, envIds, appliedTerm, searchScope]
+  );
+  const searchTargets = useMemo(() => buildAuditSearchTargets(searchResult, envIds), [searchResult, envIds]);
+  const visibleRows = useMemo(
+    () => (!searchResult.active || !onlyHits ? filteredRows : filteredRows.filter((row) => searchResult.rowHits.has(row.id))),
+    [filteredRows, searchResult, onlyHits]
+  );
+  const currentTarget = searchTargets.length > 0 ? searchTargets[clampAuditHitIndex(currentTargetIndex, searchTargets.length)] : null;
+
+  // 命中集与序号在事件回调里读 ref 而不是闭包：否则每次扫描结果变化都要重建回调，
+  // 键盘监听的 effect 跟着重挂，连按 Enter 时会出现「跳回第一处」的陈旧闭包。
+  const searchTargetsRef = useRef(searchTargets);
+  searchTargetsRef.current = searchTargets;
+  const currentTargetIndexRef = useRef(currentTargetIndex);
+  currentTargetIndexRef.current = currentTargetIndex;
+  /**
+   * 定位序号：只用来自增计数，不用 Date.now()。
+   * 按住 Enter 连跳时 keydown repeat 可以落到同一毫秒里，撞车的 nonce 会被
+   * 「同一 nonce 只滚一趟」判成已经滚过，界面看起来就是「按了没反应」。
+   */
+  const focusSeqRef = useRef(0);
+  const bumpFocus = useCallback((rowId: string | null) => {
+    focusSeqRef.current += 1;
+    setFocusTarget(rowId ? { rowId, nonce: focusSeqRef.current } : null);
+  }, []);
+
+  const moveTarget = useCallback(
+    (delta: number) => {
+      const targets = searchTargetsRef.current;
+      if (targets.length === 0) return;
+      const next = clampAuditHitIndex(currentTargetIndexRef.current + delta, targets.length);
+      // ref 当场写回：同一次按键里还要拿它算 focusTarget，下一次按键也可能在重渲染前到达。
+      currentTargetIndexRef.current = next;
+      setCurrentTargetIndex(next);
+      bumpFocus(targets[next].rowId);
+    },
+    [bumpFocus]
+  );
+
+  // 换词 / 换口径 / 结果集第一次出现：回到第一处并定位过去。
+  // 依赖里刻意没有滚动位置和选中行——那些是用户自己的动作，不该被程序拽回命中行。
+  useEffect(() => {
+    if (!appliedTerm) {
+      currentTargetIndexRef.current = 0;
+      setCurrentTargetIndex(0);
+      setFocusTarget(null);
+      return;
+    }
+    if (!hasRows) return;
+    const first = searchTargetsRef.current[0] ?? null;
+    currentTargetIndexRef.current = 0;
+    setCurrentTargetIndex(0);
+    bumpFocus(first ? first.rowId : null);
+  }, [appliedTerm, bumpFocus, hasRows, searchScope]);
+
+  const submitSearch = useCallback(
+    (value: string) => {
+      const query = value.trim();
+      if (!hasRows) {
+        // 还没跑过审计：词先留着，这轮跑完 effect 会自动接上第一处（「执行并搜索」）。
+        setAppliedTerm(query);
+        if (query) void runAudit();
+        return;
+      }
+      if (query !== appliedTerm) {
+        deferredSearch.runNow(query);
+        return;
+      }
+      moveTarget(1);
+    },
+    [appliedTerm, deferredSearch, hasRows, moveTarget, runAudit]
+  );
+
+  // 清空搜索：Esc 收起（栏开着时它是最内层的瞬时态，优先级 page 足够——本页没有别的 page 级 Esc）。
+  useEscape(
+    searchResult.active,
+    () => {
+      setSearchInput("");
+      deferredSearch.cancel();
+      setAppliedTerm("");
+    },
+    EscapePriority.page
+  );
+
+  /**
+   * 页级 Ctrl+F / ⌘F（r139 R5）：焦点不在文本框里时把光标送进矩阵搜索框。
+   *
+   * 为什么不复用 lib/useFindLayer：那一层是「正文 DOM 上打标记 + 量矩形居中」的模型，
+   * 矩阵是窗口化虚拟列表，未渲染的行根本不在 DOM 里，量不到矩形，只能按行号 × 行高算 scrollTop。
+   * 所有权口径仍复用 lib/findKeyOwnership 的 holdsTextCaret：忽略规则、环境名这些输入框里的
+   * Ctrl+F 归浏览器原生查找，这里抢了就成死键（轮39 取证 #7/#8）。
+   */
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (isImeComposing(event)) return;
+      if (!isFindShortcutKey(event)) return;
+      const active = document.activeElement;
+      if (holdsTextCaret(active) && active !== searchInputRef.current) return;
+      event.preventDefault();
+      searchInputRef.current?.focus({ preventScroll: true });
+      searchInputRef.current?.select();
+    };
+    // 捕获阶段：矩阵行 clickable、弹层等下游监听都拦在 React 冒泡里，这里要抢在它们之前。
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, []);
+
   // 切换状态过滤
   const toggleStatusFilter = (status: string) => {
     setStatusFilter((prev) => {
@@ -1093,36 +1328,155 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
         </div>
       </div>
 
-      {/* 过滤与排序 */}
-      {rows.length > 0 && (
+      {/* 过滤与排序 + r139 项目级跨环境内容搜索 */}
+      {(rows.length > 0 || envSources.length >= 2) && (
         <div className="audit-filter-bar">
-          <span className="audit-filter-label">{t("audit.filter")}:</span>
-          {(["consistent", "partial", "inconsistent", "missing", "parse_error", "ignored"] as const).map((status) => (
+          {/* 搜索块常驻：环境凑够一对就把框摆出来，此时回车 = 先执行这轮审计再带着原词搜，省一趟来回点。 */}
+          <div className="audit-search" role="group" aria-label={t("audit.searchGroupAria")}>
+            <div className="view-mode" role="group" aria-label={t("audit.searchScopeGroupAria")}>
+              {(["all", "name", "value"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`btn btn-ghost btn-sm${searchScope === mode ? " active" : ""}`}
+                  aria-pressed={searchScope === mode}
+                  onClick={() => setSearchScope(mode)}
+                >
+                  {t(AUDIT_SEARCH_SCOPE_LABELS[mode])}
+                </button>
+              ))}
+            </div>
+            <input
+              ref={searchInputRef}
+              type="search"
+              className="search-input audit-search-input"
+              value={searchInput}
+              placeholder={t("audit.searchPlaceholder")}
+              aria-label={t("audit.searchAriaLabel")}
+              title={hasRows ? undefined : t("audit.searchNeedsAudit")}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                deferredSearch.schedule(e.target.value);
+              }}
+              onCompositionStart={deferredSearch.onCompositionStart}
+              onCompositionEnd={(e) => deferredSearch.onCompositionEnd(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                // 组合态的 Enter / F3 属于输入法候选窗（轮16 R61 同一课），此处不劫持
+                if (isImeComposing(e)) return;
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitSearch(e.currentTarget.value);
+                } else if (e.key === "F3") {
+                  e.preventDefault();
+                  moveTarget(e.shiftKey ? -1 : 1);
+                }
+              }}
+            />
+            {searchResult.active && hasRows && (
+              <span className="audit-search-count" role="status">
+                {searchTargets.length === 0 ? t("audit.searchNoHit") : `${currentTargetIndex + 1}/${searchTargets.length}`}
+              </span>
+            )}
             <button
-              key={status}
-              className={`btn btn-sm ${statusFilter.has(status) ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => toggleStatusFilter(status)}
-              aria-pressed={statusFilter.has(status)}
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => moveTarget(-1)}
+              disabled={searchTargets.length === 0}
+              aria-label={t("audit.searchPrev")}
             >
-              {t(STATUS_LABELS[status])}
+              ↑
             </button>
-          ))}
-          <label className="check-row audit-filter-opt">
-            <input type="checkbox" checked={hideIgnored} onChange={(e) => setHideIgnored(e.target.checked)} />
-            <span>{t("audit.hideIgnored")}</span>
-          </label>
-          <span className="audit-filter-sort">
-            {(["dataId", "key", "status"] as const).map((key) => (
-              <button
-                key={key}
-                className={`btn btn-sm ${sortKey === key ? "btn-primary" : "btn-ghost"}`}
-                onClick={() => toggleSort(key)}
-                aria-pressed={sortKey === key}
-              >
-                {key} {sortKey === key ? (sortDir === "asc" ? "↑" : "↓") : ""}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => moveTarget(1)}
+              disabled={searchTargets.length === 0}
+              aria-label={t("audit.searchNext")}
+            >
+              ↓
+            </button>
+            {!hasRows && searchInput.trim() && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => submitSearch(searchInput)}>
+                {t("audit.searchRunAndSearch")}
               </button>
-            ))}
-          </span>
+            )}
+          </div>
+          {hasRows && (
+            <>
+              <span className="audit-filter-label">{t("audit.filter")}:</span>
+              {(["consistent", "partial", "inconsistent", "missing", "parse_error", "ignored"] as const).map((status) => (
+                <button
+                  key={status}
+                  className={`btn btn-sm ${statusFilter.has(status) ? "btn-primary" : "btn-ghost"}`}
+                  onClick={() => toggleStatusFilter(status)}
+                  aria-pressed={statusFilter.has(status)}
+                >
+                  {t(STATUS_LABELS[status])}
+                </button>
+              ))}
+              <label className="check-row audit-filter-opt">
+                <input type="checkbox" checked={hideIgnored} onChange={(e) => setHideIgnored(e.target.checked)} />
+                <span>{t("audit.hideIgnored")}</span>
+              </label>
+              <span className="audit-filter-sort">
+                {(["dataId", "key", "status"] as const).map((key) => (
+                  <button
+                    key={key}
+                    className={`btn btn-sm ${sortKey === key ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => toggleSort(key)}
+                    aria-pressed={sortKey === key}
+                  >
+                    {key} {sortKey === key ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                  </button>
+                ))}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* r139 搜索摘要：命中数、作用域、两处必须说出口的上限（PRD R10）。
+          「在 1842 行里命中 26 处」比「26 处命中」有用得多——用户要知道搜的是不是自己以为的那一部分，
+          触顶（前 5000 行）与格子内区间截断（每格最多画 20 段）都写在这里，不做静默降级。 */}
+      {searchResult.active && (
+        <div className="audit-search-summary">
+          {hasRows ? (
+            <>
+              <span className="audit-search-summary-main" role="status">
+                {t("audit.searchHitsSummary", {
+                  hits: searchTargets.length,
+                  total: searchResult.scannedRowCount,
+                  envs: envIds.length,
+                })}
+              </span>
+              <label className="check-row audit-search-opt">
+                <input type="checkbox" checked={onlyHits} onChange={(e) => setOnlyHits(e.target.checked)} />
+                <span>{t("audit.searchOnlyHits")}</span>
+              </label>
+              {searchResult.capped && (
+                <span className="audit-search-warn" role="status">
+                  {t("audit.searchCapped", {
+                    max: MAX_AUDIT_SEARCH_ROWS,
+                    rest: searchResult.scopeRowCount - searchResult.scannedRowCount,
+                  })}
+                </span>
+              )}
+              {searchResult.truncatedCells > 0 && (
+                <span className="audit-search-warn" role="status">
+                  {t("audit.searchRangesTruncated", { count: searchResult.truncatedCells, max: MAX_RANGES_PER_CELL })}
+                </span>
+              )}
+              {runGaps.length > 0 && (
+                <span className="audit-search-warn" role="status">
+                  {t("audit.searchScopeIncomplete")}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="audit-search-summary-main" role="status">
+              {t("audit.searchNeedsAudit")}
+            </span>
+          )}
         </div>
       )}
 
@@ -1354,6 +1708,19 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               {envSources.map((env) => (
                 <div key={envKey(env)} className={`audit-cell env ${baseline === envKey(env) ? "baseline" : ""}`}>
                   <div className="audit-env-label">{envShortLabel(env, t)}</div>
+                  {/* r139 列头徽标：这一列命中几处。徽标数必须等于格子里能数出来的红底数，
+                      所以它读的是同一个 searchResult.perEnvCounts，不做第二次匹配。 */}
+                  {searchResult.active && searchResult.perEnvCounts[envKey(env)] ? (
+                    <span
+                      className="audit-env-hit-badge"
+                      title={t("audit.searchEnvCount", {
+                        env: envShortLabel(env, t),
+                        count: searchResult.perEnvCounts[envKey(env)],
+                      })}
+                    >
+                      {searchResult.perEnvCounts[envKey(env)]}
+                    </span>
+                  ) : null}
                   {baseline !== envKey(env) && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setBaseline(envKey(env))}>
                       {t("audit.setBaseline")}
@@ -1364,14 +1731,30 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
             </div>
           </div>
 
-          <AuditMatrixList
-            rows={filteredRows}
-            envIds={envIds}
-            baseline={baseline}
-            selectedRowId={selectedRow?.id ?? null}
-            onSelectRow={setSelectedRow}
-            t={t}
-          />
+          {searchResult.active && visibleRows.length === 0 ? (
+            /* 0 命中必须把作用域念出来（PRD R10 / AES-07）：只说「没有结果」，
+               用户会以为是搜索坏了；说清「在多少行、几个环境里搜过这个词」才判得掉。 */
+            <div className="audit-search-nohit" role="status">
+              {t("audit.searchNoHitInScope", {
+                total: searchResult.scannedRowCount,
+                envs: envIds.length,
+                term: searchResult.term,
+              })}
+            </div>
+          ) : (
+            <AuditMatrixList
+              rows={visibleRows}
+              envIds={envIds}
+              baseline={baseline}
+              hits={searchResult.active ? searchResult.rowHits : null}
+              currentTarget={currentTarget}
+              focusRowId={focusTarget?.rowId ?? null}
+              focusNonce={focusTarget?.nonce ?? -1}
+              selectedRowId={selectedRow?.id ?? null}
+              onSelectRow={setSelectedRow}
+              t={t}
+            />
+          )}
         </div>
       )}
 
@@ -1404,13 +1787,31 @@ export default function AuditView({ connections, onNavigateToDiff, onStartApply 
               const cell = selectedRow.values[envId];
               const env = envSources.find((s) => envKey(s) === envId);
               const envLabelId = `${envLabelIdBase}-${envId}`;
+              // r139：详情面板与矩阵格子共用同一份命中区间（不二次匹配）。格子里有红底、点开详情却一片白，
+              // 用户只会读成「搜索结果不可信」。当前停靠处同样吃 search-hit-current 那一档高亮。
+              const detailHit = searchResult.active
+                ? (searchResult.rowHits.get(selectedRow.id)?.cells.find((item) => item.envId === envId) ?? null)
+                : null;
+              const isCurrentDetailCell =
+                detailHit !== null &&
+                currentTarget?.kind === "cell" &&
+                currentTarget.rowId === selectedRow.id &&
+                currentTarget.envId === envId;
+              const currentDetailRange = isCurrentDetailCell && currentTarget ? currentTarget.rangeIndex : -1;
               return (
                 <div key={envId} className="audit-detail-env">
                   <div className="audit-detail-env-label" id={envLabelId}>
                     {env ? envShortLabel(env, t) : envId}
                   </div>
                   <pre className="audit-detail-value" tabIndex={0} role="region" aria-labelledby={envLabelId} ref={resetRef}>
-                    {cell?.exists ? cell.value : t("audit.detailMissing")}
+                    {cell?.exists
+                      ? renderHighlighted(
+                          cell.value ?? "",
+                          detailHit?.ranges ?? [],
+                          currentDetailRange,
+                          `detail-${selectedRow.id}-${envId}`
+                        )
+                      : t("audit.detailMissing")}
                   </pre>
                 </div>
               );
