@@ -169,11 +169,12 @@ describe("设置页排版节奏与就近反馈（轮73 R73）", () => {
     expect(hover, "悬停时位置指示只能变深，不能整块消失").toContain("rgba(0, 122, 204, 0.22)");
   });
 
-  it("工作区宽度够得着内容列，且带徽章定位锚点（V3 / P3）", () => {
+  it("工作区随窗口伸缩，宽度上限不许回来（V3 / P3 / 轮142 D2）", () => {
     const body = topLevelRule(CSS, ".settings-workbench");
-    const width = /width: min\((\d+)px, 100%\)/.exec(body);
-    expect(width, "宽度上限写坏了：必须是 width: min(Npx, 100%)").not.toBeNull();
-    expect(Number(width?.[1]), "1440 窗口下 1080 的上限会在右侧留下 176px 死白").toBeGreaterThanOrEqual(1200);
+    expect(body, "轮142 D2：用户要求右区随窗口宽度，工作区必须铺满所在列").toMatch(/width:\s*100%;/);
+    // 自检：把旧的写死上限改回来必须判红
+    const regression = topLevelRule(CSS, ".settings-workbench").replace("width: 100%;", "width: min(1200px, 100%);");
+    expect(/width:\s*100%;/.test(regression), "探测器失去牙齿：写死上限回来必须被抓到").toBe(false);
     expect(body, "徽章绝对定位的锚点：工作区必须是 relative").toContain("position: relative;");
     expect(body, "不做居中——.page-header 是全站左对齐页头").not.toMatch(/margin:\s*0 auto|justify-content:\s*center/);
   });

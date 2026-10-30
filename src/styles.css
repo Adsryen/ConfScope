@@ -898,11 +898,13 @@ textarea {
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 18px;
   /*
-   * 轮73 R73-V3：上限从 1080 提到 1200。1440 窗口下侧栏占 184，可用 1256，
-   * 1080 的列宽在右边留下 176px 死白，而页头标题仍贴着左缘——读起来像「没排版完」。
-   * 不做居中：.page-header 是全站的左对齐页头，居中工作区会让标题与内容错开一条竖线。
+   * 轮73 R73-V3 当初只解决「右边留死白」，做法是把上限从 1080 抬到 1200——仍是写死的宽度。
+   * 轮142 D2：用户 2026-10-30 原话「右侧区域的容器不应该限制它的宽度，应该根据我整个窗口的
+   * 宽度来决定它的宽度」⇒ 上限整个撤掉，工作区随 .page-surface 伸缩。左栏 190px 固定、
+   * 右栏 minmax(0, 1fr) 自己吸收宽度，所以放开外层这一格就够，不用再补一层 max-width。
+   * 仍不做居中：.page-header 是全站左对齐页头，居中会让标题与内容错开一条竖线。
    */
-  width: min(1200px, 100%);
+  width: 100%;
   padding: 22px;
   /* 「设置已保存」就近徽章的定位锚点（见 .settings-panel-flag）。 */
   position: relative;
@@ -1790,6 +1792,22 @@ textarea {
 
 .ssh-manager-form.compact {
   max-width: 280px;
+}
+
+/*
+ * 轮142 C：凭据来源说明（值在系统凭据库、本地只剩指针时的那句就近话）。
+ * 档案页与连接页共用这一个类名——别留两个只写了一半的类。
+ * 档案页把它夹在「认证信息」标题与 .ssh-manager-form 之间，得自己补左右边距；
+ * 连接页那几处的父容器（.conn-form-section / .ssh-config）本身就是 flex + gap，
+ * 再叠上 .settings-panel-note 自带的 margin-top 就多出一层，所以那里归零。
+ */
+.secret-source-note {
+  margin: 12px 14px 0;
+}
+
+.conn-form-section .secret-source-note,
+.ssh-config .secret-source-note {
+  margin: 0;
 }
 
 .ssh-ref-list {
@@ -5760,10 +5778,13 @@ button.diff-workflow-step-btn:hover {
   padding-right: 4px;
 }
 
+/* 轮142 D1：页内（embedded）形态去掉 840px 上限——连接列表 340px 定宽，剩下的宽度本来
+   就该整块给表单；用户 2026-10-30 点名「连接管理页面右侧区域不该限制宽度，像隧道那页一样」。
+   弹层形态（.modal-body.conn-mgr）不在这条选择器里，仍按弹层自己的尺寸走。 */
 .conn-mgr-page .conn-form {
   overflow-y: auto;
   overscroll-behavior: contain;
-  max-width: 840px;
+  min-width: 0;
   padding-right: 4px;
 }
 
