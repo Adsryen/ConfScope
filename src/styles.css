@@ -5411,6 +5411,23 @@ button.diff-workflow-step-btn:hover {
   color: #dcdcaa;
   background: rgba(220, 220, 170, 0.14);
 }
+/*
+ * r145 D6：只读来源要在列表里一眼可辨。
+ * 本地快照、只读标记、强制快照这三类在 Go/API 层一律拒写，可页面上此前毫无交代——
+ * 用户只能走到发布那一步才收到一条「只读来源」的错误（站规里叫「点了才报错」）。
+ * 取中性灰而不是警告色：它陈述的是这条来源的能力，不是出错了；
+ * 也不用 Consul 那枚 #dcdcaa，免得在满屏紫色快照徽标里多出一个撞色的第三义。
+ * 高度靠 1px 边框顶替兄弟徽标 1px 的上下 padding，整行不会因为多挂一枚标签而变高。
+ */
+.conn-readonly-badge {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 0 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
 .conn-item-url {
   display: flex;
   flex-wrap: wrap;
@@ -5527,6 +5544,16 @@ button.diff-workflow-step-btn:hover {
   border: 1px solid rgba(220, 220, 170, 0.25);
   border-radius: 4px;
   padding: 6px 8px;
+}
+/*
+ * r145 D4：只读来源占掉「写入确认策略」那一格。
+ * 它不是输入控件，但要和左边的「环境角色」下拉同宽、底边对齐，
+ * 否则一行里右边像漏了一块（.field 的 flex:1 只给得到标签，这里得自己占位）。
+ */
+.readonly-source-hint {
+  flex: 1;
+  min-width: 0;
+  align-self: flex-end;
 }
 .pwd-toggle {
   flex-shrink: 0;

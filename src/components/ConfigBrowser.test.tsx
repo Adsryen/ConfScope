@@ -259,6 +259,25 @@ describe("ConfigBrowser", () => {
     expect(screen.getByText("C:\\backup\\prod\\configs\\public\\DEFAULT_GROUP\\app.yaml")).toBeInTheDocument();
   });
 
+  // 轮145 C1：同一条连接改了快照目录（id 不变），配置浏览必须重取列表，否则屏幕上留着旧目录的文件名。
+  it("re-fetches the list after the snapshot directory of the same connection changes", async () => {
+    const view = renderBrowser("zh-CN", localConn, "");
+
+    expect(await screen.findByText("app.json")).toBeInTheDocument();
+    expect(apiMocks.listConfigs).toHaveBeenCalledTimes(1);
+
+    const moved = { ...localConn, localPath: "C:\\backup\\prod-new", baseUrl: "C:\\backup\\prod-new" };
+    view.rerender(
+      <I18nProvider>
+        <ConfigBrowser conn={moved} tenant="" />
+        <MessageCenter />
+        <ErrorDialog />
+      </I18nProvider>
+    );
+
+    await waitFor(() => expect(apiMocks.listConfigs).toHaveBeenLastCalledWith(moved, "", "", "", 1, 50));
+  });
+
   it("loads the config list and opens a selected config", async () => {
     renderBrowser();
 

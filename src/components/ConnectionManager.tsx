@@ -37,6 +37,9 @@ import CopyButton from "./CopyButton";
 import NumberField from "./NumberField";
 import { PORT_MAX, PORT_MIN, SSH_DEFAULT_PORT, portIssue, sshPortIssues } from "../lib/ports";
 import { environmentTone } from "../lib/envTone";
+import { isReadOnlySource } from "../lib/configCapabilities";
+import { isSameSnapshotPath } from "../lib/localSnapshotPath";
+import BusyLabel from "./BusyLabel";
 import TestTraceView, { TestTrace, TraceStep } from "./TestTraceView";
 import PasswordField from "./PasswordField";
 import { EscapePriority, isImeComposing, useEscape } from "../lib/useEscape";
@@ -476,6 +479,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const [namespaceResultKey, setNamespaceResultKey] = useState<string | null>(null);
   const [namespaceOptions, setNamespaceOptions] = useState<Namespace[]>([]);
   const [namespaceError, setNamespaceError] = useState<string | null>(null);
+  // 连点/回车连发保护（r145 B4）：凭据结算是异步的，第二次 save 会拿同一份草稿再落一次盘。
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [activeProject, setActiveProject] = useState(emptyDraft(defaultNewEnvironment).projectName ?? DEFAULT_PROJECT_NAME);
   const [activeEnvironment, setActiveEnvironment] = useState(emptyDraft(defaultNewEnvironment).environmentName ?? defaultNewEnvironment);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -700,6 +706,20 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
   const localSnapshotSourceNamePreset = { label: t("connection.sourcePresetLocalSnapshot"), mode: "direct" as const };
   const sourceNamePresets = draft.provider === "local" ? [localSnapshotSourceNamePreset] : nacosSourceNamePresets;
   const selectedSourcePreset = sourceNamePresets.some((item) => item.label === draft.sourceName) ? (draft.sourceName ?? "") : "";
+  /*
+   * 本地快照用另一套表单（r145 D1~D6）。
+   *
+   * 它是离线目录：没有地址、没有鉴权、也写不回任何环境。原先跟 Nacos 才有关系的字段全留在页面上，
+   * 「安全」区块底下只剩孤零零一句「未启用代理」，「写入确认策略」选的是一条永远不会生效的策略——
+   * 用户得自己判断哪几格跟自己无关。
+   *
+   * 「来源入口」下拉保留：本地快照这一档它只剩「本地快照」一个预设，但那是「一键回到默认来源名称」的入口，
+   * 拆掉就少一个功能（轮145 试过，两条既有判据当场红）。
+   */
+  const isLocalSnapshotDraft = draft.provider === "local";
+  // 改了目录就等于还没校验过：先在这里说清楚，而不是等点保存时被一句拦截闷住（轮145 D 组的静默失败）。
+  const snapshotPathNeedsValidation =
+    isLocalSnapshotDraft && !!draft.localPath?.trim() && (!localValidation?.valid || !isSameSnapshotPath(localValidation.path, draft.localPath));
   const currentProjectName = (draft.projectName ?? DEFAULT_PROJECT_NAME).trim();
   const selectedProjectOption = !creatingProject && projectOptions.includes(currentProjectName) ? currentProjectName : "__new__";
   const showProjectInput = creatingProject || projectOptions.length === 0 || selectedProjectOption === "__new__";
@@ -813,7 +833,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
    * 否则点开一条迁过的连接看到的是空密码/空 AK-SK——和隧道档案同一个根因。
    * 读库失败不阻断编辑：那一条留空 + 提示重新填写，其余字段照常可改可存。
    */
-  const openConnection = async (c: Connection) => {
+  const openConnection = async (c: Connection, notice?: { ok: boolean; text: string } | null) => {
     const seq = (openSeqRef.current += 1);
     const [secrets, sshSecrets] = await Promise.all([
       loadConnectionSecretsForEdit(c),
@@ -829,7 +849,9 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       secretBaseline: secrets.baseline,
       sshSecretBaseline: sshSecrets.baseline,
     });
-    setCreatingProject(!projectOptions.includes(connectionProjectName(c)));
+    // 「能不能当新项目」要按保存之后的名册判：渲染期那份 projectOptions 是点保存时的闭包，
+    // 刚存进去的项目还不在里面，照它判会把下拉换成输入框（轮145 A 组：保存后新增来源拿不到项目下拉）。
+    setCreatingProject(!loadConnections().some((item) => connectionProjectName(item) === connectionProjectName(c)));
     setTestMsg(null);
     setNamespaceResultKey(null);
     setNamespaceOptions([]);
@@ -869,7 +891,8 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
         inlineValueOf: (field) => c.sshConfig?.[field as SSHSecretField] ?? "",
       },
     ]);
-    if (message) setTestMsg(message);
+    // 保存后的「已保存」优先于「表单已就绪/凭据读回」那句：刚点的是保存，读的是保存的结果（r145 A4）。
+    setTestMsg(notice ?? message ?? null);
   };
 
   const edit = (c: Connection) => {
@@ -988,32 +1011,96 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
     localPort: t("connection.localPortShort"),
   })[0];
 
-  const save = async () => {
+  /**
+   * 保存被拦下时的唯一送达口径（r145 B1）。
+   *
+   * 这条消息区的可见性受 `visibleTestMsg` 那道闸管：`testResultKey` 只要还停在旧草稿指纹上，
+   * 新写的消息就一个字都不显示。端口非法那条早退一直按「先清闸再写消息」办，另外三条没做——
+   * 于是「改了目录直接点保存」变成屏幕上毫无反应的静默失败（轮145 实测 D 组）。
+   * 所有早退一律走这里，不许再各写一套。
+   */
+  const announceSaveBlock = (text: string) => {
+    setTestTrace(null);
+    setTestResultKey(null);
+    setTestMsg({ ok: false, text });
+  };
+
+  /**
+   * 把草稿里的凭据字段结算进系统库（轮142 C 的三路判定），就地改写 target，返回没能进库的字段说明。
+   *
+   * 拆出来的理由：这步要碰外部密钥库，可能整条抛错。留在 save 里时一次抛错让 upsertConnection
+   * 根本执行不到——用户按了保存，屏幕上既没成功也没失败（轮145 实测的第二种静默失败）。
+   * 调用方负责 try/catch 并保证「连接照存、只是这几条字段本次以明文留在本地」。
+   */
+  const settleSecretsInto = async (target: Draft): Promise<string | null> => {
+    const ownerId = draft.id as string;
+    const noticeParts: string[] = [];
+    const collectNotices = (notices: SecretEditNotice[], labelOf: (field: string) => string) => {
+      for (const kind of ["write", "delete"] as const) {
+        const names = notices.filter((item) => item.kind === kind).map((item) => labelOf(item.field));
+        if (names.length === 0) continue;
+        noticeParts.push(
+          t(kind === "write" ? "credentials.editWriteFailed" : "credentials.editDeleteFailed", {
+            fields: joinFieldNames(names),
+          })
+        );
+      }
+    };
+
+    const settledConnection = await settleConnectionSecrets({
+      ownerId,
+      draft: target,
+      baseline: draft.secretBaseline ?? {},
+      refs: target.secretRefs,
+    });
+    Object.assign(target, connectionSecretPatch(settledConnection.inline));
+    target.secretRefs = settledConnection.pointers;
+    collectNotices(settledConnection.notices, connectionSecretLabel);
+
+    if (target.sshConfig) {
+      const settledSSH = await settleSSHSecrets({
+        namespace: "connection-ssh",
+        ownerId,
+        draft: target.sshConfig,
+        baseline: draft.sshSecretBaseline ?? {},
+        refs: target.sshSecretRefs,
+      });
+      target.sshConfig = { ...target.sshConfig, ...sshSecretPatch(settledSSH.inline) };
+      target.sshSecretRefs = settledSSH.pointers;
+      collectNotices(settledSSH.notices, sshSecretLabel);
+    } else {
+      // 改用档案、或 host 空到不存 SSH 配置：连接自己那份大凭据指针不再留着。
+      target.sshSecretRefs = undefined;
+    }
+    return noticeParts.join("；") || null;
+  };
+
+  const persistDraft = async () => {
     // 按钮 disabled 拦不住「单行输入框回车＝保存」那条路径，这里再兜一道；
     // 清掉旧测试结果，否则这条理由会被当成上一次测试的残留而看不见。
     if (portBlock) {
-      setTestTrace(null);
-      setTestResultKey(null);
-      setTestMsg({ ok: false, text: portBlock });
+      announceSaveBlock(portBlock);
       return;
     }
     if (!draft.sourceName?.trim() || (draft.provider !== "local" && !draft.baseUrl.trim())) {
-      setTestMsg({ ok: false, text: t("connection.nameAndAddressRequired") });
+      announceSaveBlock(t("connection.nameAndAddressRequired"));
       return;
     }
     if (draft.provider === "local") {
       if (!draft.localPath?.trim()) {
-        setTestMsg({ ok: false, text: t("connection.localPathRequired") });
+        announceSaveBlock(t("connection.localPathRequired"));
         return;
       }
-      if (!draft.forceLocalSnapshot && (!localValidation?.valid || localValidation.path !== draft.localPath.trim())) {
-        setTestMsg({ ok: false, text: t("connection.localValidationRequired") });
+      // 校验结果里的 path 来自 Go 侧，用户填的是另一套写法（尾部分隔符、盘符大小写、混用 /）。
+      // 严格相等会把「页面明明显示目录有效」的草稿判成未校验，用户卡在改不动也存不了之间（轮145 C 组）。
+      if (!draft.forceLocalSnapshot && (!localValidation?.valid || !isSameSnapshotPath(localValidation.path, draft.localPath))) {
+        announceSaveBlock(t("connection.localValidationRequired"));
         return;
       }
     }
     if (draft.provider === "apollo") {
       if (!draft.apolloToken?.trim() || !draft.apolloAppId?.trim() || !draft.apolloCluster?.trim() || !draft.apolloNamespaceName?.trim()) {
-        setTestMsg({ ok: false, text: t("connection.apolloRequired") });
+        announceSaveBlock(t("connection.apolloRequired"));
         return;
       }
     }
@@ -1036,44 +1123,12 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
      */
     let settleFailed: string | null = null;
     if (draft.id) {
-      const noticeParts: string[] = [];
-      const collectNotices = (notices: SecretEditNotice[], labelOf: (field: string) => string) => {
-        for (const kind of ["write", "delete"] as const) {
-          const names = notices.filter((item) => item.kind === kind).map((item) => labelOf(item.field));
-          if (names.length === 0) continue;
-          noticeParts.push(
-            t(kind === "write" ? "credentials.editWriteFailed" : "credentials.editDeleteFailed", {
-              fields: joinFieldNames(names),
-            })
-          );
-        }
-      };
-      const settledConnection = await settleConnectionSecrets({
-        ownerId: draft.id,
-        draft: toSave,
-        baseline: draft.secretBaseline ?? {},
-        refs: toSave.secretRefs,
-      });
-      Object.assign(toSave, connectionSecretPatch(settledConnection.inline));
-      toSave.secretRefs = settledConnection.pointers;
-      collectNotices(settledConnection.notices, connectionSecretLabel);
-
-      if (toSave.sshConfig) {
-        const settledSSH = await settleSSHSecrets({
-          namespace: "connection-ssh",
-          ownerId: draft.id,
-          draft: toSave.sshConfig,
-          baseline: draft.sshSecretBaseline ?? {},
-          refs: toSave.sshSecretRefs,
-        });
-        toSave.sshConfig = { ...toSave.sshConfig, ...sshSecretPatch(settledSSH.inline) };
-        toSave.sshSecretRefs = settledSSH.pointers;
-        collectNotices(settledSSH.notices, sshSecretLabel);
-      } else {
-        // 改用档案、或 host 空到不存 SSH 配置：连接自己那份大凭据指针不再留着。
-        toSave.sshSecretRefs = undefined;
+      try {
+        settleFailed = await settleSecretsInto(toSave);
+      } catch (e) {
+        // 密钥库那边炸了不能连带把保存一起吞掉：连接照存，改说「这些字段本次以明文留在本地」。
+        settleFailed = t("credentials.settleError", { reason: errorText(e) });
       }
-      settleFailed = noticeParts.join("；") || null;
     } else {
       toSave.secretRefs = undefined;
       toSave.sshSecretRefs = undefined;
@@ -1081,13 +1136,16 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
 
     const sourceName = toSave.sourceName?.trim() || toSave.name.trim();
     const connectionName = toSave.name.trim() || sourceName;
+    // 编辑前先留住旧的那份：地址（含本地快照目录）改了要按旧地址清缓存，拿新地址清不出任何东西。
+    const previous = draft.id ? list.find((c) => c.id === draft.id) : undefined;
     const saved = upsertConnection({
       ...toSave,
       name: connectionName,
       projectName: toSave.projectName?.trim() || DEFAULT_PROJECT_NAME,
       environmentName: toSave.environmentName?.trim() || DEFAULT_ENVIRONMENT_NAME,
       envRole: toSave.envRole || undefined,
-      writeConfirmPolicy: toSave.writeConfirmPolicy || undefined,
+      // 只读来源（本地快照/只读/强制快照）写不进去，这条策略对它没有意义，存了只是在数据里留个假选项。
+      writeConfirmPolicy: isReadOnlySource(toSave) ? undefined : toSave.writeConfirmPolicy || undefined,
       sourceName,
       sourceType: toSave.sourceType ?? "nacos",
       localPath: toSave.localPath?.trim() || "",
@@ -1116,20 +1174,52 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
       consulDatacenter: toSave.consulDatacenter?.trim() || "",
       consulKeyPrefix: toSave.consulKeyPrefix?.trim() || "",
     });
-    clearToken(saved.id, saved.baseUrl); // 凭据/地址可能变了，清掉旧 token 与版本缓存
+    // token 与配置列表/版本缓存按新旧地址各清一次（r145 C1）：
+    // 本地快照的 baseUrl 就是目录路径，改了目录只清新地址的话，旧目录那份缓存会一直跟着这条连接。
+    clearToken(saved.id, saved.baseUrl);
+    if (previous) {
+      clearToken(saved.id, previous.baseUrl);
+      clearToken(saved.id, sourceAddress(previous));
+    }
+    refresh();
+    // 保存后停在「编辑这条连接」：草稿不丢、标题不翻回「新建连接」（轮145 A 组的 bug1）。
+    // 项目/环境/表单要在这一同步段落定，不能等下面读库的异步返回：保存后马上点「新增来源」，
+    // 那个按钮拿的是上一次提交的闭包，异步那段还没生效，项目下拉会被换成输入框（回归判据在此）。
     const savedProject = connectionProjectName(saved);
     const savedEnvironment = connectionEnvironmentName(saved);
     setActiveProject(savedProject);
     setActiveEnvironment(savedEnvironment);
-    setDraft({ ...emptyDraft(defaultNewEnvironment), projectName: savedProject, environmentName: savedEnvironment });
-    setShowSSHConfig(false);
-    setLocalValidation(null);
-    refresh();
-    if (settleFailed) {
-      // 连接存下了，但有几个字段没能进系统凭据库：说清「这次是明文存在本地」，别只报成功。
-      setTestTrace(null);
-      setTestResultKey(null);
-      setTestMsg({ ok: false, text: settleFailed });
+    setCreatingProject(false); // 刚落盘的项目必然已经在名册里
+    setDraft({
+      ...saved,
+      secretBaseline: draft.secretBaseline ?? {},
+      sshSecretBaseline: draft.sshSecretBaseline ?? {},
+    });
+    setShowSSHConfig(!!saved.sshConfig?.host || !!saved.sshProfileId);
+    // 表单再按 saved 重开一遍：凭据从系统库读回来，免得刚存的值留在草稿里被下一次编辑当明文。
+    setTestTrace(null);
+    setTestResultKey(null); // openConnection 不重设这道闸，不清掉「已保存」会被旧草稿指纹藏起来
+    await openConnection(
+      saved,
+      settleFailed ? { ok: false, text: settleFailed } : { ok: true, text: t("connection.savedNotice", { name: sourceLabel(saved, t) }) }
+    );
+  };
+
+  /**
+   * 保存的唯一入口（r145 B4）。
+   *
+   * 回车提交这条路径绕得过按钮的 disabled，凭据结算又是异步的——连点两下或连按两次回车会拿同一份
+   * 草稿落两次盘。这里用 ref 兜一道同步的闸（state 更新在同一轮事件里还看不见），按钮的 disabled 只当视觉反馈。
+   */
+  const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await persistDraft();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -1433,6 +1523,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                           {c.provider === "local" && (
                             <span className="conn-provider-badge local">{t("connection.sourceTypeSnapshot")}</span>
                           )}
+                          {isReadOnlySource(c) && (
+                            <span className="conn-readonly-badge" title={t("connection.readonlyBadgeHelp")}>
+                              {t("connection.readonlyBadge")}
+                            </span>
+                          )}
                           {(c.sshConfig || c.sshProfileId) && (
                             <span className="conn-ssh-badge" title={t("connection.sshConfig")}>
                               <SshLockIcon />
@@ -1593,26 +1688,32 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                   <option value="production">{t("connection.envRoleProduction")}</option>
                 </select>
               </label>
-              <label className="field">
-                <FieldLabel {...fieldLabelProps} tip={t("connection.writeConfirmPolicyHelp")}>
-                  {t("connection.writeConfirmPolicy")}
-                </FieldLabel>
-                <select
-                  className="search-input wide"
-                  value={draft.writeConfirmPolicy ?? ""}
-                  onChange={(e) => set({ writeConfirmPolicy: (e.target.value || undefined) as Draft["writeConfirmPolicy"] })}
-                >
-                  <option value="">{t("connection.writeConfirmPolicyUndeclared")}</option>
-                  <option value="always">{t("connection.writeConfirmPolicyAlways")}</option>
-                  <option value="protected-only">{t("connection.writeConfirmPolicyProtectedOnly")}</option>
-                  <option value="never">{t("connection.writeConfirmPolicyNever")}</option>
-                </select>
-              </label>
+              {isReadOnlySource(draft) ? (
+                <div className="field-warning readonly-source-hint">
+                  {t("connection.readonlySourceHint")}
+                </div>
+              ) : (
+                <label className="field">
+                  <FieldLabel {...fieldLabelProps} tip={t("connection.writeConfirmPolicyHelp")}>
+                    {t("connection.writeConfirmPolicy")}
+                  </FieldLabel>
+                  <select
+                    className="search-input wide"
+                    value={draft.writeConfirmPolicy ?? ""}
+                    onChange={(e) => set({ writeConfirmPolicy: (e.target.value || undefined) as Draft["writeConfirmPolicy"] })}
+                  >
+                    <option value="">{t("connection.writeConfirmPolicyUndeclared")}</option>
+                    <option value="always">{t("connection.writeConfirmPolicyAlways")}</option>
+                    <option value="protected-only">{t("connection.writeConfirmPolicyProtectedOnly")}</option>
+                    <option value="never">{t("connection.writeConfirmPolicyNever")}</option>
+                  </select>
+                </label>
+              )}
             </div>
           </section>
 
           <section className="conn-form-section">
-            <div className="conn-section-title">{t("connection.sectionNetwork")}</div>
+            <div className="conn-section-title">{isLocalSnapshotDraft ? t("connection.sectionSnapshotDir") : t("connection.sectionNetwork")}</div>
             <div className="field-row">
               <label className="field">
                 <FieldLabel {...fieldLabelProps} required tip={t("connection.sourceNameHelp")}>
@@ -1730,6 +1831,11 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                       ? t("connection.localValidationOk").replace("{count}", String(localValidation.configCount))
                       : localSnapshotValidationMessage(localValidation, t)}
                     <span className="local-validation-path">{localValidation.path}</span>
+                  </div>
+                )}
+                {snapshotPathNeedsValidation && (
+                  <div className="field-warning" {...statusMessageProps("info")}>
+                    {t("connection.localPathNeedsValidation")}
                   </div>
                 )}
               </label>
@@ -1971,18 +2077,18 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             </section>
           )}
 
-          <section className="conn-form-section">
-            <div className="conn-section-title">{t("connection.sectionSecurity")}</div>
-            {draft.provider !== "local" && (
+          {!isLocalSnapshotDraft && (
+            <section className="conn-form-section">
+              <div className="conn-section-title">{t("connection.sectionSecurity")}</div>
               <label className="check-field">
                 <FieldLabel {...fieldLabelProps} tip={t("connection.useProxyHelp")}>
                   {t("connection.useProxy")}
                 </FieldLabel>
                 <input type="checkbox" checked={!!draft.useProxy} onChange={(e) => set({ useProxy: e.target.checked })} />
               </label>
-            )}
-            {!draft.useProxy && <div className="field-hint">{t("connection.proxyOffHint")}</div>}
-          </section>
+              {!draft.useProxy && <div className="field-hint">{t("connection.proxyOffHint")}</div>}
+            </section>
+          )}
 
           {draft.provider === "nacos" && (
             <section className="conn-form-section">
@@ -2351,8 +2457,13 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
               </button>
             )}
             <span className="btn-guard" title={portBlock}>
-              <button className="btn btn-primary" onClick={() => void save()} disabled={!!portBlock} aria-disabled={!!portBlock}>
-                {t("common.save")}
+              <button
+                className="btn btn-primary"
+                onClick={() => void save()}
+                disabled={!!portBlock || saving}
+                aria-disabled={!!portBlock || saving}
+              >
+                <BusyLabel busy={saving} idle={t("common.save")} busyText={t("connection.saving")} />
               </button>
             </span>
           </div>

@@ -691,7 +691,10 @@ export default function ConfigBrowser({ conn, tenant, connections = [], onStartA
     setTargetNamespace(tenant);
     fetchList("", 1, resetGroupValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conn.id, tenant]);
+  }, [conn.id, tenant, conn.sourceType ?? "nacos", conn.localPath ?? "", conn.baseUrl]);
+  // 本地快照改快照目录时 conn.id 与 tenant 都不变，只列目录的来源字段变了。
+  // 依赖里不带这几个字段的话，保存连接后这里的 effect 不会重跑，
+  // 屏幕上留的还是旧目录的文件列表（轮145 C1）。
 
   useEffect(() => {
     // 显式环境角色优先（r114）：声明了开发/测试的连接直接当默认目标；

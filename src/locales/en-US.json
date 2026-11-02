@@ -602,6 +602,7 @@
     "editUnreadable": "{fields} could not be read from the system credential store. Re-enter and save.",
     "editWriteFailed": "{fields} could not be written to the system credential store and is kept as plaintext in local data",
     "editDeleteFailed": "{fields} was unlinked, but the old entry could not be removed from the system credential store",
+    "settleError": "Credentials could not be written to the system credential store ({reason}). The connection was saved; these fields remain in local data as plaintext for this save",
     "vaultNote": "{fields} live in the system credential store; no plaintext is written to local data"
   },
   "ssh": {
@@ -695,6 +696,7 @@
     "sectionNetwork": "Network",
     "sectionAuth": "Authentication",
     "sectionSecurity": "Security",
+    "sectionSnapshotDir": "Snapshot Source",
     "useProxy": "Use System Proxy",
     "useProxyHelp": "When enabled, Nacos HTTP requests will go through the proxy configured in SettingsView. Disabled for direct connection.",
     "proxyOffHint": "Direct connection mode, proxy disabled. Configure proxy in global settings.",
@@ -742,6 +744,12 @@
     "validatingLocal": "Validating…",
     "localPathRequired": "Local snapshot directory is required",
     "localValidationRequired": "Validate the local snapshot directory before saving",
+    "localPathNeedsValidation": "Directory changed - revalidate before saving",
+    "readonlySourceHint": "This source cannot be written back (local snapshot or marked read-only): publishing and deletion are rejected, so no write confirmation policy is needed.",
+    "readonlyBadge": "Read-only",
+    "readonlyBadgeHelp": "This source cannot be written back; browse and compare only",
+    "savedNotice": "Saved: {name}",
+    "saving": "Saving...",
     "localValidationOk": "Directory is valid, found {count} config files",
     "localValidationEmptyPath": "Local snapshot directory is required",
     "localValidationNotFound": "Directory does not exist",

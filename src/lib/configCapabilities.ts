@@ -50,3 +50,16 @@ export function supportsConfigHistory(conn: Connection): boolean {
 export function supportsCenterHistory(conn: Connection): boolean {
   return HISTORY_CAPABILITY[effectiveProvider(conn)].center;
 }
+
+/**
+ * 这条连接是不是「写不进去的只读来源」（r145 D4）。
+ *
+ * 判据与 lib/applyFollowup.isPromotionTargetConnection 同源（那边是正向说法）：
+ * 本地快照、只读标记、强制快照三类在 Go/API 层被直接拒写
+ * （api/nacos.ts 的 publishConfig 与 deleteConfig 一族对本地快照直接抛「只读」错误），
+ * 把它们挂在「能不能写」这一栏里就是「点了才报错」。
+ * UI 入口与闸门从这里取，不在组件里散写 provider 判断（本文件既有约定）。
+ */
+export function isReadOnlySource(conn: Pick<Connection, "sourceType" | "readonly" | "forceLocalSnapshot">): boolean {
+  return conn.sourceType === "local-snapshot" || !!conn.readonly || !!conn.forceLocalSnapshot;
+}

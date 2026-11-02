@@ -30,6 +30,7 @@ const HISTORY = "src/components/OperationHistoryView.tsx";
 const APPLY_VIEW = "src/components/ApplyPlanView.tsx";
 const APP = "src/App.tsx";
 const FOLLOWUP = "src/lib/applyFollowup.ts";
+const CAPABILITIES = "src/lib/configCapabilities.ts";
 const CSS = "src/styles.css";
 const APPLY_ENTRY = "src/lib/applyEntry.ts";
 const PANEL = "src/components/PostApplyPromotionPanel.tsx";
@@ -275,9 +276,17 @@ describe("晋级机制的租户口径只在 lib 收口", () => {
   it("写不进去的连接不进生产目标，apollo/consul 留在候选里", () => {
     const followup = readScannedSource(FOLLOWUP);
     const eligibility = followup.slice(followup.indexOf("export function isPromotionTargetConnection"));
-    expect(eligibility, "资格线漏了一条：这一类连接照样挂在生产目标里，用户要到执行那步才收到错误").toMatch(
-      /connection\.sourceType !== "local-snapshot" && !connection\.readonly && !connection\.forceLocalSnapshot/
+    // 轮145：写不写得进去这条判据同时被生产目标资格线与连接表单用，散写两份迟早分家，
+    // 所以资格线收成委托 configCapabilities.isReadOnlySource。这里钉两件事：委托还在、三条条件一条不少。
+    expect(eligibility, "资格线不再过 configCapabilities.isReadOnlySource：只读判据会长成第二套").toMatch(
+      /return !isReadOnlySource\(connection\);/
     );
+    const capabilities = readScannedSource(CAPABILITIES);
+    const predicate = capabilities.slice(capabilities.indexOf("export function isReadOnlySource"));
+    expect(
+      predicate,
+      "资格线漏了一条：这一类连接照样挂在生产目标里，用户要到执行那步才收到错误"
+    ).toMatch(/conn\.sourceType === "local-snapshot" \|\| !!conn\.readonly \|\| !!conn\.forceLocalSnapshot/);
     const candidates = followup.slice(followup.indexOf("export function promotionTargetCandidates"));
     expect(candidates, "候选没有过资格线").toMatch(/conn\.id !== sandboxConnectionId && isPromotionTargetConnection\(conn\)/);
     expect(candidates, "apollo/consul 被顺手剔掉了：计划那条写链路在 Go 侧同样有 PublishConfig").not.toMatch(/provider === "nacos"/);

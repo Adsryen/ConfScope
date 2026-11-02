@@ -1,4 +1,5 @@
 // Apply 后续动作入口构造：只生成 dry-run 入口，不执行任何写入。
+import { isReadOnlySource } from "./configCapabilities";
 import type { ConfigDocument } from "../api/nacos";
 import type { Snapshot } from "../api/snapshot";
 import type { Connection } from "../store/connections";
@@ -427,7 +428,7 @@ export function isProductionMarkedConnection(connection: Connection, namespace: 
  * 用户要一路走到执行那一步才会收到一条永远不可能成功的错误（站规里叫「点了才报错」）。
  */
 export function isPromotionTargetConnection(connection: Connection): boolean {
-  return connection.sourceType !== "local-snapshot" && !connection.readonly && !connection.forceLocalSnapshot;
+  return !isReadOnlySource(connection);
 }
 
 /**

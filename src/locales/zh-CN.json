@@ -602,6 +602,7 @@
     "editUnreadable": "{fields} 在系统凭据库里读不到，请重新填写后保存",
     "editWriteFailed": "{fields} 未能写入系统凭据库，本次以明文保存在本地数据中",
     "editDeleteFailed": "{fields} 已解除引用，但系统凭据库中的旧条目没能删除",
+    "settleError": "凭据没能写入系统凭据库（{reason}），连接已保存，这些字段本次以明文留在本地数据中",
     "vaultNote": "{fields} 保存在系统凭据库中，本地数据文件里不写明文"
   },
   "ssh": {
@@ -695,6 +696,7 @@
     "sectionNetwork": "网络",
     "sectionAuth": "认证",
     "sectionSecurity": "安全",
+    "sectionSnapshotDir": "快照来源",
     "useProxy": "使用系统代理",
     "useProxyHelp": "开启后 Nacos HTTP 请求将走 SettingsView 中配置的代理，关闭则直连。",
     "proxyOffHint": "当前为直连模式，代理关闭。可在全局设置中配置代理。",
@@ -742,6 +744,12 @@
     "validatingLocal": "校验中…",
     "localPathRequired": "本地快照目录不能为空",
     "localValidationRequired": "请先校验本地快照目录，校验通过后再保存",
+    "localPathNeedsValidation": "目录改过了，重新校验通过后才能保存",
+    "readonlySourceHint": "这条来源写不回去（本地快照或被标记为只读）：发布与删除都会被拒绝，因此不需要设置写入确认策略。",
+    "readonlyBadge": "只读",
+    "readonlyBadgeHelp": "这条来源写不回去，只能查看与对比",
+    "savedNotice": "已保存：{name}",
+    "saving": "保存中…",
     "localValidationOk": "目录有效，找到 {count} 个配置文件",
     "localValidationEmptyPath": "本地快照目录不能为空",
     "localValidationNotFound": "目录不存在",

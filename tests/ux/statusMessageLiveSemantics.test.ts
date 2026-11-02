@@ -39,7 +39,9 @@ interface Site {
  * WP-15 本机版本历史面板再多一处「读不出来」的错误提示，共 25 处；
  * 轮73 R73-P3 设置页保存徽章拆成「节内就近」与「工作区兜底」两种容器，净增 1 处（共 26 处、20 条名单）；
  * 轮99 设置页保留配额那一节新增 3 处成功提示与 1 处「已回落默认值」的琥珀提示，共 30 处、名单仍是 20 条。
- * 轮142 审计动作条加扫描进度与快速忽略回执两处站点，共 32 处、22 条名单。
+ * 轮142 审计动作条加扫描进度与快速忽略回执两处站点，共 32 处、22 条名单；
+ * 轮145 连接表单补一处「目录改过需重新校验」的就近提示，共 33 处、名单仍是 22 条
+ * （同批那句「这条来源写不回去」的只读交代是常驻说明，登记进沉默名单，不是播报站点）。
  * 新宿主一律整族登记：只补 SITES 不补沉默/播报名单，等于给下一条裸提示留了空子。
  */
 const SITES: Site[] = [
@@ -58,7 +60,8 @@ const SITES: Site[] = [
   { file: "src/components/LocalRevisionPanel.tsx", marker: 'className="pad-msg err"', count: 1, spread: ERROR },
   { file: "src/App.tsx", marker: 'className="pad-msg big err"', count: 1, spread: ERROR },
   { file: "src/components/ConnectionManager.tsx", marker: 'className="field-error-box"', count: 1, spread: ERROR },
-  { file: "src/components/ConnectionManager.tsx", marker: 'className="field-warning"', count: 1, spread: INFO },
+  // 轮145 补第二处：本地快照「目录改过了，重新校验通过后才能保存」的就近提示，同 tone 同判据。
+  { file: "src/components/ConnectionManager.tsx", marker: 'className="field-warning"', count: 2, spread: INFO },
   {
     file: "src/components/ConnectionManager.tsx",
     marker: 'className={`test-msg ${visibleTestMsg.ok ? "ok" : "err"}`}',
@@ -104,6 +107,9 @@ const MUST_STAY_SILENT: Array<{ file: string; marker: string; count: number }> =
   { file: "src/components/ConfigBrowser.tsx", marker: 'className="pad-msg browser-empty"', count: 1 },
   { file: "src/components/HistoryView.tsx", marker: 'className="pad-msg">{t(', count: 2 },
   { file: "src/components/LocalRevisionPanel.tsx", marker: 'className="pad-msg">{t(', count: 3 },
+  // 轮145 D4：只读来源占掉「写入确认策略」那一格的交代句。它替代的是一个表单控件、编辑期间一直在，
+  // 属于常驻说明；挂 live region 会让读屏每次进这一节都重念一遍。
+  { file: "src/components/ConnectionManager.tsx", marker: 'className="field-warning readonly-source-hint"', count: 1 },
 ];
 
 /** 波33 之前已经带播报的 10 处，本波不动，但也不许被人顺手退回静默。 */
@@ -186,7 +192,7 @@ describe("状态提示的播报语义（波33 R54）", () => {
 
   it("站点总数与名单条目数不许悄悄缩水", () => {
     expect(SITES).toHaveLength(22);
-    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(32);
+    expect(SITES.reduce((sum, site) => sum + site.count, 0)).toBe(33);
   });
 
   it("tone → role/aria-live 的判定只许写在 statusSemantics.ts", () => {
