@@ -1470,6 +1470,23 @@ describe("发版必须先有用户这一轮的授权（轮102）", () => {
     expect(runShell(CONSENT_SCRIPT, ["check", "--version=9.9.3"], empty.env).out).toContain("没有用户原话");
   });
 
+  it("真跑一次：中文里说「可以发了」的自然写法都算授权，加了否定的一律不算", () => {
+    // 词表只认「发版/发布」那几种写法时，用户说「发一版吧」会被自己的闸门堵在门外；
+    // 反过来，宽了正面也必须同时宽否定，否则「发一版还早」这类拒绝会被读成许可。
+    for (const quote of ["发一版吧", "发个版吧", "出一版吧", "Release 一下吧"]) {
+      const { log, env } = tmpLedger();
+      const run = runShell(CONSENT_SCRIPT, ["record", "--version=9.9.1", `--quote=${quote}`], env);
+      expect(run.code, `「${quote}」是明确的发布授权`).toBe(0);
+      expect(readFileSync(log, "utf8"), `「${quote}」应原样入账`).toContain(`quote=${quote}`);
+    }
+    for (const quote of ["发一版还早", "不想发一版", "先别发一版"]) {
+      const { log, env } = tmpLedger();
+      const run = runShell(CONSENT_SCRIPT, ["record", "--version=9.9.1", `--quote=${quote}`], env);
+      expect(run.code, `「${quote}」听上去是不发`).not.toBe(0);
+      expect(readFileSync(log, "utf8").trim(), `「${quote}」不该进账本`).toBe("");
+    }
+  });
+
   it("真跑一次：不像授权的原话一律被拒，且一个字都不写进账本", () => {
     const { log, env } = tmpLedger();
     for (const quote of ["先实测后再说怎么改", "我还没同意发版", "这个别发", "继续做轮102", "发版吧，不过先别"]) {
