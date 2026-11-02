@@ -5207,6 +5207,25 @@ button.diff-workflow-step-btn:hover {
   justify-content: center;
   margin-bottom: 4px;
 }
+/*
+ * 轮146 D1：表单标题行。本地快照要在这一行就把来源种类交代掉，
+ * 否则两种表单的差别只剩「往下滚几个区块」。
+ */
+.conn-form-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 与列表行「只读」徽标同一套中性灰：陈述这条来源的能力，不是在报错。 */
+.conn-form-kind {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
 .conn-empty {
   font-size: 12px;
   color: var(--text-dim);
@@ -5549,11 +5568,19 @@ button.diff-workflow-step-btn:hover {
  * r145 D4：只读来源占掉「写入确认策略」那一格。
  * 它不是输入控件，但要和左边的「环境角色」下拉同宽、底边对齐，
  * 否则一行里右边像漏了一块（.field 的 flex:1 只给得到标签，这里得自己占位）。
+ * 轮146 D2：原先借 field-warning 的警告黄——那格长期亮着，看着像「这表单出错了」，
+ * 而它说的只是这条来源一直如此的能力边界，所以换成与徽标同族的中性灰。
  */
-.readonly-source-hint {
+.readonly-source-note {
   flex: 1;
   min-width: 0;
   align-self: flex-end;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
 }
 .pwd-toggle {
   flex-shrink: 0;

@@ -748,6 +748,7 @@
     "readonlySourceHint": "这条来源写不回去（本地快照或被标记为只读）：发布与删除都会被拒绝，因此不需要设置写入确认策略。",
     "readonlyBadge": "只读",
     "readonlyBadgeHelp": "这条来源写不回去，只能查看与对比",
+    "formKindSnapshot": "本地快照 · 只读来源",
     "savedNotice": "已保存：{name}",
     "saving": "保存中…",
     "localValidationOk": "目录有效，找到 {count} 个配置文件",

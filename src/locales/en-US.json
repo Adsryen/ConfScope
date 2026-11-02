@@ -748,6 +748,7 @@
     "readonlySourceHint": "This source cannot be written back (local snapshot or marked read-only): publishing and deletion are rejected, so no write confirmation policy is needed.",
     "readonlyBadge": "Read-only",
     "readonlyBadgeHelp": "This source cannot be written back; browse and compare only",
+    "formKindSnapshot": "Local snapshot - read only",
     "savedNotice": "Saved: {name}",
     "saving": "Saving...",
     "localValidationOk": "Directory is valid, found {count} config files",

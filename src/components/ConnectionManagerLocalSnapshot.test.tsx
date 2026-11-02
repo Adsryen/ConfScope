@@ -315,4 +315,37 @@ describe("本地快照连接的保存与表单分化（r145）", () => {
     expect(cleared).toContain("C:\\backup\\order-old");
     expect(cleared).toContain("C:\\backup\\order-new");
   });
+
+  it("标题行就把本地快照与通用表单分开，切回 Nacos 后徽标与交代一起收回", async () => {
+    seedLocalConnection();
+    renderManager();
+    await openSeed();
+
+    // 标题本身不带徽标文字：列表与用例都按「编辑连接」这四个字找它。
+    expect(document.querySelector(".conn-form-title")?.textContent).toBe("编辑连接");
+    expect(document.querySelector(".conn-form-kind")?.textContent).toBe("本地快照 · 只读来源");
+    expect(document.querySelector(".conn-form-kind")).toHaveAttribute("title", expect.stringContaining("写不回去"));
+
+    // 只读交代换成中性说明：它说的是这条来源一直如此的能力边界，不是「表单现在出错了」。
+    const note = screen.getByText(/这条来源写不回去/);
+    expect(note.className).toBe("readonly-source-note");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), { target: { value: "nacos" } });
+    expect(document.querySelector(".conn-form-kind")).toBeNull();
+    expect(screen.queryByText(/这条来源写不回去/)).not.toBeInTheDocument();
+    expect(screen.getByText("写入确认策略")).toBeInTheDocument();
+  });
+
+  it("本地快照底栏不再重复一颗连接测试，通用表单照旧有", async () => {
+    seedLocalConnection();
+    renderManager();
+    await openSeed();
+
+    // 底栏那颗「连接测试」在本地快照下走的就是目录校验，和路径框旁边那颗是同一件事。
+    expect(screen.queryByRole("button", { name: "连接测试" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "校验目录" })).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "配置中心" }), { target: { value: "nacos" } });
+    expect(screen.getByRole("button", { name: "连接测试" })).toBeInTheDocument();
+  });
 });

@@ -109,7 +109,8 @@ const MUST_STAY_SILENT: Array<{ file: string; marker: string; count: number }> =
   { file: "src/components/LocalRevisionPanel.tsx", marker: 'className="pad-msg">{t(', count: 3 },
   // 轮145 D4：只读来源占掉「写入确认策略」那一格的交代句。它替代的是一个表单控件、编辑期间一直在，
   // 属于常驻说明；挂 live region 会让读屏每次进这一节都重念一遍。
-  { file: "src/components/ConnectionManager.tsx", marker: 'className="field-warning readonly-source-hint"', count: 1 },
+  // 轮146 D2：这条交代是长期事实不是状态变化，样式也从 field-warning 的警告黄换成中性说明。
+  { file: "src/components/ConnectionManager.tsx", marker: 'className="readonly-source-note"', count: 1 },
 ];
 
 /** 波33 之前已经带播报的 10 处，本波不动，但也不许被人顺手退回静默。 */

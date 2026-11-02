@@ -1603,7 +1603,18 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
             void save();
           }}
         >
-          <div className="conn-form-title">{draft.id ? t("connection.edit") : t("connection.new")}</div>
+          <div className="conn-form-head">
+            <div className="conn-form-title">{draft.id ? t("connection.edit") : t("connection.new")}</div>
+            {/*
+             * 轮146 D1：本地快照的表单比通用的短一截、字段也不一样，但只靠下面的区块改名，
+             * 用户得滚下去数区块才知道自己开的是哪一种。标题这一行直接把来源种类交代掉。
+             */}
+            {isLocalSnapshotDraft && (
+              <span className="conn-form-kind" title={t("connection.readonlyBadgeHelp")}>
+                {t("connection.formKindSnapshot")}
+              </span>
+            )}
+          </div>
           {helpPopover && (
             <div className="help-popover" style={{ top: helpPopover.top, left: helpPopover.left }}>
               {helpPopover.text}
@@ -1689,7 +1700,7 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
                 </select>
               </label>
               {isReadOnlySource(draft) ? (
-                <div className="field-warning readonly-source-hint">
+                <div className="readonly-source-note">
                   {t("connection.readonlySourceHint")}
                 </div>
               ) : (
@@ -2449,7 +2460,12 @@ export default function ConnectionManager({ onClose, onChange, embedded = false 
           )}
 
           <div className="conn-form-actions">
-            <TestButton onClick={doTest} running={testingCurrent} />
+            {/*
+             * 轮146 D3：本地快照没有「连接」可测，底栏这颗 TestButton 走的就是目录校验，
+             * 和路径框旁边那颗「校验目录」是同一件事（同样写 localValidation、同样带忙态）。
+             * 两颗按钮做同一件事会让人怀疑它们其实不一样，这里只留贴着字段的那颗。
+             */}
+            {!isLocalSnapshotDraft && <TestButton onClick={doTest} running={testingCurrent} />}
             <div className="spacer" />
             {draft.id && (
               <button className="btn btn-ghost" onClick={() => startNew()}>
