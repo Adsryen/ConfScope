@@ -1160,6 +1160,7 @@
     "startApply": "进入配置变更计划",
     "enterBatchApply": "进入配置变更计划（{count} 个文件）",
     "enterPlanBlockedStaleMerge": "对比结果已过期，且当前还有未清空的合并草稿。请先重新对比，再按最新结果进入配置变更计划。",
+    "enterPlanBlockedReadOnlyTarget": "B 侧是本地快照或只读来源，写不回去。要落地改动请把 B 侧换成可写的配置中心；本地快照只作为来源（A 侧）参与对比和生成计划。",
     "dataIdPlaceholder": "留空则匹配全部 dataId",
     "unifiedNoDiff": "与上一版无差异",
     "sideBySideIdentical": "✓ 两侧内容完全一致",

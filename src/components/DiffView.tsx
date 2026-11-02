@@ -7,6 +7,7 @@ import { diffLines } from "../lib/diff";
 import { extractDuplicateKeys, normalizeConfig } from "../lib/normalize";
 import { validateConfig } from "../lib/validate";
 import { describeConfigListGaps, isStaleRequestError } from "../lib/configListStatus";
+import { isReadOnlySource } from "../lib/configCapabilities";
 import { reportError, reportMessage } from "../lib/errorCenter";
 import { keysDoc } from "../lib/keys";
 import {
@@ -1768,6 +1769,15 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   }, [ready, diffFormat, leftLoaded, rightLoaded, leftText, effectiveSingleRightText, t]);
   const leftConn = connections.find((item) => item.id === left.connId);
   const rightConn = connections.find((item) => item.id === right.connId);
+  /**
+   * B 侧（目标）是不是写不回去的只读来源（r148）。
+   *
+   * 判据取自 lib/configCapabilities.isReadOnlySource，与浏览页的 canWrite 同一口径：
+   * Go 侧 LocalProvider 对本地快照一律返回只读错误，api/nacos.ts 的写入口再兜一层抛错，
+   * 所以「B 侧放快照照样能进计划、走到第 5 步执行才炸」不是能力差异，是入口没拦。
+   * A 侧（来源）是快照完全合法——快照的主用法就是「读出来跟线上比」。
+   */
+  const rightTargetReadOnly = rightConn ? isReadOnlySource(rightConn) : false;
   const currentWorkflowStep: WorkflowStepId =
     loading || matchLoading || batchLoading
       ? "compare"
@@ -2004,6 +2014,8 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const startSingleApply = () => {
     if (!ready || !onStartApply) return;
+    // r148：只读目标不进计划（入口同样已锁，这里只是不让别处新调用方绕过去）。
+    if (rightTargetReadOnly) return;
     // R5：结果过期还带着手写正文进计划 = 拿旧基线上的字迹去写生产。纯引用路径不受影响
     // （计划生成时按 ref 现读并自判新鲜度），被锁的只有物化出来的这一份。
     if (resultStale && singleTune) return;
@@ -2049,6 +2061,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const startBatchApply = () => {
     if (!onStartApply || batchResults.length === 0) return;
+    if (rightTargetReadOnly) return;
     const source = applyEntryEndpointFromSource(left, connections, t);
     const target = applyEntryEndpointFromSource(right, connections, t);
     if (!source || !target) return;
@@ -2085,6 +2098,7 @@ export default function DiffView({ active = true, connections, onConnectionsChan
 
   const startMergeDraftApply = () => {
     if (!onStartApply || batchResults.length === 0) return;
+    if (rightTargetReadOnly) return;
     const source = applyEntryEndpointFromSource(left, connections, t);
     const target = applyEntryEndpointFromSource(right, connections, t);
     if (!source || !target) return;
@@ -2165,9 +2179,25 @@ export default function DiffView({ active = true, connections, onConnectionsChan
   // 所以这里只锁草稿这一条，并说清楚「重新对比」是唯一的出路（R55-A7）。
   const enterPlanBlockedByStaleMerge = resultStale && (hasMergePreviewDraft || Boolean(singleTune));
   const singleApplyBlockedByStaleTune = resultStale && Boolean(singleTune);
+  /**
+   * 只说一条原因：写不回去比基线过期更本质——过期了重新对比就能继续，
+   * 只读是重对比一百次也照样写不进去，所以只读那条排最前（r148 A1）。
+   */
+  const enterPlanBlockReason = rightTargetReadOnly
+    ? t("diff.enterPlanBlockedReadOnlyTarget")
+    : enterPlanBlockedByStaleMerge
+      ? t("diff.enterPlanBlockedStaleMerge")
+      : undefined;
+  const enterPlanBlocked = Boolean(enterPlanBlockReason);
+  const singleApplyBlockReason = rightTargetReadOnly
+    ? t("diff.enterPlanBlockedReadOnlyTarget")
+    : singleApplyBlockedByStaleTune
+      ? t("diff.enterPlanBlockedStaleTune")
+      : undefined;
+  const singleApplyBlocked = Boolean(singleApplyBlockReason);
 
   const startApplyFromCurrentDiff = () => {
-    if (enterPlanBlockedByStaleMerge) return;
+    if (enterPlanBlocked) return;
     if (hasMergePreviewDraft) {
       startMergeDraftApply();
       return;
@@ -2274,8 +2304,13 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                 type="button"
                 className="diff-source-direction"
                 aria-label={t("diff.sourceDirection")}
-                title={t("diff.startApply")}
+                title={rightTargetReadOnly ? t("diff.enterPlanBlockedReadOnlyTarget") : t("diff.startApply")}
                 onClick={() => {
+                  // 只读目标：箭头点击不把用户带到第 5 步去撞墙，就地说明（r148 A1）。
+                  if (rightTargetReadOnly) {
+                    toast(t("diff.enterPlanBlockedReadOnlyTarget"), "info");
+                    return;
+                  }
                   if (onStartApply && ready) {
                     try {
                       startSingleApply();
@@ -2403,20 +2438,18 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                   <div className="merge-plan-actions">
                     {/* disabled 收不到 pointer 事件，原因挂在包裹的 .btn-guard 上（与执行确认区同一写法）；
                         读屏不靠悬停，紧跟一条 field-hint 把话说完。 */}
-                    <span className="btn-guard" title={enterPlanBlockedByStaleMerge ? t("diff.enterPlanBlockedStaleMerge") : undefined}>
+                    <span className="btn-guard" title={enterPlanBlockReason}>
                       <button
                         type="button"
                         className="btn btn-primary btn-sm result-action result-action-plan"
                         onClick={startApplyFromCurrentDiff}
-                        disabled={enterPlanBlockedByStaleMerge}
-                        aria-disabled={enterPlanBlockedByStaleMerge}
+                        disabled={enterPlanBlocked}
+                        aria-disabled={enterPlanBlocked}
                       >
                         {t("diff.enterBatchApply", { count: hasMergePreviewDraft ? mergeRightCount : batchResults.length })}
                       </button>
                     </span>
-                    {enterPlanBlockedByStaleMerge && (
-                      <span className="merge-plan-blocker">{t("diff.enterPlanBlockedStaleMerge")}</span>
-                    )}
+                    {enterPlanBlocked && <span className="merge-plan-blocker">{enterPlanBlockReason}</span>}
                   </div>
                 )}
               </>
@@ -2456,14 +2489,14 @@ export default function DiffView({ active = true, connections, onConnectionsChan
                         {t("diff.manualTuneBadge")}
                       </span>
                     )}
-                    {singleApplyBlockedByStaleTune ? (
+                    {singleApplyBlocked ? (
                       <>
-                        <span className="btn-guard" title={t("diff.enterPlanBlockedStaleTune")}>
+                        <span className="btn-guard" title={singleApplyBlockReason}>
                           <button className="btn btn-ghost" onClick={startSingleApply} disabled aria-disabled>
                             {t("diff.startApply")}
                           </button>
                         </span>
-                        <span className="merge-plan-blocker">{t("diff.enterPlanBlockedStaleTune")}</span>
+                        <span className="merge-plan-blocker">{singleApplyBlockReason}</span>
                       </>
                     ) : (
                       <button className="btn btn-ghost" onClick={startSingleApply}>

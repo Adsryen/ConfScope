@@ -34,6 +34,20 @@ const exportMocks = vi.hoisted(() => ({
   exportDiff: vi.fn(),
 }));
 
+/**
+ * toast 的文案只有在 Toaster 挂载后才可见，而本页的测试宿主没有 Toaster；
+ * 包一层同名函数留下调用记录，让「点箭头就地说明」这件事可被断言（r148）。
+ */
+const toastMocks = vi.hoisted(() => ({ toast: vi.fn() }));
+
+vi.mock("../lib/toast", async () => {
+  const actual = await vi.importActual<typeof import("../lib/toast")>("../lib/toast");
+  return {
+    ...actual,
+    toast: (...args: Parameters<typeof actual.toast>) => toastMocks.toast(...args),
+  };
+});
+
 vi.mock("../lib/export", async () => {
   const actual = await vi.importActual<typeof import("../lib/export")>("../lib/export");
   return {
@@ -67,6 +81,40 @@ const snapshotConn: Connection = {
   sourceType: "local-snapshot",
   localPath: "C:\\backup\\dev",
   baseUrl: "C:\\backup\\dev",
+  username: "",
+  password: "",
+  defaultNamespace: "",
+};
+
+/**
+ * 把本地快照放在 A 侧（来源）用的夹具：与 leftApplyConn 同项目，快照当来源是主用法（r148）。
+ */
+const snapshotLeftConn: Connection = {
+  ...nacosConn,
+  id: "snap-left",
+  name: "local-left",
+  projectName: "Order",
+  environmentName: "Development",
+  sourceName: "本地快照",
+  sourceType: "local-snapshot",
+  localPath: "C:\\backup\\dev",
+  baseUrl: "C:\\backup\\dev",
+  username: "",
+  password: "",
+  defaultNamespace: "",
+};
+
+/** 把本地快照放在 B 侧（目标）用的夹具：id 单独一个，写后失效事件才好在多连接场景里定向。 */
+const snapshotRightConn: Connection = {
+  ...nacosConn,
+  id: "snap-right",
+  name: "local-right",
+  projectName: "Order",
+  environmentName: "Production",
+  sourceName: "本地快照",
+  sourceType: "local-snapshot",
+  localPath: "C:\\backup\\prod",
+  baseUrl: "C:\\backup\\prod",
   username: "",
   password: "",
   defaultNamespace: "",
@@ -2846,5 +2894,123 @@ describe("DiffView 第三步人工微调右侧目标内容（轮60 B线）", () 
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ dataId: "b.yaml", manualTuned: true });
     expect((items[0].sourceValueOverride as { content: string }).content).toBe("half written on b");
+  });
+});
+
+// ── r148：B 侧是写不回去的只读来源时，三个进计划的入口一起锁住 ──
+//
+// Go 侧 LocalProvider 对本地快照一律返回只读错误，api/nacos.ts 的写入口再兜一层抛错。
+// 过去对比页没有任何目标侧可写判定：用户能把快照放在 B 侧一路走到第 5 步执行才撞墙
+// （dry-run 不调 Publish，连 dry-run 都不拦）。这里锁的是入口，执行期兜底原样留着当防御层。
+describe("DiffView 目标侧只读收口（r148）", () => {
+  const readOnlyCopy = "B 侧是本地快照或只读来源，写不回去。";
+
+  beforeEach(() => {
+    localStorage.clear();
+    toastMocks.toast.mockReset();
+    apiMocks.listNamespaces.mockReset();
+    apiMocks.listConfigs.mockReset();
+    apiMocks.listAllConfigs.mockReset();
+    apiMocks.getConfig.mockReset();
+    apiMocks.listAllConfigs.mockImplementation(listAllConfigsBridge(apiMocks.listConfigs));
+    apiMocks.listNamespaces.mockResolvedValue([]);
+    apiMocks.listConfigs.mockResolvedValue({
+      totalCount: 1,
+      pageNumber: 1,
+      pagesAvailable: 1,
+      pageItems: [{ dataId: "app.yaml", group: "DEFAULT_GROUP", content: "", configType: "yaml" }],
+    });
+    apiMocks.getConfig.mockImplementation(async (conn: Connection) =>
+      conn.id === "left-nacos" || conn.id === "snap-left" ? "server:\n  port: 8080" : "server:\n  port: 9090"
+    );
+  });
+
+  /** 按两侧连接与 dataId 直接渲染到对比完成态；dataId 留空即批量态的入口。 */
+  function renderCompare(leftConnId: string, rightConnId: string, dataId: string) {
+    localStorage.setItem("locale", "zh-CN");
+    const onStartApply = vi.fn();
+    render(
+      <I18nProvider>
+        <DiffView
+          connections={[leftApplyConn, rightApplyConn, snapshotLeftConn, snapshotRightConn]}
+          initialParams={{
+            leftConnId,
+            rightConnId,
+            left: { tenant: leftConnId === "snap-left" ? "" : "shared", group: "DEFAULT_GROUP", dataId },
+            right: { tenant: rightConnId === "snap-right" ? "" : "shared", group: "DEFAULT_GROUP", dataId },
+            autoCompare: true,
+          }}
+          onStartApply={onStartApply}
+        />
+      </I18nProvider>
+    );
+    return onStartApply;
+  }
+
+  const blockerText = () => document.querySelector<HTMLElement>(".merge-plan-blocker")?.textContent ?? "";
+
+  it("B 侧放本地快照时锁住单文件入口并就地说明原因", async () => {
+    const onStartApply = renderCompare("left-nacos", "snap-right", "app.yaml");
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+
+    const planButton = screen.getByRole("button", { name: "进入配置变更计划" }) as HTMLButtonElement;
+    expect(planButton.disabled).toBe(true);
+    expect(planButton).toHaveAttribute("aria-disabled", "true");
+    expect(blockerText()).toContain(readOnlyCopy);
+
+    // 方向箭头也不能把人带进第 5 步：点击只就地给一条说明
+    fireEvent.click(screen.getByLabelText("应用方向"));
+    expect(onStartApply).not.toHaveBeenCalled();
+    expect(toastMocks.toast).toHaveBeenCalledWith(expect.stringContaining(readOnlyCopy), "info");
+  });
+
+  it("两侧都可写时入口照旧可用（回归：别把主流程锁死）", async () => {
+    const onStartApply = renderCompare("left-nacos", "right-nacos", "app.yaml");
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+
+    expect(document.querySelector(".merge-plan-blocker")).toBeNull();
+    const planButton = screen.getByRole("button", { name: "进入配置变更计划" }) as HTMLButtonElement;
+    expect(planButton.disabled).toBe(false);
+
+    fireEvent.click(planButton);
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect((onStartApply.mock.calls[0][0] as { target: { connectionId?: string } }).target).toEqual(
+      expect.objectContaining({ connectionId: "right-nacos" })
+    );
+  });
+
+  it("A 侧是本地快照时不影响进计划——快照的主用法就是拿它当来源", async () => {
+    const onStartApply = renderCompare("snap-left", "right-nacos", "app.yaml");
+    expect(await screen.findByText("9090")).toBeInTheDocument();
+
+    expect(document.querySelector(".merge-plan-blocker")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "进入配置变更计划" }));
+    expect(onStartApply).toHaveBeenCalledTimes(1);
+    expect((onStartApply.mock.calls[0][0] as { source: { connectionId?: string } }).source).toEqual(
+      expect.objectContaining({ connectionId: "snap-left" })
+    );
+  });
+
+  it("既过期又只读时只说「写不回去」，批量入口一起锁住", async () => {
+    const onStartApply = renderCompare("left-nacos", "snap-right", "");
+    fireEvent.click(await screen.findByRole("button", { name: "对比选中（1）" }));
+    expect(await screen.findByText("已生成 1 个文件对比")).toBeInTheDocument();
+
+    // 先造合并草稿，再让结果过期：过期文案与只读文案撞在一起时，只读那条更本质
+    fireEvent.click(screen.getByRole("button", { name: "拿左侧到右侧预览" }));
+    expect(await screen.findByText("待带入右侧 1 个文件")).toBeInTheDocument();
+    await act(async () => {
+      publishConfigChange({ connectionId: "snap-right", namespace: "", refs: [{ dataId: "app.yaml", group: "DEFAULT_GROUP" }] });
+    });
+    await waitFor(() => expect(document.querySelector(".diff-result-stale")).not.toBeNull());
+
+    expect(blockerText()).toContain(readOnlyCopy);
+    expect(blockerText()).not.toContain("对比结果已过期");
+    const batchPlanButton = screen.getByRole("button", { name: "进入配置变更计划（1 个文件）" }) as HTMLButtonElement;
+    expect(batchPlanButton.disabled).toBe(true);
+
+    // disabled 的按钮点不动：jsdom 不给它派发 click，这里再确认一次没有别的路径把计划递出去
+    fireEvent.click(batchPlanButton);
+    expect(onStartApply).not.toHaveBeenCalled();
   });
 });

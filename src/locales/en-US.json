@@ -1160,6 +1160,7 @@
     "startApply": "Enter Configuration Change Plan",
     "enterBatchApply": "Enter Configuration Change Plan ({count} files)",
     "enterPlanBlockedStaleMerge": "The compare result is stale and a merge draft is still open. Re-run the comparison before entering the change plan.",
+    "enterPlanBlockedReadOnlyTarget": "Side B is a local snapshot or a read-only source, so nothing can be written back to it. Put a writable config center on side B; use the snapshot as the source on side A.",
     "dataIdPlaceholder": "Leave empty to match all dataIds",
     "unifiedNoDiff": "No differences with previous version",
     "sideBySideIdentical": "Both sides are identical",
